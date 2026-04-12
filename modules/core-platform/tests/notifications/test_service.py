@@ -253,3 +253,37 @@ def test_list_preferences_and_update(db_session, bus, email, sms, user_id):
     )
     assert again.in_app_enabled is False and again.sms_enabled is True
     assert len(svc.list_preferences(user_id)) == 1
+
+
+async def test_create_with_in_app_disabled_does_not_persist_row(
+    db_session, bus, email, sms, tenant_id, user_id
+):
+    """When in_app_enabled=False the row is built but not flushed to DB."""
+    db_session.add(
+        NotificationPreference(
+            user_id=str(user_id),
+            notification_type="batch_released",
+            email_enabled=False,
+            in_app_enabled=False,
+            sms_enabled=False,
+        )
+    )
+    db_session.flush()
+    svc = _svc(db_session, bus, email, sms)
+    row = await svc.create(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        notification_type="batch_released",
+        title="t",
+        message="m",
+    )
+    # row object returned but not persisted
+    assert row is not None
+    assert row.notification_type == "batch_released"
+    # No rows in DB for this user
+    from sqlalchemy import select as _sel
+    from src.notifications.models import Notification as _N
+    rows = db_session.execute(_sel(_N).where(_N.user_id == str(user_id))).scalars().all()
+    assert rows == []
+    # Event still published
+    assert any(e.event_type == event_types.NOTIFICATION_CREATED for e in bus.published)

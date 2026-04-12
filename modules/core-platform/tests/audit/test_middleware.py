@@ -204,3 +204,39 @@ def test_non_mutating_unmarked_route_not_audited(app_and_bus, db_session):
     resp = client.get("/api/v1/public")
     assert resp.status_code == 200
     assert _fetch_audit(db_session) == []
+
+
+def test_mutating_route_without_auditable_decorator_still_logged(app_and_bus, db_session):
+    """A POST route without @auditable still gets logged — route_meta has
+    empty audit dict so action falls back to method_action and entity_type
+    is inferred from the path."""
+    app, _ = app_and_bus
+
+    @app.post("/api/v1/things")
+    def create_thing():
+        return {"thing": "created"}
+
+    client = TestClient(app)
+    resp = client.post("/api/v1/things")
+    assert resp.status_code == 200
+    rows = _fetch_audit(db_session)
+    assert len(rows) == 1
+    assert rows[0].action == "create"
+    # entity_type is inferred from path: /api/v1/things → "things"
+    assert rows[0].entity_type == "things"
+
+
+def test_mutating_unmatched_path_has_route_meta_none(app_and_bus, db_session):
+    """A POST to a path with no registered route results in route_meta=None
+    (and a 404 response), but the middleware still generates an audit entry
+    using _infer_entity_type to fill entity_type."""
+    app, _ = app_and_bus
+    client = TestClient(app, raise_server_exceptions=False)
+    # /api/v1/nonexistent has no route — _match_route_meta returns None
+    resp = client.post("/api/v1/nonexistent/resource")
+    # FastAPI returns 404 for undefined routes
+    assert resp.status_code == 404
+    rows = _fetch_audit(db_session)
+    # audit row is still created despite 404
+    assert len(rows) == 1
+    assert rows[0].entity_type == "nonexistent"

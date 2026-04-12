@@ -71,24 +71,24 @@ class NotificationService:
         resolved_severity = severity or (default.severity if default else "info")
 
         prefs = self._get_or_default_prefs(user_id, notification_type)
-        row: Notification | None = None
+        # in-app notification row is always created (row existence = in-app delivery)
+        row = Notification(
+            tenant_id=str(tenant_id),
+            user_id=str(user_id),
+            notification_type=notification_type,
+            severity=resolved_severity,
+            title=title,
+            message=message,
+            link=link,
+        )
         if prefs.in_app_enabled:
-            row = Notification(
-                tenant_id=str(tenant_id),
-                user_id=str(user_id),
-                notification_type=notification_type,
-                severity=resolved_severity,
-                title=title,
-                message=message,
-                link=link,
-            )
             self._session.add(row)
             self._session.flush()
 
         if prefs.email_enabled and self._email_lookup is not None:
-            email = self._email_lookup.resolve(user_id)
-            if email:
-                self._email.send(EmailMessage(to=email, subject=title, body=_render_body(message, link)))
+            email_addr = self._email_lookup.resolve(user_id)
+            if email_addr:
+                self._email.send(EmailMessage(to=email_addr, subject=title, body=_render_body(message, link)))
 
         if prefs.sms_enabled:
             self._sms.send(str(user_id), title)
@@ -106,7 +106,6 @@ class NotificationService:
                 },
             )
         )
-        assert row is not None, "in_app_enabled default is True; row must exist"
         return row
 
     # ------------------------------------------------------------------
