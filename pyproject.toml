@@ -48,8 +48,8 @@ py-modules = []
 [tool.pytest.ini_options]
 minversion = "9.0"
 asyncio_mode = "auto"
-testpaths = ["modules/core-platform/tests", "tests"]
-addopts = "-ra -q --strict-markers --strict-config"
+testpaths = ["modules/core-platform/tests", "shared/tests", "tests"]
+addopts = "-ra -q --strict-markers --strict-config --import-mode=importlib"
 filterwarnings = ["error"]
 
 [tool.coverage.run]
@@ -66,6 +66,7 @@ omit = [
   "**/__init__.py",
   "**/migrations/*",
   "**/alembic/*",
+  "**/_shim/*",
 ]
 
 [tool.coverage.report]
@@ -85,4 +86,4 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E","F","W","I","UP","B","SIM","RUF"]
-ignore = ["E501"]
+ignore = ["E501", "B008"]
