@@ -1,3 +1,0 @@
-# portals/medical-portal
-
-Placeholder.

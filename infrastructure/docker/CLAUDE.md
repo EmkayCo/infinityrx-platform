@@ -1,3 +1,0 @@
-# infrastructure/docker
-
-Placeholder.

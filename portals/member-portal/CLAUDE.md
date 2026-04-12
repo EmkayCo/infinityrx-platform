@@ -1,3 +1,0 @@
-# portals/member-portal
-
-Placeholder.

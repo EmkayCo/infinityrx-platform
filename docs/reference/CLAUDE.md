@@ -1,3 +1,0 @@
-# docs/reference
-
-Placeholder.

@@ -1,3 +1,0 @@
-# infrastructure/terraform
-
-Placeholder.

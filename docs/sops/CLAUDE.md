@@ -1,3 +1,0 @@
-# docs/sops
-
-Placeholder.

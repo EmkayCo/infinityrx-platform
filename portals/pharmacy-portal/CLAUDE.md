@@ -1,3 +1,0 @@
-# portals/pharmacy-portal
-
-Placeholder.

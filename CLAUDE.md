@@ -38,4 +38,6 @@ Worktrees for parallel agents. Integration Coordinator merges at gates.
 docs/glossary.md | docs/negative-constraints.md | docs/api-contracts/ | docs/prd/
 
 ## Auto-Gate
-All tests pass 100% → proceed automatically. Any failure → stop, wait for project owner.
+All tests pass 100% AND coverage meets thresholds (100% financial/PHI/security, 95% all other active code) AND no dead code/stub files → proceed automatically.
+Core active modules below 95%, OR financial/PHI paths below 100%, OR dead code found → STOP, fix before proceeding.
+Any test failure → STOP, fix before proceeding.

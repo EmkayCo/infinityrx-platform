@@ -1,3 +1,0 @@
-# docs/api-contracts
-
-Placeholder.

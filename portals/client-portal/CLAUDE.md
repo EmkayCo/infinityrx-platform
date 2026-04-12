@@ -1,3 +1,0 @@
-# portals/client-portal
-
-Placeholder.

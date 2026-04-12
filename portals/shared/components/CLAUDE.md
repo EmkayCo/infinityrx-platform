@@ -1,3 +1,0 @@
-# portals/shared/components
-
-Placeholder.
