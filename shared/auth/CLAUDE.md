@@ -1,0 +1,3 @@
+# shared/auth
+
+Placeholder.
