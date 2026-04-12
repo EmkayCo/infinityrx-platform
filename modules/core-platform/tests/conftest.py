@@ -1,13 +1,28 @@
-"""Shared test fixtures for core-platform Session 4.
+"""Shared test fixtures for core-platform.
 
-Uses an in-memory SQLite DB per test (via the shim). Overrides the
-current_user dependency so endpoints can be exercised without real JWTs.
+Combines T2 (auth) sys.path/env bootstrap with T4 (jobs/files/exclusions/
+health) shim-based DB fixtures. T3 tests bring their own conftest under
+modules/core-platform/tests/conftest.py subtrees where needed.
 """
+
 from __future__ import annotations
 
+import os
+import sys
 import uuid
+from pathlib import Path
 from typing import Iterator
 
+# --- T2: sys.path + JWT env bootstrap (must run before any shared.auth import) ---
+_MODULE_ROOT = Path(__file__).resolve().parent.parent
+if str(_MODULE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_MODULE_ROOT))
+
+os.environ.setdefault("JWT_SECRET", "test-secret-of-sufficient-length-!!!!")
+os.environ.setdefault("JWT_EXPIRES_MINUTES", "60")
+os.environ.setdefault("JWT_REFRESH_EXPIRES_MINUTES", "10080")
+
+# --- T4: shim-based DB + FastAPI fixtures for jobs/files/exclusions/health ---
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
