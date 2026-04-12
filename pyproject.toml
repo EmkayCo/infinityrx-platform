@@ -49,7 +49,7 @@ py-modules = []
 minversion = "9.0"
 asyncio_mode = "auto"
 testpaths = ["modules/core-platform/tests", "shared/tests", "tests"]
-addopts = "-ra -q --strict-markers --strict-config"
+addopts = "-ra -q --strict-markers --strict-config --import-mode=importlib"
 filterwarnings = [
   "error",
   # Starlette's sync TestClient leaves sockets to be GC'd between tests,
@@ -73,10 +73,7 @@ omit = [
   "**/__init__.py",
   "**/migrations/*",
   "**/alembic/*",
-  # _shim files are placeholder stubs from pre-module-1 scaffolding that
-  # another teammate will reconcile during integration. They are not part
-  # of the active implementation surface for this session.
-  "modules/core-platform/src/_shim/*",
+  "**/_shim/*",
 ]
 
 [tool.coverage.report]
@@ -96,4 +93,4 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E","F","W","I","UP","B","SIM","RUF"]
-ignore = ["E501"]
+ignore = ["E501", "B008"]

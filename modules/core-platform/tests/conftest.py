@@ -1,8 +1,9 @@
 """Shared test fixtures for core-platform.
 
-Combines T2 (auth) sys.path/env bootstrap with T4 (jobs/files/exclusions/
-health) shim-based DB fixtures. T3 tests bring their own conftest under
-modules/core-platform/tests/conftest.py subtrees where needed.
+Combines:
+- T2 (auth) sys.path + JWT env bootstrap
+- T4 (jobs/files/exclusions/health) shim-based DB + FastAPI fixtures
+- T3 (audit/notifications) model registration + tenant/user ID fixtures
 """
 
 from __future__ import annotations
@@ -22,18 +23,23 @@ os.environ.setdefault("JWT_SECRET", "test-secret-of-sufficient-length-!!!!")
 os.environ.setdefault("JWT_EXPIRES_MINUTES", "60")
 os.environ.setdefault("JWT_REFRESH_EXPIRES_MINUTES", "10080")
 
-# --- T4: shim-based DB + FastAPI fixtures for jobs/files/exclusions/health ---
-import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
+# --- T4: shim-based DB + FastAPI fixtures ---
+import pytest  # noqa: E402
+from fastapi import FastAPI  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 
-from src._shim import auth as auth_shim
-from src._shim import db as db_shim
-from src._shim import events as events_shim
-from src._shim.notifications import NotificationService
-from src.api import router as core_router
-from src.files import api as files_api
-from src.files.storage import LocalStorageBackend
+from src._shim import auth as auth_shim  # noqa: E402
+from src._shim import db as db_shim  # noqa: E402
+from src._shim import events as events_shim  # noqa: E402
+from src._shim.notifications import NotificationService  # noqa: E402
+from src.api import router as core_router  # noqa: E402
+from src.files import api as files_api  # noqa: E402
+from src.files.storage import LocalStorageBackend  # noqa: E402
+
+# --- T3: register audit + notification models on the shim Base so
+# _fresh_db's create_all() builds their tables too ---
+from src.audit import models as _audit_models  # noqa: F401,E402
+from src.notifications import models as _notif_models  # noqa: F401,E402
 
 
 @pytest.fixture(autouse=True)
@@ -122,3 +128,24 @@ def db_session():
         yield s
     finally:
         s.close()
+
+
+# --- T3: tenant/user ID fixtures for audit + notification tests ---
+@pytest.fixture
+def tenant_id() -> uuid.UUID:
+    return TENANT_A
+
+
+@pytest.fixture
+def other_tenant_id() -> uuid.UUID:
+    return TENANT_B
+
+
+@pytest.fixture
+def user_id() -> uuid.UUID:
+    return uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+
+@pytest.fixture
+def other_user_id() -> uuid.UUID:
+    return uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
