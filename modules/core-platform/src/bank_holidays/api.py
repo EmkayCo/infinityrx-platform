@@ -48,9 +48,12 @@ def _parse_iso_date(iso_date: str) -> date:
                 "message": f"Expected ISO 8601 date (YYYY-MM-DD), got: {iso_date!r}",
             },
         )
+    # The regex already validates the format; fromisoformat should not raise
+    # for a valid YYYY-MM-DD string, but we guard against impossible overflow
+    # (e.g., "2026-13-01") which passes the regex but not fromisoformat.
     try:
         return date.fromisoformat(iso_date)
-    except (ValueError, TypeError):
+    except ValueError:
         raise HTTPException(
             status_code=422,
             detail={
@@ -127,17 +130,16 @@ def is_business_day(
         reason = "Sunday"
         is_bd = False
     else:
-        # Only bank-holiday rows block the business day
+        # Only rows with is_bank_holiday=True block the business day.
+        # _holiday_dates() already filters by is_bank_holiday=True, so if d
+        # is in the set we can fetch the name directly from list_holidays.
         holiday_dates = svc._holiday_dates(country.upper())
         if d in holiday_dates:
-            # Fetch the name from list_holidays (includes all rows for this date)
             rows = svc.list_holidays(d, d, country=country.upper())
+            # bank_rows is guaranteed non-empty because d is in holiday_dates
             bank_rows = [r for r in rows if r.is_bank_holiday]
-            if bank_rows:
-                reason = bank_rows[0].name
-                is_bd = False
-            else:
-                is_bd = True
+            reason = bank_rows[0].name
+            is_bd = False
         else:
             is_bd = True
 

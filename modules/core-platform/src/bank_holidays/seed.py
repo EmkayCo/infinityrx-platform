@@ -252,5 +252,5 @@ def _cli() -> None:  # pragma: no cover
         engine.dispose()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     _cli()

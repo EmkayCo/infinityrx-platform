@@ -52,6 +52,65 @@ themselves into per-test schemas via SQLAlchemy's `schema_translate_map`,
 so they run in parallel without clobbering each other or the developer's
 local data.
 
+## Bank Holidays
+
+US federal bank holiday reference data for NACHA batch scheduling and
+business-day calculations.
+
+### Migrate and seed
+
+```bash
+# Apply the migration (creates core.bank_holidays)
+alembic -c modules/core-platform/alembic.ini upgrade 0002_bank_holidays
+
+# Seed US federal holidays for 2026-2035
+python -m src.bank_holidays.seed --from 2026 --to 2035
+```
+
+### Import paths for Phase 2 modules
+
+```python
+# ORM model
+from shared.db.models.bank_holidays import BankHoliday
+
+# Business-day service (requires a SQLAlchemy Session)
+from src.bank_holidays.service import BankHolidayService
+
+svc = BankHolidayService(session)
+svc.is_business_day(date(2026, 7, 3))        # False — Independence Day Observed
+svc.next_business_day(date(2026, 7, 3))      # date(2026, 7, 6)
+svc.add_business_days(date(2026, 9, 4), 1)   # date(2026, 9, 8) — skips Labor Day
+svc.previous_business_day(date(2026, 7, 6))  # date(2026, 7, 2) — Thursday
+```
+
+### REST API
+
+All endpoints are under `/api/v1/bank-holidays`:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/bank-holidays?year=2026&country=US` | List holidays for year |
+| POST | `/bank-holidays` | Add custom holiday (tenant_admin+) |
+| GET | `/bank-holidays/is-business-day/{YYYY-MM-DD}` | Business-day check |
+| GET | `/bank-holidays/next-business-day/{YYYY-MM-DD}` | Next business day |
+
+Example responses:
+
+```json
+// GET /bank-holidays/is-business-day/2026-07-03
+{
+  "date": "2026-07-03",
+  "is_business_day": false,
+  "reason": "Independence Day (Observed)"
+}
+
+// GET /bank-holidays/next-business-day/2026-07-03
+{
+  "from": "2026-07-03",
+  "next_business_day": "2026-07-06"
+}
+```
+
 ## Encryption
 
 AES-256-GCM field-level encryption for PHI/PII at rest.  All encrypted values

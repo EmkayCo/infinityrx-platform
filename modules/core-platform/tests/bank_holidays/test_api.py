@@ -313,6 +313,13 @@ def test_is_business_day_invalid_date(bh_db_session, tenant_admin_a) -> None:
     assert resp.status_code == 422
 
 
+def test_is_business_day_invalid_month_overflow(bh_db_session, tenant_admin_a) -> None:
+    """2026-13-01 passes the YYYY-MM-DD regex but fromisoformat raises ValueError."""
+    client = TestClient(_make_app(bh_db_session), raise_server_exceptions=True)
+    resp = client.get("/api/v1/bank-holidays/is-business-day/2026-13-01")
+    assert resp.status_code == 422
+
+
 def test_is_business_day_requires_auth(bh_db_session) -> None:
     auth_shim.set_current_user(None)
     client = TestClient(_make_app(bh_db_session), raise_server_exceptions=False)
@@ -362,6 +369,12 @@ def test_next_business_day_skips_holiday(bh_db_session, tenant_admin_a) -> None:
 def test_next_business_day_invalid_date(bh_db_session, tenant_admin_a) -> None:
     client = TestClient(_make_app(bh_db_session), raise_server_exceptions=True)
     resp = client.get("/api/v1/bank-holidays/next-business-day/bad-date")
+    assert resp.status_code == 422
+
+
+def test_next_business_day_invalid_month_overflow(bh_db_session, tenant_admin_a) -> None:
+    client = TestClient(_make_app(bh_db_session), raise_server_exceptions=True)
+    resp = client.get("/api/v1/bank-holidays/next-business-day/2026-14-01")
     assert resp.status_code == 422
 
 
