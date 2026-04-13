@@ -37,6 +37,12 @@ Worktrees for parallel agents. Integration Coordinator merges at gates.
 ## References
 docs/glossary.md | docs/negative-constraints.md | docs/api-contracts/ | docs/prd/
 
+## Continuous Learning
+Before starting any task, read `docs/lessons-learned.md` for recent discoveries.
+When you hit a non-obvious bug (>5 min to debug), add a LESSON entry per `docs/team/continuous-learning.md`.
+Critical/high severity lessons MUST update the relevant `.claude/rules/` file in the same commit.
+Never silently fix a bug — always document what you learned.
+
 ## Auto-Gate
 All tests pass 100% AND coverage meets thresholds (100% financial/PHI/security, 95% all other active code) AND no dead code/stub files → proceed automatically.
 Core active modules below 95%, OR financial/PHI paths below 100%, OR dead code found → STOP, fix before proceeding.
