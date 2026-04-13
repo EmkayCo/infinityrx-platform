@@ -25,6 +25,10 @@ dependencies = [
   "python-json-logger>=3.2",
   "email-validator>=2.2",
   "psycopg2-binary>=2.9.11",
+  "xgboost>=3.2.0",
+  "scikit-learn>=1.8.0",
+  "networkx>=3.6.1",
+  "hypothesis>=6.151.12",
 ]
 
 [project.optional-dependencies]
@@ -73,6 +77,8 @@ source = [
   "shared/crypto",
   "shared",
   "modules/core-platform/src",
+  "modules/billing/src",
+  "modules/reclaimrx/src",
 ]
 omit = [
   "**/__init__.py",
