@@ -303,3 +303,169 @@ async def test_router_drop_404_for_unknown_entry():
         f"/api/v1/events/dlq/{uuid.uuid4()}/drop", json={"reason": "test"}
     )
     assert response.status_code == 404
+
+
+async def test_router_replay_forbidden_without_replay_permission():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from shared.events.dlq import build_dlq_router
+
+    repo = InMemoryDLQRepository([])
+    service = DLQService(repo)
+    app = FastAPI()
+
+    async def get_service():
+        return service
+
+    async def get_current_perms():
+        return {"events:dlq:read"}  # read only — no replay permission
+
+    app.include_router(
+        build_dlq_router(get_service=get_service, get_permissions=get_current_perms)
+    )
+    client = TestClient(app)
+    response = client.post(f"/api/v1/events/dlq/{uuid.uuid4()}/replay")
+    assert response.status_code == 403
+
+
+async def test_router_replay_returns_204_and_routes_event():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from shared.events.dlq import build_dlq_router
+
+    bus = InMemoryEventBus()
+    await bus.start()
+    received: list[EventEnvelope] = []
+
+    async def handler(env: EventEnvelope) -> None:
+        received.append(env)
+
+    entry = _make_entry(event_type=event_types.PAYMENT_GENERATED)
+    await bus.subscribe(event_types.PAYMENT_GENERATED, handler)
+
+    repo = InMemoryDLQRepository([entry])
+    service = DLQService(repo)
+    app = FastAPI()
+
+    async def get_service():
+        return service
+
+    async def get_current_perms():
+        return {"events:dlq:read", "events:dlq:replay"}
+
+    app.include_router(
+        build_dlq_router(get_service=get_service, get_permissions=get_current_perms, bus=bus)
+    )
+    client = TestClient(app)
+    response = client.post(f"/api/v1/events/dlq/{entry.id}/replay")
+    assert response.status_code == 204
+    assert len(received) == 1
+    await bus.stop()
+
+
+async def test_router_replay_uses_default_bus_when_not_provided():
+    """Replay endpoint falls back to get_event_bus() when bus=None."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from shared.events.dlq import build_dlq_router
+    from shared.events.factory import set_event_bus, reset_event_bus
+
+    bus = InMemoryEventBus()
+    await bus.start()
+    set_event_bus(bus)
+
+    try:
+        entry = _make_entry(event_type=event_types.BATCH_CREATED)
+        repo = InMemoryDLQRepository([entry])
+        service = DLQService(repo)
+        app = FastAPI()
+
+        async def get_service():
+            return service
+
+        async def get_current_perms():
+            return {"events:dlq:read", "events:dlq:replay"}
+
+        # bus=None triggers the get_event_bus() fallback path
+        app.include_router(
+            build_dlq_router(get_service=get_service, get_permissions=get_current_perms, bus=None)
+        )
+        client = TestClient(app)
+        response = client.post(f"/api/v1/events/dlq/{entry.id}/replay")
+        assert response.status_code == 204
+    finally:
+        reset_event_bus()
+        await bus.stop()
+
+
+async def test_router_replay_404_for_unknown_entry():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from shared.events.dlq import build_dlq_router
+
+    bus = InMemoryEventBus()
+    await bus.start()
+    repo = InMemoryDLQRepository([])
+    service = DLQService(repo)
+    app = FastAPI()
+
+    async def get_service():
+        return service
+
+    async def get_current_perms():
+        return {"events:dlq:read", "events:dlq:replay"}
+
+    app.include_router(
+        build_dlq_router(get_service=get_service, get_permissions=get_current_perms, bus=bus)
+    )
+    client = TestClient(app)
+    response = client.post(f"/api/v1/events/dlq/{uuid.uuid4()}/replay")
+    assert response.status_code == 404
+    await bus.stop()
+
+
+async def test_postgres_dlq_sink_write():
+    """PostgresDLQSink.write() stores entry via session factory."""
+    from datetime import UTC, datetime
+    from shared.events.dlq_sink import PostgresDLQSink
+    from shared.db.models.events import EventDLQEntry
+
+    committed: list[EventDLQEntry] = []
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        def add(self, entry):
+            committed.append(entry)
+
+        async def commit(self):
+            pass
+
+    def fake_factory():
+        return FakeSession()
+
+    sink = PostgresDLQSink(fake_factory)
+    entry = EventDLQEntry(
+        id=uuid.uuid4(),
+        event_id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        event_type="payment.generated",
+        envelope={},
+        failure_reason="test",
+        attempt_count=1,
+        first_failed_at=datetime.now(UTC),
+        last_failed_at=datetime.now(UTC),
+        dlq_topic="payment.generated",
+        status="queued",
+    )
+    await sink.write(entry)
+    assert len(committed) == 1
+    assert committed[0] is entry
