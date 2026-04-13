@@ -53,3 +53,19 @@ volumes:
   postgres_data:
   redis_data:
   rabbitmq_data:
+
+# ---------------------------------------------------------------------------
+# HIPAA §164.308(a)(7) contingency plan — scheduled backups
+# ---------------------------------------------------------------------------
+# The backup script lives at ./infrastructure/scripts/backup.sh. For local
+# dev you can schedule it with a host cron entry:
+#
+#   crontab -e
+#   0 2 * * *  cd /path/to/infinityrx-platform && \
+#              PGPASSWORD=infinityrx_dev ./infrastructure/scripts/backup.sh \
+#              >> var/backups/backup.log 2>&1
+#
+# In production (AKS) the equivalent is a CronJob manifest under
+# infrastructure/k8s/ that mounts a PV at /var/backups and runs the same
+# script. Run verify_backup.py weekly against the most-recent dump to prove
+# restorability — a backup you've never restored is not a backup.
