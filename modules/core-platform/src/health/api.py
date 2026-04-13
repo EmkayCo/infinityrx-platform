@@ -63,7 +63,83 @@ async def _check_db() -> ServiceStatus:
         )
 
 
+async def _check_redis() -> ServiceStatus:
+    """Ping Redis. Critical=False: stale auth/session caches degrade but
+    don't break writes — app can limp along with direct-to-DB reads while
+    Redis recovers. Probe uses a fresh connection per call so the check
+    notices broker restarts without a retry from stale pool entries.
+    """
+    start = time.perf_counter()
+    url = os.getenv("REDIS_URL", "").strip()
+    if not url:
+        # No Redis configured — don't invent a failure; report as OK w/ detail.
+        return ServiceStatus(
+            name="redis", ok=True, latency_ms=0.0, critical=False, detail="not configured"
+        )
+    try:
+        import redis  # imported lazily so tests without redis installed don't crash
+
+        client = redis.Redis.from_url(url, socket_connect_timeout=2, socket_timeout=2)
+        try:
+            pong = client.ping()
+        finally:
+            client.close()
+        return ServiceStatus(
+            name="redis",
+            ok=bool(pong),
+            latency_ms=(time.perf_counter() - start) * 1000,
+            critical=False,
+            detail=None if pong else "ping returned falsy",
+        )
+    except Exception as exc:  # noqa: BLE001
+        return ServiceStatus(
+            name="redis",
+            ok=False,
+            latency_ms=(time.perf_counter() - start) * 1000,
+            critical=False,
+            detail=f"{type(exc).__name__}: {exc}",
+        )
+
+
+async def _check_rabbitmq() -> ServiceStatus:
+    """Open a short-lived AMQP connection and close it. Critical=False:
+    event-bus downtime means messages queue at the publisher or defer via
+    the outbox — degraded, not unhealthy. Kubernetes readiness probe
+    should NOT use this to flip pods out of rotation; the app serves
+    reads + writes without RabbitMQ."""
+    start = time.perf_counter()
+    url = os.getenv("RABBITMQ_URL", "").strip()
+    if not url:
+        return ServiceStatus(
+            name="rabbitmq", ok=True, latency_ms=0.0, critical=False, detail="not configured"
+        )
+    try:
+        import aio_pika  # imported lazily
+
+        connection = await aio_pika.connect_robust(url, timeout=2.0)
+        try:
+            is_closed = connection.is_closed
+        finally:
+            await connection.close()
+        return ServiceStatus(
+            name="rabbitmq",
+            ok=not is_closed,
+            latency_ms=(time.perf_counter() - start) * 1000,
+            critical=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return ServiceStatus(
+            name="rabbitmq",
+            ok=False,
+            latency_ms=(time.perf_counter() - start) * 1000,
+            critical=False,
+            detail=f"{type(exc).__name__}: {exc}",
+        )
+
+
 _registry.register(_check_db)
+_registry.register(_check_redis)
+_registry.register(_check_rabbitmq)
 
 
 @router.get("")
