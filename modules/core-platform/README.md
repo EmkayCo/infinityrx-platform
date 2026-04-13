@@ -51,3 +51,86 @@ Integration tests use the running docker-compose Postgres and isolate
 themselves into per-test schemas via SQLAlchemy's `schema_translate_map`,
 so they run in parallel without clobbering each other or the developer's
 local data.
+
+## Encryption
+
+AES-256-GCM field-level encryption for PHI/PII at rest.  All encrypted values
+are unreadable in raw database queries.  Keys are identified by id so that
+rotation never requires re-encrypting existing data.
+
+### Environment variables
+
+```
+ENCRYPTION_PROVIDER=env          # "env" (default) or "file"
+ENCRYPTION_KEY_ACTIVE=<base64>   # Active 32-byte key, base64-encoded
+ENCRYPTION_KEY_ACTIVE_ID=v1      # Id for the active key (default "v1")
+ENCRYPTION_KEY_<id>=<base64>     # Older keys retained for decryption only
+```
+
+Generate a new key:
+
+```bash
+python -c "import secrets,base64;print(base64.b64encode(secrets.token_bytes(32)).decode())"
+```
+
+### Import paths
+
+```python
+from shared.crypto.keys import get_key_provider, EnvKeyProvider, FileKeyProvider
+from shared.crypto.aes import encrypt, decrypt, encrypt_str, decrypt_str, DecryptionError
+from shared.crypto.sqlalchemy_types import EncryptedString, EncryptedJSON
+from shared.crypto.phi import (
+    encrypt_name, decrypt_name,
+    encrypt_dob, decrypt_dob,
+    encrypt_ssn, decrypt_ssn, ssn_last4,
+    encrypt_address, decrypt_address,
+)
+```
+
+### Usage: EncryptedString on a model
+
+```python
+from sqlalchemy import Column, String, UUID
+from shared.crypto.sqlalchemy_types import EncryptedString, EncryptedJSON
+
+class Member(Base):
+    __tablename__ = "members"
+    id = Column(UUID, primary_key=True)
+    tenant_id = Column(String(50), nullable=False)
+    full_name = Column(EncryptedString(), nullable=True)   # stored as LargeBinary
+    address = Column(EncryptedJSON(), nullable=True)       # dict → JSON → encrypted bytes
+```
+
+Read and write are transparent:
+
+```python
+member = Member(full_name="Jane Doe", address={"city": "Springfield"})
+session.add(member)
+session.commit()
+
+session.expire(member)
+assert member.full_name == "Jane Doe"  # decrypted automatically on read
+```
+
+### Usage: PHI helpers
+
+```python
+from shared.crypto.phi import encrypt_ssn, ssn_last4, encrypt_dob
+
+# Encrypt — bind ciphertext to the tenant so cross-tenant access fails
+ssn_ct = encrypt_ssn("123456789", tenant_id=member.tenant_id)
+# Display safely without exposing the full SSN in logs
+print(ssn_last4(ssn_ct, tenant_id=member.tenant_id))   # "6789"
+
+dob_ct = encrypt_dob(date(1985, 3, 15), tenant_id=member.tenant_id)
+```
+
+### Key rotation procedure
+
+1. Generate a new 32-byte key and assign it a new id (e.g., `v2`).
+2. Set `ENCRYPTION_KEY_ACTIVE=<new-key-base64>` and `ENCRYPTION_KEY_ACTIVE_ID=v2`.
+3. Retain the old key as `ENCRYPTION_KEY_v1=<old-key-base64>`.
+4. Restart the service.  New writes use `v2`; existing data encrypted with `v1`
+   is still readable via the embedded key id in each ciphertext blob.
+5. Once all existing rows have been re-encrypted (background migration), remove
+   `ENCRYPTION_KEY_v1` from the environment.
