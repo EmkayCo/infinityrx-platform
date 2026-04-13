@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/modules/reporting/src/services/scheduler.py
+# hypothesis_version: 6.151.12
+
+[3600, 9999, 'annually', 'biweekly', 'daily', 'day_of_month', 'day_of_week', 'delivery_method', 'frequency', 'monthly', 'output_format', 'quarterly', 'recipients', 'report_run_id', 'weekly']

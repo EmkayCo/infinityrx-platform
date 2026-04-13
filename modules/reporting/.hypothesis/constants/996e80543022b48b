@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/modules/reporting/src/api/dependencies.py
+# hypothesis_version: 6.151.12
+
+[',', 'MISSING_TENANT', 'UNAUTHORIZED', 'X-Permissions', 'X-Tenant-ID', 'X-User-ID', 'X-User-Role', 'code', 'error', 'message', 'operator']

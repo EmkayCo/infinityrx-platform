@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/shared/db/base.py
+# hypothesis_version: 6.151.12
+
+['ck', 'fk', 'ix', 'pk', 'pk_%(table_name)s', 'uq']

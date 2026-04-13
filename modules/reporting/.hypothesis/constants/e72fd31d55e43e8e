@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/modules/reporting/src/services/phi_controls.py
+# hypothesis_version: 6.151.12
+
+['[MASKED]', '[REDACTED]', 'access_type', 'accessed_at', 'address', 'address_line1', 'address_line2', 'api_access', 'city', 'client_portal', 'client_user', 'date_of_birth', 'deliver', 'diagnosis_code', 'dob', 'download', 'email', 'field', 'first_name', 'full_detail', 'icd_code', 'ip_address', 'last_name', 'masking_level', 'member_dob', 'member_email', 'member_id', 'member_name', 'national_drug_code', 'ndc', 'operator', 'partial', 'pdf', 'phi_access', 'phone', 'phone_number', 'prescriber_name', 'prescriber_npi', 'prescription_number', 'preview', 'redacted', 'report_definition_id', 'report_run_id', 'rx_number', 'social_security', 'ssn', 'state', 'superadmin', 'system', 'tenant_admin', 'tenant_id', 'user_id', 'view', 'zip', 'zipcode']

@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/modules/reporting/src/services/quality_service.py
+# hypothesis_version: 6.151.12
+
+['0.00', '2026', 'adherent', 'adherent_members', 'at_risk', 'current_rate', 'data_as_of', 'insufficient_data', 'measure_id', 'measure_name', 'measurement_period', 'measures', 'members', 'members_at_risk', 'non_adherent', 'overall_status', 'pending_data', 'projected_rate', 'projected_status', 'projections', 'rate', 'status', 'summary', 'target', 'tenant_id', 'total', 'total_gap_members', 'total_members', 'tracking']

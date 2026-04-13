@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/modules/reporting/src/events/consumers.py
+# hypothesis_version: 6.151.12
+
+['correlation_id', 'entity_id', 'fwa.claim_flagged', 'measure_id', 'prefund.critical', 'tenant_id']

@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/modules/reporting/src/services/financial.py
+# hypothesis_version: 6.151.12
+
+[120, '0.00', '0.01', '0_30', '100', '121_plus', '31_60', '61_90', '91_120', 'amount_due', 'amount_paid', 'ap_out', 'ar_in', 'due_date', 'fee', 'fees_collected', 'margin_pct', 'net', 'net_spend', 'operational_costs', 'pharmacy_paid', 'plan_paid', 'profit', 'recovery', 'spread', 'spread_pct', 'total_fees', 'total_recoveries', 'total_spend']

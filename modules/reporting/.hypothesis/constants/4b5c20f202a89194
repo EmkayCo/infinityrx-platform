@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/modules/reporting/src/models/__init__.py
+# hypothesis_version: 6.151.12
+
+['ActuarialModel', 'Dashboard', 'FilterPreset', 'RegulatorySubmission', 'ReportDefinition', 'ReportRun', 'ReportSchedule', 'UserDashboard']

@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/modules/reporting/src/services/report_service.py
+# hypothesis_version: 6.151.12
+
+['base_query', 'calculated_fields', 'category', 'chart_config', 'chart_type', 'columns', 'contains_phi', 'data_source', 'default_filters', 'default_groupings', 'default_sort', 'description', 'excel', 'name', 'required_permission', 'summary_row']

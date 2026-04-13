@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/shared/config.py
+# hypothesis_version: 6.151.12
+
+[100, 1024, './var/files', '.env.local', 'HS256', 'HS384', 'HS512', 'JWT_ALGORITHM', 'RS256', 'ignore', 'local', 'localhost', 'utf-8']

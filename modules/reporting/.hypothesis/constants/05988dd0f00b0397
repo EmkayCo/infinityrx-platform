@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/modules/reporting/src/api/schemas/reports.py
+# hypothesis_version: 6.151.12
+
+[100, 255, '06:00', 'America/New_York', 'after', 'category', 'delivery_method', 'excel', 'frequency', 'from_attributes', 'monthly', 'output_format', 'string', 'weekly']

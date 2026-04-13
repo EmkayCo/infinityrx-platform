@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/modules/reporting/src/models/tables.py
+# hypothesis_version: 6.151.12
+
+[100, 255, 'America/New_York', 'actuarial_models', 'dashboard_id', 'dashboards', 'draft', 'email', 'filter_presets', 'full_detail', 'phi_access_log', 'report_definitions', 'report_runs', 'report_schedules', 'reporting', 'running', 'schema', 'user_dashboards', 'user_id']

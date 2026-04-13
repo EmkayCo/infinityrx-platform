@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/shared/db/tenant_context.py
+# hypothesis_version: 6.151.12
+
+['do_orm_execute', 'is_delete', 'is_select', 'is_update', 'sync_session_class', 'tenant_exempt']

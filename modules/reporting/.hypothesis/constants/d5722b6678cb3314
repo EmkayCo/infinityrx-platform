@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/modules/reporting/src/api/router.py
+# hypothesis_version: 6.151.12
+
+[100, 201, 202, 204, 404, '/actuarial/models', '/actuarial/reprice', '/api/v1/reporting', '/builder/preview', '/client-api/billing', '/client-api/claims', '/dashboards', '/my/dashboard', '/my/filter-presets', '/quality/gaps', '/quality/projections', '/regulatory', '/reports', '/reports/{report_id}', 'NOT_FOUND', 'billing_ap', 'billing_ar', 'claims', 'code', 'data', 'data_sources', 'deadlines', 'error', 'fields', 'fwa', 'journal', 'members', 'page', 'page_size', 'pharmacies', 'prescribers', 'preview_limit', 'programs', 'reporting', 'rows', 'saved', 'source', 'status', 'tenant_id', 'total', 'total_count']

@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/modules/reporting/src/jobs/scheduled.py
+# hypothesis_version: 6.151.12
+
+['as_of', 'calculated_fields', 'category', 'chart_type', 'columns', 'contains_phi', 'dashboards_created', 'dashboards_skipped', 'data_source', 'default_filters', 'default_sort', 'description', 'is_default', 'is_system', 'layout', 'name', 'reports_created', 'reports_skipped', 'required_permission', 'role_target', 'skipped', 'summary_row', 'triggered']

@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/modules/reporting/src/events/publishers.py
+# hypothesis_version: 6.151.12
+
+['completed_at', 'current_rate', 'days_until_due', 'delivered_at', 'delivery_method', 'due_date', 'error', 'evaluated_at', 'failed_at', 'measure_id', 'measure_name', 'output_format', 'report.delivered', 'report.generated', 'report_definition_id', 'report_run_id', 'report_type', 'row_count', 'submission_id', 'target_rate']

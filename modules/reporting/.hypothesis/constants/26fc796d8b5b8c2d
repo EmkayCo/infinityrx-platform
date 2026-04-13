@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/modules/reporting/src/services/dashboard_service.py
+# hypothesis_version: 6.151.12
+
+['description', 'layout', 'name', 'role_target']

@@ -1,0 +1,1 @@
+"""Reporting module Pydantic schemas."""

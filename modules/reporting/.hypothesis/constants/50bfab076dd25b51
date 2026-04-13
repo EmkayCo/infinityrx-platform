@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/modules/reporting/src/services/regulatory_service.py
+# hypothesis_version: 6.151.12
+
+['days_until_due', 'draft', 'due_date', 'format', 'generated', 'in_review', 'is_overdue', 'net_drug_spending', 'period_end', 'period_start', 'rebate_disclosure', 'report_type', 'sections', 'semiannual_1', 'semiannual_2', 'spread_pricing', 'status', 'submission_id', 'tenant_id']

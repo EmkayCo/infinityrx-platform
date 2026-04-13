@@ -1,0 +1,4 @@
+# file: /Users/Dev/infinityrx-platform/modules/reporting/src/services/report_engine.py
+# hypothesis_version: 6.151.12
+
+['%m/%d/%Y', '0', '0.00', '0.01', '100', '[MASKED]', '[REDACTED]', 'address', 'address_line1', 'address_line2', 'avg', 'category', 'category: required', 'columns', 'columns: required', 'count', 'currency', 'data_source', 'date', 'date_end', 'date_from', 'date_of_birth', 'date_start', 'date_to', 'denominator', 'dob', 'email', 'estimated_rows', 'exceeds_limit', 'field', 'format', 'formula', 'integer', 'max', 'min', 'name', 'name: required', 'numerator', 'output_format', 'percentage', 'phone', 'phone_number', 'running_total', 'ssn', 'string', 'sum', 'warning']
