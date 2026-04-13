@@ -24,6 +24,7 @@ dependencies = [
   "python-multipart>=0.0.19",
   "python-json-logger>=3.2",
   "email-validator>=2.2",
+  "psycopg2-binary>=2.9.11",
 ]
 
 [project.optional-dependencies]
@@ -69,6 +70,7 @@ source = [
   "shared/auth",
   "shared/events",
   "shared/utils",
+  "shared/crypto",
   "shared",
   "modules/core-platform/src",
 ]
