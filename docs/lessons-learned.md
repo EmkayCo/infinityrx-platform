@@ -76,6 +76,83 @@ None added to rules — medium severity stays as reference.
 
 ---
 
+### LESSON-005: `logger.extra={"module": ...}` collides with LogRecord built-ins
+**Date:** 2026-04-13
+**Module:** core-platform (shared.observability + src.main)
+**Builder:** Builder-Hardening
+**Severity:** high
+
+**What happened:**
+After wiring structured JSON logging into `src.main.lifespan`, all four
+lifespan tests suddenly raised `KeyError: "Attempt to overwrite 'module' in
+LogRecord"`. The failing code was:
+
+```python
+logger.info("service_started", extra={"module": "core-platform"})
+```
+
+`logging.LogRecord` already has a `module` attribute (set from the caller's
+`__name__`), and `Logger.makeRecord` refuses to overwrite any built-in
+attribute — it raises rather than silently dropping the value. The
+`ContextFilter` added by `configure_logging()` was not at fault; the issue
+was latent and only surfaced once the formatter actually serialized records.
+
+**Root cause:**
+Python's `logging` reserves these attribute names on every `LogRecord`:
+`name, msg, args, levelname, levelno, pathname, filename, module, exc_info,
+exc_text, stack_info, lineno, funcName, created, msecs, relativeCreated,
+thread, threadName, processName, process, message, asctime`. Any key
+passed via `extra={}` that matches one of these raises `KeyError`.
+
+Before JSON logging, most handlers were console-only with free-form format
+strings, so the collision still raised — but we simply had not logged
+`extra={"module": ...}` anywhere. Adding structured logging encouraged
+richer `extra` payloads and surfaced the latent collision.
+
+**Fix:**
+Use `"service"` (or any non-reserved key). Updated two call sites in
+`src.main`:
+```python
+logger.info("service_started", extra={"service": "core-platform"})
+```
+
+**Prevention rule:**
+For any structured log key, avoid the reserved `LogRecord` attribute set.
+When in doubt, prefix with the subsystem: `audit_action`, `auth_user_id`,
+`svc_name`. Never use bare `module`, `name`, `message`, `asctime`,
+`levelname`, `pathname`, `lineno`, `funcName`, `process`, `thread`.
+
+**Regression test:**
+The four `test_lifespan_*` cases in
+`modules/core-platform/tests/test_main_lifespan.py` now all exercise
+`configure_logging` → log emission paths; any reserved-attribute regression
+will trip them immediately.
+
+---
+
+### LESSON-004: Python `re.match` with `$` anchor accepts trailing newline
+**Date:** 2026-04-13
+**Module:** core-platform (shared.auth.mfa.totp)
+**Builder:** Builder-Security
+**Severity:** high
+
+**What happened:**
+The TOTP code-format validator used `re.compile(r"^\d{6}$")` to reject non-6-digit input. Input like `"123456\n"` passed the regex — Python's `$` anchor by default matches *before* a trailing newline, not strictly at end-of-string. An attacker submitting codes with embedded whitespace/newlines could bypass the format gate before reaching `pyotp.TOTP.verify` (which would reject them numerically, but the validator contract was silently broken).
+
+**Root cause:**
+`^...$` anchors in Python `re` are not the same as in `re.fullmatch`. `$` matches at end-of-string **or** just before a terminating newline. This is documented but easy to miss when porting patterns from other languages or when code review treats the anchor pair as meaning "whole string only."
+
+**Fix:**
+Replaced `r"^\d{6}$"` with `r"\A\d{6}\Z"` — `\A` and `\Z` are strict start/end-of-string anchors regardless of multiline flag or trailing newlines. Equivalent alternative: switch from `re.match(...)` to `re.fullmatch(...)`.
+
+**Prevention rule:**
+Should be added to `.claude/rules/security.md` (or similar) once that file exists: "For any input-format validator, use `\A...\Z` anchors or `re.fullmatch`. `^...$` with `re.match` accepts trailing newlines and is unsafe for security-boundary validation."
+
+**Regression test:**
+`test_verify_totp_malformed_raises[123456\n]` in `shared/tests/auth/mfa/test_totp.py` — submits a 6-digit code with trailing newline; must raise `InvalidTotpFormat`.
+
+---
+
 ### LESSON-003: penny_allocate remainder can be negative — first item absorbs it
 **Date:** 2026-04-13
 **Module:** reclaimrx

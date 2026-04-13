@@ -34,6 +34,7 @@ from sqlalchemy import text
 
 from shared.db.engine import dispose_engine, get_engine
 from shared.events.factory import get_event_bus, reset_event_bus
+from shared.observability import configure_logging
 
 from .api import router as api_router
 
@@ -73,6 +74,15 @@ def _install_signal_handlers(loop: asyncio.AbstractEventLoop, app: FastAPI) -> N
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """FastAPI lifespan: startup + graceful shutdown."""
     # --- startup ---
+    # Structured logging must be configured BEFORE any other startup step
+    # so their log lines land as JSON too (otherwise the first few events
+    # escape the formatter).
+    import os
+
+    configure_logging(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        mode=os.getenv("LOG_MODE", "json"),
+    )
     app.state.shutting_down = False
     try:
         loop = asyncio.get_running_loop()
@@ -83,14 +93,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await _verify_database()
     bus = get_event_bus()
     await bus.start()
-    logger.info("service_started", extra={"module": "core-platform"})
+    logger.info("service_started", extra={"service": "core-platform"})
 
     try:
         yield
     finally:
         # --- shutdown ---
         app.state.shutting_down = True
-        logger.info("service_stopping", extra={"module": "core-platform"})
+        logger.info("service_stopping", extra={"service": "core-platform"})
         try:
             await bus.stop()
         except Exception:  # pragma: no cover - best-effort drain
@@ -100,7 +110,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await dispose_engine()
         except Exception:  # pragma: no cover - best-effort drain
             logger.exception("engine_dispose_failed")
-        logger.info("service_stopped", extra={"module": "core-platform"})
+        logger.info("service_stopped", extra={"service": "core-platform"})
 
 
 def create_app() -> FastAPI:
