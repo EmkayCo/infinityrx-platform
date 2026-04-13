@@ -50,6 +50,9 @@ minversion = "9.0"
 asyncio_mode = "auto"
 testpaths = ["modules/core-platform/tests", "shared/tests", "tests"]
 addopts = "-ra -q --strict-markers --strict-config --import-mode=importlib"
+markers = [
+  "integration: marks tests that require a live Postgres instance",
+]
 filterwarnings = [
   "error",
   # Starlette's sync TestClient leaves sockets to be GC'd between tests,
@@ -94,3 +97,8 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E","F","W","I","UP","B","SIM","RUF"]
 ignore = ["E501", "B008"]
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.151.12",
+]
