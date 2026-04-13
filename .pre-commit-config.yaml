@@ -1,0 +1,66 @@
+# Pre-commit hooks — runs locally on `git commit` and in CI.
+#
+# Enforce:
+#   * Static safety (ruff + mypy)
+#   * Dependency vulnerability scan (pip-audit) — HIPAA requires known-
+#     vulnerability monitoring; a blocked commit is cheaper than a breach.
+#   * Static security analysis (bandit) — catches obvious bugs like SQL
+#     string concat, insecure hashing, subprocess with shell=True.
+#
+# Install locally:
+#     pip install pre-commit
+#     pre-commit install
+#
+# Run against all files:
+#     pre-commit run --all-files
+#
+# Skip a hook once (use sparingly; never for security hooks):
+#     SKIP=bandit git commit -m "..."
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=512"]
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+
+  - repo: https://github.com/pypa/pip-audit
+    rev: v2.9.0
+    hooks:
+      - id: pip-audit
+        # Scan the lockfile, not the live environment — reproducible across
+        # developer machines. Uses OSV + PyPI advisory db.
+        args: ["--disable-pip", "--strict", "-r", "requirements.txt"]
+        # If you don't keep a requirements.txt, regenerate it before each
+        # run via a project Make target: `make freeze-lock`.
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.0
+    hooks:
+      - id: bandit
+        args: ["-c", "pyproject.toml", "-q", "-r", "shared", "modules"]
+        additional_dependencies: ["bandit[toml]"]
+        # -ll = only flag medium+ severity findings.
+
+# ---------------------------------------------------------------------------
+# CI integration — run the same hooks in GitHub Actions
+# ---------------------------------------------------------------------------
+# Create .github/workflows/security.yml with:
+#
+#   - uses: pre-commit/action@v3.0.1
+#     with:
+#       extra_args: --all-files --hook-stage manual
+#
+# That keeps local-dev and CI enforcement in lockstep.

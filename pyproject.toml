@@ -108,6 +108,23 @@ line-length = 100
 select = ["E","F","W","I","UP","B","SIM","RUF"]
 ignore = ["E501", "B008"]
 
+[tool.bandit]
+# Static security linter.  Only flags medium+ severity findings.
+# Test directories excluded — test code legitimately uses assert,
+# hardcoded credentials, and shell=True in fixtures.
+skips = [
+    "B101",  # assert_used — tests rely on assertions
+]
+exclude_dirs = [
+    "tests",
+    ".venv",
+    "venv",
+    "build",
+    "dist",
+    "modules/core-platform/tests",
+    "shared/tests",
+]
+
 [dependency-groups]
 dev = [
     "hypothesis>=6.151.12",
