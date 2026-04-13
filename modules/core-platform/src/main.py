@@ -35,6 +35,7 @@ from sqlalchemy import text
 from shared.db.engine import dispose_engine, get_engine
 from shared.events.factory import get_event_bus, reset_event_bus
 from shared.observability import configure_logging
+from shared.observability.slow_query import install_slow_query_logger
 
 from .api import router as api_router
 
@@ -91,6 +92,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         pass  # No running loop (shouldn't happen under uvicorn)
 
     await _verify_database()
+    # Attach slow-query logger to the sync side of the engine so any query
+    # over SLOW_QUERY_THRESHOLD_MS (default 1000) is logged at WARNING with
+    # elapsed_ms, statement (truncated, no params), and the request context
+    # injected by ContextFilter.
+    threshold = int(os.getenv("SLOW_QUERY_THRESHOLD_MS", "1000"))
+    try:
+        install_slow_query_logger(get_engine().sync_engine, threshold_ms=threshold)
+    except Exception:  # pragma: no cover - best-effort
+        logger.exception("slow_query_logger_install_failed")
     bus = get_event_bus()
     await bus.start()
     logger.info("service_started", extra={"service": "core-platform"})

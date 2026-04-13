@@ -7,6 +7,18 @@ services:
       POSTGRES_USER: infinityrx
       POSTGRES_PASSWORD: infinityrx_dev
       POSTGRES_DB: infinityrx
+    # log_min_duration_statement=1000 → any query running >1s is logged
+    # with its text + parameters. Essential for catching N+1 queries,
+    # missing indexes, and long-running audit exports before they
+    # degrade tenant response times at 100M claims/yr scale.
+    command:
+      - "postgres"
+      - "-c"
+      - "log_min_duration_statement=1000"
+      - "-c"
+      - "log_line_prefix=%t [%p]: db=%d,user=%u,app=%a,client=%h "
+      - "-c"
+      - "log_statement=ddl"
     ports:
       - "5432:5432"
     volumes:
