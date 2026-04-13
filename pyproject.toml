@@ -29,6 +29,8 @@ dependencies = [
   "scikit-learn>=1.8.0",
   "networkx>=3.6.1",
   "hypothesis>=6.151.12",
+  "pyotp>=2.9.0",
+  "fido2>=2.1.1",
 ]
 
 [project.optional-dependencies]

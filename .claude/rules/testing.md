@@ -25,3 +25,29 @@ At every gate review, verify:
 - If a module isn't being built this phase, its files should not exist (only the folder structure)
 
 Delete any empty stub/placeholder files that exist now.
+
+## SQLAlchemy Test Isolation (LESSON-001 — High Severity)
+Any test fixture for code that calls `db.commit()` inside route or service logic MUST use SQLAlchemy `begin_nested()` SAVEPOINTs with an `after_transaction_end` event listener that reopens the savepoint after each inner commit. A plain `begin()` / `rollback()` pattern does NOT isolate tests when the code under test commits — the outer rollback has nothing to roll back and all test data leaks into subsequent tests.
+
+Required fixture pattern:
+```python
+@pytest.fixture()
+def db(engine) -> Session:
+    connection = engine.connect()
+    outer = connection.begin()
+    nested = connection.begin_nested()
+    session = Session(bind=connection, join_transaction_mode="create_savepoint")
+
+    @event.listens_for(session, "after_transaction_end")
+    def restart_savepoint(sess, transaction):
+        nonlocal nested
+        if transaction.nested and not transaction._parent.nested:
+            nested = connection.begin_nested()
+
+    yield session
+    session.close()
+    outer.rollback()
+    connection.close()
+```
+
+Symptoms of broken isolation: `MultipleResultsFound`, rows persisting across tests, idempotency tests failing on second seed call.
