@@ -12,13 +12,18 @@ module provides:
 
 from __future__ import annotations
 
+import os
 import uuid
 from typing import Callable
 
 from sqlalchemy.orm import sessionmaker
 
 from shared.auth.dependencies import CurrentUser, configure_auth
-from shared.auth.tokens_repo import InMemoryRevokedTokenRepo, RevokedTokenRepo
+from shared.auth.tokens_repo import (
+    InMemoryRevokedTokenRepo,
+    RedisRevokedTokenRepo,
+    RevokedTokenRepo,
+)
 from src.auth.service import load_authenticated
 
 
@@ -43,10 +48,27 @@ def build_user_loader(
     return loader
 
 
+def _default_revoked_repo() -> RevokedTokenRepo:
+    """Pick the production default.
+
+    If ``REDIS_URL`` is set, connect and return ``RedisRevokedTokenRepo`` so
+    revocations survive process restarts (HIPAA availability / auth-control
+    integrity requirement). Otherwise fall back to the in-memory repo — only
+    appropriate for tests and local dev without Redis.
+    """
+    redis_url = os.getenv("REDIS_URL", "").strip()
+    if not redis_url:
+        return InMemoryRevokedTokenRepo()
+    import redis  # imported lazily so the import cost is paid only when needed
+
+    client = redis.Redis.from_url(redis_url, decode_responses=False)
+    return RedisRevokedTokenRepo(client)
+
+
 def configure_core_auth(
     SessionLocal: sessionmaker,
     repo: RevokedTokenRepo | None = None,
 ) -> RevokedTokenRepo:
-    repo = repo or InMemoryRevokedTokenRepo()
+    repo = repo or _default_revoked_repo()
     configure_auth(build_user_loader(SessionLocal), repo)
     return repo
