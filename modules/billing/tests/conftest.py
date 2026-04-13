@@ -1,0 +1,129 @@
+"""Shared fixtures for billing module tests."""
+
+from __future__ import annotations
+
+import sys
+import uuid
+from collections.abc import Iterator
+from datetime import UTC, date, datetime
+from decimal import Decimal
+from pathlib import Path
+
+_MODULE_ROOT = Path(__file__).resolve().parent.parent
+if str(_MODULE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_MODULE_ROOT))
+
+import pytest
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
+from src.models.tables import BillingBase
+
+
+@pytest.fixture(scope="session")
+def _engine():
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        future=True,
+    )
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_conn, _):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    # SQLite doesn't support schemas; patch tables to remove schema prefix
+    for table in BillingBase.metadata.tables.values():
+        table.schema = None
+
+    BillingBase.metadata.create_all(engine)
+    yield engine
+    BillingBase.metadata.drop_all(engine)
+    engine.dispose()
+
+
+@pytest.fixture
+def db_session(_engine) -> Iterator[Session]:
+    SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
+    session = SessionLocal()
+    try:
+        yield session
+        session.rollback()
+    finally:
+        session.close()
+
+
+# Standard tenant and user IDs for tests
+TENANT_A = uuid.UUID("11111111-1111-1111-1111-111111111111")
+TENANT_B = uuid.UUID("22222222-2222-2222-2222-222222222222")
+CLIENT_A = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+CLIENT_B = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+USER_A = uuid.UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
+PROGRAM_A = uuid.UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
+
+
+@pytest.fixture
+def tenant_id() -> uuid.UUID:
+    return TENANT_A
+
+
+@pytest.fixture
+def other_tenant_id() -> uuid.UUID:
+    return TENANT_B
+
+
+@pytest.fixture
+def client_id() -> uuid.UUID:
+    return CLIENT_A
+
+
+@pytest.fixture
+def user_id() -> uuid.UUID:
+    return USER_A
+
+
+@pytest.fixture
+def program_id() -> uuid.UUID:
+    return PROGRAM_A
+
+
+def now_utc() -> datetime:
+    return datetime.now(UTC)
+
+
+def make_claim_record(
+    tenant_id: uuid.UUID,
+    auth_number: str = "AUTH001",
+    net_amount: Decimal = Decimal("100.00"),
+    client_id: uuid.UUID | None = None,
+    program_id: uuid.UUID | None = None,
+    status: str = "ingested",
+    payment_route: str | None = None,
+    pay_to_entity_id: uuid.UUID | None = None,
+    pay_to_entity_name: str | None = None,
+    is_excluded: bool = False,
+    is_statement: bool = False,
+    claim_type: str = "new",
+    pharmacy_npi: str = "1234567890",
+    date_of_service: date | None = None,
+) -> dict:
+    return {
+        "tenant_id": tenant_id,
+        "auth_number": auth_number,
+        "net_amount": net_amount,
+        "client_id": client_id or CLIENT_A,
+        "program_id": program_id or PROGRAM_A,
+        "status": status,
+        "payment_route": payment_route,
+        "pay_to_entity_id": pay_to_entity_id,
+        "pay_to_entity_name": pay_to_entity_name,
+        "is_excluded": is_excluded,
+        "is_statement": is_statement,
+        "claim_type": claim_type,
+        "pharmacy_npi": pharmacy_npi,
+        "date_of_service": date_of_service or date(2026, 1, 15),
+        "source_type": "api",
+        "date_received": now_utc(),
+        "created_at": now_utc(),
+    }
