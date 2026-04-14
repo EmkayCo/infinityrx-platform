@@ -1,0 +1,25 @@
+[run]
+branch = true
+source =
+    modules/dataiq/src
+omit =
+    modules/dataiq/src/models/tables.py
+    modules/dataiq/src/utils/constants.py
+    modules/dataiq/src/__init__.py
+    modules/dataiq/src/api/__init__.py
+    modules/dataiq/src/api/schemas/__init__.py
+    modules/dataiq/src/events/__init__.py
+    modules/dataiq/src/jobs/__init__.py
+    modules/dataiq/src/models/__init__.py
+    modules/dataiq/src/services/__init__.py
+    modules/dataiq/src/utils/__init__.py
+    modules/dataiq/src/migrations/*
+
+[report]
+show_missing = true
+fail_under = 99
+exclude_lines =
+    pragma: no cover
+    raise NotImplementedError
+    if TYPE_CHECKING:
+    \.\.\.
