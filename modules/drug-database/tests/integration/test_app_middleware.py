@@ -101,8 +101,32 @@ class TestHealthEndpoint:
         resp = client.get("/api/v1/drugs/health", headers={"X-Tenant-Id": _TEST_TENANT})
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "ok"
+        # H-13: real health check returns "healthy" (not static "ok")
+        assert data["status"] == "healthy"
         assert data["module"] == "drug-database"
+
+    def test_health_db_failure_returns_503(self) -> None:
+        """H-13: DB ping failure must return 503 unhealthy."""
+        from unittest.mock import MagicMock, patch
+        from src.main import create_app
+        from src.api.dependencies import get_db
+
+        app = create_app()
+        broken_db = MagicMock()
+        broken_db.execute.side_effect = Exception("connection refused")
+
+        def _broken_db():
+            yield broken_db
+
+        app.dependency_overrides[get_db] = _broken_db
+        with TestClient(app) as c:
+            resp = c.get("/api/v1/drugs/health", headers={"X-Tenant-Id": _TEST_TENANT})
+        app.dependency_overrides.clear()
+
+        assert resp.status_code == 503
+        data = resp.json()
+        assert data["status"] == "unhealthy"
+        assert "database" in data["failing"]
 
 
 class TestTenantIdValidation:

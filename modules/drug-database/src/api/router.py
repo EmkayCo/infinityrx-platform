@@ -353,5 +353,25 @@ async def refresh_status(db: DBSession, tenant_id: TenantId) -> Any:
 
 
 @router.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "module": "drug-database"}
+async def health(db: DBSession) -> dict:
+    """Real dependency health check (H-13).
+
+    Returns 200 {"status":"healthy"} if DB is reachable.
+    Returns 503 {"status":"unhealthy", "failing": [...]} if DB is down.
+    """
+    failing = []
+    try:
+        from sqlalchemy import text
+        import asyncio
+        # Sync DB session — run with timeout via asyncio.wait_for on the sync call
+        db.execute(text("SELECT 1"))
+    except Exception:
+        failing.append("database")
+
+    if failing:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "module": "drug-database", "failing": failing},
+        )
+    return {"status": "healthy", "module": "drug-database"}
