@@ -9,7 +9,7 @@ import { Skeleton } from "@shared/components/skeleton";
 import { DollarDisplay } from "@shared/components/dollar-display";
 import { ActivityFeed } from "@shared/components/activity-feed";
 import { DataTable, type ColDef } from "@shared/components/data-table";
-import { apiGet, apiPatch, buildUrl } from "@shared/lib/api-client";
+import { apiGet, apiPatch, apiPost, buildUrl } from "@shared/lib/api-client";
 import { API_URLS } from "@shared/lib/constants";
 import type { Investigation, EvidenceItem } from "@shared/types/reclaimrx";
 import type { ActivityEvent } from "@shared/types/common";
@@ -49,7 +49,7 @@ const claimColumns: ColDef<RelatedClaim>[] = [
   },
 ];
 
-export default function InvestigationDetailPage() {
+function InvestigationDetailInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -64,10 +64,12 @@ export default function InvestigationDetailPage() {
   // PHI access audit beacon
   useEffect(() => {
     if (investigation) {
-      void fetch(
+      void apiPost(
         `${API_URLS.reclaimrx}/api/v1/investigations/${id}/audit-access`,
-        { method: "POST" }
-      );
+        {}
+      ).catch(() => {
+        // Audit-access beacon is fire-and-forget; never crash the page on failure.
+      });
     }
   }, [id, investigation]);
 
@@ -112,10 +114,24 @@ export default function InvestigationDetailPage() {
     );
   }
 
-  if (!investigation) {
+  // Mock handler returns { error, message } for unknown IDs.
+  const notFound =
+    !investigation ||
+    (investigation as unknown as { error?: string }).error === "not_found";
+
+  if (notFound) {
     return (
-      <div className="p-6">
-        <p className="text-slate-400">Investigation not found.</p>
+      <div className="p-6 space-y-4">
+        <h1 className="text-xl font-semibold text-white">Investigation not found</h1>
+        <p className="text-sm text-slate-400">
+          No investigation exists for ID <span className="font-mono">{id}</span>.
+        </p>
+        <button
+          onClick={() => router.push("/reclaimrx/investigations")}
+          className="text-sm text-teal-400 hover:text-teal-300 underline"
+        >
+          ← Back to investigation queue
+        </button>
       </div>
     );
   }
@@ -304,5 +320,13 @@ export default function InvestigationDetailPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function InvestigationDetailPage() {
+  return (
+    <ErrorBoundary>
+      <InvestigationDetailInner />
+    </ErrorBoundary>
   );
 }

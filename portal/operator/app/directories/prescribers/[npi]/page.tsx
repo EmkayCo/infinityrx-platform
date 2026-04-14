@@ -4,21 +4,21 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 import { ChevronLeft, AlertTriangle, CheckCircle, XCircle } from "lucide-react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
+import dynamic from "next/dynamic";
 import { ErrorBoundary } from "@shared/components/error-boundary";
 import { Skeleton } from "@shared/components/skeleton";
 import { apiGet } from "@shared/lib/api-client";
 import { API_URLS } from "@shared/lib/constants";
 import type { Prescriber } from "@shared/types/directories";
 import { formatDate } from "@shared/lib/format";
+
+const DirectoriesPrescriberTopDrugsBar = dynamic(
+  () =>
+    import("@/components/charts/directories-prescriber-top-drugs-bar").then(
+      (m) => m.DirectoriesPrescriberTopDrugsBar
+    ),
+  { ssr: false, loading: () => <Skeleton className="h-48" /> }
+);
 
 export default function PrescriberDetailPage() {
   const { npi } = useParams<{ npi: string }>();
@@ -152,20 +152,7 @@ export default function PrescriberDetailPage() {
         <ErrorBoundary>
           <div className="rounded-lg border border-ifx-border-dark bg-ifx-surface-dark p-5">
             <h3 className="text-sm font-semibold text-slate-200 mb-4">Top Prescribed Drugs (90 days)</h3>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={topDrugs} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis type="number" tick={{ fontSize: 11, fill: "#94A3B8" }} />
-                <YAxis
-                  type="category"
-                  dataKey="drug_name"
-                  tick={{ fontSize: 10, fill: "#94A3B8" }}
-                  width={140}
-                />
-                <Tooltip contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }} />
-                <Bar dataKey="claim_count" fill="#00B4D8" name="Claims" radius={[0, 3, 3, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <DirectoriesPrescriberTopDrugsBar data={topDrugs} />
           </div>
         </ErrorBoundary>
       )}

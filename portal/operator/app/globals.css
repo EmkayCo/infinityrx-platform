@@ -1,6 +1,41 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap");
-
 @import "tailwindcss";
+
+@source "../../shared/**/*.{ts,tsx}";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Brand — navy */
+  --color-navy-900: #0B1D3A;
+  --color-navy-700: #1B3A5C;
+  --color-navy-500: #2D5F8A;
+
+  /* Brand — teal (overrides Tailwind default teal) */
+  --color-teal-600: #0891B2;
+  --color-teal-500: #00B4D8;
+  --color-teal-400: #22D3EE;
+
+  /* IFX semantic + surface */
+  --color-ifx-success: #10B981;
+  --color-ifx-warning: #F59E0B;
+  --color-ifx-error: #EF4444;
+  --color-ifx-info: #3B82F6;
+  --color-ifx-bg-light: #F8FAFC;
+  --color-ifx-bg-dark: #0F172A;
+  --color-ifx-surface-light: #FFFFFF;
+  --color-ifx-surface-dark: #1E293B;
+  --color-ifx-border-light: #E2E8F0;
+  --color-ifx-border-dark: #334155;
+
+  /* Font families (driven by next/font variables from layout.tsx) */
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), "Fira Code", monospace;
+
+  /* Border radius */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
 
 :root {
   /* Primary palette */
@@ -88,19 +123,19 @@ html {
 body {
   background-color: var(--ifx-bg);
   color: var(--ifx-text-primary);
-  font-family: "Inter", system-ui, sans-serif;
+  font-family: var(--font-inter), system-ui, sans-serif;
   font-size: 14px;
   line-height: 1.5;
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: "Inter", system-ui, sans-serif;
+  font-family: var(--font-inter), system-ui, sans-serif;
   font-weight: 600;
   line-height: 1.25;
 }
 
 code, pre, kbd, samp {
-  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-family: var(--font-jetbrains-mono), "Fira Code", monospace;
 }
 
 *:focus-visible {

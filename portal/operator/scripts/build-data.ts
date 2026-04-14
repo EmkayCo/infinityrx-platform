@@ -12,8 +12,11 @@ import * as path from "path";
 import ExcelJS from "exceljs";
 
 // ── Path helpers ──────────────────────────────────────────────────────────────
-const DATA_DIR = path.join(process.cwd(), "public", "data");
-const OUT_DIR = path.join(DATA_DIR, "aggregated");
+// Raw source files live outside /public so they are not publicly served.
+// Aggregated JSON outputs go to /public so the browser mock layer can
+// fetch them over HTTP.
+const SOURCE_DIR = path.join(process.cwd(), "lib", "data", "sources");
+const OUT_DIR = path.join(process.cwd(), "public", "data", "aggregated");
 
 // ── Decimal-safe accumulator ──────────────────────────────────────────────────
 // We use integer cent arithmetic to avoid float accumulation errors.
@@ -75,7 +78,7 @@ interface Claim {
 async function buildGroupMap(): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(path.join(DATA_DIR, "client to groupid mappings.xlsx"));
+  await wb.xlsx.readFile(path.join(SOURCE_DIR, "client to groupid mappings.xlsx"));
   const ws = wb.worksheets[0];
   ws.eachRow((row, rowIndex) => {
     if (rowIndex === 1) return; // skip header
@@ -270,7 +273,7 @@ async function main() {
 
   for (const f of FILES) {
     process.stdout.write(`Parsing ${f.name}… `);
-    const text = fs.readFileSync(path.join(DATA_DIR, f.name), "utf-8");
+    const text = fs.readFileSync(path.join(SOURCE_DIR, f.name), "utf-8");
     const claims = parseFileText(text, f.hasHeader, groupMap, f.cycleId);
     allClaims.push(...claims);
     cycleStats.push({ cycleId: f.cycleId, fileName: f.name, status: f.status, claims });

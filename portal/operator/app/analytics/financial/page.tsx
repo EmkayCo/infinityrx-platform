@@ -2,18 +2,7 @@
 
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-  BarChart,
-  Bar,
-} from "recharts";
+import dynamic from "next/dynamic";
 import { ErrorBoundary } from "@shared/components/error-boundary";
 import { Skeleton } from "@shared/components/skeleton";
 import { DollarDisplay } from "@shared/components/dollar-display";
@@ -21,6 +10,22 @@ import { apiGet, buildUrl } from "@shared/lib/api-client";
 import { API_URLS } from "@shared/lib/constants";
 import type { FinancialMetrics } from "@shared/types/analytics";
 import { cn } from "@shared/lib/format";
+
+const AnalyticsFinancialPmpmLine = dynamic(
+  () =>
+    import("@/components/charts/analytics-financial-pmpm-line").then(
+      (m) => m.AnalyticsFinancialPmpmLine
+    ),
+  { ssr: false, loading: () => <Skeleton className="h-48" /> }
+);
+
+const AnalyticsFinancialCostDriverBar = dynamic(
+  () =>
+    import("@/components/charts/analytics-financial-cost-driver-bar").then(
+      (m) => m.AnalyticsFinancialCostDriverBar
+    ),
+  { ssr: false, loading: () => <Skeleton className="h-48" /> }
+);
 
 export default function FinancialAnalyticsPage() {
   const { data: metrics, isLoading } = useQuery<FinancialMetrics>({
@@ -72,24 +77,7 @@ export default function FinancialAnalyticsPage() {
           <div className="rounded-lg border border-ifx-border-dark bg-ifx-surface-dark p-5">
             <h3 className="text-sm font-semibold text-slate-200 mb-4">PMPM Trend with YoY</h3>
             {isLoading ? <Skeleton className="h-48" /> : (
-              <ResponsiveContainer width="100%" height={200}>
-                <LineChart data={(metrics?.pmpm_trend ?? []).map((d) => ({
-                  month: d.month,
-                  current: parseFloat(d.pmpm),
-                  prior_year: parseFloat(d.prior_year_pmpm),
-                }))}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="month" tick={{ fontSize: 10, fill: "#94A3B8" }} tickFormatter={(v: string) => v.slice(5)} />
-                  <YAxis tick={{ fontSize: 10, fill: "#94A3B8" }} tickFormatter={(v: number) => `$${Number(v).toFixed(0)}`} />
-                  <Tooltip
-                    formatter={(v) => [`$${Number(v).toFixed(2)}`]}
-                    contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
-                  />
-                  <Legend />
-                  <Line type="monotone" dataKey="current" stroke="#00B4D8" strokeWidth={2} dot={false} name="Current Year" />
-                  <Line type="monotone" dataKey="prior_year" stroke="#6B7280" strokeWidth={2} dot={false} strokeDasharray="5 5" name="Prior Year" />
-                </LineChart>
-              </ResponsiveContainer>
+              <AnalyticsFinancialPmpmLine data={metrics?.pmpm_trend ?? []} />
             )}
           </div>
         </ErrorBoundary>
@@ -127,24 +115,7 @@ export default function FinancialAnalyticsPage() {
           <div className="rounded-lg border border-ifx-border-dark bg-ifx-surface-dark p-5">
             <h3 className="text-sm font-semibold text-slate-200 mb-4">Cost Driver Decomposition</h3>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart
-                  data={metrics.cost_driver_breakdown.map((d) => ({
-                    category: d.category,
-                    amount: parseFloat(d.amount),
-                    pct: d.pct_of_total,
-                  }))}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="category" tick={{ fontSize: 10, fill: "#94A3B8" }} />
-                  <YAxis tick={{ fontSize: 10, fill: "#94A3B8" }} tickFormatter={(v: number) => `$${(v / 1000000).toFixed(1)}M`} />
-                  <Tooltip
-                    formatter={(v) => [`$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2 })}`]}
-                    contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
-                  />
-                  <Bar dataKey="amount" fill="#00B4D8" name="Amount" radius={[3, 3, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <AnalyticsFinancialCostDriverBar data={metrics.cost_driver_breakdown} />
               <div className="space-y-2">
                 {metrics.cost_driver_breakdown.map((d) => (
                   <div key={d.category} className="flex items-center gap-3">

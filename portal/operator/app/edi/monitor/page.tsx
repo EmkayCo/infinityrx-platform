@@ -2,18 +2,7 @@
 
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from "recharts";
+import dynamic from "next/dynamic";
 import { Activity, Clock, TrendingUp } from "lucide-react";
 import { ErrorBoundary } from "@shared/components/error-boundary";
 import { Skeleton } from "@shared/components/skeleton";
@@ -22,6 +11,22 @@ import { API_URLS } from "@shared/lib/constants";
 import { useSSE } from "@shared/hooks/use-sse";
 import type { EDIMonitorStats } from "@shared/types/edi";
 import { cn } from "@shared/lib/format";
+
+const EdiMonitorRejectionBar = dynamic(
+  () =>
+    import("@/components/charts/edi-monitor-rejection-bar").then(
+      (m) => m.EdiMonitorRejectionBar
+    ),
+  { ssr: false, loading: () => <Skeleton className="h-48" /> }
+);
+
+const EdiMonitorVolumeTrendLine = dynamic(
+  () =>
+    import("@/components/charts/edi-monitor-volume-trend-line").then(
+      (m) => m.EdiMonitorVolumeTrendLine
+    ),
+  { ssr: false, loading: () => <Skeleton className="h-48" /> }
+);
 
 function GaugeCard({
   label,
@@ -126,26 +131,7 @@ export default function EDIMonitorPage() {
             {isLoading ? (
               <Skeleton className="h-48" />
             ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart
-                  data={(stats?.top_rejection_codes ?? []).slice(0, 10)}
-                  layout="vertical"
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis type="number" tick={{ fontSize: 11, fill: "#94A3B8" }} />
-                  <YAxis
-                    type="category"
-                    dataKey="code"
-                    tick={{ fontSize: 10, fill: "#94A3B8" }}
-                    width={60}
-                  />
-                  <Tooltip
-                    formatter={(v) => [`${Number(v)} transactions`]}
-                    contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
-                  />
-                  <Bar dataKey="count" fill="#EF4444" radius={[0, 3, 3, 0]} name="Rejections" />
-                </BarChart>
-              </ResponsiveContainer>
+              <EdiMonitorRejectionBar data={stats?.top_rejection_codes ?? []} />
             )}
           </div>
         </ErrorBoundary>
@@ -160,17 +146,7 @@ export default function EDIMonitorPage() {
             {isLoading ? (
               <Skeleton className="h-48" />
             ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={stats?.volume_trend_30d ?? []}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#94A3B8" }} tickFormatter={(v: string) => v.slice(5)} />
-                  <YAxis tick={{ fontSize: 11, fill: "#94A3B8" }} />
-                  <Tooltip contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }} />
-                  <Legend />
-                  <Line type="monotone" dataKey="inbound" stroke="#00B4D8" strokeWidth={2} dot={false} name="Inbound" />
-                  <Line type="monotone" dataKey="outbound" stroke="#F59E0B" strokeWidth={2} dot={false} name="Outbound" />
-                </LineChart>
-              </ResponsiveContainer>
+              <EdiMonitorVolumeTrendLine data={stats?.volume_trend_30d ?? []} />
             )}
           </div>
         </ErrorBoundary>

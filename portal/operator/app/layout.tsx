@@ -1,9 +1,25 @@
 import type { Metadata } from "next";
-import { auth } from "@shared/lib/auth";
+import { headers } from "next/headers";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import { Providers } from "@/components/providers";
 import { AppShell } from "@/components/layout/app-shell";
 import { themeInitScript } from "@shared/components/theme-toggle";
 import "./globals.css";
+
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+  axes: ["opsz"],
+  style: ["normal", "italic"],
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains-mono",
+  display: "swap",
+  style: ["normal", "italic"],
+});
 
 export const metadata: Metadata = {
   title: {
@@ -19,11 +35,13 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const session = await auth();
-  const isAuthenticated = !!session?.user;
+  // Middleware (proxy.ts) already verified the JWT and set this header.
+  // Reading it here is free — no second JWT parse on the critical render path.
+  const h = await headers();
+  const isAuthenticated = h.get("x-ifx-authenticated") === "1";
 
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
       <head>
         {/* Prevent theme flash */}
         <script
@@ -36,7 +54,9 @@ export default async function RootLayout({
           Skip to main content
         </a>
 
-        <Providers session={session}>
+        {/* SessionProvider with no initial session lazy-fetches /api/auth/session
+            on mount — only if a component actually calls useSession()/useAuth(). */}
+        <Providers>
           <AppShell isAuthenticated={isAuthenticated}>
             {children}
           </AppShell>

@@ -2,17 +2,7 @@
 
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  ReferenceLine,
-  Cell,
-} from "recharts";
+import dynamic from "next/dynamic";
 import { ErrorBoundary } from "@shared/components/error-boundary";
 import { Skeleton } from "@shared/components/skeleton";
 import { DollarDisplay } from "@shared/components/dollar-display";
@@ -22,16 +12,26 @@ import { API_URLS } from "@shared/lib/constants";
 import type { PharmacyScorecard, NetworkAdequacySummary } from "@shared/types/analytics";
 import { cn } from "@shared/lib/format";
 
+const AnalyticsNetworkRejectRateBar = dynamic(
+  () =>
+    import("@/components/charts/analytics-network-reject-rate-bar").then(
+      (m) => m.AnalyticsNetworkRejectRateBar
+    ),
+  { ssr: false, loading: () => <Skeleton className="h-48" /> }
+);
+
+const AnalyticsNetworkMacRatioBar = dynamic(
+  () =>
+    import("@/components/charts/analytics-network-mac-ratio-bar").then(
+      (m) => m.AnalyticsNetworkMacRatioBar
+    ),
+  { ssr: false, loading: () => <Skeleton className="h-48" /> }
+);
+
 const TIER_BADGE: Record<string, string> = {
   preferred: "bg-teal-900/40 text-teal-300",
   standard: "bg-blue-900/40 text-blue-300",
   out_of_network: "bg-slate-700 text-slate-400",
-};
-
-const REJECT_COLOR = (rate: number) => {
-  if (rate <= 5) return "#10B981";
-  if (rate <= 10) return "#F59E0B";
-  return "#EF4444";
 };
 
 const columns: ColDef<PharmacyScorecard>[] = [
@@ -48,14 +48,17 @@ const columns: ColDef<PharmacyScorecard>[] = [
   {
     accessorKey: "network_tier",
     header: "Tier",
-    cell: (c) => (
-      <span className={cn(
-        "text-xs px-2 py-0.5 rounded capitalize",
-        TIER_BADGE[c.getValue() as string] ?? "bg-slate-700 text-slate-400"
-      )}>
-        {(c.getValue() as string).replace("_", " ")}
-      </span>
-    ),
+    cell: (c) => {
+      const tier = (c.getValue() as string | undefined) ?? "";
+      return (
+        <span className={cn(
+          "text-xs px-2 py-0.5 rounded capitalize",
+          TIER_BADGE[tier] ?? "bg-slate-700 text-slate-400"
+        )}>
+          {tier.replace("_", " ")}
+        </span>
+      );
+    },
   },
   {
     accessorKey: "claim_volume",
@@ -181,23 +184,7 @@ export default function NetworkAnalyticsPage() {
           <div className="rounded-lg border border-ifx-border-dark bg-ifx-surface-dark p-5">
             <h3 className="text-sm font-semibold text-slate-200 mb-4">Reject Rate by Pharmacy</h3>
             {scorecardsLoading ? <Skeleton className="h-48" /> : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={rejectRateData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#94A3B8" }} />
-                  <YAxis tick={{ fontSize: 10, fill: "#94A3B8" }} tickFormatter={(v: number) => `${Number(v)}%`} />
-                  <Tooltip
-                    formatter={(v) => [`${Number(v).toFixed(1)}%`, "Reject Rate"]}
-                    contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
-                  />
-                  <ReferenceLine y={10} stroke="#F59E0B" strokeDasharray="5 5" label={{ value: "10% target", fill: "#F59E0B", fontSize: 10 }} />
-                  <Bar dataKey="reject_rate" name="Reject Rate" radius={[3, 3, 0, 0]}>
-                    {rejectRateData.map((entry, i) => (
-                      <Cell key={i} fill={REJECT_COLOR(entry.reject_rate)} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <AnalyticsNetworkRejectRateBar data={rejectRateData} />
             )}
           </div>
         </ErrorBoundary>
@@ -206,23 +193,7 @@ export default function NetworkAnalyticsPage() {
           <div className="rounded-lg border border-ifx-border-dark bg-ifx-surface-dark p-5">
             <h3 className="text-sm font-semibold text-slate-200 mb-4">MAC Ratio Distribution</h3>
             {scorecardsLoading ? <Skeleton className="h-48" /> : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={rejectRateData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#94A3B8" }} />
-                  <YAxis domain={[0, 1.5]} tick={{ fontSize: 10, fill: "#94A3B8" }} tickFormatter={(v: number) => `${Number(v).toFixed(1)}x`} />
-                  <Tooltip
-                    formatter={(v) => [`${Number(v).toFixed(2)}x`, "MAC Ratio"]}
-                    contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
-                  />
-                  <ReferenceLine y={1.0} stroke="#10B981" strokeDasharray="5 5" label={{ value: "1.0x parity", fill: "#10B981", fontSize: 10 }} />
-                  <Bar dataKey="mac_ratio" name="MAC Ratio" fill="#00B4D8" radius={[3, 3, 0, 0]}>
-                    {rejectRateData.map((entry, i) => (
-                      <Cell key={i} fill={entry.mac_ratio >= 1.0 ? "#10B981" : entry.mac_ratio >= 0.9 ? "#F59E0B" : "#EF4444"} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <AnalyticsNetworkMacRatioBar data={rejectRateData} />
             )}
           </div>
         </ErrorBoundary>

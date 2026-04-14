@@ -4,16 +4,7 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from "recharts";
+import dynamic from "next/dynamic";
 import { ErrorBoundary } from "@shared/components/error-boundary";
 import { Skeleton } from "@shared/components/skeleton";
 import { DollarDisplay } from "@shared/components/dollar-display";
@@ -22,6 +13,14 @@ import { apiGet } from "@shared/lib/api-client";
 import { API_URLS } from "@shared/lib/constants";
 import type { Drug, DrugInteraction, TherapeuticEquivalent } from "@shared/types/directories";
 import { cn, formatDate } from "@shared/lib/format";
+
+const DirectoriesDrugPriceHistoryLine = dynamic(
+  () =>
+    import("@/components/charts/directories-drug-price-history-line").then(
+      (m) => m.DirectoriesDrugPriceHistoryLine
+    ),
+  { ssr: false, loading: () => <Skeleton className="h-48" /> }
+);
 
 const SEVERITY_COLORS = {
   contraindicated: "bg-red-900/60 text-red-300",
@@ -131,21 +130,7 @@ export default function DrugDetailPage() {
         <ErrorBoundary>
           <div className="rounded-lg border border-ifx-border-dark bg-ifx-surface-dark p-5">
             <h3 className="text-sm font-semibold text-slate-200 mb-4">Price Change History</h3>
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={priceHistory}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#94A3B8" }} />
-                <YAxis tick={{ fontSize: 11, fill: "#94A3B8" }} tickFormatter={(v: number) => `$${Number(v)}`} />
-                <Tooltip
-                  formatter={(v) => [`$${Number(v).toFixed(2)}`]}
-                  contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
-                />
-                <Legend />
-                <Line type="monotone" dataKey="AWP" stroke="#00B4D8" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="WAC" stroke="#F59E0B" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="NADAC" stroke="#10B981" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            <DirectoriesDrugPriceHistoryLine data={priceHistory} />
           </div>
         </ErrorBoundary>
       )}

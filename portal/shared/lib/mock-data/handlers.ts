@@ -84,11 +84,22 @@ type AggCache = {
 const _aggCache: AggCache = {};
 
 async function loadAgg<T>(file: string): Promise<T> {
-  const base =
-    typeof window !== "undefined"
-      ? window.location.origin
-      : "http://localhost:3000";
-  const r = await fetch(`${base}/data/aggregated/${file}.json`, {
+  if (typeof window === "undefined") {
+    // Server-side: read from disk directly. Avoids an HTTP self-loop
+    // during SSR of pages that use the mock data layer — otherwise a
+    // Server Component would fetch() back to the same dev-server process
+    // while it's mid-render of the request that triggered the fetch.
+    const { readFile } = await import("fs/promises");
+    const { join } = await import("path");
+    const text = await readFile(
+      join(process.cwd(), "public", "data", "aggregated", `${file}.json`),
+      "utf-8"
+    );
+    return JSON.parse(text) as T;
+  }
+  // Client-side: fetch from the public directory. Cached aggressively so
+  // subsequent handler calls within the same session reuse the payload.
+  const r = await fetch(`${window.location.origin}/data/aggregated/${file}.json`, {
     cache: "force-cache",
   });
   if (!r.ok) throw new Error(`Failed to load ${file}.json: ${r.status}`);
@@ -188,6 +199,39 @@ interface RouteEntry {
   handler: Handler;
 }
 
+/**
+ * Build a deterministic sample of synthetic claim records for detail pages
+ * (pharmacy, member, prescriber). The `seed` parameter makes rows stable for
+ * a given entity — the same pharmacy NPI always gets the same mock claims —
+ * so navigating back and forth doesn't shuffle data.
+ */
+function buildClaimRecordSample(seed: string) {
+  let s = 0;
+  for (let i = 0; i < seed.length; i++) s = (s * 31 + seed.charCodeAt(i)) >>> 0;
+  const rand = () => {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    return s;
+  };
+  const statuses = ["paid", "paid", "paid", "paid", "reversed"];
+  return Array.from({ length: 15 }, (_, i) => {
+    const drug = DRUGS[rand() % DRUGS.length];
+    const billed = ((rand() % 50000) / 100 + 10).toFixed(2);
+    const paid = (parseFloat(billed) * (0.6 + (rand() % 30) / 100)).toFixed(2);
+    const daysAgo = i * 3 + (rand() % 3);
+    return {
+      id: `CLM-${seed.slice(0, 8)}-${String(i).padStart(4, "0")}`,
+      date_of_service: new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10),
+      ndc: drug.ndc,
+      drug_name: `${drug.brand_name} ${drug.strength}`,
+      billed_amount: billed,
+      paid_amount: paid,
+      status: statuses[rand() % statuses.length],
+    };
+  });
+}
+
 const ROUTES: RouteEntry[] = [
   // ── Health ──────────────────────────────────────────────────────────────────
   {
@@ -196,6 +240,11 @@ const ROUTES: RouteEntry[] = [
     handler: () => ({
       status: "healthy",
       services: SERVICE_HEALTH,
+      database_healthy: true,
+      redis_healthy: true,
+      event_bus_healthy: true,
+      dlq_depth: 0,
+      checked_at: isoDate(0),
       as_of: isoDate(0),
     }),
   },
@@ -261,6 +310,16 @@ const ROUTES: RouteEntry[] = [
       total: AUDIT_ENTRIES.length,
       page: 1,
       page_size: 20,
+    }),
+  },
+  {
+    pattern: /\/audit\/entries$/,
+    methods: ["GET"],
+    handler: () => ({
+      entries: AUDIT_ENTRIES,
+      total: AUDIT_ENTRIES.length,
+      page: 1,
+      page_size: AUDIT_ENTRIES.length,
     }),
   },
 
@@ -449,7 +508,8 @@ const ROUTES: RouteEntry[] = [
 
   // ── AP/AR ────────────────────────────────────────────────────────────────────
   {
-    pattern: /\/billing\/v1\/ar\/summary$|\/api\/v1\/ar\/summary$/,
+    // Matches /ar/summary (home widget), /billing/v1/ar/summary, and /api/v1/ar/summary.
+    pattern: /(^|\/)ar\/summary$/,
     methods: ["GET"],
     handler: async () => {
       const ov = (await getOverview()) as Record<string, unknown>;
@@ -679,8 +739,11 @@ const ROUTES: RouteEntry[] = [
   },
 
   // ── Payments dashboard ────────────────────────────────────────────────────────
+  // Pattern must be specific — a bare `/\/dashboard$/` matches every URL
+  // ending in /dashboard including /api/v1/fwa/dashboard, shadowing the
+  // FWA handler below.
   {
-    pattern: /\/dashboard$/,
+    pattern: /\/api\/v1\/payments\/dashboard$/,
     methods: ["GET"],
     handler: async () => {
       const [ov, nrids] = await Promise.all([getOverview(), getByNrid()]);
@@ -736,7 +799,13 @@ const ROUTES: RouteEntry[] = [
       const SENTINEL_UUID = "00000000-0000-0000-0000-000000000000";
       const NOW = new Date().toISOString();
       const invs = (await getInvestigations()) as Array<Record<string, unknown>>;
-      const raw = invs.find((i) => String(i.id) === match[1]) ?? invs[0];
+      const raw = invs.find((i) => String(i.id) === match[1]);
+      if (!raw) {
+        return {
+          error: "not_found",
+          message: `Investigation ${match[1]} not found`,
+        };
+      }
       const flagRaw = (raw.flag ?? {}) as Record<string, unknown>;
       const full = {
         id: String(raw.id),
@@ -862,6 +931,41 @@ const ROUTES: RouteEntry[] = [
         collected: inv.status === "resolved" ? money(parseFloat(String(inv.estimated_recovery ?? 0)) * 0.7) : "0.00",
       }));
     },
+  },
+  {
+    pattern: /\/api\/v1\/recovery$/,
+    methods: ["GET"],
+    handler: () => RECOVERY_ROWS,
+  },
+
+  // ── Investigation sub-resources ───────────────────────────────────────────────
+  {
+    pattern: /\/api\/v1\/investigations\/([^/?]+)\/audit-access$/,
+    methods: ["POST"],
+    handler: (match) => ({
+      logged: true,
+      investigation_id: match[1],
+      accessed_at: new Date().toISOString(),
+    }),
+  },
+  {
+    pattern: /\/api\/v1\/investigations\/([^/?]+)\/claims$/,
+    methods: ["GET"],
+    handler: () => [],
+  },
+  {
+    pattern: /\/api\/v1\/investigations\/([^/?]+)\/activity$/,
+    methods: ["GET"],
+    handler: () => [],
+  },
+  {
+    pattern: /\/api\/v1\/investigations\/([^/?]+)\/evidence\/([^/?]+)\/toggle$/,
+    methods: ["PATCH"],
+    handler: (match) => ({
+      id: match[2],
+      completed: true,
+      updated_at: new Date().toISOString(),
+    }),
   },
 
   // ── Demand letter ─────────────────────────────────────────────────────────────
@@ -994,18 +1098,22 @@ const ROUTES: RouteEntry[] = [
   {
     pattern: /\/api\/v1\/pharmacies\/([^/?]+)$/,
     methods: ["GET"],
-    handler: async (match) => {
-      const pharms = (await getTopPharmacies()) as Array<Record<string, unknown>>;
-      return pharms.find((p) => p.service_provider_id === match[1]) ?? pharms[0];
+    handler: (match) => {
+      const found = PHARMACIES.find((p) => p.npi === match[1]);
+      if (!found) return { error: "not_found", message: `Pharmacy ${match[1]} not found` };
+      return found;
     },
+  },
+  {
+    // Synthetic claims list for pharmacy detail page — drawn from DRUGS seed.
+    pattern: /\/api\/v1\/pharmacies\/([^/?]+)\/claims$/,
+    methods: ["GET"],
+    handler: (match) => buildClaimRecordSample(`pharm-${match[1]}`),
   },
   {
     pattern: /\/api\/v1\/pharmacies$/,
     methods: ["GET"],
-    handler: async () => {
-      const pharms = await getTopPharmacies();
-      return { items: pharms, total: 15197 }; // real total from build-data
-    },
+    handler: () => PHARMACIES,
   },
 
   // ── Prescriber directory ──────────────────────────────────────────────────────
@@ -1017,37 +1125,110 @@ const ROUTES: RouteEntry[] = [
   {
     pattern: /\/api\/v1\/prescribers$/,
     methods: ["GET"],
-    handler: () => ({ items: PRESCRIBERS, total: 40567 }), // real total from build-data
+    handler: () => PRESCRIBERS,
   },
 
   // ── Drug database ─────────────────────────────────────────────────────────────
   {
     pattern: /\/api\/v1\/drugs\/([^/?]+)$/,
     methods: ["GET"],
-    handler: async (match) => {
-      const ndcs = (await getTopNdcs()) as Array<Record<string, unknown>>;
-      return ndcs.find((d) => d.ndc === match[1]) ?? ndcs[0];
+    handler: (match) => {
+      const found = DRUGS.find((d) => d.ndc === match[1]);
+      if (!found) return { error: "not_found", message: `Drug ${match[1]} not found` };
+      return found;
     },
   },
   {
     pattern: /\/api\/v1\/drugs$/,
     methods: ["GET"],
-    handler: async () => {
-      const ndcs = await getTopNdcs();
-      return { items: ndcs, total: 174 }; // real total from build-data
-    },
+    handler: () => DRUGS,
   },
 
   // ── Member management ─────────────────────────────────────────────────────────
   {
+    // Synthetic claims list for member detail page — drawn from DRUGS seed.
+    pattern: /\/api\/v1\/members\/([^/?]+)\/claims$/,
+    methods: ["GET"],
+    handler: (match) => buildClaimRecordSample(`mem-${match[1]}`),
+  },
+  {
+    // PHI audit-access beacon fired by the member detail page on mount.
+    pattern: /\/api\/v1\/members\/([^/?]+)\/audit-access$/,
+    methods: ["POST"],
+    handler: (match) => ({
+      logged: true,
+      member_id: match[1],
+      accessed_at: new Date().toISOString(),
+    }),
+  },
+  // Member enrollment wizard — validate/preview/apply form submissions.
+  {
+    pattern: /\/api\/v1\/members\/enrollment\/validate$/,
+    methods: ["POST"],
+    handler: () => ({
+      valid: true,
+      total_valid: 847,
+      errors: [
+        {
+          row: 12,
+          field: "date_of_birth",
+          message: "Invalid date format — expected YYYY-MM-DD",
+          original_value: "03/15/1982",
+        },
+        {
+          row: 34,
+          field: "group_number",
+          message: "Group GRP-9999 not on file",
+          original_value: "GRP-9999",
+        },
+        {
+          row: 58,
+          field: "coverage_effective_date",
+          message: "Effective date more than 90 days in the past",
+          original_value: "2023-01-01",
+        },
+      ],
+      warnings: [],
+      checked_at: new Date().toISOString(),
+    }),
+  },
+  {
+    pattern: /\/api\/v1\/members\/enrollment\/preview$/,
+    methods: ["POST"],
+    handler: () => ({
+      adds: 734,
+      updates: 108,
+      terms: 5,
+      total_records: 847,
+      warnings: [
+        "5 member terminations require manual review",
+        "12 records have missing phone numbers — plan welcome calls unavailable",
+      ],
+    }),
+  },
+  {
+    pattern: /\/api\/v1\/members\/enrollment\/apply$/,
+    methods: ["POST"],
+    handler: () => ({
+      success: true,
+      applied_count: 847,
+      enrollment_batch_id: `ENR-2026-${String(Math.floor(Math.random() * 9000) + 1000)}`,
+      applied_at: new Date().toISOString(),
+    }),
+  },
+  {
     pattern: /\/api\/v1\/members\/([^/?]+)$/,
     methods: ["GET"],
-    handler: (match) => MEMBERS.find((m) => m.member_id === match[1]) ?? MEMBERS[0],
+    handler: (match) => {
+      const found = MEMBERS.find((m) => m.member_id === match[1]);
+      if (!found) return { error: "not_found", message: `Member ${match[1]} not found` };
+      return found;
+    },
   },
   {
     pattern: /\/api\/v1\/members$/,
     methods: ["GET"],
-    handler: () => ({ items: MEMBERS, total: MEMBERS.length }),
+    handler: () => MEMBERS,
   },
 
   // ── EDI trading partners ──────────────────────────────────────────────────────
@@ -1200,18 +1381,7 @@ const ROUTES: RouteEntry[] = [
   {
     pattern: /\/api\/v1\/analytics\/network\/pharmacy-scorecards$/,
     methods: ["GET"],
-    handler: async () => {
-      const pharms = (await getTopPharmacies()) as Array<Record<string, unknown>>;
-      return pharms.slice(0, 20).map((p) => ({
-        npi: p.service_provider_id,
-        pharmacy_name: `Pharmacy ${String(p.service_provider_id)}`,
-        chain: p.primary_chain_code,
-        claim_count: p.total_claims,
-        total_paid: p.total_pharmacy_paid,
-        reversal_rate: p.reversal_rate,
-        score: Math.max(0, 100 - Math.round(Number(p.reversal_rate) * 1000)),
-      }));
-    },
+    handler: () => PHARMACY_SCORECARDS,
   },
   {
     pattern: /\/api\/v1\/analytics\/network\/adequacy$/,
@@ -1256,6 +1426,11 @@ const ROUTES: RouteEntry[] = [
   },
   {
     pattern: /\/api\/v1\/analytics\/high-cost-members$/,
+    methods: ["GET"],
+    handler: () => HIGH_COST_MEMBERS,
+  },
+  {
+    pattern: /\/api\/v1\/analytics\/member\/high-cost$/,
     methods: ["GET"],
     handler: () => HIGH_COST_MEMBERS,
   },

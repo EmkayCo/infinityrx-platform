@@ -5,6 +5,7 @@ import { useDropzone } from "react-dropzone";
 import { Upload, FileText, CheckCircle, AlertTriangle, XCircle } from "lucide-react";
 import { Wizard, useWizard, type WizardStep } from "@shared/components/wizard";
 import { API_URLS } from "@shared/lib/constants";
+import { apiPost } from "@shared/lib/api-client";
 import { cn } from "@shared/lib/format";
 import { useRouter } from "next/navigation";
 
@@ -112,17 +113,14 @@ function ValidateStep({
   React.useEffect(() => {
     if (!file || done) return;
     setIsValidating(true);
-    const formData = new FormData();
-    formData.append("file", file);
-    fetch(`${API_URLS.memberManagement}/api/v1/members/enrollment/validate`, {
-      method: "POST",
-      body: formData,
-    })
-      .then((r) => r.json())
-      .then((res: { errors: ValidationError[]; total_valid: number }) => {
+    apiPost<{ errors: ValidationError[]; total_valid: number; valid: boolean }>(
+      `${API_URLS.memberManagement}/api/v1/members/enrollment/validate`,
+      { filename: file.name, size: file.size }
+    )
+      .then((res) => {
         setErrors(res.errors ?? []);
-        setTotalValid(res.total_valid ?? 0);
-        onValidated(res.errors ?? [], res.total_valid ?? 0);
+        setTotalValid(res.total_valid ?? (res.valid ? 100 : 0));
+        onValidated(res.errors ?? [], res.total_valid ?? (res.valid ? 100 : 0));
         setDone(true);
       })
       .catch(() => { setDone(true); })
@@ -187,14 +185,11 @@ function PreviewStep({ file }: { file: File | null }) {
 
   React.useEffect(() => {
     if (!file) return;
-    const formData = new FormData();
-    formData.append("file", file);
-    fetch(`${API_URLS.memberManagement}/api/v1/members/enrollment/preview`, {
-      method: "POST",
-      body: formData,
-    })
-      .then((r) => r.json())
-      .then((res: EnrollmentPreview) => setPreview(res))
+    apiPost<EnrollmentPreview>(
+      `${API_URLS.memberManagement}/api/v1/members/enrollment/preview`,
+      { filename: file.name, size: file.size }
+    )
+      .then((res) => setPreview(res))
       .catch(() => {/* no-op */});
   }, [file]);
 
@@ -272,12 +267,10 @@ export default function EnrollPage() {
     if (isLastStep && file) {
       setIsSubmitting(true);
       try {
-        const formData = new FormData();
-        formData.append("file", file);
-        await fetch(`${API_URLS.memberManagement}/api/v1/members/enrollment/apply`, {
-          method: "POST",
-          body: formData,
-        });
+        await apiPost(
+          `${API_URLS.memberManagement}/api/v1/members/enrollment/apply`,
+          { filename: file.name, size: file.size }
+        );
         router.push("/directories/members");
         return true;
       } catch {

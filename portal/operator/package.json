@@ -3,12 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack",
+    "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint app components lib tests",
     "type-check": "tsc --noEmit",
-    "prepare-data": "tsx scripts/build-data.ts"
+    "prepare-data": "tsx scripts/build-data.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:all": "vitest run && playwright test",
+    "qa": "bash scripts/quality-gate.sh",
+    "qa:quick": "SKIP_BUILD=1 bash scripts/quality-gate.sh"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -58,14 +65,21 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4.0.0-beta.7",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^25.6.0",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.1",
+    "@vitejs/plugin-react": "^6.0.1",
     "eslint": "^10.2.0",
     "eslint-config-next": "^16.2.3",
+    "jsdom": "^29.0.2",
     "tailwindcss": "^4.0.0-beta.7",
     "tsx": "^4.21.0",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.4"
   }
 }

@@ -2,17 +2,7 @@
 
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-  Cell,
-} from "recharts";
+import dynamic from "next/dynamic";
 import { ErrorBoundary } from "@shared/components/error-boundary";
 import { Skeleton } from "@shared/components/skeleton";
 import { DollarDisplay } from "@shared/components/dollar-display";
@@ -21,6 +11,14 @@ import { apiGet, buildUrl } from "@shared/lib/api-client";
 import { API_URLS } from "@shared/lib/constants";
 import type { SiteOfCareAnalysis } from "@shared/types/medical-claims";
 import { cn } from "@shared/lib/format";
+
+const MedicalClaimsSiteOfCareBar = dynamic(
+  () =>
+    import("@/components/charts/medical-claims-site-of-care-bar").then(
+      (m) => m.MedicalClaimsSiteOfCareBar
+    ),
+  { ssr: false, loading: () => <Skeleton className="h-64" /> }
+);
 
 const POS_COLORS: Record<string, string> = {
   "11": "#10B981",  // Office — green
@@ -150,28 +148,7 @@ export default function SiteOfCarePage() {
         <div className="rounded-lg border border-ifx-border-dark bg-ifx-surface-dark p-5">
           <h3 className="text-sm font-semibold text-slate-200 mb-4">Billed vs Paid by Site of Care</h3>
           {isLoading ? <Skeleton className="h-64" /> : (
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={chartData} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis
-                  type="number"
-                  tick={{ fontSize: 10, fill: "#94A3B8" }}
-                  tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}K`}
-                />
-                <YAxis type="category" dataKey="pos" tick={{ fontSize: 10, fill: "#94A3B8" }} width={140} />
-                <Tooltip
-                  formatter={(v) => [`$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2 })}`]}
-                  contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
-                />
-                <Legend />
-                <Bar dataKey="billed" name="Billed" fill="#475569" radius={[0, 3, 3, 0]} />
-                <Bar dataKey="paid" name="Paid" radius={[0, 3, 3, 0]}>
-                  {chartData.map((entry, i) => (
-                    <Cell key={i} fill={POS_COLORS[entry.pos_code] ?? POS_DEFAULT_COLOR} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <MedicalClaimsSiteOfCareBar data={chartData} />
           )}
         </div>
       </ErrorBoundary>

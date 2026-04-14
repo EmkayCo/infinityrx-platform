@@ -1,0 +1,112 @@
+name: CI Quality Gate
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "portal/operator/**"
+      - "portal/shared/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "portal/operator/**"
+      - "portal/shared/**"
+      - ".github/workflows/ci.yml"
+
+# Cancel in-flight runs on the same branch when a new commit is pushed.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gate:
+    name: Quality Gate (types, lint, unit, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: portal/operator
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: portal/operator/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx eslint app components lib tests --quiet
+
+      - name: Unit tests with coverage
+        run: npx vitest run --coverage --reporter=default
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: portal/operator/coverage/
+          retention-days: 7
+
+      - name: Production build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    needs: quality-gate
+    defaults:
+      run:
+        working-directory: portal/operator
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: portal/operator/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        run: npx playwright test
+        env:
+          DEV_AUTH_BYPASS: "true"
+          NEXT_PUBLIC_DEV_AUTH_BYPASS: "true"
+          NEXT_PUBLIC_USE_MOCK_DATA: "true"
+          AUTH_SECRET: "ci-only-secret-do-not-use-in-production-aaaaaaaaaaaaaaaaaaaa"
+          NEXTAUTH_URL: "http://localhost:3000"
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: portal/operator/playwright-report/
+          retention-days: 14
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: portal/operator/test-results/
+          retention-days: 7

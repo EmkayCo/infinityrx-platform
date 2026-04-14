@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -10,8 +11,24 @@ import {
   XCircle,
   X,
 } from "lucide-react";
-import { DashboardGrid, type WidgetConfig } from "@shared/components/widget-grid";
+import type { WidgetConfig } from "@shared/components/widget-grid";
 import { DashboardWidgetSkeleton } from "@shared/components/skeleton";
+
+// DashboardGrid pulls in @dnd-kit/core, @dnd-kit/sortable, and @dnd-kit/utilities.
+// Lazy-load so those ~60KB don't sit in the home page's initial bundle.
+const DashboardGrid = dynamic(
+  () => import("@shared/components/widget-grid").then((m) => m.DashboardGrid),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="grid grid-cols-4 gap-4">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <DashboardWidgetSkeleton key={i} />
+        ))}
+      </div>
+    ),
+  }
+);
 import { WidgetErrorBoundary } from "@shared/components/error-boundary";
 import { DollarDisplay } from "@shared/components/dollar-display";
 import { ActivityFeed } from "@shared/components/activity-feed";

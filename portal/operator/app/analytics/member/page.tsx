@@ -2,16 +2,7 @@
 
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  ReferenceLine,
-} from "recharts";
+import dynamic from "next/dynamic";
 import { ErrorBoundary } from "@shared/components/error-boundary";
 import { Skeleton } from "@shared/components/skeleton";
 import { DollarDisplay } from "@shared/components/dollar-display";
@@ -21,6 +12,14 @@ import { API_URLS } from "@shared/lib/constants";
 import type { MemberAdherence, HighCostMember } from "@shared/types/analytics";
 import { cn } from "@shared/lib/format";
 
+const AnalyticsMemberAdherenceBar = dynamic(
+  () =>
+    import("@/components/charts/analytics-member-adherence-bar").then(
+      (m) => m.AnalyticsMemberAdherenceBar
+    ),
+  { ssr: false, loading: () => <Skeleton className="h-48" /> }
+);
+
 const highCostColumns: ColDef<HighCostMember>[] = [
   { accessorKey: "member_id", header: "Member ID", cell: (c) => <span className="font-mono text-xs text-teal-400">{c.getValue() as string}</span> },
   { accessorKey: "masked_name", header: "Member", cell: (c) => <span className="text-slate-300">{c.getValue() as string}</span> },
@@ -28,12 +27,6 @@ const highCostColumns: ColDef<HighCostMember>[] = [
   { accessorKey: "specialty_drug_count", header: "Specialty Drugs", cell: (c) => <span className="text-yellow-400 font-medium">{c.getValue() as number}</span> },
   { accessorKey: "ytd_spend", header: "YTD Spend", cell: (c) => <DollarDisplay amount={c.getValue() as string} size="sm" /> },
 ];
-
-const ADHERENCE_COLOR = (pdc: number, threshold: number) => {
-  if (pdc >= threshold) return "#10B981";
-  if (pdc >= threshold - 10) return "#F59E0B";
-  return "#EF4444";
-};
 
 export default function MemberAnalyticsPage() {
   const { data: adherence = [], isLoading: adherenceLoading } = useQuery<MemberAdherence[]>({
@@ -76,23 +69,7 @@ export default function MemberAnalyticsPage() {
             <Skeleton className="h-48" />
           ) : (
             <>
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={adherenceChartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="drug_class" tick={{ fontSize: 10, fill: "#94A3B8" }} />
-                  <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#94A3B8" }} tickFormatter={(v: number) => `${Number(v)}%`} />
-                  <Tooltip
-                    formatter={(v) => [`${Number(v).toFixed(1)}%`]}
-                    contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
-                  />
-                  <ReferenceLine y={80} stroke="#F59E0B" strokeDasharray="5 5" label={{ value: "CMS 80%", fill: "#F59E0B", fontSize: 10 }} />
-                  <Bar dataKey="PDC" name="PDC Score" radius={[3, 3, 0, 0]}>
-                    {adherence.map((a, i) => (
-                      <rect key={i} fill={ADHERENCE_COLOR(a.pdc_score, a.cms_threshold)} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <AnalyticsMemberAdherenceBar data={adherenceChartData} adherence={adherence} />
               <div className="mt-3 flex flex-wrap gap-4">
                 {adherence.map((a) => (
                   <div key={a.drug_class} className="text-xs">

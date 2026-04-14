@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useRef, useCallback } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
 import { DollarDisplay } from "@shared/components/dollar-display";
@@ -94,7 +94,6 @@ export default function ClaimsPage() {
     page: 1,
   });
   const [qInput, setQInput] = useState("");
-  const queryClient = useQueryClient();
   const parentRef = useRef<HTMLDivElement>(null);
 
   const { data, isLoading, isFetching } = useQuery<ClaimsResponse>({

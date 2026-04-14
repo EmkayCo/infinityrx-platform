@@ -9,16 +9,7 @@ import { TableSkeleton } from "@shared/components/skeleton";
 import { ErrorFallback } from "@shared/components/error-boundary";
 import { cn } from "@shared/lib/format";
 import { toast } from "sonner";
-
-interface TenantSettings {
-  id: string;
-  name: string;
-  slug: string;
-  mfa_required: boolean;
-  max_concurrent_sessions: number;
-  active: boolean;
-  features: Record<string, boolean>;
-}
+import type { TenantSettings } from "@shared/lib/mock-data/seed/admin";
 
 export default function TenantsPage() {
   const queryClient = useQueryClient();

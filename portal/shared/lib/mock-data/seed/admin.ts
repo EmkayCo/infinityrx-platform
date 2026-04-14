@@ -18,9 +18,10 @@ export interface TenantSettings {
   id: string;
   name: string;
   slug: string;
-  status: "active" | "inactive" | "trial";
+  active: boolean;
   mfa_required: boolean;
-  feature_flags: Record<string, boolean>;
+  max_concurrent_sessions: number;
+  features: Record<string, boolean>;
   created_at: string;
   updated_at: string;
   user_count: number;
@@ -167,9 +168,10 @@ export const TENANTS: TenantSettings[] = [
     id: TENANT_IDS[0],
     name: "InfinityRx Internal",
     slug: "infinityrx",
-    status: "active",
+    active: true,
     mfa_required: true,
-    feature_flags: { plan_design: false, adjudication: false, prior_auth: false, rebate_management: true },
+    max_concurrent_sessions: 5,
+    features: { plan_design: false, adjudication: false, prior_auth: false, rebate_management: true },
     created_at: isoDate(-730),
     updated_at: isoDate(-1),
     user_count: 12,
@@ -179,9 +181,10 @@ export const TENANTS: TenantSettings[] = [
     id: TENANT_IDS[1],
     name: "Acme Health Partners",
     slug: "acme-health",
-    status: "active",
+    active: true,
     mfa_required: true,
-    feature_flags: { plan_design: false, adjudication: false, prior_auth: true, rebate_management: false },
+    max_concurrent_sessions: 3,
+    features: { plan_design: false, adjudication: false, prior_auth: true, rebate_management: false },
     created_at: isoDate(-365),
     updated_at: isoDate(-7),
     user_count: 45,
@@ -191,9 +194,10 @@ export const TENANTS: TenantSettings[] = [
     id: TENANT_IDS[2],
     name: "BlueStar Benefits Group",
     slug: "bluestar",
-    status: "active",
+    active: true,
     mfa_required: false,
-    feature_flags: { plan_design: false, adjudication: false, prior_auth: false, rebate_management: false },
+    max_concurrent_sessions: 3,
+    features: { plan_design: false, adjudication: false, prior_auth: false, rebate_management: false },
     created_at: isoDate(-200),
     updated_at: isoDate(-14),
     user_count: 23,
@@ -203,9 +207,10 @@ export const TENANTS: TenantSettings[] = [
     id: TENANT_IDS[3],
     name: "ClearPath Managed Care",
     slug: "clearpath",
-    status: "trial",
+    active: false,
     mfa_required: false,
-    feature_flags: { plan_design: false, adjudication: false, prior_auth: false, rebate_management: false },
+    max_concurrent_sessions: 3,
+    features: { plan_design: false, adjudication: false, prior_auth: false, rebate_management: false },
     created_at: isoDate(-30),
     updated_at: isoDate(-2),
     user_count: 5,

@@ -8,7 +8,7 @@ import { ErrorBoundary } from "@shared/components/error-boundary";
 import { Skeleton } from "@shared/components/skeleton";
 import { DollarDisplay } from "@shared/components/dollar-display";
 import { DataTable, type ColDef } from "@shared/components/data-table";
-import { apiGet, buildUrl } from "@shared/lib/api-client";
+import { apiGet, apiPost, buildUrl } from "@shared/lib/api-client";
 import { API_URLS } from "@shared/lib/constants";
 import { useAuth } from "@shared/hooks/use-auth";
 import type { Member, MemberAccumulator } from "@shared/types/directories";
@@ -108,10 +108,12 @@ export default function MemberDetailPage() {
   // PHI access audit beacon
   useEffect(() => {
     if (member) {
-      void fetch(
+      void apiPost(
         `${API_URLS.memberManagement}/api/v1/members/${id}/audit-access`,
-        { method: "POST" }
-      );
+        {}
+      ).catch(() => {
+        // Audit-access beacon is fire-and-forget; never crash the page on failure.
+      });
     }
   }, [id, member]);
 

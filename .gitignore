@@ -33,6 +33,12 @@ yarn-error.log*
 
 # Claude
 .claude/worktrees/
+.claude/skills/
+
+# Test artifacts
+portal/operator/playwright-report/
+portal/operator/test-results/
+portal/operator/coverage/
 
 # OS
 .DS_Store
@@ -46,8 +52,9 @@ Thumbs.db
 coverage.json
 
 # Portal: large source data files (kept locally for dev, regen aggregations via npm run prepare-data)
-portal/operator/public/data/*.txt
-portal/operator/public/data/*.xlsx
+# Raw files live outside /public so they are not publicly served by Next.js.
+portal/operator/lib/data/sources/*.txt
+portal/operator/lib/data/sources/*.xlsx
 
 
 # Reference data (large files — kept out of git except whitelisted)

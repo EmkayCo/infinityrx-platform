@@ -3,14 +3,20 @@
 "use client";
 
 import React from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
+import { Skeleton } from "@shared/components/skeleton";
 import { WizardContainer } from "@shared/components/wizard/wizard-container";
 import { useWizard } from "@shared/components/wizard/use-wizard";
 import { WizardConfig } from "@shared/components/wizard/types";
 import { approveCycle } from "@shared/lib/billing-api";
 import { isMockEnabled } from "@shared/lib/mock-data";
 import { UploadStep } from "./step1-upload";
-import { MapFieldsStep } from "./step2-map-fields";
+// MapFieldsStep is lazy-loaded — it pulls in @dnd-kit and fuse.js which are only needed once the user reaches step 2.
+const MapFieldsStep = dynamic(
+  () => import("./step2-map-fields").then((m) => m.MapFieldsStep),
+  { ssr: false, loading: () => <Skeleton className="h-96 rounded-lg" /> }
+);
 import { ValidateStep } from "./step3-validate";
 import { PreviewStep } from "./step4-preview";
 import { ApproveStep } from "./step5-approve";

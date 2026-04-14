@@ -135,26 +135,31 @@ export default function SystemHealthPage() {
           </div>
 
           {/* DLQ depth */}
-          <div className={cn(
-            "flex items-center gap-3 rounded-lg border p-4",
-            data.dlq_depth > 0 ? "border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30" : "bg-card"
-          )}>
-            <Activity className={cn("h-5 w-5 shrink-0", data.dlq_depth > 0 ? "text-amber-500" : "text-green-500")} />
-            <div className="flex-1">
-              <p className="font-medium text-sm">Dead Letter Queue</p>
-              <p className="text-xs text-muted-foreground">
-                {data.dlq_depth === 0 ? "No messages in DLQ" : `${data.dlq_depth} messages pending review`}
-              </p>
-            </div>
-            <span
-              className={cn(
-                "text-lg font-bold tabular-nums",
-                data.dlq_depth > 0 ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"
-              )}
-            >
-              {data.dlq_depth}
-            </span>
-          </div>
+          {(() => {
+            const dlqDepth = data.dlq_depth ?? 0;
+            return (
+              <div className={cn(
+                "flex items-center gap-3 rounded-lg border p-4",
+                dlqDepth > 0 ? "border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30" : "bg-card"
+              )}>
+                <Activity className={cn("h-5 w-5 shrink-0", dlqDepth > 0 ? "text-amber-500" : "text-green-500")} />
+                <div className="flex-1">
+                  <p className="font-medium text-sm">Dead Letter Queue</p>
+                  <p className="text-xs text-muted-foreground">
+                    {dlqDepth === 0 ? "No messages in DLQ" : `${dlqDepth} messages pending review`}
+                  </p>
+                </div>
+                <span
+                  className={cn(
+                    "text-lg font-bold tabular-nums",
+                    dlqDepth > 0 ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"
+                  )}
+                >
+                  {dlqDepth}
+                </span>
+              </div>
+            );
+          })()}
 
           {/* Service list */}
           <div>

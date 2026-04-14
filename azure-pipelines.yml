@@ -1,0 +1,107 @@
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    include:
+      - portal/operator
+      - portal/shared
+
+pr:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - portal/operator
+      - portal/shared
+
+pool:
+  vmImage: "ubuntu-latest"
+
+variables:
+  workingDirectory: "portal/operator"
+  NEXT_TELEMETRY_DISABLED: "1"
+
+stages:
+  - stage: QualityGate
+    displayName: "Quality Gate"
+    jobs:
+      - job: Check
+        displayName: "Types, Lint, Unit Tests, Build"
+        steps:
+          - task: NodeTool@0
+            displayName: "Use Node 24.x"
+            inputs:
+              versionSpec: "24.x"
+
+          - script: npm ci
+            workingDirectory: $(workingDirectory)
+            displayName: "Install dependencies"
+
+          - script: npx tsc --noEmit
+            workingDirectory: $(workingDirectory)
+            displayName: "TypeScript check"
+
+          - script: npx eslint app components lib tests --quiet
+            workingDirectory: $(workingDirectory)
+            displayName: "Lint"
+
+          - script: npx vitest run --coverage --reporter=default
+            workingDirectory: $(workingDirectory)
+            displayName: "Unit tests with coverage"
+
+          - task: PublishPipelineArtifact@1
+            condition: always()
+            inputs:
+              targetPath: "$(workingDirectory)/coverage"
+              artifact: "coverage-report"
+
+          - script: npm run build
+            workingDirectory: $(workingDirectory)
+            displayName: "Production build"
+            env:
+              NEXT_TELEMETRY_DISABLED: "1"
+
+  - stage: E2E
+    displayName: "End-to-End Tests"
+    dependsOn: QualityGate
+    condition: succeeded()
+    jobs:
+      - job: Playwright
+        displayName: "Playwright (chromium)"
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: "24.x"
+
+          - script: npm ci
+            workingDirectory: $(workingDirectory)
+            displayName: "Install dependencies"
+
+          - script: npx playwright install --with-deps chromium
+            workingDirectory: $(workingDirectory)
+            displayName: "Install Playwright browsers"
+
+          - script: npx playwright test
+            workingDirectory: $(workingDirectory)
+            displayName: "Run E2E tests"
+            env:
+              DEV_AUTH_BYPASS: "true"
+              NEXT_PUBLIC_DEV_AUTH_BYPASS: "true"
+              NEXT_PUBLIC_USE_MOCK_DATA: "true"
+              AUTH_SECRET: "ci-only-secret-do-not-use-in-production-aaaaaaaaaaaaaaaaaaaa"
+              NEXTAUTH_URL: "http://localhost:3000"
+
+          - task: PublishPipelineArtifact@1
+            condition: always()
+            inputs:
+              targetPath: "$(workingDirectory)/playwright-report"
+              artifact: "playwright-report"
+
+          - task: PublishPipelineArtifact@1
+            condition: failed()
+            inputs:
+              targetPath: "$(workingDirectory)/test-results"
+              artifact: "playwright-test-results-failures"

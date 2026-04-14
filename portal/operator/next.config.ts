@@ -1,10 +1,20 @@
 import type { NextConfig } from "next";
 import path from "path";
 
+const sharedDir = path.resolve(__dirname, "../shared");
+const operatorModules = path.resolve(__dirname, "node_modules");
+
+// TODO: migrate .eslintrc to eslint.config.js (ESLint 10 requires flat config).
+
 const nextConfig: NextConfig = {
+  turbopack: {
+    root: path.resolve(__dirname, ".."),
+    resolveAlias: {
+      "@shared": sharedDir,
+    },
+  },
   webpack: (config) => {
-    config.resolve.alias["@shared"] = path.resolve(__dirname, "../shared");
-    const operatorModules = path.resolve(__dirname, "node_modules");
+    config.resolve.alias["@shared"] = sharedDir;
     if (Array.isArray(config.resolve.modules)) {
       if (!config.resolve.modules.includes(operatorModules)) {
         config.resolve.modules = [operatorModules, ...config.resolve.modules];

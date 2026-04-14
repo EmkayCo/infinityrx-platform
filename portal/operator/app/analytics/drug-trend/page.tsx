@@ -2,20 +2,7 @@
 
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
+import dynamic from "next/dynamic";
 import { ErrorBoundary } from "@shared/components/error-boundary";
 import { Skeleton } from "@shared/components/skeleton";
 import { DollarDisplay } from "@shared/components/dollar-display";
@@ -23,6 +10,30 @@ import { apiGet, buildUrl } from "@shared/lib/api-client";
 import { API_URLS } from "@shared/lib/constants";
 import type { DrugTrendPoint, GenericBrandBreakdown } from "@shared/types/analytics";
 import { cn } from "@shared/lib/format";
+
+const AnalyticsDrugTrendSpendLine = dynamic(
+  () =>
+    import("@/components/charts/analytics-drug-trend-spend-line").then(
+      (m) => m.AnalyticsDrugTrendSpendLine
+    ),
+  { ssr: false, loading: () => <Skeleton className="h-64" /> }
+);
+
+const AnalyticsDrugTrendBrandGenericPie = dynamic(
+  () =>
+    import("@/components/charts/analytics-drug-trend-brand-generic-pie").then(
+      (m) => m.AnalyticsDrugTrendBrandGenericPie
+    ),
+  { ssr: false, loading: () => <Skeleton className="h-48" /> }
+);
+
+const AnalyticsDrugTrendTopDrugsBar = dynamic(
+  () =>
+    import("@/components/charts/analytics-drug-trend-top-drugs-bar").then(
+      (m) => m.AnalyticsDrugTrendTopDrugsBar
+    ),
+  { ssr: false, loading: () => <Skeleton className="h-80" /> }
+);
 
 type DrugTab = "spend_trend" | "brand_generic" | "glp1" | "biosimilar" | "top_drugs";
 
@@ -41,8 +52,6 @@ interface TopDrug {
   claim_count: number;
   category: string;
 }
-
-const topDrugColors = ["#00B4D8", "#8B5CF6", "#10B981", "#F59E0B", "#EF4444", "#EC4899", "#14B8A6", "#F97316"];
 
 export default function DrugTrendPage() {
   const [activeTab, setActiveTab] = useState<DrugTab>("spend_trend");
@@ -102,18 +111,7 @@ export default function DrugTrendPage() {
           <div className="rounded-lg border border-ifx-border-dark bg-ifx-surface-dark p-5">
             <h3 className="text-sm font-semibold text-slate-200 mb-4">Drug Spend Trend</h3>
             {spendLoading ? <Skeleton className="h-64" /> : (
-              <ResponsiveContainer width="100%" height={280}>
-                <LineChart data={spendTrend.map((d) => ({ ...d, spend_num: parseFloat(d.spend) }))}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#94A3B8" }} tickFormatter={(v: string) => v.slice(5)} />
-                  <YAxis tick={{ fontSize: 11, fill: "#94A3B8" }} tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}K`} />
-                  <Tooltip
-                    formatter={(v) => [`$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2 })}`]}
-                    contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
-                  />
-                  <Line type="monotone" dataKey="spend_num" stroke="#00B4D8" strokeWidth={2} dot={false} name="Spend" />
-                </LineChart>
-              </ResponsiveContainer>
+              <AnalyticsDrugTrendSpendLine data={spendTrend} />
             )}
           </div>
         </ErrorBoundary>
@@ -127,26 +125,7 @@ export default function DrugTrendPage() {
               <h3 className="text-sm font-semibold text-slate-200 mb-4">Brand vs Generic Split</h3>
               {breakdownLoading ? <Skeleton className="h-48" /> : breakdown ? (
                 <>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <PieChart>
-                      <Pie
-                        data={[
-                          { name: "Brand", value: breakdown.brand_pct },
-                          { name: "Generic", value: breakdown.generic_pct },
-                        ]}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={50}
-                        outerRadius={80}
-                        dataKey="value"
-                        label={(props: { name?: string; value?: number }) => `${props.name ?? ""}: ${Number(props.value ?? 0).toFixed(1)}%`}
-                      >
-                        <Cell fill="#8B5CF6" />
-                        <Cell fill="#10B981" />
-                      </Pie>
-                      <Tooltip formatter={(v) => [`${Number(v).toFixed(1)}%`]} contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }} />
-                    </PieChart>
-                  </ResponsiveContainer>
+                  <AnalyticsDrugTrendBrandGenericPie breakdown={breakdown} />
                   <div className="grid grid-cols-2 gap-3 mt-3">
                     <div>
                       <p className="text-xs text-slate-400">Brand Spend</p>
@@ -218,25 +197,7 @@ export default function DrugTrendPage() {
           <div className="rounded-lg border border-ifx-border-dark bg-ifx-surface-dark p-5">
             <h3 className="text-sm font-semibold text-slate-200 mb-4">Top 20 Drugs by Spend</h3>
             {topLoading ? <Skeleton className="h-80" /> : (
-              <ResponsiveContainer width="100%" height={400}>
-                <BarChart
-                  data={topDrugs.map((d) => ({ ...d, spend_num: parseFloat(d.total_spend) }))}
-                  layout="vertical"
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis type="number" tick={{ fontSize: 10, fill: "#94A3B8" }} tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}K`} />
-                  <YAxis type="category" dataKey="drug_name" tick={{ fontSize: 10, fill: "#94A3B8" }} width={160} />
-                  <Tooltip
-                    formatter={(v) => [`$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2 })}`]}
-                    contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
-                  />
-                  <Bar dataKey="spend_num" name="Total Spend" radius={[0, 3, 3, 0]}>
-                    {topDrugs.map((_, i) => (
-                      <Cell key={i} fill={topDrugColors[i % topDrugColors.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <AnalyticsDrugTrendTopDrugsBar data={topDrugs} />
             )}
           </div>
         </ErrorBoundary>

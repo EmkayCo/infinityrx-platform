@@ -2,23 +2,29 @@
 
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  RadialBarChart,
-  RadialBar,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
+import dynamic from "next/dynamic";
 import { ErrorBoundary } from "@shared/components/error-boundary";
 import { Skeleton } from "@shared/components/skeleton";
 import { apiGet, buildUrl } from "@shared/lib/api-client";
 import { API_URLS } from "@shared/lib/constants";
 import type { DataQualityScore } from "@shared/types/analytics";
 import { cn } from "@shared/lib/format";
+
+const AnalyticsDataQualityGauge = dynamic(
+  () =>
+    import("@/components/charts/analytics-data-quality-gauge").then(
+      (m) => m.AnalyticsDataQualityGauge
+    ),
+  { ssr: false, loading: () => <Skeleton className="w-40 h-40 rounded-full" /> }
+);
+
+const AnalyticsDataQualityTrendLine = dynamic(
+  () =>
+    import("@/components/charts/analytics-data-quality-trend-line").then(
+      (m) => m.AnalyticsDataQualityTrendLine
+    ),
+  { ssr: false, loading: () => <Skeleton className="h-40" /> }
+);
 
 const SCORE_COLOR = (score: number) => {
   if (score >= 90) return "text-green-400";
@@ -68,23 +74,7 @@ export default function DataQualityPage() {
               <Skeleton className="w-40 h-40 rounded-full" />
             ) : (
               <>
-                <ResponsiveContainer width={180} height={180}>
-                  <RadialBarChart
-                    cx="50%"
-                    cy="50%"
-                    innerRadius="60%"
-                    outerRadius="100%"
-                    startAngle={90}
-                    endAngle={-270}
-                    data={radialData}
-                  >
-                    <RadialBar
-                      dataKey="value"
-                      cornerRadius={10}
-                      background={{ fill: "#1B3A5C" }}
-                    />
-                  </RadialBarChart>
-                </ResponsiveContainer>
+                <AnalyticsDataQualityGauge data={radialData} />
                 <div className="-mt-16 text-center">
                   <p className={cn("text-4xl font-bold tabular-nums", SCORE_COLOR(quality?.overall_score ?? 0))}>
                     {quality?.overall_score ?? 0}
@@ -131,15 +121,7 @@ export default function DataQualityPage() {
           <div className="rounded-lg border border-ifx-border-dark bg-ifx-surface-dark p-5">
             <h3 className="text-sm font-semibold text-slate-200 mb-4">90-Day Trend</h3>
             {isLoading ? <Skeleton className="h-40" /> : (
-              <ResponsiveContainer width="100%" height={160}>
-                <LineChart data={quality?.trend_90d ?? []}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#94A3B8" }} tickFormatter={(v: string) => v.slice(5)} />
-                  <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: "#94A3B8" }} />
-                  <Tooltip contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }} />
-                  <Line type="monotone" dataKey="score" stroke="#00B4D8" strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
+              <AnalyticsDataQualityTrendLine data={quality?.trend_90d ?? []} />
             )}
           </div>
         </ErrorBoundary>
