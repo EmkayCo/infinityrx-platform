@@ -57,6 +57,6 @@ export async function mockResponse<T>(
     return (isListPath ? { items: [], total: 0 } : {}) as T;
   }
 
-  const result = entry.handler(entry.match, body);
+  const result = await Promise.resolve(entry.handler(entry.match, body));
   return result as T;
 }

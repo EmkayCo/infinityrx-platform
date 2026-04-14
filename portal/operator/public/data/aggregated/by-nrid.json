@@ -1,0 +1,56 @@
+[
+  {
+    "nrid": "INFINITY",
+    "vendor_name": "Echo Health",
+    "total_claims": 70559,
+    "paid_claims": 64369,
+    "reversal_claims": 6190,
+    "total_client_billed": "17635205.15",
+    "total_pharmacy_paid": "47105519.51"
+  },
+  {
+    "nrid": "COMM30",
+    "vendor_name": "Phoenix PBM",
+    "total_claims": 7391,
+    "paid_claims": 6942,
+    "reversal_claims": 449,
+    "total_client_billed": "1501002.40",
+    "total_pharmacy_paid": "3674340.49"
+  },
+  {
+    "nrid": "PHXCOM30",
+    "vendor_name": "Phoenix PBM",
+    "total_claims": 41979,
+    "paid_claims": 40176,
+    "reversal_claims": 1803,
+    "total_client_billed": "14349709.94",
+    "total_pharmacy_paid": "58273767.05"
+  },
+  {
+    "nrid": "PHXCOM90",
+    "vendor_name": "Phoenix PBM",
+    "total_claims": 1962,
+    "paid_claims": 1804,
+    "reversal_claims": 158,
+    "total_client_billed": "922517.60",
+    "total_pharmacy_paid": "2713315.67"
+  },
+  {
+    "nrid": "COMM90",
+    "vendor_name": "Phoenix PBM",
+    "total_claims": 579,
+    "paid_claims": 536,
+    "reversal_claims": 43,
+    "total_client_billed": "133867.02",
+    "total_pharmacy_paid": "326479.58"
+  },
+  {
+    "nrid": "IFXMANUAL",
+    "vendor_name": "CheckIssuing",
+    "total_claims": 498,
+    "paid_claims": 498,
+    "reversal_claims": 0,
+    "total_client_billed": "286423.43",
+    "total_pharmacy_paid": "1344263.71"
+  }
+]

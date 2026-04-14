@@ -1,0 +1,252 @@
+[
+  {
+    "id": "ev-0001",
+    "timestamp": "2026-03-31T23:45:44",
+    "type": "cycle_approved",
+    "title": "Billing Cycle BC-2026-SM-08 approved",
+    "description": "Mike K approved Billing Cycle BC-2026-SM-08 ($23868600.79) — 89231 claims processed",
+    "severity": "success",
+    "amount": "23868600.79",
+    "client_name": "InfinityRx"
+  },
+  {
+    "id": "ev-0002",
+    "timestamp": "2026-04-01T03:40:44.000Z",
+    "type": "batch_transmitted",
+    "title": "Echo Health batch transmitted",
+    "description": "Echo Health batch — 70559 claims, $17635205.15 total",
+    "severity": "info",
+    "amount": "17635205.15",
+    "client_name": "Echo Health"
+  },
+  {
+    "id": "ev-0003",
+    "timestamp": "2026-04-01T03:33:44.000Z",
+    "type": "batch_transmitted",
+    "title": "Phoenix PBM batch transmitted",
+    "description": "Phoenix PBM combined batch — 51911 claims, $16907096.96 total",
+    "severity": "info",
+    "amount": "16907096.96",
+    "client_name": "Phoenix PBM"
+  },
+  {
+    "id": "ev-0004",
+    "timestamp": "2026-04-01T03:25:44.000Z",
+    "type": "cycle_approved",
+    "title": "Billing Cycle BC-2026-SM-07 completed",
+    "description": "Cycle BC-2026-SM-07 closed — 18174 claims, $5946972.21",
+    "severity": "success",
+    "amount": "5946972.21",
+    "client_name": "InfinityRx"
+  },
+  {
+    "id": "ev-0005",
+    "timestamp": "2026-04-01T03:10:44.000Z",
+    "type": "cycle_approved",
+    "title": "Billing Cycle BC-2026-SM-06 completed",
+    "description": "Cycle BC-2026-SM-06 closed — 15563 claims, $5013152.54",
+    "severity": "success",
+    "amount": "5013152.54",
+    "client_name": "InfinityRx"
+  },
+  {
+    "id": "ev-0006",
+    "timestamp": "2026-03-31T22:37:16",
+    "type": "reversal",
+    "title": "Reversal logged — Mayne Pharma Commercial LLC",
+    "description": "Claim 20260331814364917314 reversed for Mayne Pharma Commercial LLC — $-11.00 | NPI 1326142167",
+    "severity": "warning",
+    "amount": "-11.00",
+    "client_name": "Mayne Pharma Commercial LLC"
+  },
+  {
+    "id": "ev-0007",
+    "timestamp": "2026-03-31T22:26:55",
+    "type": "reversal",
+    "title": "Reversal logged — Mayne Pharma Commercial LLC",
+    "description": "Claim 20260331808152722996 reversed for Mayne Pharma Commercial LLC — $-395.90 | NPI 1063896215",
+    "severity": "warning",
+    "amount": "-395.90",
+    "client_name": "Mayne Pharma Commercial LLC"
+  },
+  {
+    "id": "ev-0008",
+    "timestamp": "2026-03-31T21:21:04",
+    "type": "reversal",
+    "title": "Reversal logged — Verrica Pharmaceuticals",
+    "description": "Claim 20260331768643900129 reversed for Verrica Pharmaceuticals — $-1480.59 | NPI 1629029251",
+    "severity": "warning",
+    "amount": "-1480.59",
+    "client_name": "Verrica Pharmaceuticals"
+  },
+  {
+    "id": "ev-0009",
+    "timestamp": "2026-03-31T21:17:30",
+    "type": "reversal",
+    "title": "Reversal logged — Verrica Pharmaceuticals",
+    "description": "Claim 20260331766504681000 reversed for Verrica Pharmaceuticals — $-124.70 | NPI 1447835624",
+    "severity": "warning",
+    "amount": "-124.70",
+    "client_name": "Verrica Pharmaceuticals"
+  },
+  {
+    "id": "ev-0010",
+    "timestamp": "2026-03-31T19:48:30",
+    "type": "reversal",
+    "title": "Reversal logged — Mayne Pharma Commercial LLC",
+    "description": "Claim 20260331713109844341 reversed for Mayne Pharma Commercial LLC — $-10.00 | NPI 1093115446",
+    "severity": "warning",
+    "amount": "-10.00",
+    "client_name": "Mayne Pharma Commercial LLC"
+  },
+  {
+    "id": "ev-0011",
+    "timestamp": "2026-04-01T02:05:44.000Z",
+    "type": "pharmacy_batch",
+    "title": "New claims batch from pharmacy 1497125959",
+    "description": "Pharmacy NPI 1497125959 — 2922 claims processed, $288830.50 billed",
+    "severity": "info",
+    "amount": "288830.50",
+    "client_name": "904"
+  },
+  {
+    "id": "ev-0012",
+    "timestamp": "2026-04-01T01:50:44.000Z",
+    "type": "pharmacy_batch",
+    "title": "New claims batch from pharmacy 1598013864",
+    "description": "Pharmacy NPI 1598013864 — 2363 claims processed, $557665.69 billed",
+    "severity": "info",
+    "amount": "557665.69",
+    "client_name": "904"
+  },
+  {
+    "id": "ev-0013",
+    "timestamp": "2026-04-01T01:35:44.000Z",
+    "type": "pharmacy_batch",
+    "title": "New claims batch from pharmacy 1831463561",
+    "description": "Pharmacy NPI 1831463561 — 1578 claims processed, $489154.13 billed",
+    "severity": "info",
+    "amount": "489154.13",
+    "client_name": "630"
+  },
+  {
+    "id": "ev-0014",
+    "timestamp": "2026-04-01T01:20:44.000Z",
+    "type": "pharmacy_batch",
+    "title": "New claims batch from pharmacy 1598339566",
+    "description": "Pharmacy NPI 1598339566 — 1482 claims processed, $174684.10 billed",
+    "severity": "info",
+    "amount": "174684.10",
+    "client_name": "904"
+  },
+  {
+    "id": "ev-0015",
+    "timestamp": "2026-04-01T01:05:44.000Z",
+    "type": "pharmacy_batch",
+    "title": "New claims batch from pharmacy 1962832071",
+    "description": "Pharmacy NPI 1962832071 — 1351 claims processed, $226991.06 billed",
+    "severity": "info",
+    "amount": "226991.06",
+    "client_name": "938"
+  },
+  {
+    "id": "ev-0016",
+    "timestamp": "2026-04-01T00:25:44.000Z",
+    "type": "client_invoice",
+    "title": "Invoice generated for Mayne Pharma Commercial LLC",
+    "description": "Client Mayne Pharma Commercial LLC (MP01) — 66176 claims, $13805800.47 billed",
+    "severity": "info",
+    "amount": "13805800.47",
+    "client_name": "Mayne Pharma Commercial LLC"
+  },
+  {
+    "id": "ev-0017",
+    "timestamp": "2026-04-01T00:17:44.000Z",
+    "type": "client_invoice",
+    "title": "Invoice generated for Axsome",
+    "description": "Client Axsome (AUVRET) — 10767 claims, $6121674.16 billed",
+    "severity": "info",
+    "amount": "6121674.16",
+    "client_name": "Axsome"
+  },
+  {
+    "id": "ev-0018",
+    "timestamp": "2026-04-01T00:09:44.000Z",
+    "type": "client_invoice",
+    "title": "Invoice generated for Axsome",
+    "description": "Client Axsome (AUVPRX) — 6847 claims, $3221383.16 billed",
+    "severity": "info",
+    "amount": "3221383.16",
+    "client_name": "Axsome"
+  },
+  {
+    "id": "ev-0019",
+    "timestamp": "2026-04-01T00:01:44.000Z",
+    "type": "client_invoice",
+    "title": "Invoice generated for Axsome",
+    "description": "Client Axsome (50778206) — 3195 claims, $2528956.64 billed",
+    "severity": "info",
+    "amount": "2528956.64",
+    "client_name": "Axsome"
+  },
+  {
+    "id": "ev-0020",
+    "timestamp": "2026-03-31T23:53:44.000Z",
+    "type": "client_invoice",
+    "title": "Invoice generated for Organon",
+    "description": "Client Organon (IC47103004) — 9387 claims, $2345109.30 billed",
+    "severity": "info",
+    "amount": "2345109.30",
+    "client_name": "Organon"
+  },
+  {
+    "id": "ev-0021",
+    "timestamp": "2026-03-31T23:45:44.000Z",
+    "type": "client_invoice",
+    "title": "Invoice generated for Organon",
+    "description": "Client Organon (IC47103001) — 5002 claims, $1743301.77 billed",
+    "severity": "info",
+    "amount": "1743301.77",
+    "client_name": "Organon"
+  },
+  {
+    "id": "ev-0022",
+    "timestamp": "2026-03-31T23:37:44.000Z",
+    "type": "client_invoice",
+    "title": "Invoice generated for Kalvista",
+    "description": "Client Kalvista (WCKAL1001) — 131 claims, $998771.92 billed",
+    "severity": "info",
+    "amount": "998771.92",
+    "client_name": "Kalvista"
+  },
+  {
+    "id": "ev-0023",
+    "timestamp": "2026-03-31T23:29:44.000Z",
+    "type": "client_invoice",
+    "title": "Invoice generated for Verrica Pharmaceuticals",
+    "description": "Client Verrica Pharmaceuticals (VP11) — 1519 claims, $990213.37 billed",
+    "severity": "info",
+    "amount": "990213.37",
+    "client_name": "Verrica Pharmaceuticals"
+  },
+  {
+    "id": "ev-0024",
+    "timestamp": "2026-03-31T23:21:44.000Z",
+    "type": "client_invoice",
+    "title": "Invoice generated for Axsome",
+    "description": "Client Axsome (SUNCACCP) — 1856 claims, $582695.74 billed",
+    "severity": "info",
+    "amount": "582695.74",
+    "client_name": "Axsome"
+  },
+  {
+    "id": "ev-0025",
+    "timestamp": "2026-03-31T23:13:44.000Z",
+    "type": "client_invoice",
+    "title": "Invoice generated for Sempre Health",
+    "description": "Client Sempre Health (SH) — 6721 claims, $332512.32 billed",
+    "severity": "info",
+    "amount": "332512.32",
+    "client_name": "Sempre Health"
+  }
+]

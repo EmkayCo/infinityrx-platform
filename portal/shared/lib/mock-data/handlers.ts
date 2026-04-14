@@ -2,6 +2,9 @@
  * Mock endpoint handlers — maps URL patterns to seed data responses.
  * Each entry is a tuple of [pattern, handler].
  * Patterns are matched against the URL pathname (query string stripped).
+ *
+ * Real-data handlers: endpoints marked with loadAgg() fetch from
+ * /data/aggregated/*.json (pre-built static files served from /public).
  */
 
 import {
@@ -58,8 +61,126 @@ import {
   PRIMARY_TENANT,
 } from "./seed";
 
+// ── Real-data helpers ─────────────────────────────────────────────────────────
+// Pre-load aggregations from /data/aggregated/*.json on first use.
+// These are static files served from the /public directory.
+
+type AggCache = {
+  overview?: Record<string, unknown>;
+  cycles?: unknown[];
+  byClient?: unknown[];
+  byNrid?: unknown[];
+  topPharmacies?: unknown[];
+  topNdcs?: unknown[];
+  topClients?: unknown[];
+  dailyVolume?: unknown[];
+  nridDistribution?: unknown[];
+  reversalRate?: Record<string, unknown>;
+  activityFeed?: unknown[];
+  investigations?: unknown[];
+  manifest?: Record<string, unknown>;
+};
+
+const _aggCache: AggCache = {};
+
+async function loadAgg<T>(file: string): Promise<T> {
+  const base =
+    typeof window !== "undefined"
+      ? window.location.origin
+      : "http://localhost:3000";
+  const r = await fetch(`${base}/data/aggregated/${file}.json`, {
+    cache: "force-cache",
+  });
+  if (!r.ok) throw new Error(`Failed to load ${file}.json: ${r.status}`);
+  return r.json() as Promise<T>;
+}
+
+async function getOverview(): Promise<Record<string, unknown>> {
+  if (!_aggCache.overview) {
+    _aggCache.overview = await loadAgg<Record<string, unknown>>("overview");
+  }
+  return _aggCache.overview;
+}
+
+async function getCycles(): Promise<unknown[]> {
+  if (!_aggCache.cycles) {
+    _aggCache.cycles = await loadAgg<unknown[]>("cycles");
+  }
+  return _aggCache.cycles;
+}
+
+async function getByClient(): Promise<unknown[]> {
+  if (!_aggCache.byClient) {
+    _aggCache.byClient = await loadAgg<unknown[]>("by-client");
+  }
+  return _aggCache.byClient;
+}
+
+async function getByNrid(): Promise<unknown[]> {
+  if (!_aggCache.byNrid) {
+    _aggCache.byNrid = await loadAgg<unknown[]>("by-nrid");
+  }
+  return _aggCache.byNrid;
+}
+
+async function getTopPharmacies(): Promise<unknown[]> {
+  if (!_aggCache.topPharmacies) {
+    _aggCache.topPharmacies = await loadAgg<unknown[]>("top-pharmacies");
+  }
+  return _aggCache.topPharmacies;
+}
+
+async function getTopNdcs(): Promise<unknown[]> {
+  if (!_aggCache.topNdcs) {
+    _aggCache.topNdcs = await loadAgg<unknown[]>("top-ndcs");
+  }
+  return _aggCache.topNdcs;
+}
+
+async function getTopClients(): Promise<unknown[]> {
+  if (!_aggCache.topClients) {
+    _aggCache.topClients = await loadAgg<unknown[]>("top-clients");
+  }
+  return _aggCache.topClients;
+}
+
+async function getDailyVolume(): Promise<unknown[]> {
+  if (!_aggCache.dailyVolume) {
+    _aggCache.dailyVolume = await loadAgg<unknown[]>("daily-volume");
+  }
+  return _aggCache.dailyVolume;
+}
+
+async function getReversalRate(): Promise<Record<string, unknown>> {
+  if (!_aggCache.reversalRate) {
+    _aggCache.reversalRate = await loadAgg<Record<string, unknown>>("reversal-rate");
+  }
+  return _aggCache.reversalRate;
+}
+
+async function getActivityFeed(): Promise<unknown[]> {
+  if (!_aggCache.activityFeed) {
+    _aggCache.activityFeed = await loadAgg<unknown[]>("activity-feed");
+  }
+  return _aggCache.activityFeed;
+}
+
+async function getInvestigations(): Promise<unknown[]> {
+  if (!_aggCache.investigations) {
+    _aggCache.investigations = await loadAgg<unknown[]>("investigations");
+  }
+  return _aggCache.investigations;
+}
+
+async function getManifest(): Promise<Record<string, unknown>> {
+  if (!_aggCache.manifest) {
+    _aggCache.manifest = await loadAgg<Record<string, unknown>>("manifest");
+  }
+  return _aggCache.manifest;
+}
+
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-type Handler = (match: RegExpMatchArray, body?: unknown) => unknown;
+type Handler = (match: RegExpMatchArray, body?: unknown) => unknown | Promise<unknown>;
 
 interface RouteEntry {
   pattern: RegExp;
@@ -183,32 +304,59 @@ const ROUTES: RouteEntry[] = [
   {
     pattern: /\/activity\/stream/,
     methods: ["GET"],
-    handler: () => ACTIVITY_EVENTS.slice(0, 20),
+    handler: async () => {
+      const feed = await getActivityFeed();
+      return feed.slice(0, 20);
+    },
   },
 
   // ── Billing Cycles (summary widgets) ────────────────────────────────────────
   {
     pattern: /\/billing-cycles\/active$/,
     methods: ["GET"],
-    handler: () => ({
-      count: 5,
-      total_amount: "13247891.23",
-      next_action: "Approve 2 cycles awaiting sign-off",
-    }),
+    handler: async () => {
+      const cycles = await getCycles();
+      const inProgress = (cycles as Array<Record<string, unknown>>).filter(
+        (c) => c.status === "in_progress"
+      );
+      const total = inProgress.reduce(
+        (s, c) => s + parseFloat(String(c.total_client_billed ?? 0)),
+        0
+      );
+      return {
+        count: inProgress.length,
+        total_amount: total.toFixed(2),
+        next_action:
+          inProgress.length > 0
+            ? `Approve ${inProgress.length} cycle${inProgress.length !== 1 ? "s" : ""} awaiting sign-off`
+            : "All cycles complete",
+      };
+    },
   },
   {
     pattern: /\/billing\/v1\/dashboard$|\/api\/v1\/billing\/dashboard$/,
     methods: ["GET"],
-    handler: () => ({
-      active_cycles: 5,
-      pending_approval: 2,
-      claims_today: 847,
-      claims_mtd: 18423,
-      claims_ytd: 284750,
-      ap_mtd: "4823451.20",
-      ar_mtd: "4438175.10",
-      fee_mtd: "192938.05",
-    }),
+    handler: async () => {
+      const [ov, cycles] = await Promise.all([getOverview(), getCycles()]);
+      const o = ov as Record<string, unknown>;
+      const cycs = cycles as Array<Record<string, unknown>>;
+      const inProgress = cycs.filter((c) => c.status === "in_progress");
+      return {
+        active_cycles: cycs.length,
+        pending_approval: inProgress.length,
+        claims_today: 0,
+        claims_mtd: Number(o.total_claims ?? 0),
+        claims_ytd: Number(o.total_claims ?? 0),
+        ap_mtd: String(o.total_pharmacy_paid ?? "0.00"),
+        ar_mtd: String(o.total_client_billed ?? "0.00"),
+        fee_mtd: String(
+          (
+            parseFloat(String(o.total_processing_fees ?? 0)) +
+            parseFloat(String(o.total_transaction_fees ?? 0))
+          ).toFixed(2)
+        ),
+      };
+    },
   },
 
   // ── Billing Cycles CRUD ──────────────────────────────────────────────────────
@@ -220,19 +368,23 @@ const ROUTES: RouteEntry[] = [
   {
     pattern: /\/billing\/v1\/cycles\/([^/?]+)$/,
     methods: ["GET"],
-    handler: (match) =>
-      BILLING_CYCLES.find((c) => c.id === match[1]) ?? BILLING_CYCLES[0],
+    handler: async (match) => {
+      const cycles = (await getCycles()) as Array<Record<string, unknown>>;
+      return cycles.find((c) => c.cycle_id === match[1]) ?? cycles[0];
+    },
   },
   {
     pattern: /\/billing\/v1\/cycles$/,
     methods: ["GET", "POST"],
-    handler: (_, body) => {
+    handler: async (_, body) => {
       if (body) {
-        return { ...BILLING_CYCLES[0], id: makeUUID(999), status: "draft" };
+        const cycles = (await getCycles()) as Array<Record<string, unknown>>;
+        return { ...cycles[0], id: makeUUID(999), status: "draft" };
       }
+      const cycles = (await getCycles()) as Array<Record<string, unknown>>;
       return {
-        items: BILLING_CYCLES,
-        total: BILLING_CYCLES.length,
+        items: cycles,
+        total: cycles.length,
         page: 1,
         page_size: 25,
       };
@@ -243,11 +395,17 @@ const ROUTES: RouteEntry[] = [
   {
     pattern: /\/billing\/v1\/claims\/summary$/,
     methods: ["GET"],
-    handler: () => ({
-      today: rngInt(400, 1200),
-      mtd: rngInt(8000, 25000),
-      ytd: rngInt(100000, 350000),
-    }),
+    handler: async () => {
+      const ov = (await getOverview()) as Record<string, unknown>;
+      return {
+        today: 0,
+        mtd: Number(ov.total_claims ?? 0),
+        ytd: Number(ov.total_claims ?? 0),
+        paid: Number(ov.paid_claims ?? 0),
+        reversals: Number(ov.reversal_claims ?? 0),
+        total_billed: String(ov.total_client_billed ?? "0.00"),
+      };
+    },
   },
   {
     pattern: /\/billing\/v1\/claims\/bulk-action$/,
@@ -293,23 +451,38 @@ const ROUTES: RouteEntry[] = [
   {
     pattern: /\/billing\/v1\/ar\/summary$|\/api\/v1\/ar\/summary$/,
     methods: ["GET"],
-    handler: () => ({
-      receivable: "4438175.10",
-      payable: "4823451.20",
-      net: "-385276.10",
-    }),
+    handler: async () => {
+      const ov = (await getOverview()) as Record<string, unknown>;
+      const ar = String(ov.total_client_billed ?? "0.00");
+      const ap = String(ov.total_pharmacy_paid ?? "0.00");
+      const net = (parseFloat(ar) - parseFloat(ap)).toFixed(2);
+      return { receivable: ar, payable: ap, net };
+    },
   },
   {
     pattern: /\/billing\/v1\/ap-records\/summary$/,
     methods: ["GET"],
-    handler: () => ({
-      total_ap: "4823451.20",
-      total_ar: "4438175.10",
-      net_outstanding: "-385276.10",
-      this_cycle: "1423891.20",
-      this_month: "4823451.20",
-      last_updated: isoDate(0),
-    }),
+    handler: async () => {
+      const ov = (await getOverview()) as Record<string, unknown>;
+      const ar = String(ov.total_client_billed ?? "0.00");
+      const ap = String(ov.total_pharmacy_paid ?? "0.00");
+      const fees = String(
+        (
+          parseFloat(String(ov.total_processing_fees ?? 0)) +
+          parseFloat(String(ov.total_transaction_fees ?? 0))
+        ).toFixed(2)
+      );
+      const net = (parseFloat(ar) - parseFloat(ap)).toFixed(2);
+      return {
+        total_ap: ap,
+        total_ar: ar,
+        net_outstanding: net,
+        this_cycle: String(ov.total_client_billed ?? "0.00"),
+        this_month: String(ov.total_client_billed ?? "0.00"),
+        total_fees: fees,
+        last_updated: isoDate(0),
+      };
+    },
   },
 
   // ── Mapping templates ─────────────────────────────────────────────────────────
@@ -326,55 +499,82 @@ const ROUTES: RouteEntry[] = [
   {
     pattern: /\/billing\/v1\/uploads\/([^/?]+)\/financial-preview$/,
     methods: ["GET"],
-    handler: () => ({
-      ap_total: "1423891.20",
-      ar_total: "1309579.90",
-      fee_total: "56955.65",
-      net_settlement: "1309579.90",
-      journal_entries: [
-        { account: "Accounts Payable", debit: "1423891.20", credit: "0.00", description: "Pharmacy dispensing claims" },
-        { account: "Accounts Receivable", debit: "0.00", credit: "1366935.55", description: "Client invoice" },
-        { account: "Revenue - Admin Fee", debit: "0.00", credit: "56955.65", description: "Administrative fee" },
-      ],
-    }),
+    handler: async () => {
+      const ov = (await getOverview()) as Record<string, unknown>;
+      const ar = String(ov.total_client_billed ?? "0.00");
+      const ap = String(ov.total_pharmacy_paid ?? "0.00");
+      const fees = String(
+        (
+          parseFloat(String(ov.total_processing_fees ?? 0)) +
+          parseFloat(String(ov.total_transaction_fees ?? 0))
+        ).toFixed(2)
+      );
+      return {
+        ap_total: ap,
+        ar_total: ar,
+        fee_total: fees,
+        net_settlement: ar,
+        journal_entries: [
+          { account: "Accounts Payable", debit: ap, credit: "0.00", description: "Pharmacy dispensing claims" },
+          { account: "Accounts Receivable", debit: "0.00", credit: ar, description: "Client invoice" },
+          { account: "Revenue - Processing Fees", debit: "0.00", credit: fees, description: "Claims processing and transaction fees" },
+        ],
+      };
+    },
   },
   {
     pattern: /\/billing\/v1\/uploads\/([^/?]+)\/validate$/,
     methods: ["POST"],
-    handler: () => ({
-      upload_id: makeUUID(997),
-      total_rows: 2847,
-      valid_count: 2830,
-      warning_count: 12,
-      error_count: 5,
-      errors: [
-        { row: 14, field: "pharmacy_npi", error_message: "NPI failed Luhn check", original_value: "1234567890" },
-        { row: 87, field: "drug_ndc", error_message: "NDC not found in formulary", original_value: "99999-9999-99" },
-      ],
-      warnings: [
-        { row: 23, field: "days_supply", warning_message: "Unusually high days supply (180)", original_value: "180" },
-      ],
-    }),
+    handler: async () => {
+      const ov = (await getOverview()) as Record<string, unknown>;
+      return {
+        upload_id: makeUUID(997),
+        total_rows: Number(ov.total_claims ?? 89231),
+        valid_count: Number(ov.paid_claims ?? 82162),
+        warning_count: 0,
+        error_count: 0,
+        errors: [],
+        warnings: [],
+        total_billed: String(ov.total_client_billed ?? "0.00"),
+        file_name: "InfinityRX_20260401_1618.txt",
+        columns_mapped: 63,
+        columns_total: 63,
+      };
+    },
   },
 
   // ── Payment batches (summary widgets) ────────────────────────────────────────
   {
     pattern: /\/payment-batches\/pending$/,
     methods: ["GET"],
-    handler: () => ({
-      count: 3,
-      total_amount: "847205.50",
-    }),
+    handler: async () => {
+      const nrids = (await getByNrid()) as Array<Record<string, unknown>>;
+      const total = nrids.reduce(
+        (s, n) => s + parseFloat(String(n.total_client_billed ?? 0)),
+        0
+      );
+      return {
+        count: nrids.length,
+        total_amount: total.toFixed(2),
+      };
+    },
   },
 
   // ── Payment batches CRUD ──────────────────────────────────────────────────────
   {
     pattern: /\/batches\/routing-preview$/,
     methods: ["POST"],
-    handler: () => [
-      { vendor: "nacha", vendor_name: "NACHA ACH", client_id: makeUUID(100), client_name: "Acme Health Partners", payment_count: 423, total_amount: "423891.20" },
-      { vendor: "echo", vendor_name: "Echo Health", client_id: makeUUID(101), client_name: "BlueStar Benefits Group", payment_count: 287, total_amount: "287450.10" },
-    ],
+    handler: async () => {
+      const nrids = (await getByNrid()) as Array<Record<string, unknown>>;
+      return nrids.map((n) => ({
+        vendor: String(n.nrid).toLowerCase(),
+        vendor_name: String(n.vendor_name),
+        client_id: makeUUID(String(n.nrid).charCodeAt(0)),
+        client_name: String(n.vendor_name),
+        payment_count: Number(n.total_claims),
+        total_amount: String(n.total_client_billed),
+      }));
+    },
   },
   {
     pattern: /\/batches\/([^/?]+)\/(approve|submit|void)$/,
@@ -398,9 +598,20 @@ const ROUTES: RouteEntry[] = [
   {
     pattern: /\/batches$/,
     methods: ["GET", "POST"],
-    handler: (_, body) => {
+    handler: async (_, body) => {
       if (body) return { ...PAYMENT_BATCHES[0], id: makeUUID(996), status: "draft" };
-      return { items: PAYMENT_BATCHES, total: PAYMENT_BATCHES.length, page: 1, page_size: 25 };
+      const nrids = (await getByNrid()) as Array<Record<string, unknown>>;
+      const batches = nrids.map((n, i) => ({
+        id: makeUUID(800 + i),
+        vendor_name: String(n.vendor_name),
+        nrid: String(n.nrid),
+        status: "pending_approval",
+        claim_count: Number(n.total_claims),
+        total_amount: String(n.total_client_billed),
+        created_at: isoDate(-1),
+        approved_at: null,
+      }));
+      return { items: batches, total: batches.length, page: 1, page_size: 25 };
     },
   },
 
@@ -471,70 +682,164 @@ const ROUTES: RouteEntry[] = [
   {
     pattern: /\/dashboard$/,
     methods: ["GET"],
-    handler: () => ({
-      pending_batches: PAYMENT_BATCHES.filter((b) => b.status === "pending_approval").length,
-      total_pending_amount: PAYMENT_BATCHES.filter((b) => b.status === "pending_approval")
-        .reduce((sum, b) => sum + Number(b.total_amount), 0)
-        .toFixed(2),
-      settled_today: "2847205.50",
-      returned_today: ACH_RETURNS.filter((r) => !r.resolved).length,
-      vendor_health: VENDORS_LIST,
-    }),
+    handler: async () => {
+      const [ov, nrids] = await Promise.all([getOverview(), getByNrid()]);
+      const o = ov as Record<string, unknown>;
+      const n = nrids as Array<Record<string, unknown>>;
+      return {
+        pending_batches: n.length,
+        total_pending_amount: String(o.total_client_billed ?? "0.00"),
+        settled_today: "0.00",
+        returned_today: Number(o.reversal_claims ?? 0),
+        vendor_health: VENDORS_LIST,
+        total_pharmacy_paid: String(o.total_pharmacy_paid ?? "0.00"),
+        total_claims: Number(o.total_claims ?? 0),
+      };
+    },
   },
 
   // ── ReclaimRx FWA ─────────────────────────────────────────────────────────────
   {
     pattern: /\/api\/v1\/fwa\/dashboard$/,
     methods: ["GET"],
-    handler: () => FWA_DASHBOARD,
+    handler: async () => {
+      const [rr, invs] = await Promise.all([getReversalRate(), getInvestigations()]);
+      const r = rr as Record<string, unknown>;
+      const investigations = invs as Array<Record<string, unknown>>;
+      return {
+        ...FWA_DASHBOARD,
+        overall_reversal_rate: r.overall_rate,
+        active_investigations: investigations.filter((i) => i.status !== "resolved").length,
+        total_investigations: investigations.length,
+        high_severity: investigations.filter((i) => i.flag && (i.flag as Record<string, unknown>).severity === "critical").length,
+      };
+    },
   },
   {
     pattern: /\/flags\/summary$/,
     methods: ["GET"],
-    handler: () => ({
-      today: 7,
-      week: 34,
-      high_severity: 14,
-    }),
+    handler: async () => {
+      const invs = (await getInvestigations()) as Array<Record<string, unknown>>;
+      return {
+        today: invs.filter((i) => i.status === "new").length,
+        week: invs.length,
+        high_severity: invs.filter((i) => i.flag && (i.flag as Record<string, unknown>).severity === "critical").length,
+      };
+    },
   },
 
   // ── Investigations ────────────────────────────────────────────────────────────
   {
     pattern: /\/api\/v1\/investigations\/([^/?]+)$/,
     methods: ["GET", "PATCH"],
-    handler: (match, body) => {
-      const inv = INVESTIGATIONS.find((i) => i.id === match[1]) ?? INVESTIGATIONS[0];
-      return body ? { ...inv, ...(body as Record<string, unknown>) } : inv;
+    handler: async (match, body) => {
+      const SENTINEL_UUID = "00000000-0000-0000-0000-000000000000";
+      const NOW = new Date().toISOString();
+      const invs = (await getInvestigations()) as Array<Record<string, unknown>>;
+      const raw = invs.find((i) => String(i.id) === match[1]) ?? invs[0];
+      const flagRaw = (raw.flag ?? {}) as Record<string, unknown>;
+      const full = {
+        id: String(raw.id),
+        tenant_id: SENTINEL_UUID,
+        flag_id: `flag-${String(raw.id)}`,
+        flag: {
+          id: `flag-${String(raw.id)}`,
+          tenant_id: SENTINEL_UUID,
+          flag_type: String(flagRaw.flag_type ?? "billing_anomaly"),
+          severity: String(flagRaw.severity ?? "medium"),
+          entity_type: "pharmacy" as const,
+          entity_id: String(flagRaw.entity_id ?? SENTINEL_UUID),
+          entity_name: String(flagRaw.entity_name ?? "Unknown"),
+          estimated_recovery: String(raw.estimated_recovery ?? "0.00"),
+          anomaly_narrative: String(raw.notes ?? ""),
+          detected_at: NOW,
+          claim_count: 0,
+        },
+        status: String(body ? (body as Record<string, unknown>).status ?? raw.status : raw.status),
+        assigned_to_name: raw.assigned_to_name ? String(raw.assigned_to_name) : undefined,
+        days_open: Number(raw.days_open ?? 1),
+        estimated_recovery: String(raw.estimated_recovery ?? "0.00"),
+        notes: String(raw.notes ?? ""),
+        evidence_items: [],
+        actions: [],
+        created_at: NOW,
+        updated_at: NOW,
+        ...(body ? (body as Record<string, unknown>) : {}),
+      };
+      return full;
     },
   },
   {
     pattern: /\/api\/v1\/investigations\/summary$/,
     methods: ["GET"],
-    handler: () => ({
-      active: INVESTIGATIONS.filter((i) => i.status !== "resolved").length,
-      by_stage: {
-        new: INVESTIGATIONS.filter((i) => i.status === "new").length,
-        assigned: INVESTIGATIONS.filter((i) => i.status === "assigned").length,
-        evidence: INVESTIGATIONS.filter((i) => i.status === "evidence").length,
-        demand: INVESTIGATIONS.filter((i) => i.status === "demand").length,
-        resolved: INVESTIGATIONS.filter((i) => i.status === "resolved").length,
-      },
-    }),
+    handler: async () => {
+      const invs = (await getInvestigations()) as Array<Record<string, unknown>>;
+      return {
+        active: invs.filter((i) => i.status !== "resolved").length,
+        by_stage: {
+          new: invs.filter((i) => i.status === "new").length,
+          assigned: invs.filter((i) => i.status === "assigned").length,
+          evidence: invs.filter((i) => i.status === "evidence").length,
+          demand: invs.filter((i) => i.status === "demand").length,
+          resolved: invs.filter((i) => i.status === "resolved").length,
+        },
+      };
+    },
   },
   {
     pattern: /\/api\/v1\/investigations$/,
     methods: ["GET"],
-    handler: () => INVESTIGATIONS,
+    handler: async () => {
+      const invs = await getInvestigations();
+      const SENTINEL_UUID = "00000000-0000-0000-0000-000000000000";
+      const NOW = new Date().toISOString();
+      // Transform to full Investigation shape expected by the kanban page
+      return (invs as Array<Record<string, unknown>>).map((inv) => {
+        const flagRaw = (inv.flag ?? {}) as Record<string, unknown>;
+        return {
+          id: String(inv.id),
+          tenant_id: SENTINEL_UUID,
+          flag_id: `flag-${String(inv.id)}`,
+          flag: {
+            id: `flag-${String(inv.id)}`,
+            tenant_id: SENTINEL_UUID,
+            flag_type: String(flagRaw.flag_type ?? "billing_anomaly"),
+            severity: String(flagRaw.severity ?? "medium"),
+            entity_type: "pharmacy" as const,
+            entity_id: String(flagRaw.entity_id ?? SENTINEL_UUID),
+            entity_name: String(flagRaw.entity_name ?? "Unknown"),
+            estimated_recovery: String(inv.estimated_recovery ?? "0.00"),
+            anomaly_narrative: String(inv.notes ?? ""),
+            detected_at: NOW,
+            claim_count: 0,
+          },
+          status: String(inv.status ?? "new"),
+          assigned_to: undefined,
+          assigned_to_name: inv.assigned_to_name ? String(inv.assigned_to_name) : undefined,
+          days_open: Number(inv.days_open ?? 1),
+          estimated_recovery: String(inv.estimated_recovery ?? "0.00"),
+          evidence_items: [],
+          actions: [],
+          created_at: NOW,
+          updated_at: NOW,
+        };
+      });
+    },
   },
 
   // ── Recovery ──────────────────────────────────────────────────────────────────
   {
     pattern: /\/recovery\/pipeline$/,
     methods: ["GET"],
-    handler: () => {
-      const estimated = RECOVERY_ROWS.reduce((s, r) => s + Number(r.estimated), 0);
-      const demanded = RECOVERY_ROWS.reduce((s, r) => s + Number(r.demanded), 0);
-      const collected = RECOVERY_ROWS.reduce((s, r) => s + Number(r.collected), 0);
+    handler: async () => {
+      const invs = (await getInvestigations()) as Array<Record<string, unknown>>;
+      const estimated = invs.reduce((s, r) => s + parseFloat(String(r.estimated_recovery ?? 0)), 0);
+      const demanded = invs
+        .filter((i) => i.status === "demand" || i.status === "resolved")
+        .reduce((s, r) => s + parseFloat(String(r.estimated_recovery ?? 0)), 0);
+      const collected = invs
+        .filter((i) => i.status === "resolved")
+        .reduce((s, r) => s + parseFloat(String(r.estimated_recovery ?? 0)) * 0.7, 0);
       return {
         estimated: money(estimated),
         demanded: money(demanded),
@@ -545,7 +850,18 @@ const ROUTES: RouteEntry[] = [
   {
     pattern: /\/recovery\/rows$/,
     methods: ["GET"],
-    handler: () => RECOVERY_ROWS,
+    handler: async () => {
+      const invs = (await getInvestigations()) as Array<Record<string, unknown>>;
+      return invs.map((inv) => ({
+        id: inv.id,
+        entity_name: (inv.flag as Record<string, unknown>)?.entity_name ?? inv.id,
+        client_name: inv.client_name,
+        status: inv.status,
+        estimated: inv.estimated_recovery,
+        demanded: inv.status === "demand" || inv.status === "resolved" ? inv.estimated_recovery : "0.00",
+        collected: inv.status === "resolved" ? money(parseFloat(String(inv.estimated_recovery ?? 0)) * 0.7) : "0.00",
+      }));
+    },
   },
 
   // ── Demand letter ─────────────────────────────────────────────────────────────
@@ -631,13 +947,28 @@ const ROUTES: RouteEntry[] = [
   {
     pattern: /\/reports\/recent$/,
     methods: ["GET"],
-    handler: () => ({
-      reports: GENERATED_REPORTS.slice(0, 5).map((r) => ({
-        id: r.id,
-        name: r.template_name,
-        generated_at: r.generated_at ?? isoDate(-1),
-      })),
-    }),
+    handler: async () => {
+      const [cycles, clients] = await Promise.all([getCycles(), getTopClients()]);
+      const cycs = cycles as Array<Record<string, unknown>>;
+      const tops = (clients as Array<Record<string, unknown>>).slice(0, 2);
+      const reports = [
+        ...cycs.map((c, i) => ({
+          id: makeUUID(900 + i),
+          name: `Claims Report — Cycle ${String(c.cycle_id)}`,
+          generated_at: isoDate(-i),
+          total_claims: c.total_claims,
+          total_billed: c.total_client_billed,
+        })),
+        ...tops.map((t, i) => ({
+          id: makeUUID(905 + i),
+          name: `Client Statement — ${String(t.client_name)}`,
+          generated_at: isoDate(-i - 1),
+          total_claims: t.total_claims,
+          total_billed: t.total_client_billed,
+        })),
+      ].slice(0, 5);
+      return { reports };
+    },
   },
   {
     pattern: /\/api\/v1\/reports$/,
@@ -663,12 +994,18 @@ const ROUTES: RouteEntry[] = [
   {
     pattern: /\/api\/v1\/pharmacies\/([^/?]+)$/,
     methods: ["GET"],
-    handler: (match) => PHARMACIES.find((p) => p.npi === match[1]) ?? PHARMACIES[0],
+    handler: async (match) => {
+      const pharms = (await getTopPharmacies()) as Array<Record<string, unknown>>;
+      return pharms.find((p) => p.service_provider_id === match[1]) ?? pharms[0];
+    },
   },
   {
     pattern: /\/api\/v1\/pharmacies$/,
     methods: ["GET"],
-    handler: () => ({ items: PHARMACIES, total: PHARMACIES.length }),
+    handler: async () => {
+      const pharms = await getTopPharmacies();
+      return { items: pharms, total: 15197 }; // real total from build-data
+    },
   },
 
   // ── Prescriber directory ──────────────────────────────────────────────────────
@@ -680,19 +1017,25 @@ const ROUTES: RouteEntry[] = [
   {
     pattern: /\/api\/v1\/prescribers$/,
     methods: ["GET"],
-    handler: () => ({ items: PRESCRIBERS, total: PRESCRIBERS.length }),
+    handler: () => ({ items: PRESCRIBERS, total: 40567 }), // real total from build-data
   },
 
   // ── Drug database ─────────────────────────────────────────────────────────────
   {
     pattern: /\/api\/v1\/drugs\/([^/?]+)$/,
     methods: ["GET"],
-    handler: (match) => DRUGS.find((d) => d.ndc === match[1]) ?? DRUGS[0],
+    handler: async (match) => {
+      const ndcs = (await getTopNdcs()) as Array<Record<string, unknown>>;
+      return ndcs.find((d) => d.ndc === match[1]) ?? ndcs[0];
+    },
   },
   {
     pattern: /\/api\/v1\/drugs$/,
     methods: ["GET"],
-    handler: () => ({ items: DRUGS, total: DRUGS.length }),
+    handler: async () => {
+      const ndcs = await getTopNdcs();
+      return { items: ndcs, total: 174 }; // real total from build-data
+    },
   },
 
   // ── Member management ─────────────────────────────────────────────────────────
@@ -805,14 +1148,34 @@ const ROUTES: RouteEntry[] = [
   {
     pattern: /\/api\/v1\/metrics\/live$/,
     methods: ["GET"],
-    handler: () => LIVE_METRICS,
+    handler: async () => {
+      const ov = (await getOverview()) as Record<string, unknown>;
+      return {
+        ...LIVE_METRICS,
+        claims_processed: Number(ov.total_claims ?? 0),
+        total_billed: String(ov.total_client_billed ?? "0.00"),
+        reversal_rate: String(ov.reversal_rate ?? "0.0000"),
+        active_cycles: 3,
+      };
+    },
   },
 
   // ── DataIQ analytics ──────────────────────────────────────────────────────────
   {
     pattern: /\/api\/v1\/analytics\/drug\/spend-trend$/,
     methods: ["GET"],
-    handler: () => DRUG_SPEND_TREND,
+    handler: async () => {
+      const vol = (await getDailyVolume()) as Array<Record<string, unknown>>;
+      // Return last 30 days of daily volume as spend trend
+      const recent = vol.slice(-30);
+      return recent.map((d) => ({
+        date: d.date,
+        spend: d.total_client_billed,
+        claims: d.total_claims,
+        paid_claims: d.paid_claims,
+        reversals: d.reversal_claims,
+      }));
+    },
   },
   {
     pattern: /\/api\/v1\/analytics\/drug\/brand-generic$/,
@@ -822,12 +1185,33 @@ const ROUTES: RouteEntry[] = [
   {
     pattern: /\/api\/v1\/analytics\/drug\/top-by-spend$/,
     methods: ["GET"],
-    handler: () => TOP_BY_SPEND,
+    handler: async () => {
+      const ndcs = (await getTopNdcs()) as Array<Record<string, unknown>>;
+      return ndcs.slice(0, 20).map((n) => ({
+        ndc: n.ndc,
+        drug_name: `NDC ${String(n.ndc)}`,
+        brand_generic: n.brand_generic,
+        total_spend: n.total_client_billed,
+        claim_count: n.total_claims,
+        avg_per_claim: n.avg_claim_billed,
+      }));
+    },
   },
   {
     pattern: /\/api\/v1\/analytics\/network\/pharmacy-scorecards$/,
     methods: ["GET"],
-    handler: () => PHARMACY_SCORECARDS,
+    handler: async () => {
+      const pharms = (await getTopPharmacies()) as Array<Record<string, unknown>>;
+      return pharms.slice(0, 20).map((p) => ({
+        npi: p.service_provider_id,
+        pharmacy_name: `Pharmacy ${String(p.service_provider_id)}`,
+        chain: p.primary_chain_code,
+        claim_count: p.total_claims,
+        total_paid: p.total_pharmacy_paid,
+        reversal_rate: p.reversal_rate,
+        score: Math.max(0, 100 - Math.round(Number(p.reversal_rate) * 1000)),
+      }));
+    },
   },
   {
     pattern: /\/api\/v1\/analytics\/network\/adequacy$/,
@@ -842,7 +1226,28 @@ const ROUTES: RouteEntry[] = [
   {
     pattern: /\/api\/v1\/analytics\/financial$/,
     methods: ["GET"],
-    handler: () => FINANCIAL_METRICS,
+    handler: async () => {
+      const [ov, nrids, rr] = await Promise.all([getOverview(), getByNrid(), getReversalRate()]);
+      const o = ov as Record<string, unknown>;
+      return {
+        ...FINANCIAL_METRICS,
+        total_client_billed: o.total_client_billed,
+        total_pharmacy_paid: o.total_pharmacy_paid,
+        total_processing_fees: o.total_processing_fees,
+        total_transaction_fees: o.total_transaction_fees,
+        reversal_rate: o.reversal_rate,
+        by_vendor: nrids,
+        reversal_rate_detail: rr,
+      };
+    },
+  },
+  {
+    pattern: /\/api\/v1\/analytics\/financial\/by-client$/,
+    methods: ["GET"],
+    handler: async () => {
+      const clients = await getTopClients();
+      return clients;
+    },
   },
   {
     pattern: /\/api\/v1\/analytics\/data-quality$/,

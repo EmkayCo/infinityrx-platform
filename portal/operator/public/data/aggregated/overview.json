@@ -1,0 +1,10 @@
+{
+  "total_claims": 122968,
+  "paid_claims": 114325,
+  "reversal_claims": 8643,
+  "total_client_billed": "34828725.54",
+  "total_pharmacy_paid": "113437686.01",
+  "total_processing_fees": "182999.20",
+  "total_transaction_fees": "29091.00",
+  "reversal_rate": "0.0703"
+}

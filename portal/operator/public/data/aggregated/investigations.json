@@ -1,0 +1,148 @@
+[
+  {
+    "id": "inv-rev-1",
+    "status": "new",
+    "flag": {
+      "severity": "critical",
+      "flag_type": "high_reversal_rate",
+      "entity_name": "Pharmacy NPI 1295278166",
+      "entity_id": "1295278166"
+    },
+    "client_name": "Multiple",
+    "days_open": 7,
+    "estimated_recovery": "-2840.87",
+    "notes": "Reversal rate 100.0% — 83 reversals out of 83 claims"
+  },
+  {
+    "id": "inv-rev-2",
+    "status": "new",
+    "flag": {
+      "severity": "high",
+      "flag_type": "high_reversal_rate",
+      "entity_name": "Pharmacy NPI 1366229619",
+      "entity_id": "1366229619"
+    },
+    "client_name": "Multiple",
+    "days_open": 3,
+    "estimated_recovery": "-23.00",
+    "notes": "Reversal rate 60.0% — 6 reversals out of 10 claims"
+  },
+  {
+    "id": "inv-rev-3",
+    "status": "assigned",
+    "flag": {
+      "severity": "high",
+      "flag_type": "high_reversal_rate",
+      "entity_name": "Pharmacy NPI 1356906614",
+      "entity_id": "1356906614"
+    },
+    "client_name": "Multiple",
+    "days_open": 1,
+    "estimated_recovery": "19.00",
+    "assigned_to_name": "Sarah M.",
+    "notes": "Reversal rate 50.0% — 6 reversals out of 12 claims"
+  },
+  {
+    "id": "inv-avg-1",
+    "status": "assigned",
+    "flag": {
+      "severity": "high",
+      "flag_type": "high_avg_claim_amount",
+      "entity_name": "Pharmacy NPI 1437171568",
+      "entity_id": "1437171568"
+    },
+    "client_name": "Multiple",
+    "days_open": 5,
+    "estimated_recovery": "125000.00",
+    "assigned_to_name": "James K.",
+    "notes": "Average claim $25000.00 — 1 claims, chain INDEPENDENT"
+  },
+  {
+    "id": "inv-avg-2",
+    "status": "evidence",
+    "flag": {
+      "severity": "medium",
+      "flag_type": "high_avg_claim_amount",
+      "entity_name": "Pharmacy NPI 1073608998",
+      "entity_id": "1073608998"
+    },
+    "client_name": "Multiple",
+    "days_open": 12,
+    "estimated_recovery": "53903.35",
+    "assigned_to_name": "Ana R.",
+    "notes": "Average claim $10780.67 — 13 claims, chain INDEPENDENT"
+  },
+  {
+    "id": "inv-avg-3",
+    "status": "new",
+    "flag": {
+      "severity": "low",
+      "flag_type": "high_avg_claim_amount",
+      "entity_name": "Pharmacy NPI 1417915653",
+      "entity_id": "1417915653"
+    },
+    "client_name": "Multiple",
+    "days_open": 2,
+    "estimated_recovery": "51903.80",
+    "notes": "Average claim $10380.76 — 42 claims, chain 392"
+  },
+  {
+    "id": "inv-vol-1",
+    "status": "demand",
+    "flag": {
+      "severity": "high",
+      "flag_type": "volume_spike",
+      "entity_name": "Mayne Pharma Commercial LLC",
+      "entity_id": "Mayne Pharma Commercial LLC"
+    },
+    "client_name": "Mayne Pharma Commercial LLC",
+    "days_open": 14,
+    "estimated_recovery": "921585.00",
+    "assigned_to_name": "Chris T.",
+    "notes": "Volume changed by 61439 claims between cycle SM-06 and SM-08"
+  },
+  {
+    "id": "inv-vol-2",
+    "status": "evidence",
+    "flag": {
+      "severity": "medium",
+      "flag_type": "volume_spike",
+      "entity_name": "Axsome",
+      "entity_id": "Axsome"
+    },
+    "client_name": "Axsome",
+    "days_open": 9,
+    "estimated_recovery": "93330.00",
+    "assigned_to_name": "Maria L.",
+    "notes": "Volume changed by 6222 claims between cycle SM-06 and SM-08"
+  },
+  {
+    "id": "inv-sample-1",
+    "status": "resolved",
+    "flag": {
+      "severity": "medium",
+      "flag_type": "duplicate_claim",
+      "entity_name": "Pharmacy NPI 1033656814",
+      "entity_id": "1033656814"
+    },
+    "client_name": "Axsome",
+    "days_open": 0,
+    "estimated_recovery": "0.00",
+    "assigned_to_name": "Peter V.",
+    "notes": "Duplicate claim pattern confirmed and resolved — pharmacy corrected submission"
+  },
+  {
+    "id": "inv-sample-2",
+    "status": "new",
+    "flag": {
+      "severity": "low",
+      "flag_type": "daw_mismatch",
+      "entity_name": "NDC 81968004560",
+      "entity_id": "81968004560"
+    },
+    "client_name": "Mayne Pharma Commercial LLC",
+    "days_open": 1,
+    "estimated_recovery": "1615.68",
+    "notes": "DAW code mismatch on 81968004560 — 17408 claims flagged for review"
+  }
+]

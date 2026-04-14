@@ -1,0 +1,289 @@
+[
+  {
+    "cardholder_id": "MP01",
+    "client_name": "Mayne Pharma Commercial LLC",
+    "total_claims": 66176,
+    "total_client_billed": "13805800.47",
+    "unique_ndcs": 48
+  },
+  {
+    "cardholder_id": "AUVRET",
+    "client_name": "Axsome",
+    "total_claims": 10767,
+    "total_client_billed": "6121674.16",
+    "unique_ndcs": 2
+  },
+  {
+    "cardholder_id": "IC47103004",
+    "client_name": "Organon",
+    "total_claims": 9387,
+    "total_client_billed": "2345109.30",
+    "unique_ndcs": 4
+  },
+  {
+    "cardholder_id": "AUVPRX",
+    "client_name": "Axsome",
+    "total_claims": 6847,
+    "total_client_billed": "3221383.16",
+    "unique_ndcs": 2
+  },
+  {
+    "cardholder_id": "SH",
+    "client_name": "Sempre Health",
+    "total_claims": 6721,
+    "total_client_billed": "332512.32",
+    "unique_ndcs": 88
+  },
+  {
+    "cardholder_id": "IC47103001",
+    "client_name": "Organon",
+    "total_claims": 5002,
+    "total_client_billed": "1743301.77",
+    "unique_ndcs": 4
+  },
+  {
+    "cardholder_id": "50778206",
+    "client_name": "Axsome",
+    "total_claims": 3195,
+    "total_client_billed": "2528956.64",
+    "unique_ndcs": 1
+  },
+  {
+    "cardholder_id": "IC47102003",
+    "client_name": "Organon",
+    "total_claims": 1933,
+    "total_client_billed": "106543.81",
+    "unique_ndcs": 3
+  },
+  {
+    "cardholder_id": "SUNCACCP",
+    "client_name": "Axsome",
+    "total_claims": 1856,
+    "total_client_billed": "582695.74",
+    "unique_ndcs": 2
+  },
+  {
+    "cardholder_id": "IC47102001",
+    "client_name": "Organon",
+    "total_claims": 1619,
+    "total_client_billed": "85496.36",
+    "unique_ndcs": 3
+  },
+  {
+    "cardholder_id": "VP11",
+    "client_name": "Verrica Pharmaceuticals",
+    "total_claims": 1519,
+    "total_client_billed": "990213.37",
+    "unique_ndcs": 3
+  },
+  {
+    "cardholder_id": "IC47101001",
+    "client_name": "Organon",
+    "total_claims": 1160,
+    "total_client_billed": "63229.58",
+    "unique_ndcs": 7
+  },
+  {
+    "cardholder_id": "SC4539",
+    "client_name": "Scilex",
+    "total_claims": 1144,
+    "total_client_billed": "139675.92",
+    "unique_ndcs": 2
+  },
+  {
+    "cardholder_id": "IC47101003",
+    "client_name": "Organon",
+    "total_claims": 1060,
+    "total_client_billed": "59059.75",
+    "unique_ndcs": 7
+  },
+  {
+    "cardholder_id": "MP02",
+    "client_name": "Mayne Pharma Commercial LLC",
+    "total_claims": 846,
+    "total_client_billed": "156179.73",
+    "unique_ndcs": 4
+  },
+  {
+    "cardholder_id": "WCVRA3001",
+    "client_name": "Servier",
+    "total_claims": 809,
+    "total_client_billed": "240398.23",
+    "unique_ndcs": 2
+  },
+  {
+    "cardholder_id": "WCVRA1001",
+    "client_name": "Servier",
+    "total_claims": 585,
+    "total_client_billed": "83760.32",
+    "unique_ndcs": 2
+  },
+  {
+    "cardholder_id": "AVY1001",
+    "client_name": "AVYXA",
+    "total_claims": 489,
+    "total_client_billed": "244041.71",
+    "unique_ndcs": 12
+  },
+  {
+    "cardholder_id": "WCEVR1001",
+    "client_name": "Ascensia",
+    "total_claims": 311,
+    "total_client_billed": "74848.21",
+    "unique_ndcs": 2
+  },
+  {
+    "cardholder_id": "SUNFTOA",
+    "client_name": "Axsome",
+    "total_claims": 271,
+    "total_client_billed": "246389.93",
+    "unique_ndcs": 2
+  },
+  {
+    "cardholder_id": "AUVFTOA",
+    "client_name": "Axsome",
+    "total_claims": 220,
+    "total_client_billed": "237705.77",
+    "unique_ndcs": 2
+  },
+  {
+    "cardholder_id": "WCTBV3001",
+    "client_name": "Servier",
+    "total_claims": 156,
+    "total_client_billed": "112715.73",
+    "unique_ndcs": 1
+  },
+  {
+    "cardholder_id": "WCTBV1001",
+    "client_name": "Servier",
+    "total_claims": 138,
+    "total_client_billed": "41551.26",
+    "unique_ndcs": 1
+  },
+  {
+    "cardholder_id": "WCMYC4001",
+    "client_name": "Mycovia Pharmaceuticals",
+    "total_claims": 135,
+    "total_client_billed": "58429.22",
+    "unique_ndcs": 1
+  },
+  {
+    "cardholder_id": "WCKAL1001",
+    "client_name": "Kalvista",
+    "total_claims": 131,
+    "total_client_billed": "998771.92",
+    "unique_ndcs": 1
+  },
+  {
+    "cardholder_id": "WCVRA2001",
+    "client_name": "Servier",
+    "total_claims": 118,
+    "total_client_billed": "36306.07",
+    "unique_ndcs": 2
+  },
+  {
+    "cardholder_id": "MP03",
+    "client_name": "Mayne Pharma Commercial LLC",
+    "total_claims": 71,
+    "total_client_billed": "18326.84",
+    "unique_ndcs": 2
+  },
+  {
+    "cardholder_id": "WCLYS6001",
+    "client_name": "HRA Pharma Rare Diseases",
+    "total_claims": 64,
+    "total_client_billed": "11160.94",
+    "unique_ndcs": 1
+  },
+  {
+    "cardholder_id": "IC47104001",
+    "client_name": "Organon",
+    "total_claims": 49,
+    "total_client_billed": "2958.50",
+    "unique_ndcs": 1
+  },
+  {
+    "cardholder_id": "WCMET4001",
+    "client_name": "HRA Pharma Rare Diseases",
+    "total_claims": 41,
+    "total_client_billed": "31011.33",
+    "unique_ndcs": 1
+  },
+  {
+    "cardholder_id": "WCTBV4001",
+    "client_name": "Servier",
+    "total_claims": 39,
+    "total_client_billed": "12658.75",
+    "unique_ndcs": 1
+  },
+  {
+    "cardholder_id": "SUNFTO",
+    "client_name": "Axsome",
+    "total_claims": 26,
+    "total_client_billed": "25420.79",
+    "unique_ndcs": 2
+  },
+  {
+    "cardholder_id": "WCCEQ1001",
+    "client_name": "CeQur Corporation",
+    "total_claims": 24,
+    "total_client_billed": "1659.15",
+    "unique_ndcs": 1
+  },
+  {
+    "cardholder_id": "RES11",
+    "client_name": "Resilia",
+    "total_claims": 23,
+    "total_client_billed": "3025.00",
+    "unique_ndcs": 2
+  },
+  {
+    "cardholder_id": "WCTBV2001",
+    "client_name": "Servier",
+    "total_claims": 12,
+    "total_client_billed": "18277.37",
+    "unique_ndcs": 1
+  },
+  {
+    "cardholder_id": "WCLYS6003",
+    "client_name": "HRA Pharma Rare Diseases",
+    "total_claims": 9,
+    "total_client_billed": "3740.66",
+    "unique_ndcs": 1
+  },
+  {
+    "cardholder_id": "GENEPK11",
+    "client_name": "GENMAB",
+    "total_claims": 6,
+    "total_client_billed": "41888.32",
+    "unique_ndcs": 1
+  },
+  {
+    "cardholder_id": "IC47103003",
+    "client_name": "Organon",
+    "total_claims": 5,
+    "total_client_billed": "1832.44",
+    "unique_ndcs": 2
+  },
+  {
+    "cardholder_id": "WCLYS6002",
+    "client_name": "HRA Pharma Rare Diseases",
+    "total_claims": 2,
+    "total_client_billed": "0.00",
+    "unique_ndcs": 1
+  },
+  {
+    "cardholder_id": "IC47104004",
+    "client_name": "Organon",
+    "total_claims": 1,
+    "total_client_billed": "15.00",
+    "unique_ndcs": 1
+  },
+  {
+    "cardholder_id": "WCLYS6004",
+    "client_name": "HRA Pharma Rare Diseases",
+    "total_claims": 1,
+    "total_client_billed": "0.00",
+    "unique_ndcs": 1
+  }
+]

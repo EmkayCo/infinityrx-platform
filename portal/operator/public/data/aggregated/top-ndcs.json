@@ -1,0 +1,452 @@
+[
+  {
+    "ndc": "81968004560",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 17408,
+    "total_client_billed": "9375258.55",
+    "total_pharmacy_paid": "23227785.27",
+    "avg_claim_billed": "538.56"
+  },
+  {
+    "ndc": "51862056060",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 4454,
+    "total_client_billed": "3559205.09",
+    "total_pharmacy_paid": "7536611.25",
+    "avg_claim_billed": "799.10"
+  },
+  {
+    "ndc": "78206018701",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 12010,
+    "total_client_billed": "3408253.21",
+    "total_pharmacy_paid": "12559031.52",
+    "avg_claim_billed": "283.78"
+  },
+  {
+    "ndc": "51862076530",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 9079,
+    "total_client_billed": "3338862.91",
+    "total_pharmacy_paid": "7836069.44",
+    "avg_claim_billed": "367.75"
+  },
+  {
+    "ndc": "81968002009",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 3195,
+    "total_client_billed": "2528956.64",
+    "total_pharmacy_paid": "5261655.24",
+    "avg_claim_billed": "791.53"
+  },
+  {
+    "ndc": "51862025801",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 6592,
+    "total_client_billed": "1500990.43",
+    "total_pharmacy_paid": "3719296.11",
+    "avg_claim_billed": "227.69"
+  },
+  {
+    "ndc": "82928030004",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 131,
+    "total_client_billed": "998771.92",
+    "total_pharmacy_paid": "4606209.60",
+    "avg_claim_billed": "7624.21"
+  },
+  {
+    "ndc": "68308074808",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 7510,
+    "total_client_billed": "761037.78",
+    "total_pharmacy_paid": "2242051.31",
+    "avg_claim_billed": "101.33"
+  },
+  {
+    "ndc": "51862077130",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 1664,
+    "total_client_billed": "633846.73",
+    "total_pharmacy_paid": "1732894.24",
+    "avg_claim_billed": "380.91"
+  },
+  {
+    "ndc": "81968035101",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 1657,
+    "total_client_billed": "625220.65",
+    "total_pharmacy_paid": "1605510.07",
+    "avg_claim_billed": "377.32"
+  },
+  {
+    "ndc": "71349007006",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 763,
+    "total_client_billed": "548991.83",
+    "total_pharmacy_paid": "1245879.14",
+    "avg_claim_billed": "719.51"
+  },
+  {
+    "ndc": "51862077230",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 1259,
+    "total_client_billed": "537818.42",
+    "total_pharmacy_paid": "1209827.15",
+    "avg_claim_billed": "427.17"
+  },
+  {
+    "ndc": "68308075030",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 4219,
+    "total_client_billed": "490698.68",
+    "total_pharmacy_paid": "1445153.94",
+    "avg_claim_billed": "116.30"
+  },
+  {
+    "ndc": "68308066830",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 3611,
+    "total_client_billed": "425625.57",
+    "total_pharmacy_paid": "1153315.26",
+    "avg_claim_billed": "117.86"
+  },
+  {
+    "ndc": "71349007001",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 673,
+    "total_client_billed": "404991.71",
+    "total_pharmacy_paid": "948840.00",
+    "avg_claim_billed": "601.77"
+  },
+  {
+    "ndc": "72694072840",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 1437,
+    "total_client_billed": "352506.56",
+    "total_pharmacy_paid": "15774526.50",
+    "avg_claim_billed": "245.30"
+  },
+  {
+    "ndc": "78206018601",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 1163,
+    "total_client_billed": "315391.09",
+    "total_pharmacy_paid": "1220266.62",
+    "avg_claim_billed": "271.18"
+  },
+  {
+    "ndc": "78206018401",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 1005,
+    "total_client_billed": "305912.22",
+    "total_pharmacy_paid": "1035804.45",
+    "avg_claim_billed": "304.39"
+  },
+  {
+    "ndc": "68308057330",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 696,
+    "total_client_billed": "281871.11",
+    "total_pharmacy_paid": "720864.58",
+    "avg_claim_billed": "404.98"
+  },
+  {
+    "ndc": "68308074708",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 2756,
+    "total_client_billed": "240230.74",
+    "total_pharmacy_paid": "717250.50",
+    "avg_claim_billed": "87.16"
+  },
+  {
+    "ndc": "68308068550",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 803,
+    "total_client_billed": "236454.93",
+    "total_pharmacy_paid": "589535.16",
+    "avg_claim_billed": "294.46"
+  },
+  {
+    "ndc": "68308075130",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 2268,
+    "total_client_billed": "235458.22",
+    "total_pharmacy_paid": "716101.07",
+    "avg_claim_billed": "103.81"
+  },
+  {
+    "ndc": "73499000101",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 351,
+    "total_client_billed": "234671.91",
+    "total_pharmacy_paid": "564485.12",
+    "avg_claim_billed": "668.58"
+  },
+  {
+    "ndc": "81968035001",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 496,
+    "total_client_billed": "229285.81",
+    "total_pharmacy_paid": "552168.30",
+    "avg_claim_billed": "462.26"
+  },
+  {
+    "ndc": "68308057530",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 677,
+    "total_client_billed": "208744.47",
+    "total_pharmacy_paid": "561725.36",
+    "avg_claim_billed": "308.33"
+  },
+  {
+    "ndc": "81968004530",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 426,
+    "total_client_billed": "205504.54",
+    "total_pharmacy_paid": "456209.83",
+    "avg_claim_billed": "482.40"
+  },
+  {
+    "ndc": "72694061760",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 345,
+    "total_client_billed": "185203.11",
+    "total_pharmacy_paid": "2965359.25",
+    "avg_claim_billed": "536.82"
+  },
+  {
+    "ndc": "68308076950",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 360,
+    "total_client_billed": "170091.53",
+    "total_pharmacy_paid": "395062.56",
+    "avg_claim_billed": "472.47"
+  },
+  {
+    "ndc": "68308078430",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 5085,
+    "total_client_billed": "153801.06",
+    "total_pharmacy_paid": "730264.76",
+    "avg_claim_billed": "30.24"
+  },
+  {
+    "ndc": "68308078330",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 4487,
+    "total_client_billed": "147276.26",
+    "total_pharmacy_paid": "696138.67",
+    "avg_claim_billed": "32.82"
+  },
+  {
+    "ndc": "68308075201",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 283,
+    "total_client_billed": "127384.25",
+    "total_pharmacy_paid": "516791.41",
+    "avg_claim_billed": "450.12"
+  },
+  {
+    "ndc": "78206012601",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 2199,
+    "total_client_billed": "119986.76",
+    "total_pharmacy_paid": "447787.24",
+    "avg_claim_billed": "54.56"
+  },
+  {
+    "ndc": "69557011130",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 923,
+    "total_client_billed": "104067.53",
+    "total_pharmacy_paid": "330892.80",
+    "avg_claim_billed": "112.74"
+  },
+  {
+    "ndc": "68308074818",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 580,
+    "total_client_billed": "102055.16",
+    "total_pharmacy_paid": "273728.87",
+    "avg_claim_billed": "175.95"
+  },
+  {
+    "ndc": "50458057930",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 848,
+    "total_client_billed": "99556.71",
+    "total_pharmacy_paid": "281684.70",
+    "avg_claim_billed": "117.40"
+  },
+  {
+    "ndc": "68308070145",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 3034,
+    "total_client_billed": "84667.14",
+    "total_pharmacy_paid": "436404.90",
+    "avg_claim_billed": "27.90"
+  },
+  {
+    "ndc": "83831010208",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 47,
+    "total_client_billed": "81622.64",
+    "total_pharmacy_paid": "353089.61",
+    "avg_claim_billed": "1736.65"
+  },
+  {
+    "ndc": "78206012701",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 1467,
+    "total_client_billed": "71227.96",
+    "total_pharmacy_paid": "281978.94",
+    "avg_claim_billed": "48.55"
+  },
+  {
+    "ndc": "83831010501",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 329,
+    "total_client_billed": "70362.35",
+    "total_pharmacy_paid": "290282.65",
+    "avg_claim_billed": "213.86"
+  },
+  {
+    "ndc": "78206018301",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 225,
+    "total_client_billed": "62608.99",
+    "total_pharmacy_paid": "218006.16",
+    "avg_claim_billed": "278.26"
+  },
+  {
+    "ndc": "68308034260",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 1820,
+    "total_client_billed": "60273.67",
+    "total_pharmacy_paid": "286820.86",
+    "avg_claim_billed": "33.11"
+  },
+  {
+    "ndc": "74695082318",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 135,
+    "total_client_billed": "58429.22",
+    "total_pharmacy_paid": "135839.44",
+    "avg_claim_billed": "432.80"
+  },
+  {
+    "ndc": "17491002429",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 158,
+    "total_client_billed": "56062.06",
+    "total_pharmacy_paid": "132295.23",
+    "avg_claim_billed": "354.82"
+  },
+  {
+    "ndc": "51862051260",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 124,
+    "total_client_billed": "52377.25",
+    "total_pharmacy_paid": "124864.79",
+    "avg_claim_billed": "422.39"
+  },
+  {
+    "ndc": "68308057130",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 160,
+    "total_client_billed": "49205.50",
+    "total_pharmacy_paid": "133084.14",
+    "avg_claim_billed": "307.53"
+  },
+  {
+    "ndc": "78206011201",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 921,
+    "total_client_billed": "47457.14",
+    "total_pharmacy_paid": "118724.02",
+    "avg_claim_billed": "51.52"
+  },
+  {
+    "ndc": "68308074718",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 366,
+    "total_client_billed": "43838.09",
+    "total_pharmacy_paid": "118774.45",
+    "avg_claim_billed": "119.77"
+  },
+  {
+    "ndc": "82705932199",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 6,
+    "total_client_billed": "41888.32",
+    "total_pharmacy_paid": "213536.78",
+    "avg_claim_billed": "6981.38"
+  },
+  {
+    "ndc": "51862029510",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 49,
+    "total_client_billed": "40937.93",
+    "total_pharmacy_paid": "90282.53",
+    "avg_claim_billed": "835.46"
+  },
+  {
+    "ndc": "68308077750",
+    "drug_tier": "",
+    "brand_generic": "",
+    "total_claims": 268,
+    "total_client_billed": "37628.69",
+    "total_pharmacy_paid": "119462.37",
+    "avg_claim_billed": "140.40"
+  }
+]

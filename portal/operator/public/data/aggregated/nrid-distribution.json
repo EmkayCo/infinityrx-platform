@@ -1,0 +1,38 @@
+[
+  {
+    "nrid": "INFINITY",
+    "vendor_name": "Echo Health",
+    "claim_count": 70559,
+    "pct_of_total": "0.5738"
+  },
+  {
+    "nrid": "COMM30",
+    "vendor_name": "Phoenix PBM",
+    "claim_count": 7391,
+    "pct_of_total": "0.0601"
+  },
+  {
+    "nrid": "PHXCOM30",
+    "vendor_name": "Phoenix PBM",
+    "claim_count": 41979,
+    "pct_of_total": "0.3414"
+  },
+  {
+    "nrid": "PHXCOM90",
+    "vendor_name": "Phoenix PBM",
+    "claim_count": 1962,
+    "pct_of_total": "0.0160"
+  },
+  {
+    "nrid": "COMM90",
+    "vendor_name": "Phoenix PBM",
+    "claim_count": 579,
+    "pct_of_total": "0.0047"
+  },
+  {
+    "nrid": "IFXMANUAL",
+    "vendor_name": "CheckIssuing",
+    "claim_count": 498,
+    "pct_of_total": "0.0040"
+  }
+]

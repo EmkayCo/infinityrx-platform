@@ -1,0 +1,728 @@
+[
+  {
+    "primary_chain_code": "UNKNOWN",
+    "total_claims": 37406,
+    "total_client_billed": "12217072.48",
+    "total_pharmacy_paid": "47600355.76"
+  },
+  {
+    "primary_chain_code": "904",
+    "total_claims": 24465,
+    "total_client_billed": "6094171.95",
+    "total_pharmacy_paid": "15377851.97"
+  },
+  {
+    "primary_chain_code": "603",
+    "total_claims": 17999,
+    "total_client_billed": "4311154.19",
+    "total_pharmacy_paid": "12630682.56"
+  },
+  {
+    "primary_chain_code": "630",
+    "total_claims": 10163,
+    "total_client_billed": "3330334.22",
+    "total_pharmacy_paid": "8613595.71"
+  },
+  {
+    "primary_chain_code": "605",
+    "total_claims": 5210,
+    "total_client_billed": "1588131.81",
+    "total_pharmacy_paid": "4135665.40"
+  },
+  {
+    "primary_chain_code": "841",
+    "total_claims": 4223,
+    "total_client_billed": "1304312.00",
+    "total_pharmacy_paid": "3207414.91"
+  },
+  {
+    "primary_chain_code": "039",
+    "total_claims": 3763,
+    "total_client_billed": "684966.00",
+    "total_pharmacy_paid": "1548893.37"
+  },
+  {
+    "primary_chain_code": "783",
+    "total_claims": 2847,
+    "total_client_billed": "771125.61",
+    "total_pharmacy_paid": "2005033.58"
+  },
+  {
+    "primary_chain_code": "455",
+    "total_claims": 2321,
+    "total_client_billed": "441212.61",
+    "total_pharmacy_paid": "1173409.95"
+  },
+  {
+    "primary_chain_code": "226",
+    "total_claims": 1458,
+    "total_client_billed": "278948.93",
+    "total_pharmacy_paid": "604501.99"
+  },
+  {
+    "primary_chain_code": "769",
+    "total_claims": 1431,
+    "total_client_billed": "312738.51",
+    "total_pharmacy_paid": "905230.64"
+  },
+  {
+    "primary_chain_code": "959",
+    "total_claims": 1238,
+    "total_client_billed": "366480.75",
+    "total_pharmacy_paid": "4161833.35"
+  },
+  {
+    "primary_chain_code": "229",
+    "total_claims": 1047,
+    "total_client_billed": "194901.95",
+    "total_pharmacy_paid": "420083.03"
+  },
+  {
+    "primary_chain_code": "177",
+    "total_claims": 939,
+    "total_client_billed": "188563.12",
+    "total_pharmacy_paid": "419088.93"
+  },
+  {
+    "primary_chain_code": "392",
+    "total_claims": 660,
+    "total_client_billed": "433951.88",
+    "total_pharmacy_paid": "884220.91"
+  },
+  {
+    "primary_chain_code": "207",
+    "total_claims": 623,
+    "total_client_billed": "121554.95",
+    "total_pharmacy_paid": "271469.08"
+  },
+  {
+    "primary_chain_code": "380",
+    "total_claims": 580,
+    "total_client_billed": "264685.19",
+    "total_pharmacy_paid": "1633198.82"
+  },
+  {
+    "primary_chain_code": "302",
+    "total_claims": 545,
+    "total_client_billed": "196148.07",
+    "total_pharmacy_paid": "407953.94"
+  },
+  {
+    "primary_chain_code": "938",
+    "total_claims": 483,
+    "total_client_billed": "82852.46",
+    "total_pharmacy_paid": "739440.91"
+  },
+  {
+    "primary_chain_code": "626",
+    "total_claims": 472,
+    "total_client_billed": "180500.24",
+    "total_pharmacy_paid": "376347.48"
+  },
+  {
+    "primary_chain_code": "A00",
+    "total_claims": 374,
+    "total_client_billed": "31433.85",
+    "total_pharmacy_paid": "174687.62"
+  },
+  {
+    "primary_chain_code": "113",
+    "total_claims": 279,
+    "total_client_billed": "75541.61",
+    "total_pharmacy_paid": "159520.55"
+  },
+  {
+    "primary_chain_code": "123",
+    "total_claims": 259,
+    "total_client_billed": "40701.80",
+    "total_pharmacy_paid": "94332.96"
+  },
+  {
+    "primary_chain_code": "951",
+    "total_claims": 207,
+    "total_client_billed": "77541.12",
+    "total_pharmacy_paid": "155521.55"
+  },
+  {
+    "primary_chain_code": "299",
+    "total_claims": 195,
+    "total_client_billed": "34519.36",
+    "total_pharmacy_paid": "74916.85"
+  },
+  {
+    "primary_chain_code": "C81",
+    "total_claims": 193,
+    "total_client_billed": "132232.42",
+    "total_pharmacy_paid": "265701.18"
+  },
+  {
+    "primary_chain_code": "608",
+    "total_claims": 185,
+    "total_client_billed": "79038.43",
+    "total_pharmacy_paid": "560834.96"
+  },
+  {
+    "primary_chain_code": "248",
+    "total_claims": 176,
+    "total_client_billed": "39117.55",
+    "total_pharmacy_paid": "81967.20"
+  },
+  {
+    "primary_chain_code": "400",
+    "total_claims": 171,
+    "total_client_billed": "41321.21",
+    "total_pharmacy_paid": "85434.93"
+  },
+  {
+    "primary_chain_code": "025",
+    "total_claims": 165,
+    "total_client_billed": "38362.20",
+    "total_pharmacy_paid": "80530.03"
+  },
+  {
+    "primary_chain_code": "213",
+    "total_claims": 165,
+    "total_client_billed": "37053.77",
+    "total_pharmacy_paid": "86069.65"
+  },
+  {
+    "primary_chain_code": "216",
+    "total_claims": 154,
+    "total_client_billed": "19819.71",
+    "total_pharmacy_paid": "70975.48"
+  },
+  {
+    "primary_chain_code": "695",
+    "total_claims": 149,
+    "total_client_billed": "33441.34",
+    "total_pharmacy_paid": "240540.11"
+  },
+  {
+    "primary_chain_code": "008",
+    "total_claims": 141,
+    "total_client_billed": "27639.65",
+    "total_pharmacy_paid": "67538.94"
+  },
+  {
+    "primary_chain_code": "156",
+    "total_claims": 131,
+    "total_client_billed": "29696.86",
+    "total_pharmacy_paid": "61120.99"
+  },
+  {
+    "primary_chain_code": "307",
+    "total_claims": 124,
+    "total_client_billed": "40375.13",
+    "total_pharmacy_paid": "136247.66"
+  },
+  {
+    "primary_chain_code": "A10",
+    "total_claims": 121,
+    "total_client_billed": "52003.59",
+    "total_pharmacy_paid": "282819.05"
+  },
+  {
+    "primary_chain_code": "C34",
+    "total_claims": 112,
+    "total_client_billed": "49922.06",
+    "total_pharmacy_paid": "142963.55"
+  },
+  {
+    "primary_chain_code": "905",
+    "total_claims": 108,
+    "total_client_billed": "66355.56",
+    "total_pharmacy_paid": "157816.92"
+  },
+  {
+    "primary_chain_code": "003",
+    "total_claims": 107,
+    "total_client_billed": "34301.12",
+    "total_pharmacy_paid": "71166.72"
+  },
+  {
+    "primary_chain_code": "C11",
+    "total_claims": 107,
+    "total_client_billed": "18239.03",
+    "total_pharmacy_paid": "39612.02"
+  },
+  {
+    "primary_chain_code": "097",
+    "total_claims": 97,
+    "total_client_billed": "37826.13",
+    "total_pharmacy_paid": "107341.70"
+  },
+  {
+    "primary_chain_code": "139",
+    "total_claims": 92,
+    "total_client_billed": "36183.03",
+    "total_pharmacy_paid": "103030.38"
+  },
+  {
+    "primary_chain_code": "913",
+    "total_claims": 79,
+    "total_client_billed": "50687.03",
+    "total_pharmacy_paid": "119786.02"
+  },
+  {
+    "primary_chain_code": "898",
+    "total_claims": 62,
+    "total_client_billed": "11873.18",
+    "total_pharmacy_paid": "319583.25"
+  },
+  {
+    "primary_chain_code": "289",
+    "total_claims": 60,
+    "total_client_billed": "11242.70",
+    "total_pharmacy_paid": "25327.58"
+  },
+  {
+    "primary_chain_code": "596",
+    "total_claims": 59,
+    "total_client_billed": "34845.59",
+    "total_pharmacy_paid": "289588.60"
+  },
+  {
+    "primary_chain_code": "044",
+    "total_claims": 59,
+    "total_client_billed": "30653.25",
+    "total_pharmacy_paid": "88867.17"
+  },
+  {
+    "primary_chain_code": "602",
+    "total_claims": 58,
+    "total_client_billed": "6325.08",
+    "total_pharmacy_paid": "14447.52"
+  },
+  {
+    "primary_chain_code": "891",
+    "total_claims": 46,
+    "total_client_billed": "16872.47",
+    "total_pharmacy_paid": "166367.23"
+  },
+  {
+    "primary_chain_code": "319",
+    "total_claims": 45,
+    "total_client_billed": "15733.11",
+    "total_pharmacy_paid": "32120.80"
+  },
+  {
+    "primary_chain_code": "929",
+    "total_claims": 44,
+    "total_client_billed": "10740.63",
+    "total_pharmacy_paid": "21484.85"
+  },
+  {
+    "primary_chain_code": "069",
+    "total_claims": 41,
+    "total_client_billed": "10647.84",
+    "total_pharmacy_paid": "21917.20"
+  },
+  {
+    "primary_chain_code": "427",
+    "total_claims": 40,
+    "total_client_billed": "9681.20",
+    "total_pharmacy_paid": "54705.82"
+  },
+  {
+    "primary_chain_code": "158",
+    "total_claims": 39,
+    "total_client_billed": "9125.22",
+    "total_pharmacy_paid": "18514.41"
+  },
+  {
+    "primary_chain_code": "B62",
+    "total_claims": 39,
+    "total_client_billed": "10014.20",
+    "total_pharmacy_paid": "22086.08"
+  },
+  {
+    "primary_chain_code": "A13",
+    "total_claims": 36,
+    "total_client_billed": "7552.54",
+    "total_pharmacy_paid": "16200.83"
+  },
+  {
+    "primary_chain_code": "043",
+    "total_claims": 33,
+    "total_client_billed": "10226.06",
+    "total_pharmacy_paid": "21055.05"
+  },
+  {
+    "primary_chain_code": "227",
+    "total_claims": 29,
+    "total_client_billed": "7092.30",
+    "total_pharmacy_paid": "15503.72"
+  },
+  {
+    "primary_chain_code": "256",
+    "total_claims": 29,
+    "total_client_billed": "6141.74",
+    "total_pharmacy_paid": "12687.37"
+  },
+  {
+    "primary_chain_code": "631",
+    "total_claims": 28,
+    "total_client_billed": "16043.85",
+    "total_pharmacy_paid": "32800.87"
+  },
+  {
+    "primary_chain_code": "108",
+    "total_claims": 28,
+    "total_client_billed": "3433.41",
+    "total_pharmacy_paid": "7647.70"
+  },
+  {
+    "primary_chain_code": "199",
+    "total_claims": 26,
+    "total_client_billed": "8525.34",
+    "total_pharmacy_paid": "17957.74"
+  },
+  {
+    "primary_chain_code": "744",
+    "total_claims": 21,
+    "total_client_billed": "8689.90",
+    "total_pharmacy_paid": "279403.69"
+  },
+  {
+    "primary_chain_code": "715",
+    "total_claims": 18,
+    "total_client_billed": "2804.97",
+    "total_pharmacy_paid": "273722.73"
+  },
+  {
+    "primary_chain_code": "687",
+    "total_claims": 18,
+    "total_client_billed": "12342.17",
+    "total_pharmacy_paid": "25508.41"
+  },
+  {
+    "primary_chain_code": "C45",
+    "total_claims": 18,
+    "total_client_billed": "8771.87",
+    "total_pharmacy_paid": "18587.58"
+  },
+  {
+    "primary_chain_code": "678",
+    "total_claims": 18,
+    "total_client_billed": "1456.26",
+    "total_pharmacy_paid": "11776.01"
+  },
+  {
+    "primary_chain_code": "C92",
+    "total_claims": 17,
+    "total_client_billed": "2249.15",
+    "total_pharmacy_paid": "169233.38"
+  },
+  {
+    "primary_chain_code": "822",
+    "total_claims": 17,
+    "total_client_billed": "2814.37",
+    "total_pharmacy_paid": "11468.95"
+  },
+  {
+    "primary_chain_code": "C28",
+    "total_claims": 15,
+    "total_client_billed": "3807.47",
+    "total_pharmacy_paid": "11323.41"
+  },
+  {
+    "primary_chain_code": "516",
+    "total_claims": 15,
+    "total_client_billed": "821.45",
+    "total_pharmacy_paid": "2581.81"
+  },
+  {
+    "primary_chain_code": "071",
+    "total_claims": 14,
+    "total_client_billed": "4994.53",
+    "total_pharmacy_paid": "10747.00"
+  },
+  {
+    "primary_chain_code": "782",
+    "total_claims": 14,
+    "total_client_billed": "5257.64",
+    "total_pharmacy_paid": "9725.60"
+  },
+  {
+    "primary_chain_code": "233",
+    "total_claims": 12,
+    "total_client_billed": "1586.72",
+    "total_pharmacy_paid": "3797.92"
+  },
+  {
+    "primary_chain_code": "C91",
+    "total_claims": 11,
+    "total_client_billed": "1622.44",
+    "total_pharmacy_paid": "274498.32"
+  },
+  {
+    "primary_chain_code": "832",
+    "total_claims": 11,
+    "total_client_billed": "5552.55",
+    "total_pharmacy_paid": "13093.90"
+  },
+  {
+    "primary_chain_code": "A65",
+    "total_claims": 11,
+    "total_client_billed": "1622.64",
+    "total_pharmacy_paid": "3534.87"
+  },
+  {
+    "primary_chain_code": "109",
+    "total_claims": 11,
+    "total_client_billed": "1276.45",
+    "total_pharmacy_paid": "5274.35"
+  },
+  {
+    "primary_chain_code": "540",
+    "total_claims": 9,
+    "total_client_billed": "3163.91",
+    "total_pharmacy_paid": "7474.80"
+  },
+  {
+    "primary_chain_code": "477",
+    "total_claims": 8,
+    "total_client_billed": "4755.19",
+    "total_pharmacy_paid": "237774.95"
+  },
+  {
+    "primary_chain_code": "803",
+    "total_claims": 7,
+    "total_client_billed": "1411.27",
+    "total_pharmacy_paid": "3048.91"
+  },
+  {
+    "primary_chain_code": "A87",
+    "total_claims": 7,
+    "total_client_billed": "847.24",
+    "total_pharmacy_paid": "68259.60"
+  },
+  {
+    "primary_chain_code": "C12",
+    "total_claims": 7,
+    "total_client_billed": "1092.58",
+    "total_pharmacy_paid": "6502.40"
+  },
+  {
+    "primary_chain_code": "434",
+    "total_claims": 7,
+    "total_client_billed": "1795.58",
+    "total_pharmacy_paid": "4016.68"
+  },
+  {
+    "primary_chain_code": "495",
+    "total_claims": 7,
+    "total_client_billed": "1192.28",
+    "total_pharmacy_paid": "3165.33"
+  },
+  {
+    "primary_chain_code": "282",
+    "total_claims": 7,
+    "total_client_billed": "3368.24",
+    "total_pharmacy_paid": "7127.75"
+  },
+  {
+    "primary_chain_code": "301",
+    "total_claims": 7,
+    "total_client_billed": "1982.34",
+    "total_pharmacy_paid": "4016.41"
+  },
+  {
+    "primary_chain_code": "862",
+    "total_claims": 5,
+    "total_client_billed": "635.00",
+    "total_pharmacy_paid": "1350.00"
+  },
+  {
+    "primary_chain_code": "A71",
+    "total_claims": 5,
+    "total_client_billed": "1398.37",
+    "total_pharmacy_paid": "3275.88"
+  },
+  {
+    "primary_chain_code": "A98",
+    "total_claims": 4,
+    "total_client_billed": "501.64",
+    "total_pharmacy_paid": "29316.44"
+  },
+  {
+    "primary_chain_code": "696",
+    "total_claims": 4,
+    "total_client_billed": "57.15",
+    "total_pharmacy_paid": "157708.71"
+  },
+  {
+    "primary_chain_code": "463",
+    "total_claims": 4,
+    "total_client_billed": "212.64",
+    "total_pharmacy_paid": "1257.69"
+  },
+  {
+    "primary_chain_code": "410",
+    "total_claims": 4,
+    "total_client_billed": "1944.31",
+    "total_pharmacy_paid": "5497.06"
+  },
+  {
+    "primary_chain_code": "C89",
+    "total_claims": 4,
+    "total_client_billed": "1328.47",
+    "total_pharmacy_paid": "3071.19"
+  },
+  {
+    "primary_chain_code": "087",
+    "total_claims": 4,
+    "total_client_billed": "232.67",
+    "total_pharmacy_paid": "1324.36"
+  },
+  {
+    "primary_chain_code": "817",
+    "total_claims": 4,
+    "total_client_billed": "1426.50",
+    "total_pharmacy_paid": "2944.35"
+  },
+  {
+    "primary_chain_code": "835",
+    "total_claims": 4,
+    "total_client_billed": "174.00",
+    "total_pharmacy_paid": "1325.33"
+  },
+  {
+    "primary_chain_code": "027",
+    "total_claims": 4,
+    "total_client_billed": "3169.03",
+    "total_pharmacy_paid": "6378.06"
+  },
+  {
+    "primary_chain_code": "C84",
+    "total_claims": 4,
+    "total_client_billed": "129.97",
+    "total_pharmacy_paid": "813.50"
+  },
+  {
+    "primary_chain_code": "C08",
+    "total_claims": 3,
+    "total_client_billed": "200.00",
+    "total_pharmacy_paid": "430.00"
+  },
+  {
+    "primary_chain_code": "945",
+    "total_claims": 3,
+    "total_client_billed": "3655.65",
+    "total_pharmacy_paid": "7339.74"
+  },
+  {
+    "primary_chain_code": "B67",
+    "total_claims": 3,
+    "total_client_billed": "190.00",
+    "total_pharmacy_paid": "503.12"
+  },
+  {
+    "primary_chain_code": "D10",
+    "total_claims": 3,
+    "total_client_billed": "-1052.81",
+    "total_pharmacy_paid": "-2064.62"
+  },
+  {
+    "primary_chain_code": "C15",
+    "total_claims": 3,
+    "total_client_billed": "-150.00",
+    "total_pharmacy_paid": "-432.29"
+  },
+  {
+    "primary_chain_code": "610",
+    "total_claims": 3,
+    "total_client_billed": "265.97",
+    "total_pharmacy_paid": "654.22"
+  },
+  {
+    "primary_chain_code": "A72",
+    "total_claims": 3,
+    "total_client_billed": "95.00",
+    "total_pharmacy_paid": "1803.49"
+  },
+  {
+    "primary_chain_code": "915",
+    "total_claims": 3,
+    "total_client_billed": "798.09",
+    "total_pharmacy_paid": "2268.40"
+  },
+  {
+    "primary_chain_code": "499",
+    "total_claims": 2,
+    "total_client_billed": "255.00",
+    "total_pharmacy_paid": "1007.83"
+  },
+  {
+    "primary_chain_code": "978",
+    "total_claims": 2,
+    "total_client_billed": "262.50",
+    "total_pharmacy_paid": "714.23"
+  },
+  {
+    "primary_chain_code": "A53",
+    "total_claims": 2,
+    "total_client_billed": "1027.61",
+    "total_pharmacy_paid": "2069.47"
+  },
+  {
+    "primary_chain_code": "673",
+    "total_claims": 2,
+    "total_client_billed": "102.00",
+    "total_pharmacy_paid": "277.00"
+  },
+  {
+    "primary_chain_code": "A37",
+    "total_claims": 2,
+    "total_client_billed": "468.56",
+    "total_pharmacy_paid": "937.12"
+  },
+  {
+    "primary_chain_code": "490",
+    "total_claims": 2,
+    "total_client_billed": "1241.02",
+    "total_pharmacy_paid": "2571.81"
+  },
+  {
+    "primary_chain_code": "847",
+    "total_claims": 2,
+    "total_client_billed": "658.49",
+    "total_pharmacy_paid": "2873.46"
+  },
+  {
+    "primary_chain_code": "273",
+    "total_claims": 2,
+    "total_client_billed": "190.31",
+    "total_pharmacy_paid": "414.62"
+  },
+  {
+    "primary_chain_code": "703",
+    "total_claims": 2,
+    "total_client_billed": "0.00",
+    "total_pharmacy_paid": "0.00"
+  },
+  {
+    "primary_chain_code": "B49",
+    "total_claims": 1,
+    "total_client_billed": "10.00",
+    "total_pharmacy_paid": "20.00"
+  },
+  {
+    "primary_chain_code": "B23",
+    "total_claims": 1,
+    "total_client_billed": "34.00",
+    "total_pharmacy_paid": "583.17"
+  },
+  {
+    "primary_chain_code": "899",
+    "total_claims": 1,
+    "total_client_billed": "45.00",
+    "total_pharmacy_paid": "129.81"
+  },
+  {
+    "primary_chain_code": "B01",
+    "total_claims": 1,
+    "total_client_billed": "10.00",
+    "total_pharmacy_paid": "45.00"
+  }
+]

@@ -1,0 +1,412 @@
+[
+  {
+    "group_number": "MP01",
+    "client_name": "Mayne Pharma Commercial LLC",
+    "total_claims": 66176,
+    "paid_claims": 60209,
+    "reversal_claims": 5967,
+    "total_client_billed": "13805800.47",
+    "total_pharmacy_paid": "34979017.64",
+    "reversal_rate": "0.0902"
+  },
+  {
+    "group_number": "AUVRET",
+    "client_name": "Axsome",
+    "total_claims": 10767,
+    "paid_claims": 10091,
+    "reversal_claims": 676,
+    "total_client_billed": "6121674.16",
+    "total_pharmacy_paid": "14184937.29",
+    "reversal_rate": "0.0628"
+  },
+  {
+    "group_number": "AUVPRX",
+    "client_name": "Axsome",
+    "total_claims": 6847,
+    "paid_claims": 6583,
+    "reversal_claims": 264,
+    "total_client_billed": "3221383.16",
+    "total_pharmacy_paid": "9024088.25",
+    "reversal_rate": "0.0386"
+  },
+  {
+    "group_number": "50778206",
+    "client_name": "Axsome",
+    "total_claims": 3195,
+    "paid_claims": 3112,
+    "reversal_claims": 83,
+    "total_client_billed": "2528956.64",
+    "total_pharmacy_paid": "5261655.24",
+    "reversal_rate": "0.0260"
+  },
+  {
+    "group_number": "IC47103004",
+    "client_name": "Organon",
+    "total_claims": 9387,
+    "paid_claims": 9121,
+    "reversal_claims": 266,
+    "total_client_billed": "2345109.30",
+    "total_pharmacy_paid": "9737255.39",
+    "reversal_rate": "0.0283"
+  },
+  {
+    "group_number": "IC47103001",
+    "client_name": "Organon",
+    "total_claims": 5002,
+    "paid_claims": 4820,
+    "reversal_claims": 182,
+    "total_client_billed": "1743301.77",
+    "total_pharmacy_paid": "5280160.21",
+    "reversal_rate": "0.0364"
+  },
+  {
+    "group_number": "WCKAL1001",
+    "client_name": "Kalvista",
+    "total_claims": 131,
+    "paid_claims": 126,
+    "reversal_claims": 5,
+    "total_client_billed": "998771.92",
+    "total_pharmacy_paid": "4606209.60",
+    "reversal_rate": "0.0382"
+  },
+  {
+    "group_number": "VP11",
+    "client_name": "Verrica Pharmaceuticals",
+    "total_claims": 1519,
+    "paid_claims": 1365,
+    "reversal_claims": 154,
+    "total_client_billed": "990213.37",
+    "total_pharmacy_paid": "2274019.08",
+    "reversal_rate": "0.1014"
+  },
+  {
+    "group_number": "SUNCACCP",
+    "client_name": "Axsome",
+    "total_claims": 1856,
+    "paid_claims": 1781,
+    "reversal_claims": 75,
+    "total_client_billed": "582695.74",
+    "total_pharmacy_paid": "1614610.37",
+    "reversal_rate": "0.0404"
+  },
+  {
+    "group_number": "SH",
+    "client_name": "Sempre Health",
+    "total_claims": 6721,
+    "paid_claims": 6344,
+    "reversal_claims": 377,
+    "total_client_billed": "332512.32",
+    "total_pharmacy_paid": "1715705.27",
+    "reversal_rate": "0.0561"
+  },
+  {
+    "group_number": "SUNFTOA",
+    "client_name": "Axsome",
+    "total_claims": 271,
+    "paid_claims": 267,
+    "reversal_claims": 4,
+    "total_client_billed": "246389.93",
+    "total_pharmacy_paid": "492276.53",
+    "reversal_rate": "0.0148"
+  },
+  {
+    "group_number": "AVY1001",
+    "client_name": "AVYXA",
+    "total_claims": 489,
+    "paid_claims": 489,
+    "reversal_claims": 0,
+    "total_client_billed": "244041.71",
+    "total_pharmacy_paid": "1129365.20",
+    "reversal_rate": "0.0000"
+  },
+  {
+    "group_number": "WCVRA3001",
+    "client_name": "Servier",
+    "total_claims": 809,
+    "paid_claims": 790,
+    "reversal_claims": 19,
+    "total_client_billed": "240398.23",
+    "total_pharmacy_paid": "8727376.53",
+    "reversal_rate": "0.0235"
+  },
+  {
+    "group_number": "AUVFTOA",
+    "client_name": "Axsome",
+    "total_claims": 220,
+    "paid_claims": 212,
+    "reversal_claims": 8,
+    "total_client_billed": "237705.77",
+    "total_pharmacy_paid": "474969.56",
+    "reversal_rate": "0.0364"
+  },
+  {
+    "group_number": "MP02",
+    "client_name": "Mayne Pharma Commercial LLC",
+    "total_claims": 846,
+    "paid_claims": 810,
+    "reversal_claims": 36,
+    "total_client_billed": "156179.73",
+    "total_pharmacy_paid": "363503.65",
+    "reversal_rate": "0.0426"
+  },
+  {
+    "group_number": "SC4539",
+    "client_name": "Scilex",
+    "total_claims": 1144,
+    "paid_claims": 1010,
+    "reversal_claims": 134,
+    "total_client_billed": "139675.92",
+    "total_pharmacy_paid": "445688.57",
+    "reversal_rate": "0.1171"
+  },
+  {
+    "group_number": "WCTBV3001",
+    "client_name": "Servier",
+    "total_claims": 156,
+    "paid_claims": 152,
+    "reversal_claims": 4,
+    "total_client_billed": "112715.73",
+    "total_pharmacy_paid": "1475134.98",
+    "reversal_rate": "0.0256"
+  },
+  {
+    "group_number": "IC47102003",
+    "client_name": "Organon",
+    "total_claims": 1933,
+    "paid_claims": 1836,
+    "reversal_claims": 97,
+    "total_client_billed": "106543.81",
+    "total_pharmacy_paid": "406635.69",
+    "reversal_rate": "0.0502"
+  },
+  {
+    "group_number": "IC47102001",
+    "client_name": "Organon",
+    "total_claims": 1619,
+    "paid_claims": 1508,
+    "reversal_claims": 111,
+    "total_client_billed": "85496.36",
+    "total_pharmacy_paid": "328092.29",
+    "reversal_rate": "0.0686"
+  },
+  {
+    "group_number": "WCVRA1001",
+    "client_name": "Servier",
+    "total_claims": 585,
+    "paid_claims": 570,
+    "reversal_claims": 15,
+    "total_client_billed": "83760.32",
+    "total_pharmacy_paid": "6484781.30",
+    "reversal_rate": "0.0256"
+  },
+  {
+    "group_number": "WCEVR1001",
+    "client_name": "Ascensia",
+    "total_claims": 311,
+    "paid_claims": 250,
+    "reversal_claims": 61,
+    "total_client_billed": "74848.21",
+    "total_pharmacy_paid": "173537.78",
+    "reversal_rate": "0.1961"
+  },
+  {
+    "group_number": "IC47101001",
+    "client_name": "Organon",
+    "total_claims": 1160,
+    "paid_claims": 1114,
+    "reversal_claims": 46,
+    "total_client_billed": "63229.58",
+    "total_pharmacy_paid": "160315.89",
+    "reversal_rate": "0.0397"
+  },
+  {
+    "group_number": "IC47101003",
+    "client_name": "Organon",
+    "total_claims": 1060,
+    "paid_claims": 1037,
+    "reversal_claims": 23,
+    "total_client_billed": "59059.75",
+    "total_pharmacy_paid": "154750.18",
+    "reversal_rate": "0.0217"
+  },
+  {
+    "group_number": "WCMYC4001",
+    "client_name": "Mycovia Pharmaceuticals",
+    "total_claims": 135,
+    "paid_claims": 118,
+    "reversal_claims": 17,
+    "total_client_billed": "58429.22",
+    "total_pharmacy_paid": "135839.44",
+    "reversal_rate": "0.1259"
+  },
+  {
+    "group_number": "GENEPK11",
+    "client_name": "GENMAB",
+    "total_claims": 6,
+    "paid_claims": 6,
+    "reversal_claims": 0,
+    "total_client_billed": "41888.32",
+    "total_pharmacy_paid": "213536.78",
+    "reversal_rate": "0.0000"
+  },
+  {
+    "group_number": "WCTBV1001",
+    "client_name": "Servier",
+    "total_claims": 138,
+    "paid_claims": 136,
+    "reversal_claims": 2,
+    "total_client_billed": "41551.26",
+    "total_pharmacy_paid": "936403.28",
+    "reversal_rate": "0.0145"
+  },
+  {
+    "group_number": "WCVRA2001",
+    "client_name": "Servier",
+    "total_claims": 118,
+    "paid_claims": 113,
+    "reversal_claims": 5,
+    "total_client_billed": "36306.07",
+    "total_pharmacy_paid": "1488479.53",
+    "reversal_rate": "0.0424"
+  },
+  {
+    "group_number": "WCMET4001",
+    "client_name": "HRA Pharma Rare Diseases",
+    "total_claims": 41,
+    "paid_claims": 41,
+    "reversal_claims": 0,
+    "total_client_billed": "31011.33",
+    "total_pharmacy_paid": "254935.62",
+    "reversal_rate": "0.0000"
+  },
+  {
+    "group_number": "SUNFTO",
+    "client_name": "Axsome",
+    "total_claims": 26,
+    "paid_claims": 26,
+    "reversal_claims": 0,
+    "total_client_billed": "25420.79",
+    "total_pharmacy_paid": "50791.47",
+    "reversal_rate": "0.0000"
+  },
+  {
+    "group_number": "MP03",
+    "client_name": "Mayne Pharma Commercial LLC",
+    "total_claims": 71,
+    "paid_claims": 70,
+    "reversal_claims": 1,
+    "total_client_billed": "18326.84",
+    "total_pharmacy_paid": "41806.12",
+    "reversal_rate": "0.0141"
+  },
+  {
+    "group_number": "WCTBV2001",
+    "client_name": "Servier",
+    "total_claims": 12,
+    "paid_claims": 11,
+    "reversal_claims": 1,
+    "total_client_billed": "18277.37",
+    "total_pharmacy_paid": "195817.29",
+    "reversal_rate": "0.0833"
+  },
+  {
+    "group_number": "WCTBV4001",
+    "client_name": "Servier",
+    "total_claims": 39,
+    "paid_claims": 39,
+    "reversal_claims": 0,
+    "total_client_billed": "12658.75",
+    "total_pharmacy_paid": "358003.70",
+    "reversal_rate": "0.0000"
+  },
+  {
+    "group_number": "WCLYS6001",
+    "client_name": "HRA Pharma Rare Diseases",
+    "total_claims": 64,
+    "paid_claims": 60,
+    "reversal_claims": 4,
+    "total_client_billed": "11160.94",
+    "total_pharmacy_paid": "181042.98",
+    "reversal_rate": "0.0625"
+  },
+  {
+    "group_number": "WCLYS6003",
+    "client_name": "HRA Pharma Rare Diseases",
+    "total_claims": 9,
+    "paid_claims": 9,
+    "reversal_claims": 0,
+    "total_client_billed": "3740.66",
+    "total_pharmacy_paid": "33812.69",
+    "reversal_rate": "0.0000"
+  },
+  {
+    "group_number": "RES11",
+    "client_name": "Resilia",
+    "total_claims": 23,
+    "paid_claims": 20,
+    "reversal_claims": 3,
+    "total_client_billed": "3025.00",
+    "total_pharmacy_paid": "9747.67",
+    "reversal_rate": "0.1304"
+  },
+  {
+    "group_number": "IC47104001",
+    "client_name": "Organon",
+    "total_claims": 49,
+    "paid_claims": 46,
+    "reversal_claims": 3,
+    "total_client_billed": "2958.50",
+    "total_pharmacy_paid": "7538.01",
+    "reversal_rate": "0.0612"
+  },
+  {
+    "group_number": "IC47103003",
+    "client_name": "Organon",
+    "total_claims": 5,
+    "paid_claims": 5,
+    "reversal_claims": 0,
+    "total_client_billed": "1832.44",
+    "total_pharmacy_paid": "6070.82",
+    "reversal_rate": "0.0000"
+  },
+  {
+    "group_number": "WCCEQ1001",
+    "client_name": "CeQur Corporation",
+    "total_claims": 24,
+    "paid_claims": 24,
+    "reversal_claims": 0,
+    "total_client_billed": "1659.15",
+    "total_pharmacy_paid": "19854.75",
+    "reversal_rate": "0.0000"
+  },
+  {
+    "group_number": "IC47104004",
+    "client_name": "Organon",
+    "total_claims": 1,
+    "paid_claims": 1,
+    "reversal_claims": 0,
+    "total_client_billed": "15.00",
+    "total_pharmacy_paid": "171.83",
+    "reversal_rate": "0.0000"
+  },
+  {
+    "group_number": "WCLYS6002",
+    "client_name": "HRA Pharma Rare Diseases",
+    "total_claims": 2,
+    "paid_claims": 2,
+    "reversal_claims": 0,
+    "total_client_billed": "0.00",
+    "total_pharmacy_paid": "9357.64",
+    "reversal_rate": "0.0000"
+  },
+  {
+    "group_number": "WCLYS6004",
+    "client_name": "HRA Pharma Rare Diseases",
+    "total_claims": 1,
+    "paid_claims": 1,
+    "reversal_claims": 0,
+    "total_client_billed": "0.00",
+    "total_pharmacy_paid": "389.90",
+    "reversal_rate": "0.0000"
+  }
+]

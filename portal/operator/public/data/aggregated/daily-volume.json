@@ -1,0 +1,821 @@
+[
+  {
+    "date": "2025-01-14",
+    "total_claims": 2,
+    "paid_claims": 2,
+    "reversal_claims": 0,
+    "total_client_billed": "5371.93"
+  },
+  {
+    "date": "2025-04-21",
+    "total_claims": 2,
+    "paid_claims": 1,
+    "reversal_claims": 1,
+    "total_client_billed": "24955.00"
+  },
+  {
+    "date": "2025-04-25",
+    "total_claims": 2,
+    "paid_claims": 0,
+    "reversal_claims": 2,
+    "total_client_billed": "-279.58"
+  },
+  {
+    "date": "2025-08-27",
+    "total_claims": 1,
+    "paid_claims": 1,
+    "reversal_claims": 0,
+    "total_client_billed": "2254.23"
+  },
+  {
+    "date": "2025-09-03",
+    "total_claims": 1,
+    "paid_claims": 1,
+    "reversal_claims": 0,
+    "total_client_billed": "2064.90"
+  },
+  {
+    "date": "2025-10-13",
+    "total_claims": 1,
+    "paid_claims": 1,
+    "reversal_claims": 0,
+    "total_client_billed": "87.36"
+  },
+  {
+    "date": "2025-10-14",
+    "total_claims": 1,
+    "paid_claims": 1,
+    "reversal_claims": 0,
+    "total_client_billed": "150.00"
+  },
+  {
+    "date": "2025-10-21",
+    "total_claims": 1,
+    "paid_claims": 1,
+    "reversal_claims": 0,
+    "total_client_billed": "199.83"
+  },
+  {
+    "date": "2025-10-22",
+    "total_claims": 2,
+    "paid_claims": 1,
+    "reversal_claims": 1,
+    "total_client_billed": "157.70"
+  },
+  {
+    "date": "2025-10-25",
+    "total_claims": 1,
+    "paid_claims": 0,
+    "reversal_claims": 1,
+    "total_client_billed": "-65.00"
+  },
+  {
+    "date": "2025-10-27",
+    "total_claims": 2,
+    "paid_claims": 2,
+    "reversal_claims": 0,
+    "total_client_billed": "939.87"
+  },
+  {
+    "date": "2025-11-06",
+    "total_claims": 1,
+    "paid_claims": 1,
+    "reversal_claims": 0,
+    "total_client_billed": "217.70"
+  },
+  {
+    "date": "2025-11-10",
+    "total_claims": 2,
+    "paid_claims": 2,
+    "reversal_claims": 0,
+    "total_client_billed": "478.81"
+  },
+  {
+    "date": "2025-11-12",
+    "total_claims": 1,
+    "paid_claims": 1,
+    "reversal_claims": 0,
+    "total_client_billed": "422.98"
+  },
+  {
+    "date": "2025-11-24",
+    "total_claims": 1,
+    "paid_claims": 1,
+    "reversal_claims": 0,
+    "total_client_billed": "275.08"
+  },
+  {
+    "date": "2025-11-25",
+    "total_claims": 1,
+    "paid_claims": 1,
+    "reversal_claims": 0,
+    "total_client_billed": "160.00"
+  },
+  {
+    "date": "2025-12-01",
+    "total_claims": 1,
+    "paid_claims": 0,
+    "reversal_claims": 1,
+    "total_client_billed": "-4.10"
+  },
+  {
+    "date": "2025-12-02",
+    "total_claims": 2,
+    "paid_claims": 2,
+    "reversal_claims": 0,
+    "total_client_billed": "1366.31"
+  },
+  {
+    "date": "2025-12-04",
+    "total_claims": 1,
+    "paid_claims": 0,
+    "reversal_claims": 1,
+    "total_client_billed": "-180.00"
+  },
+  {
+    "date": "2025-12-10",
+    "total_claims": 3,
+    "paid_claims": 3,
+    "reversal_claims": 0,
+    "total_client_billed": "806.00"
+  },
+  {
+    "date": "2025-12-12",
+    "total_claims": 2,
+    "paid_claims": 1,
+    "reversal_claims": 1,
+    "total_client_billed": "-2003.75"
+  },
+  {
+    "date": "2025-12-15",
+    "total_claims": 2,
+    "paid_claims": 2,
+    "reversal_claims": 0,
+    "total_client_billed": "1764.16"
+  },
+  {
+    "date": "2025-12-16",
+    "total_claims": 8,
+    "paid_claims": 4,
+    "reversal_claims": 4,
+    "total_client_billed": "20.17"
+  },
+  {
+    "date": "2025-12-17",
+    "total_claims": 1,
+    "paid_claims": 0,
+    "reversal_claims": 1,
+    "total_client_billed": "-75.00"
+  },
+  {
+    "date": "2025-12-18",
+    "total_claims": 1,
+    "paid_claims": 1,
+    "reversal_claims": 0,
+    "total_client_billed": "25.00"
+  },
+  {
+    "date": "2025-12-19",
+    "total_claims": 4,
+    "paid_claims": 2,
+    "reversal_claims": 2,
+    "total_client_billed": "-1113.32"
+  },
+  {
+    "date": "2025-12-22",
+    "total_claims": 2,
+    "paid_claims": 2,
+    "reversal_claims": 0,
+    "total_client_billed": "210.13"
+  },
+  {
+    "date": "2025-12-24",
+    "total_claims": 2,
+    "paid_claims": 2,
+    "reversal_claims": 0,
+    "total_client_billed": "357.01"
+  },
+  {
+    "date": "2025-12-26",
+    "total_claims": 2,
+    "paid_claims": 1,
+    "reversal_claims": 1,
+    "total_client_billed": "6.70"
+  },
+  {
+    "date": "2025-12-29",
+    "total_claims": 3,
+    "paid_claims": 3,
+    "reversal_claims": 0,
+    "total_client_billed": "1537.85"
+  },
+  {
+    "date": "2025-12-30",
+    "total_claims": 5,
+    "paid_claims": 3,
+    "reversal_claims": 2,
+    "total_client_billed": "2010.21"
+  },
+  {
+    "date": "2026-01-02",
+    "total_claims": 15,
+    "paid_claims": 12,
+    "reversal_claims": 3,
+    "total_client_billed": "3474.43"
+  },
+  {
+    "date": "2026-01-03",
+    "total_claims": 3,
+    "paid_claims": 2,
+    "reversal_claims": 1,
+    "total_client_billed": "-27.03"
+  },
+  {
+    "date": "2026-01-04",
+    "total_claims": 2,
+    "paid_claims": 2,
+    "reversal_claims": 0,
+    "total_client_billed": "30.00"
+  },
+  {
+    "date": "2026-01-05",
+    "total_claims": 32,
+    "paid_claims": 28,
+    "reversal_claims": 4,
+    "total_client_billed": "1709.40"
+  },
+  {
+    "date": "2026-01-06",
+    "total_claims": 15,
+    "paid_claims": 12,
+    "reversal_claims": 3,
+    "total_client_billed": "13936.92"
+  },
+  {
+    "date": "2026-01-07",
+    "total_claims": 9,
+    "paid_claims": 9,
+    "reversal_claims": 0,
+    "total_client_billed": "3005.05"
+  },
+  {
+    "date": "2026-01-08",
+    "total_claims": 24,
+    "paid_claims": 18,
+    "reversal_claims": 6,
+    "total_client_billed": "10624.25"
+  },
+  {
+    "date": "2026-01-09",
+    "total_claims": 24,
+    "paid_claims": 19,
+    "reversal_claims": 5,
+    "total_client_billed": "3049.17"
+  },
+  {
+    "date": "2026-01-11",
+    "total_claims": 2,
+    "paid_claims": 2,
+    "reversal_claims": 0,
+    "total_client_billed": "560.36"
+  },
+  {
+    "date": "2026-01-12",
+    "total_claims": 37,
+    "paid_claims": 30,
+    "reversal_claims": 7,
+    "total_client_billed": "15578.74"
+  },
+  {
+    "date": "2026-01-13",
+    "total_claims": 31,
+    "paid_claims": 29,
+    "reversal_claims": 2,
+    "total_client_billed": "9557.81"
+  },
+  {
+    "date": "2026-01-14",
+    "total_claims": 16,
+    "paid_claims": 13,
+    "reversal_claims": 3,
+    "total_client_billed": "4622.19"
+  },
+  {
+    "date": "2026-01-15",
+    "total_claims": 18,
+    "paid_claims": 11,
+    "reversal_claims": 7,
+    "total_client_billed": "1679.75"
+  },
+  {
+    "date": "2026-01-16",
+    "total_claims": 12,
+    "paid_claims": 12,
+    "reversal_claims": 0,
+    "total_client_billed": "7356.13"
+  },
+  {
+    "date": "2026-01-18",
+    "total_claims": 1,
+    "paid_claims": 0,
+    "reversal_claims": 1,
+    "total_client_billed": "-533.57"
+  },
+  {
+    "date": "2026-01-19",
+    "total_claims": 32,
+    "paid_claims": 32,
+    "reversal_claims": 0,
+    "total_client_billed": "14300.63"
+  },
+  {
+    "date": "2026-01-20",
+    "total_claims": 33,
+    "paid_claims": 30,
+    "reversal_claims": 3,
+    "total_client_billed": "14762.35"
+  },
+  {
+    "date": "2026-01-21",
+    "total_claims": 25,
+    "paid_claims": 24,
+    "reversal_claims": 1,
+    "total_client_billed": "6788.63"
+  },
+  {
+    "date": "2026-01-22",
+    "total_claims": 12,
+    "paid_claims": 10,
+    "reversal_claims": 2,
+    "total_client_billed": "3237.29"
+  },
+  {
+    "date": "2026-01-23",
+    "total_claims": 10,
+    "paid_claims": 7,
+    "reversal_claims": 3,
+    "total_client_billed": "3258.21"
+  },
+  {
+    "date": "2026-01-26",
+    "total_claims": 24,
+    "paid_claims": 19,
+    "reversal_claims": 5,
+    "total_client_billed": "5425.54"
+  },
+  {
+    "date": "2026-01-27",
+    "total_claims": 17,
+    "paid_claims": 16,
+    "reversal_claims": 1,
+    "total_client_billed": "14118.82"
+  },
+  {
+    "date": "2026-01-28",
+    "total_claims": 37,
+    "paid_claims": 29,
+    "reversal_claims": 8,
+    "total_client_billed": "10197.73"
+  },
+  {
+    "date": "2026-01-29",
+    "total_claims": 29,
+    "paid_claims": 21,
+    "reversal_claims": 8,
+    "total_client_billed": "7730.07"
+  },
+  {
+    "date": "2026-01-30",
+    "total_claims": 21,
+    "paid_claims": 15,
+    "reversal_claims": 6,
+    "total_client_billed": "128.00"
+  },
+  {
+    "date": "2026-01-31",
+    "total_claims": 1,
+    "paid_claims": 1,
+    "reversal_claims": 0,
+    "total_client_billed": "90.00"
+  },
+  {
+    "date": "2026-02-01",
+    "total_claims": 3,
+    "paid_claims": 1,
+    "reversal_claims": 2,
+    "total_client_billed": "40.00"
+  },
+  {
+    "date": "2026-02-02",
+    "total_claims": 50,
+    "paid_claims": 40,
+    "reversal_claims": 10,
+    "total_client_billed": "8419.26"
+  },
+  {
+    "date": "2026-02-03",
+    "total_claims": 53,
+    "paid_claims": 48,
+    "reversal_claims": 5,
+    "total_client_billed": "11797.77"
+  },
+  {
+    "date": "2026-02-04",
+    "total_claims": 38,
+    "paid_claims": 32,
+    "reversal_claims": 6,
+    "total_client_billed": "11358.84"
+  },
+  {
+    "date": "2026-02-05",
+    "total_claims": 80,
+    "paid_claims": 70,
+    "reversal_claims": 10,
+    "total_client_billed": "16095.46"
+  },
+  {
+    "date": "2026-02-06",
+    "total_claims": 44,
+    "paid_claims": 37,
+    "reversal_claims": 7,
+    "total_client_billed": "4872.68"
+  },
+  {
+    "date": "2026-02-07",
+    "total_claims": 3,
+    "paid_claims": 2,
+    "reversal_claims": 1,
+    "total_client_billed": "1932.62"
+  },
+  {
+    "date": "2026-02-08",
+    "total_claims": 4,
+    "paid_claims": 4,
+    "reversal_claims": 0,
+    "total_client_billed": "747.14"
+  },
+  {
+    "date": "2026-02-09",
+    "total_claims": 68,
+    "paid_claims": 51,
+    "reversal_claims": 17,
+    "total_client_billed": "10508.80"
+  },
+  {
+    "date": "2026-02-10",
+    "total_claims": 53,
+    "paid_claims": 45,
+    "reversal_claims": 8,
+    "total_client_billed": "4119.52"
+  },
+  {
+    "date": "2026-02-11",
+    "total_claims": 42,
+    "paid_claims": 35,
+    "reversal_claims": 7,
+    "total_client_billed": "13506.73"
+  },
+  {
+    "date": "2026-02-12",
+    "total_claims": 49,
+    "paid_claims": 31,
+    "reversal_claims": 18,
+    "total_client_billed": "22.18"
+  },
+  {
+    "date": "2026-02-13",
+    "total_claims": 45,
+    "paid_claims": 24,
+    "reversal_claims": 21,
+    "total_client_billed": "3897.72"
+  },
+  {
+    "date": "2026-02-14",
+    "total_claims": 30,
+    "paid_claims": 25,
+    "reversal_claims": 5,
+    "total_client_billed": "-1292.19"
+  },
+  {
+    "date": "2026-02-15",
+    "total_claims": 3,
+    "paid_claims": 0,
+    "reversal_claims": 3,
+    "total_client_billed": "-184.44"
+  },
+  {
+    "date": "2026-02-16",
+    "total_claims": 101,
+    "paid_claims": 64,
+    "reversal_claims": 37,
+    "total_client_billed": "2319.35"
+  },
+  {
+    "date": "2026-02-17",
+    "total_claims": 95,
+    "paid_claims": 55,
+    "reversal_claims": 40,
+    "total_client_billed": "5931.51"
+  },
+  {
+    "date": "2026-02-18",
+    "total_claims": 104,
+    "paid_claims": 51,
+    "reversal_claims": 53,
+    "total_client_billed": "-3185.38"
+  },
+  {
+    "date": "2026-02-19",
+    "total_claims": 188,
+    "paid_claims": 114,
+    "reversal_claims": 74,
+    "total_client_billed": "-35480.88"
+  },
+  {
+    "date": "2026-02-20",
+    "total_claims": 112,
+    "paid_claims": 27,
+    "reversal_claims": 85,
+    "total_client_billed": "-24487.61"
+  },
+  {
+    "date": "2026-02-21",
+    "total_claims": 49,
+    "paid_claims": 19,
+    "reversal_claims": 30,
+    "total_client_billed": "-5526.10"
+  },
+  {
+    "date": "2026-02-22",
+    "total_claims": 26,
+    "paid_claims": 7,
+    "reversal_claims": 19,
+    "total_client_billed": "-3854.16"
+  },
+  {
+    "date": "2026-02-23",
+    "total_claims": 154,
+    "paid_claims": 61,
+    "reversal_claims": 93,
+    "total_client_billed": "-11471.47"
+  },
+  {
+    "date": "2026-02-24",
+    "total_claims": 200,
+    "paid_claims": 62,
+    "reversal_claims": 138,
+    "total_client_billed": "-35614.95"
+  },
+  {
+    "date": "2026-02-25",
+    "total_claims": 215,
+    "paid_claims": 82,
+    "reversal_claims": 133,
+    "total_client_billed": "-43453.37"
+  },
+  {
+    "date": "2026-02-26",
+    "total_claims": 333,
+    "paid_claims": 116,
+    "reversal_claims": 217,
+    "total_client_billed": "-67158.64"
+  },
+  {
+    "date": "2026-02-27",
+    "total_claims": 352,
+    "paid_claims": 126,
+    "reversal_claims": 226,
+    "total_client_billed": "-75768.64"
+  },
+  {
+    "date": "2026-02-28",
+    "total_claims": 176,
+    "paid_claims": 77,
+    "reversal_claims": 99,
+    "total_client_billed": "-9143.87"
+  },
+  {
+    "date": "2026-03-01",
+    "total_claims": 249,
+    "paid_claims": 232,
+    "reversal_claims": 17,
+    "total_client_billed": "47043.27"
+  },
+  {
+    "date": "2026-03-02",
+    "total_claims": 1938,
+    "paid_claims": 1625,
+    "reversal_claims": 313,
+    "total_client_billed": "499404.69"
+  },
+  {
+    "date": "2026-03-03",
+    "total_claims": 1684,
+    "paid_claims": 1307,
+    "reversal_claims": 377,
+    "total_client_billed": "314011.72"
+  },
+  {
+    "date": "2026-03-04",
+    "total_claims": 1695,
+    "paid_claims": 1272,
+    "reversal_claims": 423,
+    "total_client_billed": "311112.80"
+  },
+  {
+    "date": "2026-03-05",
+    "total_claims": 1895,
+    "paid_claims": 1398,
+    "reversal_claims": 497,
+    "total_client_billed": "348179.35"
+  },
+  {
+    "date": "2026-03-06",
+    "total_claims": 1772,
+    "paid_claims": 1245,
+    "reversal_claims": 527,
+    "total_client_billed": "255793.38"
+  },
+  {
+    "date": "2026-03-07",
+    "total_claims": 443,
+    "paid_claims": 337,
+    "reversal_claims": 106,
+    "total_client_billed": "55606.92"
+  },
+  {
+    "date": "2026-03-08",
+    "total_claims": 329,
+    "paid_claims": 255,
+    "reversal_claims": 74,
+    "total_client_billed": "50944.96"
+  },
+  {
+    "date": "2026-03-09",
+    "total_claims": 2608,
+    "paid_claims": 1775,
+    "reversal_claims": 833,
+    "total_client_billed": "392257.96"
+  },
+  {
+    "date": "2026-03-10",
+    "total_claims": 2325,
+    "paid_claims": 1510,
+    "reversal_claims": 815,
+    "total_client_billed": "357747.58"
+  },
+  {
+    "date": "2026-03-11",
+    "total_claims": 2364,
+    "paid_claims": 1429,
+    "reversal_claims": 935,
+    "total_client_billed": "136220.05"
+  },
+  {
+    "date": "2026-03-12",
+    "total_claims": 2294,
+    "paid_claims": 1356,
+    "reversal_claims": 938,
+    "total_client_billed": "153760.39"
+  },
+  {
+    "date": "2026-03-13",
+    "total_claims": 2505,
+    "paid_claims": 1527,
+    "reversal_claims": 978,
+    "total_client_billed": "246274.57"
+  },
+  {
+    "date": "2026-03-14",
+    "total_claims": 630,
+    "paid_claims": 457,
+    "reversal_claims": 173,
+    "total_client_billed": "64391.61"
+  },
+  {
+    "date": "2026-03-15",
+    "total_claims": 545,
+    "paid_claims": 369,
+    "reversal_claims": 176,
+    "total_client_billed": "54679.77"
+  },
+  {
+    "date": "2026-03-16",
+    "total_claims": 9076,
+    "paid_claims": 9076,
+    "reversal_claims": 0,
+    "total_client_billed": "2960742.47"
+  },
+  {
+    "date": "2026-03-17",
+    "total_claims": 6909,
+    "paid_claims": 6909,
+    "reversal_claims": 0,
+    "total_client_billed": "2290570.99"
+  },
+  {
+    "date": "2026-03-18",
+    "total_claims": 6912,
+    "paid_claims": 6912,
+    "reversal_claims": 0,
+    "total_client_billed": "2318782.96"
+  },
+  {
+    "date": "2026-03-19",
+    "total_claims": 6725,
+    "paid_claims": 6725,
+    "reversal_claims": 0,
+    "total_client_billed": "2152234.79"
+  },
+  {
+    "date": "2026-03-20",
+    "total_claims": 6052,
+    "paid_claims": 6052,
+    "reversal_claims": 0,
+    "total_client_billed": "1939960.01"
+  },
+  {
+    "date": "2026-03-21",
+    "total_claims": 1137,
+    "paid_claims": 1137,
+    "reversal_claims": 0,
+    "total_client_billed": "311017.42"
+  },
+  {
+    "date": "2026-03-22",
+    "total_claims": 927,
+    "paid_claims": 927,
+    "reversal_claims": 0,
+    "total_client_billed": "253227.18"
+  },
+  {
+    "date": "2026-03-23",
+    "total_claims": 9843,
+    "paid_claims": 9843,
+    "reversal_claims": 0,
+    "total_client_billed": "3288644.24"
+  },
+  {
+    "date": "2026-03-24",
+    "total_claims": 7846,
+    "paid_claims": 7846,
+    "reversal_claims": 0,
+    "total_client_billed": "2575731.65"
+  },
+  {
+    "date": "2026-03-25",
+    "total_claims": 7524,
+    "paid_claims": 7524,
+    "reversal_claims": 0,
+    "total_client_billed": "2430610.35"
+  },
+  {
+    "date": "2026-03-26",
+    "total_claims": 7403,
+    "paid_claims": 7403,
+    "reversal_claims": 0,
+    "total_client_billed": "2394893.07"
+  },
+  {
+    "date": "2026-03-27",
+    "total_claims": 6313,
+    "paid_claims": 6313,
+    "reversal_claims": 0,
+    "total_client_billed": "2205851.15"
+  },
+  {
+    "date": "2026-03-28",
+    "total_claims": 1445,
+    "paid_claims": 1445,
+    "reversal_claims": 0,
+    "total_client_billed": "412944.43"
+  },
+  {
+    "date": "2026-03-29",
+    "total_claims": 992,
+    "paid_claims": 992,
+    "reversal_claims": 0,
+    "total_client_billed": "255777.07"
+  },
+  {
+    "date": "2026-03-30",
+    "total_claims": 9765,
+    "paid_claims": 9765,
+    "reversal_claims": 0,
+    "total_client_billed": "3224237.00"
+  },
+  {
+    "date": "2026-03-31",
+    "total_claims": 7609,
+    "paid_claims": 7609,
+    "reversal_claims": 0,
+    "total_client_billed": "2549719.81"
+  },
+  {
+    "date": "2026-04-01",
+    "total_claims": 1,
+    "paid_claims": 1,
+    "reversal_claims": 0,
+    "total_client_billed": "625.00"
+  }
+]

@@ -1,0 +1,45 @@
+{
+  "generated_at": "2026-04-14T13:34:11.773Z",
+  "files": [
+    {
+      "name": "InfinityRX_20260401_1618.txt",
+      "cycle_id": "BC-2026-SM-08",
+      "status": "in_progress",
+      "rows": 89231,
+      "total_billed": "23868600.79",
+      "total_paid": "71274324.18",
+      "paid_count": 82162,
+      "reversal_count": 7069
+    },
+    {
+      "name": "InfinityRX_20260401_0815.txt",
+      "cycle_id": "BC-2026-SM-07",
+      "status": "completed",
+      "rows": 18174,
+      "total_billed": "5946972.21",
+      "total_paid": "22824540.96",
+      "paid_count": 17295,
+      "reversal_count": 879
+    },
+    {
+      "name": "InfinityRX_20260316_0815.txt",
+      "cycle_id": "BC-2026-SM-06",
+      "status": "completed",
+      "rows": 15563,
+      "total_billed": "5013152.54",
+      "total_paid": "19338820.87",
+      "paid_count": 14868,
+      "reversal_count": 695
+    }
+  ],
+  "totals": {
+    "total_claims": 122968,
+    "paid_claims": 114325,
+    "reversal_claims": 8643,
+    "total_client_billed": "34828725.54",
+    "total_pharmacy_paid": "113437686.01",
+    "total_processing_fees": "182999.20",
+    "total_transaction_fees": "29091.00",
+    "reversal_rate": "0.0703"
+  }
+}
