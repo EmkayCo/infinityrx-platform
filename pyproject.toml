@@ -28,9 +28,12 @@ dependencies = [
   "xgboost>=3.2.0",
   "scikit-learn>=1.8.0",
   "networkx>=3.6.1",
-  "hypothesis>=6.151.12",
   "pyotp>=2.9.0",
   "fido2>=2.1.1",
+  "openai>=1.50",
+  "jinja2>=3.1",
+  "pgvector>=0.3",
+  "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
@@ -53,12 +56,12 @@ package = false
 py-modules = []
 
 [tool.pytest.ini_options]
-minversion = "9.0"
+minversion = "8.0"
 asyncio_mode = "auto"
-testpaths = ["modules/core-platform/tests", "shared/tests", "tests"]
-addopts = "-ra -q --strict-markers --strict-config --import-mode=importlib"
+testpaths = ["modules/core-platform/tests", "modules/ai-nlp/tests", "shared/tests", "tests"]
+addopts = "-ra -q --strict-markers --strict-config --import-mode=importlib -m 'not integration'"
 markers = [
-  "integration: marks tests that require a live Postgres instance",
+  "integration: marks tests that require a live Postgres/RabbitMQ/Redis instance",
 ]
 filterwarnings = [
   "error",
@@ -77,10 +80,12 @@ source = [
   "shared/events",
   "shared/utils",
   "shared/crypto",
+  "shared/ai",
   "shared",
   "modules/core-platform/src",
   "modules/billing/src",
   "modules/reclaimrx/src",
+  "modules/ai-nlp/src",
 ]
 omit = [
   "**/__init__.py",

@@ -2,6 +2,11 @@
 
 ALL money operations use Decimal with ROUND_HALF_UP.
 No floats. Ever.
+
+``money()`` and ``penny_allocate()`` come from :mod:`shared.utils.money`
+(single canonical implementation). Reporting-specific helpers such as
+:func:`calculate_ar_aging_buckets` stay here because they aren't shared
+across modules.
 """
 
 from __future__ import annotations
@@ -10,21 +15,14 @@ from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from shared.utils.money import money, penny_allocate
 
-def money(value: Any) -> Decimal:
-    """Convert any numeric value to Decimal with 2 decimal places (ROUND_HALF_UP)."""
-    return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-
-def penny_allocate(total: Decimal, count: int) -> list[Decimal]:
-    """Split total into count equal parts; remainder penny goes to first item."""
-    if count <= 0:
-        return []
-    per_item = (total / count).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    allocated = [per_item] * count
-    remainder = total - sum(allocated)
-    allocated[0] += remainder
-    return allocated
+__all__ = [
+    "money",
+    "penny_allocate",
+    "calculate_ar_aging_buckets",
+    "calculate_prefund_burn_rate",
+]
 
 
 def calculate_ar_aging_buckets(invoices: list[dict[str, Any]], as_of: date) -> dict[str, Decimal]:

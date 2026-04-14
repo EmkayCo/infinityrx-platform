@@ -1,4 +1,9 @@
-"""Tests for the async engine and session factory."""
+"""Tests for the async engine and session factory.
+
+Drives real async connections to the configured DATABASE_URL — marked
+``integration`` so the default ``-m "not integration"`` selector skips
+these when Postgres is not reachable.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +15,8 @@ from shared.db import engine as engine_mod
 from shared.db import session as session_mod
 from shared.db.engine import dispose_engine, get_engine
 from shared.db.session import get_sessionmaker, reset_sessionmaker, transaction
+
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(autouse=True)

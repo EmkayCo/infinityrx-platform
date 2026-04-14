@@ -13,6 +13,8 @@ from sqlalchemy.exc import IntegrityError
 
 from src.bank_holidays.service import BankHolidayService
 
+# Integration marker applied via the directory conftest.
+
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers

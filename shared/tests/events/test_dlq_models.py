@@ -1,4 +1,8 @@
-"""Tests for EventDLQEntry and ProcessedEvent ORM models and migration."""
+"""Tests for EventDLQEntry and ProcessedEvent ORM models and migration.
+
+Requires a live Postgres instance — migration DDL, JSONB column type,
+and composite-PK ON CONFLICT behaviour cannot be exercised on SQLite.
+"""
 
 from __future__ import annotations
 
@@ -62,7 +66,7 @@ async def db_session(pg_engine):
         )
 
 
-@pytest.mark.postgres
+@pytest.mark.integration
 async def test_event_dlq_entry_round_trip(db_session: AsyncSession):
     """Insert and retrieve an EventDLQEntry, verifying all fields persist."""
     entry_id = uuid.uuid4()
@@ -98,7 +102,7 @@ async def test_event_dlq_entry_round_trip(db_session: AsyncSession):
     assert result.replayed_at is None
 
 
-@pytest.mark.postgres
+@pytest.mark.integration
 async def test_event_dlq_entry_replayed_at_nullable(db_session: AsyncSession):
     """replayed_at should be nullable."""
     entry = EventDLQEntry(
@@ -122,7 +126,7 @@ async def test_event_dlq_entry_replayed_at_nullable(db_session: AsyncSession):
     assert result.replayed_at is None
 
 
-@pytest.mark.postgres
+@pytest.mark.integration
 async def test_processed_event_round_trip(db_session: AsyncSession):
     """Insert and retrieve a ProcessedEvent."""
     pe = ProcessedEvent(
@@ -142,7 +146,7 @@ async def test_processed_event_round_trip(db_session: AsyncSession):
     assert result.processed_at is not None
 
 
-@pytest.mark.postgres
+@pytest.mark.integration
 async def test_processed_event_composite_pk_allows_same_key_different_consumer(
     db_session: AsyncSession,
 ):
@@ -163,7 +167,7 @@ async def test_processed_event_composite_pk_allows_same_key_different_consumer(
     assert result_b is not None
 
 
-@pytest.mark.postgres
+@pytest.mark.integration
 async def test_event_dlq_entry_envelope_is_jsonb(db_session: AsyncSession):
     """Envelope stored as JSONB should support nested dict retrieval."""
     payload = {"event_id": str(uuid.uuid4()), "payload": {"amount": "99.99"}}
@@ -191,7 +195,7 @@ async def test_event_dlq_entry_envelope_is_jsonb(db_session: AsyncSession):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.postgres
+@pytest.mark.integration
 async def test_migration_upgrade_creates_tables(pg_engine):
     """Running upgrade() creates event_dlq and processed_events tables."""
     migration = _load_migration()
@@ -218,7 +222,7 @@ async def test_migration_upgrade_creates_tables(pg_engine):
         await conn.run_sync(migration.downgrade)
 
 
-@pytest.mark.postgres
+@pytest.mark.integration
 async def test_migration_downgrade_drops_tables(pg_engine):
     """downgrade() removes both tables."""
     migration = _load_migration()

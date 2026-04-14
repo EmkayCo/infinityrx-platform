@@ -232,7 +232,7 @@ def test_in_memory_store_implements_protocol():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.postgres
+@pytest.mark.integration
 async def test_postgres_store_first_seen_returns_false(pg_engine):
     """First-time key is not seen."""
     from shared.events.idempotency import PostgresIdempotencyStore
@@ -242,7 +242,7 @@ async def test_postgres_store_first_seen_returns_false(pg_engine):
     assert await store.seen("pg-key-1", consumer_name="consumer-X") is False
 
 
-@pytest.mark.postgres
+@pytest.mark.integration
 async def test_postgres_store_mark_then_seen(pg_engine):
     from shared.events.idempotency import PostgresIdempotencyStore
 
@@ -252,7 +252,7 @@ async def test_postgres_store_mark_then_seen(pg_engine):
     assert await store.seen("pg-key-2", consumer_name="consumer-X") is True
 
 
-@pytest.mark.postgres
+@pytest.mark.integration
 async def test_postgres_store_insert_on_conflict_is_idempotent(pg_engine):
     """Marking the same key twice should not raise."""
     from shared.events.idempotency import PostgresIdempotencyStore
@@ -264,7 +264,7 @@ async def test_postgres_store_insert_on_conflict_is_idempotent(pg_engine):
     assert await store.seen("pg-key-3", consumer_name="consumer-X") is True
 
 
-@pytest.mark.postgres
+@pytest.mark.integration
 async def test_postgres_store_consumer_scoping(pg_engine):
     """Different consumer_name values are independent for the same key."""
     from shared.events.idempotency import PostgresIdempotencyStore

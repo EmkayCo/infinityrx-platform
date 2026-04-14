@@ -2,36 +2,21 @@
 
 All money math uses Decimal with ROUND_HALF_UP. No floats. Ever.
 numpy arrays used ONLY for ML feature vectors, never for money.
+
+``money()`` and ``penny_allocate()`` are re-exported from
+:mod:`shared.utils.money` — there is exactly one implementation in the
+platform. Reclaimrx-specific helpers like :func:`three_tier_recovery`
+stay here because they aren't shared across modules.
 """
 from __future__ import annotations
 
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any
 
-_TWO = Decimal("0.01")
-_ZERO = Decimal("0.00")
+from shared.utils.money import TWO_PLACES as _TWO
+from shared.utils.money import ZERO as _ZERO
+from shared.utils.money import money, penny_allocate
 
-
-def money(value: Any) -> Decimal:
-    """Convert any numeric value to Decimal with 2 decimal places, ROUND_HALF_UP."""
-    if isinstance(value, Decimal):
-        return value.quantize(_TWO, rounding=ROUND_HALF_UP)
-    return Decimal(str(value)).quantize(_TWO, rounding=ROUND_HALF_UP)
-
-
-def penny_allocate(total: Decimal, count: int) -> list[Decimal]:
-    """Split total into count equal parts, allocating remainder penny to first item.
-
-    Guarantees: sum(result) == total for any valid inputs.
-    """
-    if count <= 0:
-        return []
-    per_item = (total / count).quantize(_TWO, rounding=ROUND_HALF_UP)
-    allocated = [per_item] * count
-    remainder = total - sum(allocated)
-    # remainder is always a multiple of 0.01 (possibly negative)
-    allocated[0] = (allocated[0] + remainder).quantize(_TWO, rounding=ROUND_HALF_UP)
-    return allocated
+__all__ = ["money", "penny_allocate", "three_tier_recovery"]
 
 
 def three_tier_recovery(items: list[dict]) -> dict[str, Decimal]:

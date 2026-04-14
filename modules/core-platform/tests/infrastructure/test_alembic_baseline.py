@@ -34,6 +34,10 @@ from shared.config import get_settings
 from shared.db.base import Base
 from shared.db.models import core as _core_models  # noqa: F401
 
+# Requires a live Postgres instance — skip with ``-m "not integration"``
+# unless CI provides the DATABASE_URL.
+pytestmark = pytest.mark.integration
+
 EXPECTED_TABLES = {
     "tenants",
     "users",

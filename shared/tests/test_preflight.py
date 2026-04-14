@@ -170,6 +170,7 @@ def test_check_lessons_empty(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 async def test_check_postgres_real() -> None:
     """Exercise the real check against the developer's running Postgres."""
     r = await check_postgres()

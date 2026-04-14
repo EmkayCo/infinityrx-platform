@@ -18,6 +18,11 @@ import uuid
 import pytest
 from sqlalchemy import delete, select, update
 
+# Drives real Postgres — the security-floor guarantees only make sense
+# against a real database. Marked integration so the default local run
+# skips when no DB is reachable.
+pytestmark = pytest.mark.integration
+
 from shared.db.models.core import Tenant, User
 from shared.db.tenant_context import (
     MissingTenantContextError,
