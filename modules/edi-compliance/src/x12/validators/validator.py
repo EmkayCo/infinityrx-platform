@@ -203,3 +203,43 @@ def validate_837p_basic(raw: str, delims: Delimiters) -> list[str]:
     errors.extend(_validate_837p_guide(segs))
     errors.extend(_validate_business(segs))
     return [f"{e.code}: {e.message}" for e in errors]
+
+
+def _validate_837i_guide(segs: list[list[str]]) -> list[ValidationError]:
+    errors: list[ValidationError] = []
+    seg_ids = [s[0] for s in segs]
+    required = ["ISA", "GS", "ST", "BHT", "HL", "CLM", "SE", "GE", "IEA"]
+    for r in required:
+        if r not in seg_ids:
+            errors.append(ValidationError(ValidationLevel.IMPLEMENTATION_GUIDE, "L2-837I-001",
+                                          f"Required segment {r} missing", r))
+    return errors
+
+
+def _validate_837d_guide(segs: list[list[str]]) -> list[ValidationError]:
+    errors: list[ValidationError] = []
+    seg_ids = [s[0] for s in segs]
+    required = ["ISA", "GS", "ST", "BHT", "HL", "CLM", "SE", "GE", "IEA"]
+    for r in required:
+        if r not in seg_ids:
+            errors.append(ValidationError(ValidationLevel.IMPLEMENTATION_GUIDE, "L2-837D-001",
+                                          f"Required segment {r} missing", r))
+    return errors
+
+
+def validate_837i_basic(raw: str, delims: Delimiters) -> list[str]:
+    """Quick validation used by the 837I generator (fail-closed)."""
+    segs = parse_segments(raw, delims)
+    errors = _validate_syntax(raw, delims)
+    errors.extend(_validate_837i_guide(segs))
+    errors.extend(_validate_business(segs))
+    return [f"{e.code}: {e.message}" for e in errors]
+
+
+def validate_837d_basic(raw: str, delims: Delimiters) -> list[str]:
+    """Quick validation used by the 837D generator (fail-closed)."""
+    segs = parse_segments(raw, delims)
+    errors = _validate_syntax(raw, delims)
+    errors.extend(_validate_837d_guide(segs))
+    errors.extend(_validate_business(segs))
+    return [f"{e.code}: {e.message}" for e in errors]

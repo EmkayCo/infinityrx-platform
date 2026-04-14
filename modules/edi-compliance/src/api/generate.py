@@ -17,11 +17,21 @@ except ImportError:
         yield None
 
 from ..x12.generators.gen_270 import generate_270
+from ..x12.generators.gen_271 import generate_271
+from ..x12.generators.gen_276 import generate_276
+from ..x12.generators.gen_277 import generate_277
 from ..x12.generators.gen_835 import generate_835
+from ..x12.generators.gen_837d import generate_837d
+from ..x12.generators.gen_837i import generate_837i
 from ..x12.generators.gen_837p import generate_837p
 from ..x12.generators.schemas import (
     Generate270Request,
+    Generate271Request,
+    Generate276Request,
+    Generate277Request,
     Generate835Request,
+    Generate837DRequest,
+    Generate837IRequest,
     Generate837PRequest,
 )
 
@@ -86,3 +96,70 @@ async def api_generate_270(
     """Generate a 270 eligibility inquiry EDI file."""
     content = generate_270(req)
     return GenerateResponse(content=content, byte_count=len(content.encode()), transaction_type="270")
+
+
+@router.post("/271", response_model=GenerateResponse)
+async def api_generate_271(
+    req: Generate271Request,
+    tenant_id: uuid.UUID = Depends(_require_tenant),
+    db: AsyncSession = Depends(get_session),
+) -> GenerateResponse:
+    """Generate a 271 eligibility response EDI file."""
+    content = generate_271(req)
+    return GenerateResponse(content=content, byte_count=len(content.encode()), transaction_type="271")
+
+
+@router.post("/276", response_model=GenerateResponse)
+async def api_generate_276(
+    req: Generate276Request,
+    tenant_id: uuid.UUID = Depends(_require_tenant),
+    db: AsyncSession = Depends(get_session),
+) -> GenerateResponse:
+    """Generate a 276 claim status request EDI file."""
+    content = generate_276(req)
+    return GenerateResponse(content=content, byte_count=len(content.encode()), transaction_type="276")
+
+
+@router.post("/277", response_model=GenerateResponse)
+async def api_generate_277(
+    req: Generate277Request,
+    tenant_id: uuid.UUID = Depends(_require_tenant),
+    db: AsyncSession = Depends(get_session),
+) -> GenerateResponse:
+    """Generate a 277 claim status response EDI file."""
+    content = generate_277(req)
+    return GenerateResponse(content=content, byte_count=len(content.encode()), transaction_type="277")
+
+
+@router.post("/837i", response_model=GenerateResponse)
+async def api_generate_837i(
+    req: Generate837IRequest,
+    tenant_id: uuid.UUID = Depends(_require_tenant),
+    db: AsyncSession = Depends(get_session),
+) -> GenerateResponse:
+    """Generate a 837I institutional claim EDI file."""
+    try:
+        content = generate_837i(req)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"code": "GENERATION_FAILED", "message": str(exc), "correlation_id": str(uuid.uuid4())}},
+        )
+    return GenerateResponse(content=content, byte_count=len(content.encode()), transaction_type="837I")
+
+
+@router.post("/837d", response_model=GenerateResponse)
+async def api_generate_837d(
+    req: Generate837DRequest,
+    tenant_id: uuid.UUID = Depends(_require_tenant),
+    db: AsyncSession = Depends(get_session),
+) -> GenerateResponse:
+    """Generate a 837D dental claim EDI file."""
+    try:
+        content = generate_837d(req)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"code": "GENERATION_FAILED", "message": str(exc), "correlation_id": str(uuid.uuid4())}},
+        )
+    return GenerateResponse(content=content, byte_count=len(content.encode()), transaction_type="837D")

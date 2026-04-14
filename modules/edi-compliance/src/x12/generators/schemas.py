@@ -137,3 +137,104 @@ class Generate270Request(BaseModel):
     service_type_codes: List[str] = Field(default_factory=lambda: ["30"])
     date_of_service: Optional[str] = None
     metadata: dict = Field(default_factory=dict)
+
+
+class _837BaseRequest(BaseModel):
+    tenant_id: UUID
+    trading_partner_id: UUID
+    isa_control_number: int
+    gs_control_number: int
+    st_control_number: int = 1
+    sender_qualifier: str = "ZZ"
+    sender_id: str = "INFINITYRX     "
+    receiver_qualifier: str = "ZZ"
+    receiver_id: str
+    test_mode: bool = True
+    billing_provider_npi: str
+    billing_provider_name: str
+    billing_provider_ein: Optional[str] = None
+    subscriber_id: str
+    subscriber_last_name: str
+    subscriber_first_name: str
+    subscriber_dob: str
+    subscriber_gender: str
+    payer_id: str
+    payer_name: str
+    claims: List[Any] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
+
+
+class Generate837IRequest(_837BaseRequest):
+    implementation_guide: str = "005010X223A3"
+    claim_filing_indicator: str = "MC"
+
+
+class Generate837DRequest(_837BaseRequest):
+    implementation_guide: str = "005010X224A3"
+
+
+class Generate271Request(BaseModel):
+    """271 Eligibility/Benefit Information Response."""
+    tenant_id: UUID
+    trading_partner_id: UUID
+    isa_control_number: int
+    gs_control_number: int
+    st_control_number: int = 1
+    sender_qualifier: str = "ZZ"
+    sender_id: str = "INFINITYRX     "
+    receiver_qualifier: str = "ZZ"
+    receiver_id: str
+    test_mode: bool = True
+    implementation_guide: str = "005010X279A1"
+    original_270_control: str = ""
+    subscriber_id: str
+    subscriber_last_name: str
+    subscriber_first_name: str
+    subscriber_dob: Optional[str] = None
+    payer_id: str
+    payer_name: str
+    eligibility_status: str = "1"       # 1=active, 6=inactive
+    plan_begin_date: Optional[str] = None
+    plan_end_date: Optional[str] = None
+    benefit_info: List[Any] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
+
+
+class Generate276Request(BaseModel):
+    """276 Health Care Claim Status Request."""
+    tenant_id: UUID
+    trading_partner_id: UUID
+    isa_control_number: int
+    gs_control_number: int
+    st_control_number: int = 1
+    sender_qualifier: str = "ZZ"
+    sender_id: str = "INFINITYRX     "
+    receiver_qualifier: str = "ZZ"
+    receiver_id: str
+    test_mode: bool = True
+    implementation_guide: str = "005010X212"
+    payer_id: str
+    payer_name: str
+    provider_npi: str
+    provider_name: str
+    claim_inquiries: List[Any] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
+
+
+class Generate277Request(BaseModel):
+    """277 Health Care Claim Status Response."""
+    tenant_id: UUID
+    trading_partner_id: UUID
+    isa_control_number: int
+    gs_control_number: int
+    st_control_number: int = 1
+    sender_qualifier: str = "ZZ"
+    sender_id: str = "INFINITYRX     "
+    receiver_qualifier: str = "ZZ"
+    receiver_id: str
+    test_mode: bool = True
+    implementation_guide: str = "005010X212"
+    payer_id: str
+    payer_name: str
+    claim_statuses: List[Any] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
