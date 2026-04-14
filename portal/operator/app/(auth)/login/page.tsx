@@ -6,8 +6,12 @@ import { signIn } from "next-auth/react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Eye, EyeOff, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, ShieldCheck, FlaskConical } from "lucide-react";
 import { cn } from "@shared/lib/format";
+
+const DEV_BYPASS_VISIBLE =
+  process.env.NODE_ENV !== "production" &&
+  process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === "true";
 
 const loginSchema = z.object({
   email: z.string().email("Enter a valid email address"),
@@ -175,6 +179,45 @@ export default function LoginPage() {
               {isLoading ? "Signing in..." : "Sign in"}
             </button>
           </form>
+
+          {DEV_BYPASS_VISIBLE && (
+            <div className="mt-6 border-t border-navy-700 pt-4">
+              <button
+                type="button"
+                onClick={async () => {
+                  setAuthError(null);
+                  setIsLoading(true);
+                  try {
+                    const result = await signIn("dev-bypass", {
+                      redirect: false,
+                    });
+                    if (result?.error) {
+                      setAuthError(
+                        "Dev bypass refused. Server flag DEV_AUTH_BYPASS is not set to 'true'."
+                      );
+                      return;
+                    }
+                    router.push(callbackUrl);
+                  } finally {
+                    setIsLoading(false);
+                  }
+                }}
+                disabled={isLoading}
+                className={cn(
+                  "flex w-full items-center justify-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-2.5",
+                  "text-sm font-medium text-amber-300 hover:bg-amber-500/20",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500",
+                  "disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                )}
+              >
+                <FlaskConical className="h-4 w-4" />
+                Sign in as Dev Admin (mock)
+              </button>
+              <p className="mt-2 text-center text-[11px] text-amber-400/70">
+                Dev-only bypass. Disabled in production builds.
+              </p>
+            </div>
+          )}
         </div>
 
         <p className="mt-6 text-center text-xs text-slate-500">

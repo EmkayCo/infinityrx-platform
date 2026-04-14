@@ -34,8 +34,34 @@ interface MfaVerifyResponse {
   };
 }
 
+// DEV-ONLY MOCK AUTH BYPASS — hard-refuses in production builds.
+// Server-side guard: NODE_ENV !== "production" AND DEV_AUTH_BYPASS === "true".
+// NEXT_PUBLIC_DEV_AUTH_BYPASS only controls the login UI button visibility.
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
+    Credentials({
+      id: "dev-bypass",
+      name: "Dev Bypass (LOCAL ONLY)",
+      credentials: {},
+      async authorize() {
+        if (process.env.NODE_ENV === "production") return null;
+        if (process.env.DEV_AUTH_BYPASS !== "true") return null;
+        const now = Math.floor(Date.now() / 1000);
+        return {
+          id: "dev-admin-00000000-0000-0000-0000-000000000001",
+          email: "dev@infinityrx.local",
+          name: "Dev Admin",
+          role: "platform_admin",
+          tenant_id: "00000000-0000-0000-0000-000000000001",
+          permissions: ["*"],
+          mfa_enrolled: true,
+          access_token: "dev-bypass-token",
+          refresh_token: "dev-bypass-refresh",
+          expires_at: now + 60 * 60 * 8,
+        };
+      },
+    }),
     Credentials({
       id: "credentials",
       name: "Email & Password",
