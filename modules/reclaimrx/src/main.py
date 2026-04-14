@@ -1,9 +1,10 @@
-"""Payment-processing FastAPI application entry point.
+"""ReclaimRx FastAPI application entry point.
 
 create_app() is the canonical application factory (LESSON-006):
 all middleware, routers, and event-bus subscriptions must be mounted here
 so integration tests through create_app() catch regressions.
 """
+
 from __future__ import annotations
 
 import logging
@@ -15,9 +16,8 @@ from shared.events.dlq import DLQService, build_dlq_router
 from shared.middleware import RateLimitConfig, RateLimitMiddleware, SecurityHeadersMiddleware
 
 from .api.router import router
-from .events import consumers as _consumers  # noqa: F401 — registers handlers
 
-logger = logging.getLogger("payment-processing.main")
+logger = logging.getLogger("reclaimrx.main")
 
 
 class _EmptyDLQRepository:
@@ -48,9 +48,9 @@ def create_app() -> FastAPI:
     cors_origins = getattr(settings, "CORS_ALLOW_ORIGINS", [])
 
     app = FastAPI(
-        title="InfinityRx Payment Processing",
+        title="InfinityRx ReclaimRx",
         version="1.0.0",
-        description="Payment vendor adapter layer: NACHA, Echo, Zelis, Check issuance",
+        description="FWA detection, ML scoring, graph analysis, and recovery estimation.",
         openapi_url="/openapi.json" if environment != "production" else None,
         docs_url="/docs" if environment != "production" else None,
         redoc_url="/redoc" if environment != "production" else None,
@@ -79,7 +79,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict:
-        return {"status": "ok", "module": "payment-processing"}
+        return {"status": "ok", "module": "reclaimrx"}
 
     return app
 
