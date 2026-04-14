@@ -15,6 +15,14 @@ from shared.db.session import get_session
 from shared.db.tenant_context import set_tenant_context
 
 from ..models.edi_models import TradingPartner
+from ..services.baa_tracking import (
+    AgreementInput,
+    InvalidAgreementType,
+    check_baa_valid,
+    create_agreement,
+    get_agreements_by_partner,
+    get_expiring_agreements,
+)
 
 router = APIRouter(
     prefix="/trading-partners",
@@ -124,3 +132,110 @@ async def create_trading_partner(
         test_mode=partner.test_mode,
         is_active=partner.is_active,
     )
+
+
+# ---- H-08: Trading Partner Agreement (BAA/TPA/NDA) tracking ----
+
+
+class AgreementCreate(BaseModel):
+    agreement_type: str
+    executed_date: Optional[str] = None
+    effective_date: Optional[str] = None
+    expiry_date: Optional[str] = None
+    renewal_date: Optional[str] = None
+    signatory_name: Optional[str] = None
+    signatory_title: Optional[str] = None
+
+
+class AgreementResponse(BaseModel):
+    id: str
+    trading_partner_id: str
+    agreement_type: str
+    executed_date: Optional[str] = None
+    effective_date: Optional[str] = None
+    expiry_date: Optional[str] = None
+    renewal_date: Optional[str] = None
+    signatory_name: Optional[str] = None
+    signatory_title: Optional[str] = None
+
+
+def _agreement_to_response(row: Any) -> AgreementResponse:
+    return AgreementResponse(
+        id=str(row.id),
+        trading_partner_id=str(row.trading_partner_id),
+        agreement_type=row.agreement_type,
+        executed_date=row.executed_date,
+        effective_date=row.effective_date,
+        expiry_date=row.expiry_date,
+        renewal_date=row.renewal_date,
+        signatory_name=row.signatory_name,
+        signatory_title=row.signatory_title,
+    )
+
+
+@router.get("/{partner_id}/agreements", response_model=list[AgreementResponse])
+async def list_agreements(
+    partner_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(_require_tenant),
+    db: AsyncSession = Depends(get_session),
+) -> list[AgreementResponse]:
+    set_tenant_context(tenant_id)
+    rows = await get_agreements_by_partner(
+        db, tenant_id=tenant_id, trading_partner_id=partner_id
+    )
+    return [_agreement_to_response(r) for r in rows]
+
+
+@router.post("/{partner_id}/agreements", response_model=AgreementResponse, status_code=201)
+async def create_agreement_endpoint(
+    partner_id: uuid.UUID,
+    body: AgreementCreate,
+    tenant_id: uuid.UUID = Depends(_require_tenant),
+    db: AsyncSession = Depends(get_session),
+) -> AgreementResponse:
+    set_tenant_context(tenant_id)
+    try:
+        row = await create_agreement(
+            db,
+            tenant_id=tenant_id,
+            payload=AgreementInput(
+                trading_partner_id=partner_id,
+                agreement_type=body.agreement_type,
+                executed_date=body.executed_date,
+                effective_date=body.effective_date,
+                expiry_date=body.expiry_date,
+                renewal_date=body.renewal_date,
+                signatory_name=body.signatory_name,
+                signatory_title=body.signatory_title,
+            ),
+        )
+    except InvalidAgreementType as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"code": "INVALID_AGREEMENT_TYPE", "message": str(exc)}},
+        )
+    return _agreement_to_response(row)
+
+
+@router.get("/agreements/expiring", response_model=list[AgreementResponse])
+async def list_expiring_agreements(
+    days_ahead: int = 90,
+    tenant_id: uuid.UUID = Depends(_require_tenant),
+    db: AsyncSession = Depends(get_session),
+) -> list[AgreementResponse]:
+    set_tenant_context(tenant_id)
+    rows = await get_expiring_agreements(db, tenant_id=tenant_id, days_ahead=days_ahead)
+    return [_agreement_to_response(r) for r in rows]
+
+
+@router.get("/{partner_id}/baa-valid")
+async def check_baa(
+    partner_id: uuid.UUID,
+    tenant_id: uuid.UUID = Depends(_require_tenant),
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, bool]:
+    set_tenant_context(tenant_id)
+    valid = await check_baa_valid(
+        db, tenant_id=tenant_id, trading_partner_id=partner_id
+    )
+    return {"valid": valid}
