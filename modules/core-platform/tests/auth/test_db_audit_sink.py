@@ -23,6 +23,11 @@ def _event(**overrides) -> AuditEvent:
     return make_event(**defaults)
 
 
+class _EmptyScalar:
+    def scalar_one_or_none(self):
+        return None
+
+
 class _RecordingSession:
     """Minimal stand-in for sqlalchemy.orm.Session recording what happened."""
 
@@ -40,6 +45,11 @@ class _RecordingSession:
 
     def commit(self) -> None:
         self.committed += 1
+
+    def execute(self, _stmt):
+        # AuditService.log() looks up the current hash-chain head; an empty
+        # recording session behaves like an empty table.
+        return _EmptyScalar()
 
 
 def _make_factory(session: _RecordingSession):

@@ -11,12 +11,13 @@ import csv
 import io
 import uuid
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 
 from openpyxl import Workbook
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from src.audit.hash_chain import GENESIS_HASH, compute_entry_hash
 from src.audit.models import AuditLog, _as_uuid_str
 from src.audit.schemas import AuditEntry, AuditEntryRead, AuditPage, AuditQuery
 
@@ -45,6 +46,35 @@ class AuditService:
     # Writes
     # ------------------------------------------------------------------
     def log(self, entry: AuditEntry) -> AuditLog:
+        # Per-tenant SHA-256 hash chain. Look up the current chain head
+        # (most recent audit row for this tenant) and link the new entry
+        # to it. If no predecessor exists we start from GENESIS_HASH.
+        #
+        # Concurrent writers to the same tenant can theoretically produce
+        # branching chains rooted at the same predecessor — detection of
+        # *tampering* with existing rows is unaffected, which is the HIPAA
+        # 2026 requirement we must satisfy. A per-tenant advisory lock is
+        # tracked as a follow-up hardening task.
+        previous_hash = (
+            self._session.execute(
+                select(AuditLog.entry_hash)
+                .where(AuditLog.tenant_id == str(entry.tenant_id))
+                .order_by(AuditLog.id.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            or GENESIS_HASH
+        )
+
+        created_at = datetime.now(UTC)
+        entry_hash = compute_entry_hash(
+            tenant_id=entry.tenant_id,
+            action=entry.action,
+            entity_type=entry.entity_type,
+            entity_id=entry.entity_id,
+            created_at=created_at,
+            previous_hash=previous_hash,
+        )
+
         row = AuditLog(
             tenant_id=str(entry.tenant_id),
             user_id=_as_uuid_str(entry.user_id),
@@ -57,6 +87,9 @@ class AuditService:
             ip_address=entry.ip_address,
             user_agent=entry.user_agent,
             correlation_id=_as_uuid_str(entry.correlation_id),
+            created_at=created_at,
+            previous_hash=previous_hash,
+            entry_hash=entry_hash,
         )
         self._session.add(row)
         self._session.flush()

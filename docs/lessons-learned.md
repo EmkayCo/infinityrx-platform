@@ -4,6 +4,39 @@ Entries added by builders during the build. Critical/high severity lessons are p
 
 ---
 
+### LESSON-006: Security primitives built-and-tested in isolation but never mounted on the production app
+**Date:** 2026-04-13
+**Module:** core-platform
+**Builder:** Emergency-Wiring
+**Severity:** critical
+
+**What happened:**
+A comprehensive audit found that tamper-evident audit hashing, MFA, security headers, rate limiting, DLQ inspection, and tenant isolation were each authored with full test coverage in their own subsystems — then never wired into the running FastAPI application. The pattern: 40% of effort went to "design and test the primitive" and 0% went to "mount it on the app that serves traffic."
+
+Concrete examples discovered in the same session:
+- `AuditService.log()` at `modules/core-platform/src/audit/service.py:47` wrote rows with `entry_hash=""` — `compute_entry_hash()` existed and had 8 tests but was never called on the write path.
+- `SecurityHeadersMiddleware` and `RateLimitMiddleware` had their own integration tests but were absent from `main.py:create_app()`; production responses shipped with no HSTS, CSP, or rate limiting.
+- `build_dlq_router` had 18 tests; the router was never `include_router`ed anywhere reachable by a real request.
+- `TenantIsolationMiddleware` installed `with_loader_criteria` on the `shared` session factory, but three modules (billing, payment-processing, reclaimrx) each maintained their own `sessionmaker` and never called `install_tenant_loader`.
+- `FraudNetworkAnalyzer.GraphEdge.total_amount` was annotated `float` and accumulated dollar amounts across graph edges via IEEE 754 arithmetic, violating the "Decimal only for money" principle — despite the module having `penny_allocate` property tests for its other financial paths.
+
+**Root cause:**
+Test discipline was applied at the unit level, so every primitive could ship "with tests" and feel done. Nothing enforced the subsequent integration step: "does the *application* actually call this primitive on the happy path?" Unit tests on a primitive prove the primitive works in isolation; they say nothing about whether the primitive is reachable by a real request. Without an integration contract test (e.g., "issuing 3 audit entries produces an unbroken hash chain on the real AuditService") the gap is invisible.
+
+**Fix:**
+For each primitive, write an integration test at the next layer up that can only pass if the primitive is both called and correct. Examples landed in this session:
+- `test_service_hash_chain.py::test_three_entries_form_unbroken_chain` verifies `AuditService.log()` populates the chain, not that `compute_entry_hash` works in isolation.
+- `test_main_middleware.py::test_security_headers_present_on_responses` drives `TestClient` against `create_app()` and asserts `Strict-Transport-Security` on the response — the only way this passes is if the middleware is mounted.
+- `test_graph_analysis_decimal.py::test_graph_edge_default_amount_is_decimal_zero` asserts the dataclass default is Decimal, not float — a statement-level test would have been fooled by `total_amount: float = 0.0`.
+
+**Prevention rule:**
+For any new primitive that must run on the request path, the RED test MUST assert the primitive's observable effect through the top-level app (`create_app()` or equivalent), not the primitive in isolation. "Is it mounted?" is a test case, not a code-review checklist item. Candidate file: `.claude/rules/architecture.md` → "Every middleware/router/pre-commit primitive MUST have at least one integration test that exercises it through the top-level application factory. Unit tests on the primitive alone are insufficient; they verify correctness of a component that may never run."
+
+**Regression test:**
+`modules/core-platform/tests/test_main_middleware.py` — four tests that fail-closed if SecurityHeadersMiddleware, RateLimitMiddleware, or the DLQ router regress out of `create_app()`.
+
+---
+
 ### LESSON-001: SQLite SAVEPOINT isolation required for tests that commit inside routes
 **Date:** 2026-04-13
 **Module:** reclaimrx

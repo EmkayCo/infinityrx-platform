@@ -1,6 +1,8 @@
 """Tests for NetworkX community detection — TDD first."""
 from __future__ import annotations
 
+from decimal import Decimal
+
 from src.services.graph_analysis import (
     CommunityResult,
     FraudNetworkAnalyzer,
@@ -8,13 +10,19 @@ from src.services.graph_analysis import (
 )
 
 
-def make_edge(pharmacy: str, prescriber: str, member: str, claim_count: int = 5, amount: float = 500.0) -> GraphEdge:
+def make_edge(
+    pharmacy: str,
+    prescriber: str,
+    member: str,
+    claim_count: int = 5,
+    amount: Decimal | str | int | float = "500.00",
+) -> GraphEdge:
     return GraphEdge(
         pharmacy_npi=pharmacy,
         prescriber_npi=prescriber,
         member_id=member,
         claim_count=claim_count,
-        total_amount=amount,
+        total_amount=amount if isinstance(amount, Decimal) else Decimal(str(amount)),
     )
 
 

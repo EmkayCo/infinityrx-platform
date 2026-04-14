@@ -177,7 +177,7 @@ def publish_suspicious_community_detected(
     community_id: str,
     node_count: int,
     self_referral_rate: float,
-    total_amount: float,
+    total_amount: Decimal,
 ) -> None:
     publish(
         "fwa.suspicious_community_detected",
@@ -186,7 +186,9 @@ def publish_suspicious_community_detected(
             "community_id": community_id,
             "node_count": node_count,
             "self_referral_rate": self_referral_rate,
-            "total_amount": total_amount,
+            # Serialize Decimal as string so JSON consumers see exact cents
+            # and not a float reconstruction of the value.
+            "total_amount": str(total_amount),
             "occurred_at": _now_iso(),
         },
     )

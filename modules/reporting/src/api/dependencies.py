@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,13 +17,26 @@ async def get_db(session: AsyncSession = Depends(get_session)) -> AsyncSession:
 async def get_current_tenant_id(
     x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
 ) -> str:
-    """Extract and validate tenant ID from request header."""
+    """Extract and validate tenant ID from request header.
+
+    The header MUST parse as a UUID. A raw-string passthrough lets crafted
+    values propagate into ``WHERE tenant_id = :tid`` clauses and is the
+    class of bug tenant isolation is supposed to prevent. Matches billing's
+    validator at ``modules/billing/src/api/dependencies.py``.
+    """
     if not x_tenant_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": {"code": "MISSING_TENANT", "message": "X-Tenant-ID header required"}},
         )
-    return x_tenant_id
+    try:
+        parsed = uuid.UUID(x_tenant_id)
+    except (ValueError, AttributeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": {"code": "INVALID_TENANT", "message": "X-Tenant-ID must be a UUID"}},
+        ) from exc
+    return str(parsed)
 
 
 async def get_current_user_id(

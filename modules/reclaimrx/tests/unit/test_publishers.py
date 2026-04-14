@@ -118,7 +118,7 @@ class TestPublishers:
             community_id="comm-001",
             node_count=5,
             self_referral_rate=0.85,
-            total_amount=250000.0,
+            total_amount=Decimal("250000.00"),
         )
         events = published_events()
         assert any(e.topic == "fwa.suspicious_community_detected" for e in events)

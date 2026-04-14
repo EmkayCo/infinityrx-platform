@@ -33,11 +33,14 @@ from fastapi import FastAPI
 from sqlalchemy import text
 
 from shared.db.engine import dispose_engine, get_engine
+from shared.events.dlq import DLQService, build_dlq_router
 from shared.events.factory import get_event_bus, reset_event_bus
 from shared.observability import configure_logging
 from shared.observability.slow_query import install_slow_query_logger
 
 from .api import router as api_router
+from .infrastructure.rate_limiter import RateLimitConfig, RateLimitMiddleware
+from .infrastructure.security_headers import SecurityHeadersMiddleware
 
 logger = logging.getLogger("core-platform.main")
 
@@ -123,6 +126,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("service_stopped", extra={"service": "core-platform"})
 
 
+class _EmptyDLQRepository:
+    """Placeholder DLQ repository mounted before the Postgres-backed repo
+    is wired through the shared async engine. Returns no entries so list
+    operations are honest ("nothing is queued") rather than stubbed."""
+
+    async def list(self, **_kwargs):
+        return []
+
+    async def get(self, _entry_id):
+        return None
+
+    async def save(self, _entry) -> None:  # pragma: no cover - write path unused
+        return None
+
+
+async def _get_dlq_service() -> DLQService:
+    return DLQService(repository=_EmptyDLQRepository())
+
+
+async def _get_dlq_permissions() -> set[str]:
+    # Deny by default. The real permission resolver will pull from the
+    # authenticated user's JWT once the auth dependency lands on this app.
+    return set()
+
+
 def create_app() -> FastAPI:
     """Application factory. Tests use this to build a fresh app per case."""
     app = FastAPI(
@@ -131,7 +159,20 @@ def create_app() -> FastAPI:
         description="Tenants, auth, RBAC, audit, jobs, files, notifications.",
         lifespan=lifespan,
     )
+    # HIPAA-grade defaults. Middleware is applied outermost-first, so
+    # RateLimitMiddleware runs before SecurityHeadersMiddleware and the
+    # 429 response still gets HSTS/CSP/Cache-Control applied on its way
+    # back out.
+    app.add_middleware(RateLimitMiddleware, config=RateLimitConfig())
+    app.add_middleware(SecurityHeadersMiddleware)
+
     app.include_router(api_router)
+    app.include_router(
+        build_dlq_router(
+            get_service=_get_dlq_service,
+            get_permissions=_get_dlq_permissions,
+        )
+    )
     return app
 
 

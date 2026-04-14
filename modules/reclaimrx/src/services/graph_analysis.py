@@ -5,6 +5,7 @@ Uses Louvain algorithm to detect suspicious communities in claim relationships.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 import networkx as nx
@@ -16,20 +17,33 @@ except ImportError:
     HAS_LOUVAIN = False
 
 
+_ZERO = Decimal("0")
+
+
 @dataclass
 class GraphEdge:
-    """An edge in the fraud detection graph (claim relationship)."""
+    """An edge in the fraud detection graph (claim relationship).
+
+    ``total_amount`` is a Decimal because graph accumulation across many
+    edges would otherwise drift via IEEE 754 float error, and the value is
+    published onto the event bus into downstream financial consumers.
+    """
 
     pharmacy_npi: str
     prescriber_npi: str
     member_id: str
     claim_count: int = 1
-    total_amount: float = 0.0
+    total_amount: Decimal = field(default_factory=lambda: _ZERO)
 
 
 @dataclass
 class CommunityResult:
-    """Result of community detection for a cluster of entities."""
+    """Result of community detection for a cluster of entities.
+
+    ``total_amount`` is a Decimal (aggregated dollars). ``self_referral_rate``
+    and ``geographic_spread_score`` are ratios/scores, not money — float is
+    appropriate for those.
+    """
 
     community_id: int
     nodes: list[str]
@@ -37,7 +51,7 @@ class CommunityResult:
     prescribers: list[str]
     members: list[str]
     total_claims: int
-    total_amount: float
+    total_amount: Decimal
     self_referral_rate: float
     geographic_spread_score: float
     is_suspicious: bool
@@ -75,7 +89,7 @@ class FraudNetworkAnalyzer:
     def _add_or_update_edge(self, G: nx.Graph, u: str, v: str, edge: GraphEdge) -> None:
         if G.has_edge(u, v):
             G[u][v]["weight"] += edge.claim_count
-            G[u][v]["total_amount"] += edge.total_amount
+            G[u][v]["total_amount"] = G[u][v]["total_amount"] + edge.total_amount
         else:
             G.add_edge(u, v, weight=edge.claim_count, total_amount=edge.total_amount)
 
@@ -120,13 +134,13 @@ class FraudNetworkAnalyzer:
         node_set = set(nodes)
         total_weight = 0
         internal_weight = 0
-        total_amount = 0.0
+        total_amount: Decimal = _ZERO
 
         for u, v, data in G.edges(data=True):
             w = data.get("weight", 1)
-            amt = data.get("total_amount", 0.0)
+            amt = data.get("total_amount", _ZERO)
             total_weight += w
-            total_amount += amt
+            total_amount = total_amount + amt
             if u in node_set and v in node_set:
                 internal_weight += w
 
@@ -163,7 +177,7 @@ class FraudNetworkAnalyzer:
         members: list[str],
         self_referral_rate: float,
         total_claims: int,
-        total_amount: float,
+        total_amount: Decimal,
     ) -> tuple[bool, list[str]]:
         reasons: list[str] = []
 
@@ -199,6 +213,6 @@ class FraudNetworkAnalyzer:
                 "entity_type": node_data.get("entity_type"),
                 "entity_id": node_data.get("entity_id"),
                 "claim_count": edge_data.get("weight", 0),
-                "total_amount": edge_data.get("total_amount", 0.0),
+                "total_amount": edge_data.get("total_amount", _ZERO),
             })
         return neighbors
