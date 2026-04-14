@@ -178,7 +178,7 @@ class APRecord(BillingBase):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     claim_record_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("billing.claim_records.id"), nullable=False
+        ForeignKey("billing.claim_records.id", ondelete="RESTRICT"), nullable=False
     )
 
     client_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
@@ -244,6 +244,10 @@ class PaymentBatch(BillingBase):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
+    # Optimistic locking (H-12): prevents concurrent batch approval from double-submitting.
+    # Increment on every approved/submitted transition; check before mutation.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
     payments: Mapped[list[Payment]] = relationship(back_populates="batch")
 
 
@@ -253,7 +257,7 @@ class Payment(BillingBase):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     payment_batch_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("billing.payment_batches.id"), nullable=False
+        ForeignKey("billing.payment_batches.id", ondelete="RESTRICT"), nullable=False
     )
     tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
 
@@ -333,7 +337,7 @@ class Invoice(BillingBase):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     invoicing_config_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("billing.invoicing_configs.id"), nullable=True
+        ForeignKey("billing.invoicing_configs.id", ondelete="SET NULL"), nullable=True
     )
 
     invoice_number: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -377,6 +381,9 @@ class Invoice(BillingBase):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
+    # Optimistic locking (H-12)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
     line_items: Mapped[list[InvoiceLineItem]] = relationship(back_populates="invoice")
     ar_record: Mapped[ARRecord | None] = relationship(back_populates="invoice")
 
@@ -386,7 +393,7 @@ class InvoiceLineItem(BillingBase):
     __table_args__ = ({"schema": "billing"},)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    invoice_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("billing.invoices.id"), nullable=False)
+    invoice_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("billing.invoices.id", ondelete="RESTRICT"), nullable=False)
     tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
 
     line_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -412,7 +419,7 @@ class ARRecord(BillingBase):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
-    invoice_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("billing.invoices.id"), nullable=False)
+    invoice_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("billing.invoices.id", ondelete="RESTRICT"), nullable=False)
     client_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
 
     amount_due: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
@@ -448,7 +455,7 @@ class ARPayment(BillingBase):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     ar_record_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("billing.ar_records.id"), nullable=False
+        ForeignKey("billing.ar_records.id", ondelete="RESTRICT"), nullable=False
     )
 
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
@@ -572,7 +579,7 @@ class ProgramBudgetAlert(BillingBase):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     program_budget_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("billing.program_budgets.id"), nullable=False
+        ForeignKey("billing.program_budgets.id", ondelete="RESTRICT"), nullable=False
     )
 
     alert_type: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -601,7 +608,7 @@ class ProgramBudgetSnapshot(BillingBase):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     program_budget_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("billing.program_budgets.id"), nullable=False
+        ForeignKey("billing.program_budgets.id", ondelete="RESTRICT"), nullable=False
     )
     tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
 
@@ -680,7 +687,7 @@ class PrefundLedger(BillingBase):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     funding_config_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("billing.funding_configs.id"), nullable=False
+        ForeignKey("billing.funding_configs.id", ondelete="RESTRICT"), nullable=False
     )
     tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
 
