@@ -4,6 +4,7 @@
 - **LESSON-001:** SQLAlchemy test sessions need SAVEPOINT-based rollback, not TRUNCATE. Use the nested transaction fixture pattern in `.claude/rules/testing.md`.
 - **LESSON-004:** `re.match(r"^\d{6}$")` accepts trailing newlines. Use `\A...\Z` anchors or `re.fullmatch()` for ALL security-sensitive regex validation.
 - **LESSON-005:** `logger.extra={"module": ...}` collides with `LogRecord.module` built-in attribute. Use service/subsystem-prefixed keys instead.
+- **LESSON-007:** `PG_UUID(as_uuid=True)` returns floats under SQLite SAVEPOINT sessions. Use `_UUIDString` TypeDecorator (VARCHAR 36) in test conftest fixtures for any model with UUID columns. See `.claude/rules/testing.md`.
 - **AUDIT FINDING:** Built primitives must be MOUNTED on production apps — hash chain, MFA gate, security headers, rate limiter all existed but were never wired into live request paths. Every middleware/router primitive needs an integration test through `create_app()`.
 
 ## Rules Files
@@ -27,33 +28,37 @@ Domain specialists are in `.claude/agents/tier2-specialists/` and are called on-
 
 ## Project Status
 
-| Module | Phase | Status |
-|---|---|---|
-| core-platform | 1 | Implemented (auth, MFA, audit, tenants, sessions, API keys, DLQ, middleware) |
-| billing | 2 | In progress (AP/AR, journal hash chain, NACHA, 835, state compliance) |
-| payment-processing | 2 | In progress (vendor adapters, ACH returns, OFAC, business-day calendar) |
-| reclaimrx | 2 | In progress (FWA detection, ML scoring, graph analysis, recovery estimation) |
-| reporting | 2 | In progress (dashboards, Star Ratings PDC, Excel/PDF exports) |
-| ai-nlp | 3 | Not yet implemented |
-| dataiq | 3 | Not yet implemented |
-| drug-database | 3 | Not yet implemented |
-| member-management | 3 | Not yet implemented |
-| pharmacy-directory | 3 | Not yet implemented |
-| prescriber-directory | 3 | Not yet implemented |
-| medical-prescriber-directory | 3 | Not yet implemented |
-| adjudication-engine | 4 | Not yet implemented |
-| edi-compliance | 4 | Not yet implemented |
-| medical-claims | 4 | Not yet implemented |
-| mtm-clinical | 4 | Not yet implemented |
-| part-d-pde | 4 | Not yet implemented |
-| plan-design | 4 | Not yet implemented |
-| prior-authorization | 4 | Not yet implemented |
-| program-config | 4 | Not yet implemented |
-| rebate-management | 4 | Not yet implemented |
-| rules-engine | 4 | Not yet implemented |
-| switch-connectivity | 4 | Not yet implemented |
-| testing-simulator | 4 | Not yet implemented |
-| ebv-ebi-rtbc | 4 | Not yet implemented |
+| Module | Phase | Status | Notes |
+|---|---|---|---|
+| core-platform | 1 | Built | Auth, MFA, audit hash chain, tenants, sessions, API keys, DLQ, middleware — security/audit primitives now mounted and integration-tested |
+| billing | 2 | In progress | AP/AR, journal hash chain, NACHA, 835, state compliance — 50-state compliance tables and accounting adapters missing |
+| payment-processing | 2 | In progress | Vendor adapters, ACH returns (80+ codes), OFAC, business-day calendar |
+| reclaimrx | 2 | In progress | FWA detection, ML scoring, graph analysis, recovery estimation |
+| reporting | 2 | In progress | Dashboards, Star Ratings PDC, Excel/PDF exports — scheduled delivery not wired |
+| ai-nlp | 3 | Built | RAG, extraction, guardrails, NLP pipeline — 20+ advanced features (denial prediction, FHIR PA, fax splitting) not yet implemented; PRD coverage ~48% |
+| dataiq | 3 | Built | Analytics endpoints, dashboards — what-if, NL query, forecast, MTM targeting missing from router |
+| drug-database | 3 | Built | NDC/pricing/drug interactions complete; compound ingredients missing |
+| member-management | 3 | Built | 834/CSV ingestion, accumulators, 270/271 — consent and COBRA tracking missing |
+| pharmacy-directory | 3 | Built | Lookup, credentialing, PSAO — accreditation, LDD, contract rate history missing |
+| prescriber-directory | 3 | Built | NPPES, state rules — DEA authority check, panel size, supervisory relationships missing; no tenant isolation fence (CR-09) |
+| medical-prescriber-directory | 3 | Not started | No implementation files |
+| adjudication-engine | 4 | Not started | Placeholder README only |
+| edi-compliance | 4 | Built | Full X12 suite (835/837/270/271/276/277/278/834/999), AS2+SFTP, NCPDP Batch 1.2, FHIR bridge — test coverage 15% (CR-12); no JWT auth (CR-03) |
+| medical-claims | 4 | Built | Full claim pipeline, CMS-1500/UB-04, accumulator integration — PHI stored plaintext (CR-02); no JWT auth (CR-03) |
+| mtm-clinical | 4 | Not started | Placeholder README only |
+| part-d-pde | 4 | Not started | Placeholder README only |
+| plan-design | 4 | Not started | Placeholder README only |
+| prior-authorization | 4 | Not started | Placeholder README only |
+| program-config | 4 | Not started | Placeholder README only |
+| rebate-management | 4 | Not started | Placeholder README only |
+| rules-engine | 4 | Not started | Placeholder README only |
+| switch-connectivity | 4 | Not started | Placeholder README only |
+| testing-simulator | 4 | Not started | Placeholder README only |
+| ebv-ebi-rtbc | 4 | Not started | Placeholder README only |
+
+## Session Remediation (2026-04-14)
+
+Audit-remediation session conducted 2026-04-14 by 4 parallel teammates (Teammate 1: wiring, Teammate 2: events, Teammate 3: models/tests, Teammate 4: docs). Findings catalogued in `docs/audit/full-platform-audit-2026-04-14.md`. Overall platform score: **63/100**. Critical blockers: 13 critical findings (CR-01 through CR-13); see audit doc for full list. This session addresses: CR-13 (this table), H-04 (event catalog), H-06 (HIPAA SOPs), M-10 (module READMEs), M-11 (ERD), M-12 (unused imports), M-14 (dead test), M-21 (Docker image pinning), L-01 (coverage.json gitignore), L-02 (empty agent dir). Critical code wiring issues (CR-01 through CR-12) are addressed by Teammates 1–3.
 
 ## System
 Multi-module PBM ecosystem. Multi-tenant, API-first. Build local, deploy to Azure.
