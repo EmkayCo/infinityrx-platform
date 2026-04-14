@@ -12,7 +12,9 @@ from shared.events.in_memory_bus import InMemoryEventBus
 from src.events.consumers import (
     handle_ach_return_received,
     handle_claim_adjudicated,
+    handle_claim_reversed,
     handle_member_enrolled,
+    handle_payment_auto_posted,
     handle_payment_vendor_confirmed,
 )
 from src.events.publishers import (
@@ -208,18 +210,48 @@ class TestEventPublishers:
         assert envelope.payload["severity"] == "critical"
 
 
+def _make_envelope(event_type: str = "test.event") -> "EventEnvelope":
+    from shared.events.types import EventEnvelope
+
+    return EventEnvelope(
+        event_type=event_type,
+        tenant_id=TENANT,
+        correlation_id=CORR,
+        source_module="test",
+        payload={},
+    )
+
+
 class TestEventConsumers:
-    def test_handle_member_enrolled_is_no_op(self) -> None:
-        handle_member_enrolled({}, db=MagicMock(), bus=MagicMock())
+    @pytest.mark.asyncio
+    async def test_handle_member_enrolled_logs_and_returns(self) -> None:
+        envelope = _make_envelope("member.enrolled")
+        await handle_member_enrolled(envelope, db=MagicMock(), bus=MagicMock())
 
-    def test_handle_claim_adjudicated_is_no_op(self) -> None:
-        handle_claim_adjudicated({}, db=MagicMock(), bus=MagicMock())
+    @pytest.mark.asyncio
+    async def test_handle_claim_adjudicated_logs_and_returns(self) -> None:
+        envelope = _make_envelope("claim.adjudicated")
+        await handle_claim_adjudicated(envelope, db=MagicMock(), bus=MagicMock())
 
-    def test_handle_payment_vendor_confirmed_is_no_op(self) -> None:
-        handle_payment_vendor_confirmed({}, db=MagicMock(), bus=MagicMock())
+    @pytest.mark.asyncio
+    async def test_handle_payment_vendor_confirmed_logs_and_returns(self) -> None:
+        envelope = _make_envelope("payment.vendor_confirmed")
+        await handle_payment_vendor_confirmed(envelope, db=MagicMock(), bus=MagicMock())
 
-    def test_handle_ach_return_received_is_no_op(self) -> None:
-        handle_ach_return_received({}, db=MagicMock(), bus=MagicMock())
+    @pytest.mark.asyncio
+    async def test_handle_ach_return_received_logs_and_returns(self) -> None:
+        envelope = _make_envelope("payment.ach_return")
+        await handle_ach_return_received(envelope, db=MagicMock(), bus=MagicMock())
+
+    @pytest.mark.asyncio
+    async def test_handle_claim_reversed_logs_and_returns(self) -> None:
+        envelope = _make_envelope("claim.reversed")
+        await handle_claim_reversed(envelope, db=MagicMock(), bus=MagicMock())
+
+    @pytest.mark.asyncio
+    async def test_handle_payment_auto_posted_logs_and_returns(self) -> None:
+        envelope = _make_envelope("payment.auto_posted")
+        await handle_payment_auto_posted(envelope, db=MagicMock(), bus=MagicMock())
 
 
 class TestScheduledJobs:
