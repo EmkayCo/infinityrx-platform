@@ -185,7 +185,8 @@ class TestParsed271ToFhir:
         result = parsed_271_to_fhir(self._make_parsed271(benefits=[benefit]))
         item = result["insurance"][0]["item"][0]
         assert "benefit" in item
-        assert item["benefit"][0]["allowedMoney"]["value"] == 500.0
+        # Value is a str (not float) to preserve Decimal precision (H-01 fix)
+        assert item["benefit"][0]["allowedMoney"]["value"] == "500.00"
 
     def test_benefit_without_monetary_amount(self):
         benefit = Parsed271Benefit(

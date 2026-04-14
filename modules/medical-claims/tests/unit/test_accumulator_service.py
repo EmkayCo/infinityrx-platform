@@ -5,6 +5,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
+import pytest
 
 from src.services.accumulator_service import AccumulatorService
 from src.models.tables import ClaimRecord
@@ -87,3 +88,36 @@ class TestAccumulatorService:
         svc = AccumulatorService(db_session, MemberManagementClient())
         result = svc.apply_accumulator(tenant_id, uuid.uuid4())
         assert result is None
+
+    def test_transient_error_is_swallowed_uses_local_calc(self, db_session, tenant_id):
+        """ConnectionError (transient) is caught; local calculation is used (H-14)."""
+        from unittest.mock import MagicMock
+
+        client = MagicMock()
+        client.apply_claim_accumulator.side_effect = ConnectionError("connection refused")
+        svc = AccumulatorService(db_session, client)
+
+        claim = self._make_claim(
+            db_session, tenant_id,
+            deductible=Decimal("50.00"),
+            coinsurance=Decimal("10.00"),
+        )
+        # Should NOT raise — transient error is swallowed and local calc is used
+        updated = svc.apply_accumulator(tenant_id, claim.id)
+        assert updated is not None
+        assert updated.applied_to_deductible == Decimal("50.00")
+
+    def test_non_transient_error_propagates(self, db_session, tenant_id):
+        """ValueError (non-transient) propagates out of apply_accumulator (H-14 fix)."""
+        from unittest.mock import MagicMock
+
+        client = MagicMock()
+        client.apply_claim_accumulator.side_effect = ValueError("bad data")
+        svc = AccumulatorService(db_session, client)
+
+        claim = self._make_claim(
+            db_session, tenant_id,
+            deductible=Decimal("50.00"),
+        )
+        with pytest.raises(ValueError, match="bad data"):
+            svc.apply_accumulator(tenant_id, claim.id)
