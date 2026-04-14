@@ -13,6 +13,8 @@ from src.x12.generators.gen_271 import generate_271
 from src.x12.generators.gen_277 import generate_277
 from src.x12.generators.schemas import Generate271Request, Generate277Request
 
+from tests.conftest import _FAKE_USER_FOR_TESTS  # noqa: E402
+
 _TENANT_ID = str(uuid.uuid4())
 _TENANT_HEADERS = {"x-tenant-id": _TENANT_ID}
 _FIXED_NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -24,12 +26,14 @@ async def _mock_get_session():
 
 @pytest.fixture()
 def client():
+    from shared.auth.dependencies import get_current_user
     app = create_app()
     try:
         from shared.db.session import get_session  # type: ignore[import]
         app.dependency_overrides[get_session] = _mock_get_session
     except (ImportError, Exception):
         pass
+    app.dependency_overrides[get_current_user] = lambda: _FAKE_USER_FOR_TESTS
     with TestClient(app) as c:
         yield c
 

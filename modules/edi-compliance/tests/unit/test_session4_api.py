@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.conftest import _FAKE_USER_FOR_TESTS  # noqa: E402
+
 _T = str(uuid.UUID("00000000-0000-0000-0000-000000000001"))
 _TP = str(uuid.UUID("00000000-0000-0000-0000-000000000002"))
 _HEADERS = {"x-tenant-id": _T}
@@ -17,6 +19,7 @@ _FIXED_NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 @pytest.fixture(scope="module")
 def client():
     from src.main import create_app
+    from shared.auth.dependencies import get_current_user
     try:
         from shared.db.session import get_session  # type: ignore[import]
     except ImportError:
@@ -31,6 +34,7 @@ def client():
         from src.api.generate import get_session as gen_get_session  # type: ignore[import]
         app.dependency_overrides[gen_get_session] = _mock_session
 
+    app.dependency_overrides[get_current_user] = lambda: _FAKE_USER_FOR_TESTS
     return TestClient(app)
 
 

@@ -24,6 +24,38 @@ if str(_PROJECT_ROOT) not in sys.path:
 os.environ.setdefault("ENCRYPTION_KEY_ACTIVE", "dGVzdC1rZXktMzItYnl0ZXMtZm9yLXVuaXQtdGVzdHM=")
 os.environ.setdefault("JWT_SECRET", "test-secret-of-sufficient-length-!!!!")
 
+# ---------------------------------------------------------------------------
+# Auth configuration — fake user for integration tests (CR-03)
+# ---------------------------------------------------------------------------
+
+_TEST_TENANT_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
+_TEST_USER_ID = uuid.UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
+
+
+def _configure_test_auth() -> None:
+    """Configure in-memory auth once at conftest import time."""
+    global _FAKE_USER_FOR_TESTS
+    from shared.auth.dependencies import CurrentUser, configure_auth
+    from shared.auth.tokens_repo import InMemoryRevokedTokenRepo
+
+    _FAKE_USER_FOR_TESTS = CurrentUser(
+        id=_TEST_USER_ID,
+        tenant_id=_TEST_TENANT_ID,
+        email="edi-test@example.com",
+        status="active",
+        roles=("tenant_admin",),
+    )
+    configure_auth(
+        user_loader=lambda uid: _FAKE_USER_FOR_TESTS if uid == _TEST_USER_ID else None,
+        revoked_repo=InMemoryRevokedTokenRepo(),
+    )
+
+
+# Exported so test files can use: dependency_overrides[get_current_user] = lambda: _FAKE_USER_FOR_TESTS
+_FAKE_USER_FOR_TESTS = None  # type: ignore[assignment]
+
+_configure_test_auth()
+
 import pytest
 from sqlalchemy import JSON, String, create_engine, event
 from sqlalchemy.dialects.postgresql import JSONB

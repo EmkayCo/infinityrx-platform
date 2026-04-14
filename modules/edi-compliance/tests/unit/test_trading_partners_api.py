@@ -16,6 +16,7 @@ os.environ.setdefault("ENCRYPTION_KEY_ACTIVE", "dGVzdC1rZXktMzItYnl0ZXMtZm9yLXVu
 os.environ.setdefault("JWT_SECRET", "test-secret-of-sufficient-length-!!!!")
 
 from fastapi.testclient import TestClient
+from tests.conftest import _FAKE_USER_FOR_TESTS  # noqa: E402
 
 TENANT_ID = "11111111-1111-1111-1111-111111111111"
 TENANT_UUID = uuid.UUID(TENANT_ID)
@@ -82,6 +83,7 @@ class _FakeDB:
 
 def test_list_trading_partners_with_results():
     """List endpoint returns trading partner data from DB."""
+    from shared.auth.dependencies import get_current_user
     partner = _FakeTradingPartner()
     fake_db = _FakeDB(partners=[partner])
 
@@ -95,13 +97,7 @@ def test_list_trading_partners_with_results():
         app.dependency_overrides[get_session] = _mock_session
     except (ImportError, Exception):
         pass
-
-    # Also override compliance router's get_session
-    try:
-        pass
-        # Patch set_tenant_context to avoid shared import issues
-    except Exception:
-        pass
+    app.dependency_overrides[get_current_user] = lambda: _FAKE_USER_FOR_TESTS
 
     client = TestClient(app, raise_server_exceptions=False)
 
@@ -115,6 +111,7 @@ def test_list_trading_partners_with_results():
 
 def test_create_trading_partner_with_db():
     """Create endpoint adds trading partner to DB and returns response."""
+    from shared.auth.dependencies import get_current_user
     fake_db = _FakeDB()
 
     async def _mock_session():
@@ -127,6 +124,7 @@ def test_create_trading_partner_with_db():
         app.dependency_overrides[get_session] = _mock_session
     except (ImportError, Exception):
         pass
+    app.dependency_overrides[get_current_user] = lambda: _FAKE_USER_FOR_TESTS
 
     client = TestClient(app, raise_server_exceptions=False)
 

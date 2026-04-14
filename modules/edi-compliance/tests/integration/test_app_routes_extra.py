@@ -16,6 +16,8 @@ os.environ.setdefault("JWT_SECRET", "test-secret-of-sufficient-length-!!!!")
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.conftest import _FAKE_USER_FOR_TESTS  # noqa: E402
+
 TENANT_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -26,12 +28,14 @@ async def _mock_get_session():
 @pytest.fixture(scope="module")
 def client():
     from src.main import create_app
+    from shared.auth.dependencies import get_current_user
     app = create_app()
     try:
         from shared.db.session import get_session  # type: ignore[import]
         app.dependency_overrides[get_session] = _mock_get_session
     except (ImportError, Exception):
         pass
+    app.dependency_overrides[get_current_user] = lambda: _FAKE_USER_FOR_TESTS
     return TestClient(app, raise_server_exceptions=False)
 
 

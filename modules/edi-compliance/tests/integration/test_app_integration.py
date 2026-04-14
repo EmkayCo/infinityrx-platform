@@ -26,6 +26,8 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.conftest import _FAKE_USER_FOR_TESTS  # noqa: E402
+
 TENANT_ID = "11111111-1111-1111-1111-111111111111"
 
 _FIXED_NOW = datetime(2026, 4, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -48,6 +50,7 @@ async def _mock_get_session():
 def client():
     """Create a TestClient against the real create_app() with DB mocked out."""
     from src.main import create_app
+    from shared.auth.dependencies import get_current_user
 
     app = create_app()
 
@@ -58,6 +61,7 @@ def client():
     except (ImportError, Exception):
         pass
 
+    app.dependency_overrides[get_current_user] = lambda: _FAKE_USER_FOR_TESTS
     return TestClient(app, raise_server_exceptions=True)
 
 

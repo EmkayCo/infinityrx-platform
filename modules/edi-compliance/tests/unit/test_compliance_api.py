@@ -17,6 +17,8 @@ os.environ.setdefault("JWT_SECRET", "test-secret-of-sufficient-length-!!!!")
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.conftest import _FAKE_USER_FOR_TESTS  # noqa: E402
+
 TENANT_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -85,6 +87,7 @@ async def _make_create_tp_session(scalars=None):
 @pytest.fixture(scope="function")
 def client_with_compliance_data():
     from src.main import create_app
+    from shared.auth.dependencies import get_current_user
     row = _make_row(total=10, pending=2, accepted=8, rejected=0)
     app = create_app()
     try:
@@ -93,6 +96,7 @@ def client_with_compliance_data():
         app.dependency_overrides[get_session] = lambda: _make_compliance_session(row)
     except (ImportError, Exception):
         pass
+    app.dependency_overrides[get_current_user] = lambda: _FAKE_USER_FOR_TESTS
     return TestClient(app, raise_server_exceptions=False)
 
 
