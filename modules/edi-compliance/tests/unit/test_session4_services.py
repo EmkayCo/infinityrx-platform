@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import uuid
 from datetime import datetime, timedelta, timezone
 
-import pytest
 
 from src.services.cert_lifecycle import (
     CertRecord,

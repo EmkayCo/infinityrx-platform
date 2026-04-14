@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 
-import pytest
 
 from src.x12.delimiters import Delimiters
 from src.x12.generators.gen_835 import generate_835

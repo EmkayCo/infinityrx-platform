@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import replace
 from decimal import Decimal
 from typing import Any, List
 
@@ -12,11 +11,8 @@ import pytest
 from src.x12.delimiters import Delimiters
 from src.x12.generators.gen_835 import generate_835
 from src.x12.generators.schemas import (
-    CasAdjustment,
-    ClpClaim,
     Generate835Request,
     N1Party,
-    SvcLine,
     TrnTrace,
 )
 from src.x12.parsers.parse_835 import parse_835

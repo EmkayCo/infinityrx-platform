@@ -226,7 +226,7 @@ class TestRagServiceConfidenceNoSources:
 class TestRagServiceLowConfNoHistory:
     @pytest.mark.asyncio
     async def test_low_confidence_first_time_no_escalation(self) -> None:
-        from src.services.rag_service import RagService, EmbeddingChunk, ChatMessage
+        from src.services.rag_service import RagService, EmbeddingChunk
         from shared.ai.openai_client import OpenAIResponse
         from unittest.mock import AsyncMock, MagicMock, patch
 

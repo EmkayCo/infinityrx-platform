@@ -17,7 +17,6 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from shared.db.models.events import EventDLQEntry

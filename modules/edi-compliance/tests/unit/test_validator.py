@@ -4,13 +4,11 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-import pytest
 
 from src.x12.delimiters import Delimiters
 from src.x12.generators.gen_835 import generate_835
 from src.x12.generators.gen_837p import generate_837p
 from src.x12.generators.schemas import (
-    ClpClaim,
     Generate835Request,
     Generate837PRequest,
     N1Party,

@@ -1,8 +1,6 @@
 """RED tests for PHI encryption on Member model — 100% coverage required."""
 from __future__ import annotations
 
-import uuid
-from unittest.mock import MagicMock
 
 import pytest
 

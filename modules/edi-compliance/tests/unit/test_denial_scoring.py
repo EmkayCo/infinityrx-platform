@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
 
 from src.services.denial_scoring import (
     DenialRiskLevel,
-    DenialScoreResult,
     score_claim,
-    _HIGH_THRESHOLD,
     _MEDIUM_THRESHOLD,
 )
 

@@ -6,14 +6,11 @@ Tenant isolation tested per endpoint with two tenants.
 from __future__ import annotations
 
 import uuid
-from datetime import date
-from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.main import create_app
-from src.models.tables import MedicalClaimsBase
 
 # Reuse the SAVEPOINT engine pattern from conftest
 TENANT_A = uuid.UUID("11111111-1111-1111-1111-111111111111")

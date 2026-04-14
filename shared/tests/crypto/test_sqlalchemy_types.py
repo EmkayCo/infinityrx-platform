@@ -1,7 +1,6 @@
 """Tests for shared.crypto.sqlalchemy_types — EncryptedString and EncryptedJSON."""
 
 import base64
-import json
 import os
 import secrets
 from unittest import mock

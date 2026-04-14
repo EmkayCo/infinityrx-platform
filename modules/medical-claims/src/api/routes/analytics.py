@@ -4,14 +4,14 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
+from decimal import ROUND_HALF_UP
+
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
-from src.services.claim_service import ClaimService
 from src.services.detection_340b_service import Detection340bService
 from src.clients.pharmacy_directory_client import PharmacyDirectoryClient
 from src.api.schemas.claims import ClaimResponse
-from src.api.schemas.errors import ErrorEnvelope
 
 router = APIRouter(tags=["analytics"])
 
@@ -73,7 +73,7 @@ async def get_340b_summary(request: Request) -> JSONResponse:
         .filter_by(tenant_id=tenant_id, is_340b=True)
         .scalar()
     )
-    paid_str = str(Decimal(str(total_340b_paid)).quantize(Decimal("0.01"))) if total_340b_paid else "0.00"
+    paid_str = str(Decimal(str(total_340b_paid)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)) if total_340b_paid else "0.00"
 
     return JSONResponse(content={"total_340b_claims": total_340b, "total_paid_amount": paid_str})
 
@@ -114,7 +114,7 @@ async def get_waste_report(
             "procedure_code": row.procedure_code,
             "rendering_provider_npi": row.rendering_provider_npi,
             "total_waste_quantity": str(row.total_waste_qty or "0"),
-            "total_waste_amount": str(Decimal(str(row.total_waste_amount or "0")).quantize(Decimal("0.01"))),
+            "total_waste_amount": str(Decimal(str(row.total_waste_amount or "0")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
             "claim_count": row.claim_count,
         }
         for row in rows
@@ -153,7 +153,7 @@ async def site_of_care_analysis(
         {
             "site_of_care": row.site_of_care or "unknown",
             "claim_count": row.claim_count,
-            "total_paid": str(Decimal(str(row.total_paid or "0")).quantize(Decimal("0.01"))),
+            "total_paid": str(Decimal(str(row.total_paid or "0")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
         }
         for row in rows
     ]
@@ -188,7 +188,7 @@ async def site_of_care_opportunities(request: Request) -> JSONResponse:
         {
             "procedure_code": row.procedure_code,
             "count": row.count,
-            "total_paid": str(Decimal(str(row.total_paid or "0")).quantize(Decimal("0.01"))),
+            "total_paid": str(Decimal(str(row.total_paid or "0")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
             "recommended_setting": "office_infusion",
         }
         for row in rows

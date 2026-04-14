@@ -12,13 +12,11 @@ from __future__ import annotations
 import base64
 import os
 import secrets
-import uuid
 from unittest import mock
 
 import pytest
-from sqlalchemy import LargeBinary, create_engine, inspect
+from sqlalchemy import LargeBinary, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
-from sqlalchemy.types import TypeDecorator
 
 from shared.crypto.keys import get_key_provider
 from shared.crypto.sqlalchemy_types import EncryptedString

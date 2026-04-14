@@ -26,7 +26,6 @@ from src.models.tables import (
     DrugBase,
     DrugInteraction,
     DrugPricing,
-    DrugPricingHistory,
     DrugProduct,
     DrugShortage,
     RemsProgram,

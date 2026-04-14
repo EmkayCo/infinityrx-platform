@@ -13,7 +13,6 @@ import pytest
 
 from src.services.guardrails import (
     GuardrailAction,
-    GuardrailResult,
     GuardrailService,
     InputGuardrail,
     OutputGuardrail,

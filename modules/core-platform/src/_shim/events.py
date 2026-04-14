@@ -4,7 +4,7 @@ Real implementation lives in shared/events/ (T3).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List
 
 

@@ -33,9 +33,6 @@ class TestParse271NoIsa:
         # Replace ISA with a valid-delimiter file that detect_delimiters can parse
         # but has GS as first segment instead of ISA
         from unittest.mock import patch
-        from src.x12.parsers import parse_271 as parse_module
-        import src.x12.parsers.parse_271 as m
-        from src.x12.delimiters import Delimiters
 
         real_segs = [
             ["GS", "HB", "SENDER", "RECEIVER"],

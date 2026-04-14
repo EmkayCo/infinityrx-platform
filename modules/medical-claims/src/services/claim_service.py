@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from src.models.tables import ClaimRecord
-from src.utils.validators import is_drug_hcpcs, classify_site_of_care, has_jw_modifier
+from src.utils.validators import is_drug_hcpcs, classify_site_of_care
 from src.api.schemas.claims import ClaimCreate, ClaimUpdate
 
 logger = logging.getLogger(__name__)

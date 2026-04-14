@@ -7,7 +7,6 @@ Supports 005010X279A1 implementation guide.
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from enum import Enum

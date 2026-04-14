@@ -7,7 +7,7 @@ from datetime import date
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
-from src.api.schemas.crosswalk import CrosswalkLookupResponse, CrosswalkResponse
+from src.api.schemas.crosswalk import CrosswalkLookupResponse
 from src.api.schemas.errors import ErrorEnvelope
 from src.services.mapping_service import MappingService
 

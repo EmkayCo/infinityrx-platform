@@ -163,7 +163,6 @@ class UnifiedDrugSpendService:
         are COB, not duplication. We exclude those by checking the claim table.
         """
         # Get all pharmacy+medical pairs for the same member/ndc/date
-        from sqlalchemy import and_, func
         from sqlalchemy.orm import aliased
 
         PharmacySpend = aliased(UnifiedDrugSpend)

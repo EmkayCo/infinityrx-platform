@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-import pytest
 
 from src.x12.generators.schemas import CasAdjustment, ClpClaim, N1Party, SvcLine, TrnTrace
 

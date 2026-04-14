@@ -14,7 +14,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
-from starlette.responses import JSONResponse
 
 from src.infrastructure.rate_limiter import (
     RateLimitConfig,
@@ -22,7 +21,6 @@ from src.infrastructure.rate_limiter import (
     InMemoryBucketStore,
     TokenBucket,
 )
-from src.infrastructure.security_headers import SecurityHeadersMiddleware
 from src.main import create_app, _EmptyDLQRepository, _get_dlq_service, _get_dlq_permissions
 
 

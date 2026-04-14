@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pytest
 
 from src.health.api import ServiceStatus, get_registry
 
@@ -25,7 +24,6 @@ def test_detailed_requires_platform_admin(client, tenant_admin_a):
 
 
 def test_detailed_db_down_returns_503(client, platform_admin, monkeypatch):
-    from src.health import api as hmod
 
     async def bad_db():
         return ServiceStatus(name="database", ok=False, latency_ms=1.0, critical=True, detail="conn refused")

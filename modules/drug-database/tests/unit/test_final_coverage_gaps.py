@@ -5,9 +5,7 @@ import sys
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from io import BytesIO
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
@@ -375,7 +373,6 @@ class TestDependenciesGetDB:
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
 
-        from src.api.dependencies import get_db
         from src.main import create_app
         from src.models.tables import DrugBase
 

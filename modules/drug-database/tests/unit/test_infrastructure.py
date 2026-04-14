@@ -16,7 +16,6 @@ from src.api.dependencies import get_db
 from src.infrastructure.rate_limiter import (
     InMemoryBucketStore,
     RateLimitConfig,
-    RateLimitMiddleware,
     TokenBucket,
 )
 from src.main import create_app

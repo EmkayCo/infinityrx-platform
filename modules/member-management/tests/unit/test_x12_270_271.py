@@ -13,7 +13,6 @@ import pytest
 
 from src.services.x12_270_271 import (
     X12EligibilityInquiry,
-    X12EligibilityResponse,
     X12ParseError,
     X12Parser,
     X12ResponseBuilder,

@@ -13,7 +13,6 @@ from decimal import Decimal
 import pytest
 
 from src.services.merge_service import (
-    MergeConflictError,
     MergeService,
     MergeServiceError,
 )
@@ -108,7 +107,6 @@ class TestMergeService:
             operator_id=uuid.uuid4(),
         )
 
-        from src.models.tables import CoveragePeriod
         db_session.refresh(cov)
         assert cov.member_id == SURVIVING_UUID
 
@@ -126,7 +124,6 @@ class TestMergeService:
             operator_id=uuid.uuid4(),
         )
 
-        from src.models.tables import Accumulator
         db_session.refresh(acc)
         assert acc.member_id == SURVIVING_UUID
 
@@ -143,7 +140,6 @@ class TestMergeService:
             operator_id=uuid.uuid4(),
         )
 
-        from src.models.tables import CobRecord
         db_session.refresh(cob)
         assert cob.member_id == SURVIVING_UUID
 
@@ -159,7 +155,6 @@ class TestMergeService:
             operator_id=uuid.uuid4(),
         )
 
-        from src.models.tables import Member
         db_session.refresh(surviving)
         assert surviving.status == "active"
         assert surviving.member_id == "M001"
@@ -261,7 +256,6 @@ class TestMergeCrossTenantIsolation:
             operator_id=uuid.uuid4(),
         )
 
-        from src.models.tables import CoveragePeriod
         db_session.refresh(cov_b)
         assert cov_b.member_id == tenant_b_mbr_id  # unchanged
 

@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import date, datetime, UTC
-from decimal import Decimal
+from datetime import date
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -150,7 +150,7 @@ class DenialService:
         ) or 0
 
         denial_rate = Decimal(str(denied_claims / all_claims * 100)).quantize(
-            Decimal("0.01")
+            Decimal("0.01"), rounding=ROUND_HALF_UP
         ) if all_claims > 0 else Decimal("0.00")
 
         # By reason code

@@ -10,7 +10,6 @@ import unicodedata
 import uuid
 from datetime import UTC, datetime
 
-import pytest
 
 from src.audit.hash_chain import GENESIS_HASH, compute_entry_hash
 

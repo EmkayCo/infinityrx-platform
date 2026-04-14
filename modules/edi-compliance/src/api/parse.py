@@ -12,9 +12,9 @@ from ..x12.parsers.parse_271 import parse_271
 from ..x12.parsers.parse_277 import parse_277
 from ..x12.parsers.parse_278 import parse_278
 from ..x12.parsers.parse_834 import parse_834
-from ..x12.parsers.parse_835 import Parsed835, parse_835
+from ..x12.parsers.parse_835 import parse_835
 from ..x12.parsers.parse_999 import parse_999, parse_ta1
-from ..x12.validators.validator import ValidationResult, validate_x12
+from ..x12.validators.validator import validate_x12
 
 
 def _require_tenant(x_tenant_id: Annotated[Optional[str], Header()] = None) -> uuid.UUID:

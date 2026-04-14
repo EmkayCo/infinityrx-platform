@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from shared.auth.tokens_repo import InMemoryRevokedTokenRepo, RedisRevokedTokenRepo
 from src.auth import wiring

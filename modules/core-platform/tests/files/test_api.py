@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 
 from src.files import api as files_api
 from src.files.storage import LocalStorageBackend

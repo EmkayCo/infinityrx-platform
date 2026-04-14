@@ -13,9 +13,9 @@ Code sets update on schedule:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Optional, Set
+from typing import Set
 
 
 class CodeSetType(str, Enum):

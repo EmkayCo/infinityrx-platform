@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from decimal import Decimal
 
 import pytest
 
 from src.x12.generators.gen_837i import generate_837i
 from src.x12.generators.schemas import Generate837IRequest
-from src.x12.delimiters import _DEFAULT_DELIMITERS
 
 _FIXED_NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 

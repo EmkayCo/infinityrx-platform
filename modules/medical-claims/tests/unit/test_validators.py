@@ -1,7 +1,6 @@
 """Unit tests for validators module — 100% coverage required (security path)."""
 from __future__ import annotations
 
-import pytest
 
 from src.utils.validators import (
     is_valid_npi,

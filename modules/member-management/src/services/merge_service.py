@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 
 from src.models.tables import (
     Accumulator,
-    AccumulatorLedger,
     CobRecord,
     CoveragePeriod,
     Member,

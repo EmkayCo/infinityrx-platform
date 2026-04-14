@@ -6,9 +6,7 @@ All amounts Decimal with ROUND_HALF_UP. Zero floats. Penny-perfect.
 from __future__ import annotations
 
 from decimal import Decimal
-from uuid import uuid4
 
-import pytest
 
 from src.services.accumulator import (
     AccumulatorService,

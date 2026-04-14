@@ -11,6 +11,7 @@ import uuid
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from sqlalchemy.exc import OperationalError, TimeoutError as SATimeoutError
 from sqlalchemy.orm import Session
 
 from src.models.tables import ClaimRecord
@@ -67,11 +68,24 @@ class AccumulatorService:
             if result:
                 applied_deductible = _money(result.get("applied_to_deductible", applied_deductible))
                 applied_oop = _money(result.get("applied_to_oop", applied_oop))
-        except Exception:
+        except (OperationalError, SATimeoutError, ConnectionError, TimeoutError) as exc:
+            # Only swallow transient infrastructure errors; re-raise data/logic errors
             logger.warning(
                 "accumulator service call failed — using local calculation",
-                extra={"svc_claim_id": str(claim_id), "svc_tenant_id": str(tenant_id)},
+                extra={
+                    "svc_claim_id": str(claim_id),
+                    "svc_tenant_id": str(tenant_id),
+                    "svc_error_type": type(exc).__name__,
+                },
             )
+        except Exception:
+            # Non-transient error (e.g. InvalidOperation, ValueError) — propagate
+            logger.error(
+                "accumulator service non-transient failure",
+                extra={"svc_claim_id": str(claim_id), "svc_tenant_id": str(tenant_id)},
+                exc_info=True,
+            )
+            raise
 
         claim.applied_to_deductible = applied_deductible
         claim.applied_to_oop = applied_oop

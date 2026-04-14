@@ -4,13 +4,11 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-import pytest
 
 from src.x12.delimiters import Delimiters
 from src.x12.generators.gen_835 import generate_835
 from src.x12.generators.schemas import Generate835Request, N1Party, TrnTrace
 from src.x12.validators.validator import (
-    ValidationLevel,
     _check_npi_luhn,
     validate_x12,
 )

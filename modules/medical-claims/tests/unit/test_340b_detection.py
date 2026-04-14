@@ -5,7 +5,6 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-import pytest
 
 from src.services.detection_340b_service import Detection340bService
 from src.clients.pharmacy_directory_client import PharmacyDirectoryClient

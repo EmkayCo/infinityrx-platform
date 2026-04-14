@@ -42,6 +42,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from shared.crypto.sqlalchemy_types import EncryptedString
 from shared.db.base import Base
 from shared.db.tenant_context import TenantScopedMixin
 
@@ -103,6 +104,9 @@ class Tenant(Base):
 
     data_retention_days: Mapped[int] = mapped_column(Integer, server_default="2555")
 
+    # Security settings
+    mfa_required: Mapped[bool] = mapped_column(Boolean, server_default="true")
+
     created_at: Mapped[datetime] = _ts_now()
     updated_at: Mapped[datetime] = _ts_now()
     created_by: Mapped[UUID | None] = mapped_column(
@@ -146,6 +150,14 @@ class User(Base, TenantScopedMixin):
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     failed_login_count: Mapped[int] = mapped_column(Integer, server_default="0")
+
+    # MFA fields (HIPAA 2026 — application-level encryption on secrets)
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    mfa_method: Mapped[str | None] = mapped_column(String(50), nullable=True)  # "totp" | "fido2"
+    mfa_secret_encrypted: Mapped[str | None] = mapped_column(EncryptedString(), nullable=True)
+    mfa_backup_codes_encrypted: Mapped[str | None] = mapped_column(EncryptedString(), nullable=True)
+    mfa_enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    mfa_last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = _ts_now()
     updated_at: Mapped[datetime] = _ts_now()
@@ -247,6 +259,9 @@ class AuditLog(Base, TenantScopedMixin):
     ip_address: Mapped[str | None] = mapped_column(INET)
     user_agent: Mapped[str | None] = mapped_column(Text)
     correlation_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    # Tamper-evident hash chain (HIPAA 2026 — added by audit-hash-chain agent)
+    previous_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    entry_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = _ts_now()
 
 
@@ -442,9 +457,42 @@ class ExclusionMatch(Base, TenantScopedMixin):
     created_at: Mapped[datetime] = _ts_now()
 
 
+# ---------------------------------------------------------------------------
+# FIDO2 / WebAuthn credentials
+# ---------------------------------------------------------------------------
+
+
+class UserFido2Credential(Base):
+    """Stores a registered FIDO2 / WebAuthn credential for a user.
+
+    One user may have multiple hardware keys. credential_id is the
+    unique identifier returned by the authenticator during registration.
+    """
+
+    __tablename__ = "user_fido2_credentials"
+    __table_args__ = (
+        Index("ix_fido2_user", "user_id"),
+        UniqueConstraint("credential_id", name="uq_fido2_credential_id"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[UUID] = _uuid_pk()
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.users.id"),
+        nullable=False,
+        index=True,
+    )
+    credential_id: Mapped[bytes] = mapped_column(nullable=False, unique=True)
+    public_key: Mapped[bytes] = mapped_column(nullable=False)
+    sign_count: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
+    created_at: Mapped[datetime] = _ts_now()
+
+
 __all__ = [
     "Tenant",
     "User",
+    "UserFido2Credential",
     "Role",
     "UserRole",
     "Permission",

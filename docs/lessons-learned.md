@@ -4,6 +4,37 @@ Entries added by builders during the build. Critical/high severity lessons are p
 
 ---
 
+### LESSON-008: `after_transaction_end` sync event listener is incompatible with AsyncSession + StaticPool
+**Date:** 2026-04-13
+**Module:** pharmacy-directory
+**Builder:** Builder-PharmacyDirectory
+**Severity:** high
+
+**What happened:**
+Router tests using `httpx.AsyncClient + ASGITransport` showed 74% branch coverage on `router.py` despite every route being exercised. The SAVEPOINT restart listener (from LESSON-001) was the root cause. When installed on an `AsyncSession` backed by a `StaticPool` SQLite connection, the listener fires synchronous code (`conn.sync_connection.begin_nested()`) from within an async coroutine context. The `aiosqlite` driver executes async IO on the underlying SQLite connection, but `begin_nested()` inside the synchronous `after_transaction_end` event runs outside any greenlet context. This causes the coverage.py C tracer to lose track of the async coroutine frames that resume after `await` suspension points — the tracer sees the coroutine restart but has no frame context to attribute the lines to, so post-`await` lines are recorded as not executed.
+
+Additionally, with `StaticPool` all connections share the same underlying SQLite connection. The synchronous listener firing on one session disrupts the async frame tracking for all sessions using that connection — including sessions from different test functions.
+
+**Root cause:**
+`after_transaction_end` is a synchronous SQLAlchemy event. When fired from an `AsyncSession` that has an active async context, calling `conn.sync_connection.begin_nested()` from the listener crosses the async/sync boundary in a way that `aiosqlite` does not support outside a greenlet. This breaks the coverage.py C tracer's coroutine resume tracking rather than raising an explicit error — making it extremely hard to diagnose.
+
+**Fix:**
+The SAVEPOINT restart listener is only needed when the code under test calls `db.commit()`. If all route/service handlers call only `db.flush()` (never `db.commit()`), the outer `conn.begin()` + `conn.rollback()` pattern provides complete isolation without a restart listener. Verify the code never calls `commit()` before removing the listener:
+
+```bash
+grep -rn "\.commit()" src/   # must return zero results
+```
+
+If the code under test does call `commit()`, the fix is to use a separate in-memory engine per test (not StaticPool) so each test gets its own connection, eliminating the shared-connection interference. Alternatively, use `pytest-anyio` with `asyncio_mode=auto` and avoid the SAVEPOINT listener entirely by isolating at the engine level.
+
+**Prevention rule:**
+Before adding an `after_transaction_end` listener to an `AsyncSession` fixture: (1) confirm the code calls `commit()`, not just `flush()` — if flush-only, the listener is unnecessary; (2) if the code does commit, use a per-test engine rather than StaticPool to avoid the sync/async boundary crossing.
+
+**Regression test:**
+`modules/pharmacy-directory/tests/integration/test_router.py` — 31 router tests all hitting `async def` route handlers post-`await`. If the coverage C tracer regresses, router.py coverage will drop from 100% to ~74%, which would fail the `fail_under = 99` gate.
+
+---
+
 ### LESSON-006: Security primitives built-and-tested in isolation but never mounted on the production app
 **Date:** 2026-04-13
 **Module:** core-platform

@@ -3,7 +3,6 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 import httpx
-import pytest
 import respx
 
 from src.exclusions import job_handler as jh

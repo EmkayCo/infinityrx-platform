@@ -15,9 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
-from src.api.dependencies import get_db, get_tenant_id
+from src.api.dependencies import get_db
 from src.main import create_app
 from src.models.tables import DrugBase
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-import pytest
 
 from src.x12.generators.gen_271 import generate_271
 from src.x12.generators.gen_276 import generate_276

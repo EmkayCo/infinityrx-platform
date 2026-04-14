@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
 from typing import Iterator
 
 import pytest
@@ -15,7 +14,7 @@ from sqlalchemy.pool import StaticPool
 from shared.auth.jwt_tokens import create_access_token
 from src.auth import auth_api_router
 from src.auth._db import get_session as app_get_session
-from src.auth._models import Base, Tenant, User, UserRole
+from src.auth._models import Base, Tenant, User
 from src.auth.audit_sink import InMemoryAuditSink
 from src.auth.deps import get_audit_sink
 from src.auth.seed.system_roles import seed_system_roles

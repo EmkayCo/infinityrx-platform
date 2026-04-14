@@ -6,9 +6,8 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
-import pytest
 
-from src.services.ncpdp_batch import NcpdpClaim, generate_ncpdp_batch, parse_ncpdp_batch
+from src.services.ncpdp_batch import parse_ncpdp_batch
 from src.x12.generators.gen_278 import generate_278
 from src.x12.generators.gen_999 import generate_999, generate_ta1
 from src.x12.generators.schemas import Generate278Request, Generate999Request, GenerateTA1Request
@@ -243,7 +242,7 @@ class TestNcpdpBatchBranches:
 
     def test_btr_with_short_field_no_total(self):
         """BTR with only 1 field — total stays 0."""
-        from src.services.ncpdp_batch import _FIELD_SEP, _RECORD_SEP
+        from src.services.ncpdp_batch import _RECORD_SEP
         raw = "BTR" + _RECORD_SEP
         result = parse_ncpdp_batch(raw)
         assert result.total_amount == Decimal("0")

@@ -12,7 +12,6 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
-    JSON,
     Boolean,
     Date,
     DateTime,
@@ -28,6 +27,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from shared.crypto.sqlalchemy_types import EncryptedString
+from shared.db.models.phi_mixin import PHIMixin
 from shared.db.tenant_context import TenantScopedMixin
 
 SCHEMA = "medical_claims"
@@ -54,14 +54,19 @@ def _ts_now() -> Mapped[datetime]:
     )
 
 
-class ClaimRecord(MedicalClaimsBase, TenantScopedMixin):
-    """Medical benefit drug claim at the service line level."""
+class ClaimRecord(MedicalClaimsBase, TenantScopedMixin, PHIMixin):
+    """Medical benefit drug claim at the service line level.
+
+    PHI columns (patient_member_id, diagnosis_code_1..4) are stored as
+    AES-256-GCM ciphertext via EncryptedString (LargeBinary in DB).
+    Encrypted columns cannot be used as B-tree index keys; tenant+status
+    and tenant+date indexes remain for query performance.
+    """
 
     __tablename__ = "claim_records"
     __table_args__ = (
         UniqueConstraint("tenant_id", "claim_number", "claim_line_number", name="uq_claim_line"),
         Index("idx_medical_tenant_date", "tenant_id", "date_of_service"),
-        Index("idx_medical_member", "tenant_id", "patient_member_id"),
         Index("idx_medical_provider", "tenant_id", "rendering_provider_npi"),
         Index("idx_medical_ndc", "tenant_id", "ndc"),
         Index("idx_medical_hcpcs", "tenant_id", "procedure_code"),
@@ -85,9 +90,11 @@ class ClaimRecord(MedicalClaimsBase, TenantScopedMixin):
     source_file_type: Mapped[str | None] = mapped_column(String(10), nullable=True)  # 837P, 837I, manual, api
     received_date: Mapped[date] = mapped_column(Date, nullable=False, default=date.today)
 
-    # Patient — PHI encrypted
+    # Patient — PHI encrypted (AES-256-GCM via EncryptedString, stored as LargeBinary)
+    # member_id links to the UUID PK in member-management; patient_member_id is the
+    # human-readable member identifier which constitutes PHI under HIPAA §164.514(b)(2)(i).
     member_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
-    patient_member_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    patient_member_id: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
     patient_first_name_encrypted: Mapped[str | None] = mapped_column(EncryptedString(), nullable=True)
     patient_last_name_encrypted: Mapped[str | None] = mapped_column(EncryptedString(), nullable=True)
     patient_dob_encrypted: Mapped[str | None] = mapped_column(EncryptedString(), nullable=True)
@@ -104,7 +111,8 @@ class ClaimRecord(MedicalClaimsBase, TenantScopedMixin):
 
     billing_provider_npi: Mapped[str | None] = mapped_column(String(10), nullable=True)
     billing_provider_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    billing_provider_tax_id: Mapped[str | None] = mapped_column(String(11), nullable=True)
+    # Tax ID (EIN/SSN-equivalent) — PHI-adjacent; encrypted at rest
+    billing_provider_tax_id: Mapped[str | None] = mapped_column(EncryptedString(), nullable=True)
 
     referring_provider_npi: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
@@ -138,11 +146,12 @@ class ClaimRecord(MedicalClaimsBase, TenantScopedMixin):
     mapped_ndc: Mapped[str | None] = mapped_column(String(11), nullable=True)
     mapping_confidence: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
-    # Diagnosis
-    diagnosis_code_1: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    diagnosis_code_2: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    diagnosis_code_3: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    diagnosis_code_4: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Diagnosis — PHI: ICD-10 codes are PHI when linked to a specific member record
+    # (HIPAA §164.514(b)(2)(i)). Stored as AES-256-GCM ciphertext (LargeBinary).
+    diagnosis_code_1: Mapped[str | None] = mapped_column(EncryptedString(), nullable=True)
+    diagnosis_code_2: Mapped[str | None] = mapped_column(EncryptedString(), nullable=True)
+    diagnosis_code_3: Mapped[str | None] = mapped_column(EncryptedString(), nullable=True)
+    diagnosis_code_4: Mapped[str | None] = mapped_column(EncryptedString(), nullable=True)
     diagnosis_code_qualifier: Mapped[str | None] = mapped_column(String(5), nullable=True, default="ABK")
     diagnosis_pointer: Mapped[str | None] = mapped_column(String(4), nullable=True)
 

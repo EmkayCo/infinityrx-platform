@@ -5,7 +5,6 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-import pytest
 
 from src.services.accumulator_service import AccumulatorService
 from src.models.tables import ClaimRecord

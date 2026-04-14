@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from src.models.tables import AspPricing, ClaimRecord
-from src.api.schemas.asp import AspPricingResponse, AspRefreshResponse
+from src.api.schemas.asp import AspPricingResponse
 
 logger = logging.getLogger(__name__)
 

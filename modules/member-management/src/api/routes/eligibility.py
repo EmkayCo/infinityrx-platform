@@ -9,14 +9,11 @@ import uuid
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from src.services.eligibility_service import (
     EligibilityRequest,
-    EligibilityResponse,
     EligibilityService,
-    EligibilityStatus,
 )
 from src.services.x12_270_271 import X12ParseError, X12Parser, X12ResponseBuilder
 

@@ -5,11 +5,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-import pytest
 
 from src.transport.as2 import (
     AS2DispositionType,
-    AS2MDN,
     AS2Message,
     build_as2_message,
     build_mdn,

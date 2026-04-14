@@ -124,7 +124,6 @@ def test_create_app_returns_fastapi_with_router() -> None:
 
 def test_install_signal_handlers_handles_no_loop() -> None:
     """Should silently no-op if add_signal_handler is unsupported."""
-    import asyncio
 
     app = main_module.create_app()
 
@@ -183,7 +182,6 @@ async def test_lifespan_handles_no_running_loop() -> None:
 @pytest.mark.asyncio
 async def test_verify_database_executes_select_1() -> None:
     """Cover the _verify_database body by patching get_engine with a fake."""
-    from unittest.mock import MagicMock
 
     executed: list[str] = []
 

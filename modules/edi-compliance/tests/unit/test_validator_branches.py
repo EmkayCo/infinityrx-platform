@@ -11,10 +11,8 @@ from src.x12.delimiters import Delimiters
 from src.x12.generators.gen_835 import generate_835
 from src.x12.generators.schemas import Generate835Request, N1Party, TrnTrace
 from src.x12.validators.validator import (
-    ValidationLevel,
     _validate_syntax,
     validate_x12,
-    validate_835_basic,
 )
 
 _DELIMS = Delimiters(element="*", sub_element=":", segment="~")
@@ -187,7 +185,6 @@ def test_gen_835_validation_failure_raises():
     from src.x12.generators.gen_835 import generate_835
     from src.x12.generators.schemas import Generate835Request, N1Party, TrnTrace
     from decimal import Decimal
-    from datetime import datetime, timezone
 
     req = Generate835Request(
         tenant_id=TENANT_ID,

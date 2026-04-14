@@ -15,7 +15,6 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 from sqlalchemy import (
-    BigInteger,
     Boolean,
     Date,
     DateTime,

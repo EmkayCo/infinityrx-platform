@@ -1,18 +1,14 @@
 """Unit tests for pricing logic — 100% coverage required (financial path)."""
 from __future__ import annotations
 
-import uuid
 from datetime import date
 from decimal import Decimal
 
-import pytest
 
 from src.services.pricing_service import (
     PricingService,
     quarter_for_date,
-    ASP_MARKUP_PCT,
 )
-from src.models.tables import AspPricing
 
 
 class TestQuarterForDate:

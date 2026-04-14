@@ -22,7 +22,6 @@ os.environ.setdefault("JWT_SECRET", "test-secret-of-sufficient-length-!!!!")
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -73,7 +72,6 @@ def test_health_endpoint(client):
 
 def test_generate_835_through_app(client):
     """835 generator route is mounted on the real app and produces valid X12."""
-    from src.x12.generators.gen_835 import generate_835
     from src.x12.generators.schemas import Generate835Request, N1Party, TrnTrace
     from src.x12.delimiters import Delimiters
 

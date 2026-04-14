@@ -6,7 +6,7 @@ rolled-back transaction against the real ``core.bank_holidays`` table.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 
 import pytest
 from sqlalchemy.exc import IntegrityError

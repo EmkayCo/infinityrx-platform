@@ -5,10 +5,9 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-import pytest
 
 from src.services.unified_spend_service import UnifiedDrugSpendService
-from src.models.tables import ClaimRecord, UnifiedDrugSpend
+from src.models.tables import ClaimRecord
 
 
 def _make_claim(db, tenant_id, claim_num, ndc=None, member_id=None, payer_seq=None, paid=None):

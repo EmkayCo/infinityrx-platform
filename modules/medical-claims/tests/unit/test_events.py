@@ -2,13 +2,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
-from decimal import Decimal
 
 import pytest
 
 from shared.events import InMemoryEventBus, EventEnvelope
-from shared.events.context import new_correlation_id
 from src.events.publishers import (
     publish_claim_received,
     publish_claim_priced,

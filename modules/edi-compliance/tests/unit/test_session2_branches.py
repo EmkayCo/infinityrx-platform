@@ -5,9 +5,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-import pytest
 
-from src.services.scrubbing import scrub_claim, ScrubSeverity
+from src.services.scrubbing import scrub_claim
 from src.x12.generators.gen_271 import generate_271
 from src.x12.generators.gen_276 import generate_276
 from src.x12.generators.gen_277 import generate_277

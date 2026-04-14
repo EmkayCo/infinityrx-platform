@@ -5,7 +5,6 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-import pytest
 
 from src.services.mapping_service import MappingService, _MANY_NDCS_THRESHOLD
 from src.models.tables import ClaimRecord
@@ -66,7 +65,6 @@ class TestCrosswalkLookup:
 class TestClaimMapping:
     def test_direct_ndc_returns_exact(self, db_session, tenant_id):
         svc = MappingService(db_session)
-        from tests.conftest import TENANT_A
         claim = ClaimRecord(
             id=uuid.uuid4(),
             tenant_id=tenant_id,

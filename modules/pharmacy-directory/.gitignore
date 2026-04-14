@@ -1,0 +1,6 @@
+# coverage.py annotate artifacts
+*,cover
+
+# coverage data
+.coverage
+htmlcov/

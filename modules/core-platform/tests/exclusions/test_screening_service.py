@@ -11,7 +11,7 @@ from src.exclusions.screening_service import (
     ExclusionScreeningService,
     TenantScreeningConfig,
 )
-from src.models import ExclusionListEntry, ExclusionMatch
+from src.models import ExclusionListEntry
 
 
 @pytest.fixture

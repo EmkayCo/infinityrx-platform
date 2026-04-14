@@ -12,7 +12,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from src.services.pricing_service import PricingService, quarter_for_date
+from src.services.pricing_service import PricingService
 from src.utils.validators import is_valid_quarter
 
 logger = logging.getLogger(__name__)

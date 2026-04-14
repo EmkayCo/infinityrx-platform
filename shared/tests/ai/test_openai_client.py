@@ -7,7 +7,6 @@ on 429/5xx, fail-fast on 4xx, circuit breaker, and usage logging.
 
 from __future__ import annotations
 
-import re
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch

@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from src.services.claim_service import ClaimService, STATUS_TRANSITIONS
+from src.services.claim_service import ClaimService
 from src.api.schemas.claims import ClaimCreate
 
 

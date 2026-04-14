@@ -7,7 +7,6 @@ and composite-PK ON CONFLICT behaviour cannot be exercised on SQLite.
 from __future__ import annotations
 
 import importlib.util
-import sys
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path

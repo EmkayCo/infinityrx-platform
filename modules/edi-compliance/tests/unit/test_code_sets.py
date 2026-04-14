@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
 
 from src.services.code_sets import (
     CodeSetType,
-    CodeValidationResult,
     validate_claim_frequency,
     validate_cpt,
     validate_hcpcs,

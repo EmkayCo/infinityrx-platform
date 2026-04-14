@@ -8,13 +8,12 @@ MFA for any user accessing ePHI; this suite captures the gate contract.
 
 from __future__ import annotations
 
-import uuid
 from typing import Iterator
 
 import pyotp
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from shared.auth.mfa.challenge import InMemoryChallengeStore
 from shared.auth.passwords import hash_password

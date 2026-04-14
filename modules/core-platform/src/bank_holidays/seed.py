@@ -183,7 +183,6 @@ def seed_years(session: object, start: int, end: int) -> int:
         Inclusive year range.  ``end`` must be >= ``start``.
     """
     from sqlalchemy import text
-    from sqlalchemy.orm import Session as _Session
 
     if end < start:
         raise ValueError(f"end ({end}) must be >= start ({start})")

@@ -8,7 +8,6 @@ Usage: python tests/golden_master/generate_masters.py
 
 from __future__ import annotations
 
-import os
 import sys
 from decimal import Decimal
 from pathlib import Path

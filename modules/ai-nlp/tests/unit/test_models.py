@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
-from uuid import uuid4
 
-import pytest
 
 from src.models.tables import (
     AiNlpConversation,
-    AiNlpConversationMessage,
     AiNlpDocumentResult,
     AiNlpEmbedding,
     AiNlpGuardrailEvent,

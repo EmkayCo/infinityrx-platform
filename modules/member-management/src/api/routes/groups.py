@@ -7,7 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
 
-from src.api.schemas.member import GroupCreate, GroupResponse
+from src.api.schemas.member import GroupCreate
 
 router = APIRouter(prefix="/groups", tags=["groups"])
 

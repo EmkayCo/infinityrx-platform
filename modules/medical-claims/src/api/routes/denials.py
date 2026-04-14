@@ -7,8 +7,7 @@ from datetime import date
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
-from src.api.schemas.denials import DenialResponse, DenialAnalyticsResponse, AppealCreate
-from src.api.schemas.errors import ErrorEnvelope
+from src.api.schemas.denials import DenialResponse
 from src.services.denial_service import DenialService
 
 router = APIRouter(prefix="/denials", tags=["denials"])

@@ -5,11 +5,11 @@ All arithmetic uses Decimal with ROUND_HALF_UP. Zero floats anywhere.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 
-from shared.utils.money import TWO_PLACES, ZERO, money
+from shared.utils.money import TWO_PLACES, ZERO
 
 
 class CopayAssistanceProgramType(str, Enum):

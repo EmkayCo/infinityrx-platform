@@ -13,8 +13,8 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from shared.events.idempotency import InMemoryIdempotencyStore, idempotent_handler
-from src.services.accumulator_db import AccumulatorDbService, AccumulatorNotFoundError
+from shared.events.idempotency import InMemoryIdempotencyStore
+from src.services.accumulator_db import AccumulatorDbService
 
 _acc_db_svc = AccumulatorDbService()
 

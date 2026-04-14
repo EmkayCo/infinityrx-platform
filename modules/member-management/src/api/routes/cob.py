@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
-from typing import Any, Literal
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException

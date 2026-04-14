@@ -33,21 +33,9 @@ dependencies = [
   "openai>=1.50",
   "jinja2>=3.1",
   "pgvector>=0.3",
-  "numpy>=1.26",
+  "numpy>=2.0",
 ]
 
-[project.optional-dependencies]
-dev = [
-  "pytest>=8.3",
-  "pytest-asyncio>=0.25",
-  "pytest-cov>=6.0",
-  "ruff>=0.8",
-  "mypy>=1.13",
-  "testcontainers[postgres,redis,rabbitmq]>=4.9",
-  "freezegun>=1.5",
-  "respx>=0.22",
-  "fakeredis>=2.26",
-]
 
 [tool.uv]
 package = false
@@ -96,6 +84,7 @@ source = [
   "modules/billing/src",
   "modules/reclaimrx/src",
   "modules/ai-nlp/src",
+  "modules/member-management/src",
 ]
 omit = [
   "**/__init__.py",
@@ -142,5 +131,15 @@ exclude_dirs = [
 
 [dependency-groups]
 dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "testcontainers[postgres,redis,rabbitmq]>=4.9",
+    "freezegun>=1.5",
+    "respx>=0.22",
+    "fakeredis>=2.26",
+    "aiosqlite>=0.20",
     "hypothesis>=6.151.12",
 ]

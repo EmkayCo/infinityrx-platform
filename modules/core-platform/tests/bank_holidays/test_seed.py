@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
-from unittest.mock import MagicMock, call
 
 import pytest
 

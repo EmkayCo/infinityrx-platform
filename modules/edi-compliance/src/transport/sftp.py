@@ -9,10 +9,10 @@ Connection parameters are passed in; credentials never hardcoded.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Callable, Dict, List, Optional
+from typing import List, Optional
 
 
 class SftpTransferDirection(str, Enum):

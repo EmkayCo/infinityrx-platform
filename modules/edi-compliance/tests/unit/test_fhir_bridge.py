@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timezone
 
-import pytest
 
 from src.services.fhir_bridge import (
     fhir_coverage_request_to_270,

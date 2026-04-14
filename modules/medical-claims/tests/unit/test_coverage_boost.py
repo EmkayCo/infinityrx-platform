@@ -16,7 +16,6 @@ from src.infrastructure.rate_limiter import (
     InMemoryBucketStore,
     TokenBucket,
 )
-from src.infrastructure.security_headers import SecurityHeadersMiddleware
 from src.services.mapping_service import MappingService
 from src.services.denial_service import DenialService
 from src.services.unified_spend_service import UnifiedDrugSpendService

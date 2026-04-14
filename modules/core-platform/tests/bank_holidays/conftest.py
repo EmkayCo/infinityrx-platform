@@ -14,7 +14,7 @@ selector therefore skips them cleanly when a DB is not reachable.
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from shared.config import get_settings

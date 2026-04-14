@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
 from uuid import uuid4
 
 import pytest
@@ -11,12 +10,9 @@ from src.api.schemas.requests import (
     ChatRequest,
     DocumentProcessRequest,
     GenerateContentRequest,
-    TextClassifyRequest,
 )
 from src.api.schemas.responses import (
     ChatMessageResponse,
-    DocumentResultResponse,
-    GeneratedContentResponse,
     ServiceRequestResponse,
 )
 

@@ -6,7 +6,7 @@ surface pharmacies / prescribers / members.
 """
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, Dict, Iterable, Protocol
+from typing import Any, Callable, Dict, Iterable, Protocol
 
 import httpx
 

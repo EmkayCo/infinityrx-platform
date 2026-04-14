@@ -1,7 +1,6 @@
 """Tests targeting specific coverage gaps."""
 from __future__ import annotations
 
-import json
 import sys
 import uuid
 from datetime import date

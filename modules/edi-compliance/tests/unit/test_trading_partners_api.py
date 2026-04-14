@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 import uuid
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 _MODULE_ROOT = Path(__file__).resolve().parents[2]
 if str(_MODULE_ROOT) not in sys.path:
@@ -15,7 +15,6 @@ import os
 os.environ.setdefault("ENCRYPTION_KEY_ACTIVE", "dGVzdC1rZXktMzItYnl0ZXMtZm9yLXVuaXQtdGVzdHM=")
 os.environ.setdefault("JWT_SECRET", "test-secret-of-sufficient-length-!!!!")
 
-import pytest
 from fastapi.testclient import TestClient
 
 TENANT_ID = "11111111-1111-1111-1111-111111111111"
@@ -99,7 +98,7 @@ def test_list_trading_partners_with_results():
 
     # Also override compliance router's get_session
     try:
-        from src.api.trading_partners import router
+        pass
         # Patch set_tenant_context to avoid shared import issues
     except Exception:
         pass

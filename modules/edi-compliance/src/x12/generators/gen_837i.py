@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from ..delimiters import Delimiters, _DEFAULT_DELIMITERS
 from ..envelope import build_ge, build_gs, build_iea, build_se, build_st

@@ -3,7 +3,6 @@
 import base64
 import os
 import secrets
-from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -17,7 +16,7 @@ from shared.crypto.aes import (
     encrypt,
     encrypt_str,
 )
-from shared.crypto.keys import EnvKeyProvider, get_key_provider
+from shared.crypto.keys import get_key_provider
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -245,7 +244,6 @@ class TestKeyRotation:
     def test_decrypt_data_encrypted_with_old_key(self, rotation_provider):
         # Simulate: data was encrypted when v0 was active
         old_key_b64 = KEY_V0
-        import base64 as _b64
         import os as _os
         with mock.patch.dict(
             _os.environ,

@@ -100,18 +100,9 @@ def _get_revoked_repo() -> RevokedTokenRepo:
 
 
 def _set_tenant_context(tenant_id: uuid.UUID) -> None:
-    try:  # pragma: no cover - real path exercised once T1 lands
-        from shared.db.tenant_context import set_current_tenant_id  # type: ignore
+    from shared.db.tenant_context import set_tenant_context
 
-        set_current_tenant_id(tenant_id)
-    except Exception:
-        # Fall back to the in-repo shim if present
-        try:  # pragma: no cover
-            from modules.core_platform.src._shim.db import _current_tenant  # type: ignore
-
-            _current_tenant.set(tenant_id)
-        except Exception:
-            pass
+    set_tenant_context(tenant_id)
 
 
 def _unauthorized(detail: str) -> HTTPException:

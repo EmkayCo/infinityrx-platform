@@ -9,7 +9,7 @@ No PHI is logged. FHIR resources are dicts (json.loads output).
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 
 # ---- FHIR → X12 ----
@@ -119,7 +119,7 @@ def parsed_271_to_fhir(parsed_271: Any) -> Dict[str, Any]:
         }
         if b.monetary_amount:
             item["benefit"] = [{"type": {"text": "benefit"},
-                                 "allowedMoney": {"value": float(b.monetary_amount), "currency": "USD"}}]
+                                 "allowedMoney": {"value": str(b.monetary_amount), "currency": "USD"}}]
         benefits.append(item)
 
     return {

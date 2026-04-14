@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import pytest
 
-from src.x12.delimiters import Delimiters, _DEFAULT_DELIMITERS
+from src.x12.delimiters import Delimiters
 from src.x12.envelope import EnvelopeConfig, build_isa, build_gs
 
 _DELIMS = Delimiters(element="*", sub_element=":", segment="~")

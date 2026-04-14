@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from datetime import datetime, timezone
-from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient

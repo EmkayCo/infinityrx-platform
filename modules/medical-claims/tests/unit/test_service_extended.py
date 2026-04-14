@@ -5,15 +5,12 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-import pytest
 
 from src.services.claim_service import ClaimService, _parse_date
 from src.services.pricing_service import PricingService
 from src.services.mapping_service import MappingService
 from src.services.unified_spend_service import UnifiedDrugSpendService
 from src.services.detection_340b_service import Detection340bService
-from src.services.denial_service import DenialService
-from src.clients.pharmacy_directory_client import PharmacyDirectoryClient
 from src.clients.drug_database_client import DrugDatabaseClient
 from src.api.schemas.claims import ClaimCreate, ClaimUpdate
 from src.models.tables import ClaimRecord

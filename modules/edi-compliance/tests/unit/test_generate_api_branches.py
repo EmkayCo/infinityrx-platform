@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 _MODULE_ROOT = Path(__file__).resolve().parents[2]
 if str(_MODULE_ROOT) not in sys.path:

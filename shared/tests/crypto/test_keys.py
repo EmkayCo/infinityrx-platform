@@ -4,7 +4,6 @@ import base64
 import json
 import os
 import secrets
-import tempfile
 from pathlib import Path
 from unittest import mock
 

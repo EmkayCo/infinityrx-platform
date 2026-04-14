@@ -9,7 +9,7 @@ import pytest
 
 from src.x12.generators.gen_278 import generate_278
 from src.x12.generators.schemas import Generate278Request
-from src.x12.parsers.parse_278 import Parsed278, Parsed278ServiceReview, parse_278
+from src.x12.parsers.parse_278 import parse_278
 
 _FIXED_NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 _T = uuid.UUID("00000000-0000-0000-0000-000000000001")

@@ -15,7 +15,6 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 

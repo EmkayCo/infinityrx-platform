@@ -10,7 +10,6 @@ if str(_MODULE_ROOT) not in sys.path:
     sys.path.insert(0, str(_MODULE_ROOT))
 
 import uuid
-from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,14 +18,12 @@ from src.main import create_app
 from src.api.schemas.member import (
     MemberCreate,
     MemberUpdate,
-    MemberTerminate,
     GroupCreate,
     PhiAccessLevel,
 )
 from src.services.csv_parser import (
     CsvEnrollmentParser,
     FieldMapping,
-    ParseError,
 )
 from src.services.edi_834_parser import (
     Edi834Parser,

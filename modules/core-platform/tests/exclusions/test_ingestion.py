@@ -13,7 +13,6 @@ from src.exclusions.ingestion import (
     _parse_date,
     _pick,
 )
-from src.models import ExclusionListEntry
 
 FIX = Path(__file__).resolve().parents[1] / "fixtures" / "exclusions" / "sample_oig.csv"
 

@@ -9,7 +9,7 @@ import pytest
 
 from src.x12.generators.gen_999 import generate_999, generate_ta1
 from src.x12.generators.schemas import Generate999Request, GenerateTA1Request
-from src.x12.parsers.parse_999 import Parsed999, ParsedTA1, parse_999, parse_ta1
+from src.x12.parsers.parse_999 import parse_999, parse_ta1
 
 _FIXED_NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 _T = uuid.UUID("00000000-0000-0000-0000-000000000001")

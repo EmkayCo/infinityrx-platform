@@ -10,9 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from decimal import Decimal
 from enum import IntEnum
-from typing import Any
 
 from ..delimiters import Delimiters, detect_delimiters
 from ..segments import parse_segments

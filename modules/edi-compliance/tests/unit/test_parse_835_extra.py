@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-import pytest
 
 from src.x12.delimiters import Delimiters
 from src.x12.parsers.parse_835 import parse_835

@@ -10,8 +10,8 @@ import pytest
 from src.x12.generators.gen_271 import generate_271
 from src.x12.generators.gen_277 import generate_277
 from src.x12.generators.schemas import Generate271Request, Generate277Request
-from src.x12.parsers.parse_271 import Parsed271, Parsed271Benefit, parse_271
-from src.x12.parsers.parse_277 import Parsed277, Parsed277ClaimStatus, parse_277
+from src.x12.parsers.parse_271 import parse_271
+from src.x12.parsers.parse_277 import parse_277
 
 _FIXED_NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 _TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")

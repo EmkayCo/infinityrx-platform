@@ -8,7 +8,6 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-import pytest
 
 from src.jobs.benefit_year_reset import BenefitYearResetJob
 from src.jobs.dependent_aging import DependentAgingJob

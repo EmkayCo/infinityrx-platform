@@ -8,7 +8,7 @@ Anchor test: apply_claim writes a ledger row with running_total = accumulated_am
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -322,7 +322,7 @@ class TestLedgerInvariant:
 
     def test_running_total_equals_cumulative_sum(self, db_session):
         """running_total on final ledger row == sum of all ledger amounts."""
-        from src.models.tables import Accumulator, AccumulatorLedger
+        from src.models.tables import AccumulatorLedger
         acc_id = self._seed_acc(db_session)
         svc = AccumulatorDbService()
         svc.apply_claim(db=db_session, tenant_id=TENANT_ID, accumulator_id=acc_id,
@@ -345,7 +345,6 @@ class TestLedgerInvariant:
             )
 
     def test_verify_ledger_invariant_passes_for_valid_ledger(self, db_session):
-        from src.models.tables import AccumulatorLedger
         acc_id = self._seed_acc(db_session)
         svc = AccumulatorDbService()
         svc.apply_claim(db=db_session, tenant_id=TENANT_ID, accumulator_id=acc_id,

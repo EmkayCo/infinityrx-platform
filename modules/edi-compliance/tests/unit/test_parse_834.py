@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.x12.parsers.parse_834 import Parsed834, Parsed834Member, parse_834
+from src.x12.parsers.parse_834 import parse_834
 
 
 def _make_834_raw(members=None) -> str:

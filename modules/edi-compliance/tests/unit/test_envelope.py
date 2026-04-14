@@ -6,10 +6,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from src.x12.delimiters import Delimiters, _DEFAULT_DELIMITERS
+from src.x12.delimiters import Delimiters
 from src.x12.envelope import (
-    EnvelopeConfig,
-    ParsedEnvelope,
     build_ge,
     build_gs,
     build_iea,

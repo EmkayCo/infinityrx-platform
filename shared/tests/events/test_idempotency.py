@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from freezegun import freeze_time
 
 from shared.events.idempotency import (
-    IdempotencyStore,
     InMemoryIdempotencyStore,
     idempotent_handler,
 )

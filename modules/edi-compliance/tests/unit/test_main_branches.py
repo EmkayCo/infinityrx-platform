@@ -82,7 +82,6 @@ def test_create_app_with_dlq_router_mocked():
 async def test_lifespan_runs():
     """Lifespan async context manager executes without error (shared imports fail gracefully)."""
     from src.main import lifespan, create_app
-    from fastapi import FastAPI
     app = create_app()
     async with lifespan(app):
         pass  # Just verify it completes

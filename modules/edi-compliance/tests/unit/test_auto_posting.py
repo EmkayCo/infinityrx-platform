@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any, Callable, List, Optional
-from unittest.mock import AsyncMock, MagicMock
+from typing import Any, List
 
 import pytest
 
@@ -17,11 +15,10 @@ from src.x12.generators.schemas import (
     ClpClaim,
     Generate835Request,
     N1Party,
-    SvcLine,
     TrnTrace,
 )
 from src.x12.parsers.parse_835 import parse_835
-from src.services.auto_posting import PostingResult, auto_post_835
+from src.services.auto_posting import auto_post_835
 
 _DELIMS = Delimiters(element="*", sub_element=":", segment="~")
 

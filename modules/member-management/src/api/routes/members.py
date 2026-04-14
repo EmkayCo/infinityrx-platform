@@ -5,12 +5,10 @@ import uuid
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Query
 
 from src.api.schemas.member import (
     MemberCreate,
-    MemberResponse,
     MemberTerminate,
     MemberUpdate,
     PhiAccessLevel,

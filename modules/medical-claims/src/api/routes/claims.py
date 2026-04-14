@@ -7,9 +7,8 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
-from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
+from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import JSONResponse
 
 from src.api.schemas.claims import (

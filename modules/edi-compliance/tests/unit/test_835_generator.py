@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-import pytest
 
-from src.x12.delimiters import Delimiters, detect_delimiters
+from src.x12.delimiters import Delimiters
 from src.x12.generators.gen_835 import generate_835
 from src.x12.generators.schemas import (
     CasAdjustment,
