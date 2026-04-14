@@ -186,6 +186,56 @@ Should be added to `.claude/rules/security.md` (or similar) once that file exist
 
 ---
 
+### LESSON-007: PG_UUID(as_uuid=True) returns float under SQLite SAVEPOINT sessions
+**Date:** 2026-04-14
+**Module:** member-management
+**Builder:** member-management
+**Severity:** medium
+
+**What happened:**
+After adding SAVEPOINT-based test isolation (per LESSON-001) to the member-management module, every test that read back an `Accumulator` row via `db.query(Accumulator).filter_by(...).first()` crashed with:
+
+```
+AttributeError: 'float' object has no attribute 'replace'
+```
+
+The UUID column `tenant_id` was receiving `1.1111111111111112e+31` — i.e., the UUID `11111111-1111-1111-1111-111111111111` interpreted as a Python float.
+
+**Root cause:**
+`PG_UUID(as_uuid=True)` stores UUID values as raw bytes (BLOB) in SQLite. Under a normal `Session`, SQLAlchemy fetches BLOBs and its `UUID` type processor correctly converts them to `uuid.UUID` objects. Under a SAVEPOINT-based connection (using `join_transaction_mode="create_savepoint"`), SQLite's pysqlite driver appears to return BLOB data as Python floats in some result rows — most likely because the C-level row factory in the `cyextension` path applies integer-style coercion to 16-byte BLOBs when no explicit type affinity is set on the SQLite column.
+
+The `INSERT` side was unaffected; the crash only manifested on `SELECT` after an earlier flush within the same SAVEPOINT connection.
+
+**Fix:**
+In the conftest `_engine` fixture, replace all `PG_UUID` columns with a `_UUIDString` TypeDecorator that stores as `VARCHAR(36)` and round-trips `uuid.UUID` ↔ str explicitly:
+
+```python
+class _UUIDString(TypeDecorator):
+    impl = String(36)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return str(value) if value is not None else None
+
+    def process_result_value(self, value, dialect):
+        return uuid.UUID(value) if value is not None else None
+
+# In _engine fixture, after nulling schemas:
+for col in table.columns:
+    if isinstance(col.type, JSONB):
+        col.type = JSON()
+    elif isinstance(col.type, PG_UUID):
+        col.type = _UUIDString()
+```
+
+**Prevention rule:**
+ADDED TO `.claude/rules/testing.md` (see LESSON-007 section).
+
+**Regression test:**
+`test_apply_claim_ledger_row_created` in `modules/member-management/tests/unit/test_accumulator_db.py` — the anchor test seeds an Accumulator and queries it back in the same SAVEPOINT session; any regression in the UUID type swap will immediately fail with the float AttributeError.
+
+---
+
 ### LESSON-003: penny_allocate remainder can be negative — first item absorbs it
 **Date:** 2026-04-13
 **Module:** reclaimrx

@@ -51,3 +51,33 @@ def db(engine) -> Session:
 ```
 
 Symptoms of broken isolation: `MultipleResultsFound`, rows persisting across tests, idempotency tests failing on second seed call.
+
+## SQLite UUID Column Compatibility (LESSON-007 — Medium Severity)
+MUST NOT use `PG_UUID(as_uuid=True)` columns in SQLite-backed test fixtures that use SAVEPOINT-based isolation. Under SQLite's pysqlite driver with `join_transaction_mode="create_savepoint"`, BLOB-stored UUIDs are returned as Python floats on SELECT, causing `AttributeError: 'float' object has no attribute 'replace'` in the UUID type processor.
+
+Required conftest pattern for any module whose ORM models use `PG_UUID(as_uuid=True)`:
+
+```python
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.types import TypeDecorator
+
+class _UUIDString(TypeDecorator):
+    """SQLite-compatible UUID stored as VARCHAR(36)."""
+    impl = String(36)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return str(value) if value is not None else None
+
+    def process_result_value(self, value, dialect):
+        return uuid.UUID(value) if value is not None else None
+
+# In _engine fixture, after nulling schemas:
+for col in table.columns:
+    if isinstance(col.type, JSONB):
+        col.type = JSON()
+    elif isinstance(col.type, PG_UUID):
+        col.type = _UUIDString()
+```
+
+Symptom: `AttributeError: 'float' object has no attribute 'replace'` raised deep in `sqlalchemy.sql.sqltypes` when reading back a row that contains a UUID column alongside a Numeric column.
