@@ -1,0 +1,257 @@
+erDiagram
+    %% =========================================================
+    %% CORE SCHEMA (owned by core-platform)
+    %% =========================================================
+
+    Tenant {
+        UUID id PK
+        string name
+        string slug
+        string status
+        bool mfa_required
+        bool session_timeout_enabled
+        int session_timeout_minutes
+        int max_concurrent_sessions
+    }
+
+    User {
+        UUID id PK
+        UUID tenant_id FK
+        string email
+        string display_name
+        string status
+        bool mfa_enabled
+        string mfa_method
+        encrypted mfa_secret_encrypted
+        encrypted mfa_backup_codes_encrypted
+    }
+
+    AuditLog {
+        UUID id PK
+        UUID tenant_id FK
+        UUID user_id FK
+        string action
+        string entity_type
+        UUID entity_id
+        jsonb before_state
+        jsonb after_state
+        string entry_hash
+        string chain_hash
+    }
+
+    Session {
+        UUID id PK
+        UUID tenant_id FK
+        UUID user_id FK
+        string token_hash
+        datetime expires_at
+        string ip_address
+        datetime last_active_at
+    }
+
+    ApiKey {
+        UUID id PK
+        UUID tenant_id FK
+        UUID user_id FK
+        string key_hash
+        string scopes
+        datetime expires_at
+        bool is_active
+    }
+
+    Tenant ||--o{ User : "has"
+    Tenant ||--o{ AuditLog : "scopes"
+    User ||--o{ AuditLog : "creates"
+    User ||--o{ Session : "owns"
+    User ||--o{ ApiKey : "owns"
+
+    %% =========================================================
+    %% BILLING SCHEMA (owned by billing module)
+    %% =========================================================
+
+    ClaimRecord {
+        UUID id PK
+        UUID tenant_id FK
+        string auth_number
+        string claim_type
+        string status
+        numeric net_amount
+        numeric dispensing_fee
+        UUID client_id FK
+        UUID program_id FK
+    }
+
+    PaymentBatch {
+        UUID id PK
+        UUID tenant_id FK
+        string batch_number
+        string payment_route
+        string status
+        numeric total_amount
+        int payment_count
+    }
+
+    APRecord {
+        UUID id PK
+        UUID tenant_id FK
+        UUID claim_id FK
+        UUID batch_id FK
+        string payment_route
+        string status
+        numeric amount
+    }
+
+    Invoice {
+        UUID id PK
+        UUID tenant_id FK
+        string invoice_number
+        UUID client_id FK
+        numeric total_amount
+        string status
+        date due_date
+    }
+
+    ARRecord {
+        UUID id PK
+        UUID tenant_id FK
+        UUID invoice_id FK
+        UUID client_id FK
+        numeric original_amount
+        numeric outstanding_amount
+        string status
+    }
+
+    JournalEntry {
+        UUID id PK
+        UUID tenant_id FK
+        string account_code
+        numeric debit_amount
+        numeric credit_amount
+        string entry_hash
+        string chain_hash
+        string period
+    }
+
+    ProgramBudget {
+        UUID id PK
+        UUID tenant_id FK
+        UUID program_id FK
+        numeric budget_amount
+        numeric spent_amount
+        string period
+    }
+
+    Tenant ||--o{ ClaimRecord : "scopes"
+    Tenant ||--o{ PaymentBatch : "scopes"
+    ClaimRecord ||--o{ APRecord : "generates"
+    PaymentBatch ||--o{ APRecord : "groups"
+    Invoice ||--o{ ARRecord : "creates"
+    Tenant ||--o{ JournalEntry : "scopes"
+    Tenant ||--o{ ProgramBudget : "scopes"
+
+    %% =========================================================
+    %% MEMBER SCHEMA (owned by member-management)
+    %% =========================================================
+
+    Member {
+        UUID id PK
+        UUID tenant_id FK
+        string member_id_external
+        encrypted first_name
+        encrypted last_name
+        encrypted date_of_birth
+        encrypted ssn
+        encrypted address_line1
+        encrypted city
+        string state
+        encrypted zip
+        encrypted phone
+        encrypted email
+        string status
+    }
+
+    CoveragePeriod {
+        UUID id PK
+        UUID tenant_id FK
+        UUID member_id FK
+        UUID group_id FK
+        string plan_id
+        date effective_date
+        date termination_date
+        string benefit_phase
+    }
+
+    Accumulator {
+        UUID id PK
+        UUID tenant_id FK
+        UUID member_id FK
+        int benefit_year
+        string accumulator_type
+        numeric ytd_amount
+        numeric benefit_limit
+        numeric remaining_amount
+    }
+
+    AccumulatorLedger {
+        UUID id PK
+        UUID tenant_id FK
+        UUID accumulator_id FK
+        string claim_ref
+        numeric delta
+        numeric running_total
+        datetime applied_at
+    }
+
+    EnrollmentFile {
+        UUID id PK
+        UUID tenant_id FK
+        string filename
+        string file_format
+        string status
+        int records_processed
+    }
+
+    Member ||--o{ CoveragePeriod : "has"
+    Member ||--o{ Accumulator : "holds"
+    Accumulator ||--o{ AccumulatorLedger : "tracks"
+    Tenant ||--o{ Member : "scopes"
+    EnrollmentFile ||--o{ Member : "creates"
+
+    %% =========================================================
+    %% MEDICAL CLAIMS SCHEMA (owned by medical-claims)
+    %% =========================================================
+
+    MedClaimRecord {
+        UUID id PK
+        UUID tenant_id FK
+        string claim_number
+        string claim_type
+        string filing_indicator
+        date service_from_date
+        date service_to_date
+        encrypted patient_member_id
+        string rendering_provider_npi
+        string billing_provider_npi
+        numeric total_charge_amount
+        numeric allowed_amount
+        numeric paid_amount
+        string claim_status
+    }
+
+    HcpcsNdcCrosswalk {
+        UUID id PK
+        string hcpcs_code
+        string ndc11
+        string description
+        bool is_active
+    }
+
+    AspPricing {
+        UUID id PK
+        string hcpcs_code
+        string quarter
+        numeric asp_price
+        numeric asp_limit
+    }
+
+    Tenant ||--o{ MedClaimRecord : "scopes"
