@@ -1,0 +1,5 @@
+Appl_Type~Appl_No~Product_No~Exclusivity_Code~Exclusivity_Date
+N~019777~001~NCE~Jan 22, 1993
+N~020702~001~NCE~Dec 17, 2001
+BLA~103772~001~ODE~Aug 24, 2006
+BLA~103772~001~PED~Feb 24, 2007
