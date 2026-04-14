@@ -1,0 +1,62 @@
+[
+  {
+    "NPI": "1234567893",
+    "First Name": "JOHN",
+    "Last Name": "SMITH",
+    "Middle Name": "A",
+    "Specialty": "Internal Medicine",
+    "Opt Out Effective Date": "2023-01-01",
+    "Opt Out End Date": null,
+    "Order/Referring": "N",
+    "Address": "123 MAIN ST",
+    "City": "CHICAGO",
+    "State": "IL",
+    "Zip": "60601",
+    "Phone": "3125551234"
+  },
+  {
+    "NPI": "9876543210",
+    "First Name": "MARY",
+    "Last Name": "JONES",
+    "Middle Name": null,
+    "Specialty": "Family Practice",
+    "Opt Out Effective Date": "2022-06-15",
+    "Opt Out End Date": "2024-06-14",
+    "Order/Referring": "Y",
+    "Address": "456 PARK AVE",
+    "City": "NEW YORK",
+    "State": "NY",
+    "Zip": "10001",
+    "Phone": "2125559876"
+  },
+  {
+    "NPI": "5555555557",
+    "First Name": "CARLOS",
+    "Last Name": "GARCIA",
+    "Middle Name": "R",
+    "Specialty": "Orthopedic Surgery",
+    "Opt Out Effective Date": "2024-03-01",
+    "Opt Out End Date": null,
+    "Order/Referring": "N",
+    "Address": "789 WILSHIRE BLVD",
+    "City": "LOS ANGELES",
+    "State": "CA",
+    "Zip": "90010",
+    "Phone": "3105558765"
+  },
+  {
+    "NPI": "6666666660",
+    "First Name": "PATRICIA",
+    "Last Name": "WILLIAMS",
+    "Middle Name": null,
+    "Specialty": "Psychiatry",
+    "Opt Out Effective Date": "2021-09-01",
+    "Opt Out End Date": "2023-08-31",
+    "Order/Referring": "N",
+    "Address": "321 OAK ST",
+    "City": "HOUSTON",
+    "State": "TX",
+    "Zip": "77001",
+    "Phone": "7135554321"
+  }
+]
