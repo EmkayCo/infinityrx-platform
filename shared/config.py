@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -34,6 +35,12 @@ class Settings(BaseSettings):
         case_sensitive=True,
         extra="ignore",
     )
+
+    # ── Deployment environment (CR-10/M-16) ─────────────────────────────────
+    # Controls /docs visibility, CORS strictness, and future Key Vault routing.
+    # Default is "development" so local dev works without configuration.
+    # Production deployments MUST set ENVIRONMENT=production.
+    ENVIRONMENT: Literal["development", "staging", "production"] = "development"
 
     DATABASE_URL: str
     DATABASE_URL_SYNC: str
@@ -55,6 +62,16 @@ class Settings(BaseSettings):
 
     MAX_UPLOAD_BYTES: int = 100 * 1024 * 1024
 
+    # ── CORS (M-06/M-16) ────────────────────────────────────────────────────
+    # Explicit allow-list; empty list = no CORS headers (for APIs behind a
+    # gateway) or set to ["*"] only in development. Never wildcard in prod.
+    CORS_ALLOW_ORIGINS: list[str] = []
+
+    # ── Azure Key Vault (H-05) ───────────────────────────────────────────────
+    # When set, the Key Vault stub can resolve secrets from AKV at startup.
+    # Leave empty in development — local .env.local or env vars are used.
+    AZURE_KEYVAULT_URL: str = ""
+
     @field_validator("JWT_ALGORITHM")
     @classmethod
     def _validate_alg(cls, value: str) -> str:
@@ -62,6 +79,15 @@ class Settings(BaseSettings):
         if value not in allowed:
             raise ValueError(f"JWT_ALGORITHM must be one of {sorted(allowed)}")
         return value
+
+    @field_validator("CORS_ALLOW_ORIGINS", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, value: object) -> list[str]:
+        """Accept both JSON array and comma-separated string from env vars."""
+        if isinstance(value, str):
+            # Support CORS_ALLOW_ORIGINS="https://app.example.com,https://admin.example.com"
+            return [o.strip() for o in value.split(",") if o.strip()]
+        return list(value) if value else []
 
 
 @lru_cache(maxsize=1)

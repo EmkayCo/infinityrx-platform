@@ -1,4 +1,8 @@
-"""SQLAlchemy session factory for drug-database module."""
+"""SQLAlchemy session factory for drug-database module.
+
+M-16: No hardcoded DB URL fallback. DRUG_DB_DATABASE_URL must be set
+in the environment. A clear RuntimeError is raised at first use if absent.
+"""
 from __future__ import annotations
 
 import os
@@ -10,11 +14,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from shared.db.tenant_context import install_tenant_loader
 
-_DATABASE_URL = os.environ.get(
-    "DRUG_DB_DATABASE_URL",
-    "postgresql+psycopg2://drug_db:drug_db@localhost:5432/infinityrx_drug_db",
-)
-
 _engine = None
 _SessionFactory = None
 
@@ -22,7 +21,13 @@ _SessionFactory = None
 def _get_engine():
     global _engine
     if _engine is None:
-        _engine = create_engine(_DATABASE_URL, pool_pre_ping=True)
+        db_url = os.environ.get("DRUG_DB_DATABASE_URL")
+        if not db_url:
+            raise RuntimeError(
+                "DRUG_DB_DATABASE_URL environment variable is required but not set. "
+                "Set it to a valid PostgreSQL connection string."
+            )
+        _engine = create_engine(db_url, pool_pre_ping=True)
     return _engine
 
 

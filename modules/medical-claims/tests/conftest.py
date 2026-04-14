@@ -63,6 +63,38 @@ USER_A = uuid.UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
 MEMBER_1 = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 CLAIM_1 = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 
+# ---------------------------------------------------------------------------
+# Auth configuration — fake user for integration tests (CR-03)
+# ---------------------------------------------------------------------------
+# Configure shared auth with in-memory fakes once at module import time.
+# Other integration tests override get_current_user via dependency_overrides
+# to bypass JWT auth and test business logic directly.
+
+
+def _configure_test_auth():
+    """Configure in-memory auth once per test session."""
+    from shared.auth.dependencies import CurrentUser, configure_auth
+    from shared.auth.tokens_repo import InMemoryRevokedTokenRepo
+
+    global _FAKE_USER_FOR_TESTS
+    _FAKE_USER_FOR_TESTS = CurrentUser(
+        id=USER_A,
+        tenant_id=TENANT_A,
+        email="test@example.com",
+        status="active",
+        roles=("tenant_admin",),
+    )
+    configure_auth(
+        user_loader=lambda uid: _FAKE_USER_FOR_TESTS if uid == USER_A else None,
+        revoked_repo=InMemoryRevokedTokenRepo(),
+    )
+
+
+# Exported for dependency_overrides in integration test fixtures.
+_FAKE_USER_FOR_TESTS = None  # type: ignore[assignment]
+
+_configure_test_auth()
+
 
 @pytest.fixture(scope="session")
 def _engine():

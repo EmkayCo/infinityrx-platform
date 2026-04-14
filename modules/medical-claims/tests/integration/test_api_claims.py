@@ -10,7 +10,9 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
+from shared.auth.dependencies import get_current_user
 from src.main import create_app
+from tests.conftest import _FAKE_USER_FOR_TESTS
 
 # Reuse the SAVEPOINT engine pattern from conftest
 TENANT_A = uuid.UUID("11111111-1111-1111-1111-111111111111")
@@ -40,6 +42,9 @@ def app_and_db(_engine):
     SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False)
 
     app = create_app()
+
+    # CR-03: bypass JWT auth so these integration tests focus on business logic
+    app.dependency_overrides[get_current_user] = lambda: _FAKE_USER_FOR_TESTS
 
     @app.middleware("http")
     async def inject_db(request, call_next):
