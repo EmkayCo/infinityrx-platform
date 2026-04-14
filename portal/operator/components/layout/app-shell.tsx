@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { SessionTimeoutModal } from "./session-timeout-modal";
+import { DemoBanner } from "@shared/components/demo-banner";
 import { ShortcutsOverlay } from "@shared/components/shortcuts-overlay";
 import { CommandPalette, useCommandPalette } from "@shared/components/command-palette";
 import { useGlobalKeyboardShortcuts, useKeyboardShortcut } from "@shared/hooks/use-keyboard-shortcuts";
@@ -42,7 +43,11 @@ export function AppShell({ isAuthenticated, children }: AppShellProps) {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex flex-col h-screen overflow-hidden">
+      {/* Demo mode banner — renders only when NEXT_PUBLIC_USE_MOCK_DATA=true */}
+      <DemoBanner />
+
+      <div className="flex flex-1 overflow-hidden">
       {/* Sidebar — desktop */}
       <Sidebar className="hidden lg:flex flex-col" />
 
@@ -83,6 +88,7 @@ export function AppShell({ isAuthenticated, children }: AppShellProps) {
         onOpenChange={setCmdPaletteOpen}
         onNavigate={(href) => router.push(href)}
       />
+      </div>
     </div>
   );
 }

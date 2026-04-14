@@ -1,4 +1,5 @@
 import { ApiError } from "@shared/types/api";
+import { isMockEnabled, mockResponse } from "./mock-data";
 
 export class ApiClientError extends Error {
   public readonly code: string;
@@ -126,6 +127,7 @@ async function parseApiError(response: Response): Promise<ApiClientError> {
 }
 
 export async function apiGet<T>(url: string, options?: FetchOptions): Promise<T> {
+  if (isMockEnabled()) return mockResponse<T>("GET", url);
   const response = await fetchWithRetry(url, { ...options, method: "GET" });
   if (!response.ok) {
     throw await parseApiError(response);
@@ -138,6 +140,7 @@ export async function apiPost<T>(
   body: unknown,
   options?: FetchOptions
 ): Promise<T> {
+  if (isMockEnabled()) return mockResponse<T>("POST", url, body);
   const response = await fetchWithRetry(url, {
     ...options,
     method: "POST",
@@ -154,6 +157,7 @@ export async function apiPut<T>(
   body: unknown,
   options?: FetchOptions
 ): Promise<T> {
+  if (isMockEnabled()) return mockResponse<T>("PUT", url, body);
   const response = await fetchWithRetry(url, {
     ...options,
     method: "PUT",
@@ -170,6 +174,7 @@ export async function apiPatch<T>(
   body: unknown,
   options?: FetchOptions
 ): Promise<T> {
+  if (isMockEnabled()) return mockResponse<T>("PATCH", url, body);
   const response = await fetchWithRetry(url, {
     ...options,
     method: "PATCH",
@@ -185,6 +190,7 @@ export async function apiDelete<T = void>(
   url: string,
   options?: FetchOptions
 ): Promise<T> {
+  if (isMockEnabled()) return mockResponse<T>("DELETE", url);
   const response = await fetchWithRetry(url, { ...options, method: "DELETE" });
   if (!response.ok) {
     throw await parseApiError(response);

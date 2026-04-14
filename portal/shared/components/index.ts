@@ -1,3 +1,4 @@
+export * from "./demo-banner";
 export * from "./skeleton";
 export * from "./error-boundary";
 export * from "./empty-state";

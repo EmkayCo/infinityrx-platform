@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useCallback, useState } from "react";
+import { isMockEnabled } from "@shared/lib/mock-data";
 
 export interface SSEEvent<T = unknown> {
   type: string;
@@ -131,6 +132,37 @@ export function useSSE<T = unknown>(
 
   useEffect(() => {
     mountedRef.current = true;
+
+    if (isMockEnabled()) {
+      // Mock mode: simulate SSE with a rotating set of stub events via setInterval
+      const MOCK_EVENTS: SSEEvent<unknown>[] = [
+        { type: "activity", data: { action: "billing_cycle_approved", user: "Sarah Chen", module: "billing", description: "Billing cycle approved — $2.8M AP", occurred_at: new Date().toISOString() } },
+        { type: "activity", data: { action: "fwa_flag_created", user: "System", module: "reclaimrx", description: "High-severity flag detected at QuickScript Pharmacy", occurred_at: new Date().toISOString() } },
+        { type: "activity", data: { action: "payment_batch_transmitted", user: "Marcus Rivera", module: "payments", description: "NACHA batch transmitted — 847 payments", occurred_at: new Date().toISOString() } },
+        { type: "activity", data: { action: "edi_transaction_accepted", user: "System", module: "edi", description: "835 remittance accepted from BlueCross", occurred_at: new Date().toISOString() } },
+        { type: "metrics", data: { claims_per_hour: 2847, dollars_flowing: "1423891.20", flags_per_day: 34, as_of: new Date().toISOString() } },
+        { type: "activity", data: { action: "report_generated", user: "System", module: "reporting", description: "Monthly Billing Summary ready", occurred_at: new Date().toISOString() } },
+      ];
+      let eventIndex = 0;
+
+      setIsConnected(true);
+
+      const intervalId = setInterval(() => {
+        if (!mountedRef.current) return;
+        const evt = { ...MOCK_EVENTS[eventIndex % MOCK_EVENTS.length], id: String(Date.now()) } as SSEEvent<T>;
+        setEvents((prev) => [...prev.slice(-499), evt]);
+        setLastEvent(evt);
+        onEventRef.current?.(evt);
+        eventIndex += 1;
+      }, 4000 + Math.floor(Math.random() * 4000));
+
+      return () => {
+        mountedRef.current = false;
+        clearInterval(intervalId);
+        setIsConnected(false);
+      };
+    }
+
     if (enabled) {
       connect();
     }
