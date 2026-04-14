@@ -6,8 +6,10 @@ import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
+
+from shared.auth.dependencies import get_current_user  # CR-03
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import DBSession, TenantId
@@ -28,7 +30,11 @@ from src.utils.validators import NpiValidationError, validate_npi
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/prescribers", tags=["prescribers"])
+router = APIRouter(
+    prefix="/api/v1/prescribers",
+    tags=["prescribers"],
+    dependencies=[Depends(get_current_user)],  # CR-03: require JWT auth on all routes
+)
 
 _taxonomy_service = TaxonomyService()
 

@@ -4,13 +4,15 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
+
+from shared.auth.dependencies import get_current_user
 
 from src.api.schemas.denials import DenialResponse
 from src.services.denial_service import DenialService
 
-router = APIRouter(prefix="/denials", tags=["denials"])
+router = APIRouter(prefix="/denials", tags=["denials"], dependencies=[Depends(get_current_user)])  # CR-03
 
 
 def _get_db(request: Request):

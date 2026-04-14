@@ -4,14 +4,16 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
+
+from shared.auth.dependencies import get_current_user
 
 from src.api.schemas.crosswalk import CrosswalkLookupResponse
 from src.api.schemas.errors import ErrorEnvelope
 from src.services.mapping_service import MappingService
 
-router = APIRouter(prefix="/crosswalk", tags=["crosswalk"])
+router = APIRouter(prefix="/crosswalk", tags=["crosswalk"], dependencies=[Depends(get_current_user)])  # CR-03
 
 
 def _get_db(request: Request):

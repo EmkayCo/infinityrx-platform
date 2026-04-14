@@ -10,12 +10,17 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.auth.dependencies import get_current_user  # CR-03
 from shared.db.session import get_session
 from shared.db.tenant_context import set_tenant_context
 
 from ..models.edi_models import TradingPartner
 
-router = APIRouter(prefix="/trading-partners", tags=["trading-partners"])
+router = APIRouter(
+    prefix="/trading-partners",
+    tags=["trading-partners"],
+    dependencies=[Depends(get_current_user)],  # CR-03: require JWT auth on all routes
+)
 
 
 def _require_tenant(x_tenant_id: Annotated[Optional[str], Header()] = None) -> uuid.UUID:

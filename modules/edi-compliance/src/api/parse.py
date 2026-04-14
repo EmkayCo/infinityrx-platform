@@ -8,6 +8,8 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
+from shared.auth.dependencies import get_current_user  # CR-03
+
 from ..x12.parsers.parse_271 import parse_271
 from ..x12.parsers.parse_277 import parse_277
 from ..x12.parsers.parse_278 import parse_278
@@ -26,7 +28,11 @@ def _require_tenant(x_tenant_id: Annotated[Optional[str], Header()] = None) -> u
         raise HTTPException(status_code=403, detail={"error": {"code": "INVALID_TENANT", "message": "x-tenant-id must be a valid UUID"}})
 
 
-router = APIRouter(prefix="/parse", tags=["parsing"])
+router = APIRouter(
+    prefix="/parse",
+    tags=["parsing"],
+    dependencies=[Depends(get_current_user)],  # CR-03: require JWT auth on all routes
+)
 
 
 class ParseRequest(BaseModel):

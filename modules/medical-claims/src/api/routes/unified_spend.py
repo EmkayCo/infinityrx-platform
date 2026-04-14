@@ -4,13 +4,15 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
+
+from shared.auth.dependencies import get_current_user
 
 from src.api.schemas.unified_spend import UnifiedSpendListResponse, UnifiedSpendResponse, DuplicationResponse
 from src.services.unified_spend_service import UnifiedDrugSpendService
 
-router = APIRouter(prefix="/unified-spend", tags=["unified-spend"])
+router = APIRouter(prefix="/unified-spend", tags=["unified-spend"], dependencies=[Depends(get_current_user)])  # CR-03
 
 
 def _get_db(request: Request):

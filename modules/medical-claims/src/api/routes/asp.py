@@ -3,15 +3,17 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
+
+from shared.auth.dependencies import get_current_user
 
 from src.api.schemas.asp import AspPricingResponse, AspRefreshResponse
 from src.api.schemas.errors import ErrorEnvelope
 from src.services.pricing_service import PricingService, quarter_for_date
 from src.jobs.asp_refresh_job import AspRefreshJob
 
-router = APIRouter(prefix="/asp", tags=["asp"])
+router = APIRouter(prefix="/asp", tags=["asp"], dependencies=[Depends(get_current_user)])  # CR-03
 
 
 def _get_db(request: Request):

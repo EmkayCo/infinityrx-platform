@@ -8,8 +8,10 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import JSONResponse
+
+from shared.auth.dependencies import CurrentUser, get_current_user
 
 from src.api.schemas.claims import (
     ClaimCreate,
@@ -22,7 +24,11 @@ from src.api.schemas.claims import (
 from src.api.schemas.errors import ErrorEnvelope
 from src.services.claim_service import ClaimService
 
-router = APIRouter(prefix="/claims", tags=["claims"])
+router = APIRouter(
+    prefix="/claims",
+    tags=["claims"],
+    dependencies=[Depends(get_current_user)],  # CR-03: require JWT auth on all routes
+)
 
 
 def _get_db(request: Request):

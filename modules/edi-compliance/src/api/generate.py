@@ -7,6 +7,8 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
+
+from shared.auth.dependencies import get_current_user  # CR-03
 try:
     from sqlalchemy.ext.asyncio import AsyncSession
     from shared.db.session import get_session  # type: ignore[import]
@@ -40,7 +42,11 @@ from ..x12.generators.schemas import (
     GenerateTA1Request,
 )
 
-router = APIRouter(prefix="/generate", tags=["generation"])
+router = APIRouter(
+    prefix="/generate",
+    tags=["generation"],
+    dependencies=[Depends(get_current_user)],  # CR-03: require JWT auth on all routes
+)
 
 
 def _require_tenant(x_tenant_id: Annotated[Optional[str], Header()] = None) -> uuid.UUID:

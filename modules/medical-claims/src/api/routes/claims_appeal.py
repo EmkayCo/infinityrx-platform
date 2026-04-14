@@ -3,15 +3,17 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+
+from shared.auth.dependencies import get_current_user
 
 from src.api.schemas.claims import ClaimResponse
 from src.api.schemas.denials import AppealCreate
 from src.api.schemas.errors import ErrorEnvelope
 from src.services.denial_service import DenialService
 
-router = APIRouter(prefix="/claims", tags=["appeals"])
+router = APIRouter(prefix="/claims", tags=["appeals"], dependencies=[Depends(get_current_user)])  # CR-03
 
 
 def _get_db(request: Request):

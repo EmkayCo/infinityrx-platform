@@ -6,14 +6,16 @@ from datetime import date
 
 from decimal import ROUND_HALF_UP
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
+
+from shared.auth.dependencies import get_current_user
 
 from src.services.detection_340b_service import Detection340bService
 from src.clients.pharmacy_directory_client import PharmacyDirectoryClient
 from src.api.schemas.claims import ClaimResponse
 
-router = APIRouter(tags=["analytics"])
+router = APIRouter(tags=["analytics"], dependencies=[Depends(get_current_user)])  # CR-03
 
 
 def _get_db(request: Request):
