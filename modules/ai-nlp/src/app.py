@@ -77,8 +77,37 @@ def create_app() -> FastAPI:
     )
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok", "module": "ai-nlp"}
+    async def health() -> dict:
+        from sqlalchemy import text  # noqa: PLC0415
+        from shared.db.session import get_sessionmaker  # noqa: PLC0415
+        from fastapi.responses import JSONResponse  # noqa: PLC0415
+
+        db_status: str
+        db_critical_failed: bool
+        try:
+            maker = get_sessionmaker()
+            async with maker() as session:
+                await session.execute(text("SELECT 1"))
+            db_status = "ok"
+            db_critical_failed = False
+        except Exception as exc:  # noqa: BLE001
+            db_status = f"error: {type(exc).__name__}"
+            db_critical_failed = True
+
+        dependencies: dict[str, str] = {"database": db_status}
+
+        if db_critical_failed:
+            overall = "unhealthy"
+        elif any(v != "ok" for v in dependencies.values()):
+            overall = "degraded"
+        else:
+            overall = "healthy"
+
+        status_code = 503 if db_critical_failed else 200
+        return JSONResponse(
+            status_code=status_code,
+            content={"status": overall, "module": "ai-nlp", "dependencies": dependencies},
+        )
 
     return app
 

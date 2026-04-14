@@ -2,6 +2,10 @@
 
 First run generates the golden file. Subsequent runs compare byte-for-byte.
 If output changes, verify intentionally and delete the .golden file to regenerate.
+
+H-16: time is frozen to 2026-04-13 because nacha_generator._batch_header reads
+date.today() for the company descriptive date — without freezing, the golden
+fixture drifts every day.
 """
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from freezegun import freeze_time
 
 from src.services.nacha_generator import (
     NachaBatchConfig,
@@ -61,6 +66,7 @@ GOLDEN_ENTRIES = [
 ]
 
 
+@freeze_time("2026-04-13")
 def _generate_golden_nacha() -> str:
     result = generate_nacha_file(
         FILE_CFG, BATCH_CFG, GOLDEN_ENTRIES,
@@ -70,6 +76,7 @@ def _generate_golden_nacha() -> str:
     return result.file_content
 
 
+@freeze_time("2026-04-13")
 class TestNachaGoldenMaster:
     def test_nacha_output_matches_golden(self):
         content = _generate_golden_nacha()

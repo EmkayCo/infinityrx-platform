@@ -33,8 +33,10 @@ class TestCreateApp:
         assert "DataIQ" in app.title
 
     def test_health_endpoint_mounted(self, client: TestClient) -> None:
+        """Health endpoint must be mounted and return the contract schema."""
         response = client.get("/health")
-        assert response.status_code == 200
+        # 200 = healthy/degraded, 503 = unhealthy (DB/Redis down in test env).
+        assert response.status_code in (200, 503)
         assert response.json()["module"] == "dataiq"
 
     def test_router_mounted_at_api_v1_dataiq(self, client: TestClient) -> None:

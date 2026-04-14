@@ -23,16 +23,20 @@ TENANT_ID = str(uuid.UUID("00000000-0000-0000-0000-000000000001"))
 
 
 class TestHealthEndpoint:
-    def test_health_check_returns_ok(self, client: TestClient) -> None:
+    def test_health_check_is_reachable(self, client: TestClient) -> None:
+        """Health endpoint must be mounted and return the contract schema."""
         response = client.get("/health")
-        assert response.status_code == 200
+        # 200 = healthy/degraded, 503 = unhealthy (DB/Redis down in test env).
+        assert response.status_code in (200, 503)
         data = response.json()
-        assert data["status"] == "ok"
         assert data["module"] == "dataiq"
+        assert data["status"] in ("healthy", "degraded", "unhealthy")
+        assert "dependencies" in data
 
     def test_health_has_no_auth_requirement(self, client: TestClient) -> None:
+        """Health must be reachable without an auth token."""
         response = client.get("/health")
-        assert response.status_code == 200
+        assert response.status_code in (200, 503)
 
 
 class TestMetricsEndpoints:

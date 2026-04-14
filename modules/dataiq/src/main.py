@@ -82,8 +82,51 @@ def create_app() -> FastAPI:
     )
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok", "module": "dataiq"}
+    async def health() -> dict:
+        from sqlalchemy import text  # noqa: PLC0415
+        from shared.db.session import get_sessionmaker  # noqa: PLC0415
+        from shared.config import get_settings  # noqa: PLC0415, F811
+        import redis.asyncio as redis_async  # noqa: PLC0415
+        from fastapi.responses import JSONResponse  # noqa: PLC0415
+
+        db_status: str
+        db_critical_failed: bool
+        try:
+            maker = get_sessionmaker()
+            async with maker() as session:
+                await session.execute(text("SELECT 1"))
+            db_status = "ok"
+            db_critical_failed = False
+        except Exception as exc:  # noqa: BLE001
+            db_status = f"error: {type(exc).__name__}"
+            db_critical_failed = True
+
+        redis_status: str
+        try:
+            _settings = get_settings()
+            _redis = redis_async.from_url(_settings.REDIS_URL)
+            try:
+                await _redis.ping()
+                redis_status = "ok"
+            finally:
+                await _redis.aclose()
+        except Exception as exc:  # noqa: BLE001
+            redis_status = f"error: {type(exc).__name__}"
+
+        dependencies: dict[str, str] = {"database": db_status, "redis": redis_status}
+
+        if db_critical_failed:
+            overall = "unhealthy"
+        elif any(v != "ok" for v in dependencies.values()):
+            overall = "degraded"
+        else:
+            overall = "healthy"
+
+        status_code = 503 if db_critical_failed else 200
+        return JSONResponse(
+            status_code=status_code,
+            content={"status": overall, "module": "dataiq", "dependencies": dependencies},
+        )
 
     @app.exception_handler(Exception)
     async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
