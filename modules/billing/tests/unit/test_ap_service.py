@@ -184,7 +184,7 @@ class TestBatchGeneration:
             batch_number="BATCH001",
         )
         topics = [c[0][0] for c in events.publish.call_args_list]
-        assert "payment_batch.generated" in topics
+        assert "payment_batch.submitted" in topics
 
 
 class TestBatchValidation:

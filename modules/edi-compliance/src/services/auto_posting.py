@@ -13,14 +13,12 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any, Optional, Protocol
+from typing import Any, Optional
+
+from shared.events.bus import EventBus
+from shared.events.types import EventEnvelope
 
 from ..x12.parsers.parse_835 import Parsed835, Parsed835Claim
-
-
-class _EventBusProtocol(Protocol):
-    async def publish(self, envelope: Any) -> None:  # pragma: no cover
-        ...
 
 
 @dataclass
@@ -32,23 +30,10 @@ class PostingResult:
     clp_total: Decimal = Decimal("0")
 
 
-def _make_envelope(**kwargs: Any) -> Any:
-    """Build an EventEnvelope — import lazily to avoid shared import errors in tests."""
-    try:
-        from shared.events.types import EventEnvelope
-        return EventEnvelope(**kwargs)
-    except ImportError:  # pragma: no cover
-        class _SimpleEnvelope:
-            def __init__(self, **kw: Any) -> None:
-                for k, v in kw.items():
-                    setattr(self, k, v)
-        return _SimpleEnvelope(**kwargs)
-
-
 async def auto_post_835(
     remittance: Parsed835,
     tenant_id: uuid.UUID,
-    event_bus: Any,
+    event_bus: EventBus,
     correlation_id: Optional[uuid.UUID] = None,
 ) -> PostingResult:
     """Process a parsed 835 and emit payment.auto_posted events."""
@@ -73,13 +58,13 @@ async def _post_claim(
     claim: Parsed835Claim,
     remittance: Parsed835,
     tenant_id: uuid.UUID,
-    event_bus: Any,
+    event_bus: EventBus,
     correlation_id: uuid.UUID,
     result: PostingResult,
 ) -> None:
     if not claim.claim_id:
         result.unmatched_claims.append("")
-        await event_bus.publish(_make_envelope(
+        await event_bus.publish(EventEnvelope(
             event_type="payment.unmatched_claim",
             tenant_id=tenant_id,
             correlation_id=correlation_id,
@@ -121,7 +106,7 @@ async def _post_claim(
         for svc in claim.service_lines
     ]
 
-    await event_bus.publish(_make_envelope(
+    await event_bus.publish(EventEnvelope(
         event_type="payment.auto_posted",
         tenant_id=tenant_id,
         correlation_id=correlation_id,

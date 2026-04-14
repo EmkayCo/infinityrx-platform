@@ -5,9 +5,10 @@ from __future__ import annotations
 import uuid
 from datetime import date
 from decimal import Decimal
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from shared.events.in_memory_bus import InMemoryEventBus
 from src.events.consumers import (
     handle_ach_return_received,
     handle_claim_adjudicated,
@@ -20,7 +21,7 @@ from src.events.publishers import (
     publish_claim_classified,
     publish_claim_ingested,
     publish_invoice_generated,
-    publish_payment_batch_generated,
+    publish_payment_batch_submitted,
     publish_payment_batch_voided,
 )
 from src.jobs.scheduled import (
@@ -34,142 +35,177 @@ from src.jobs.scheduled import (
 TENANT = uuid.UUID("11111111-1111-1111-1111-111111111111")
 CLIENT = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 PROGRAM = uuid.UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
+CORR = uuid.UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
 
 
 class TestEventPublishers:
-    def test_publish_claim_ingested(self) -> None:
-        bus = MagicMock()
-        publish_claim_ingested(
+    @pytest.mark.asyncio
+    async def test_publish_claim_ingested_emits_correct_envelope(self) -> None:
+        bus = InMemoryEventBus()
+        await bus.start()
+        await publish_claim_ingested(
             bus,
             tenant_id=TENANT,
-            claim_id=uuid.uuid4(),
+            claim_id=uuid.UUID("aaaa0001-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            correlation_id=CORR,
             auth_number="AUTH001",
             claim_type="new",
             net_amount=Decimal("100.00"),
             client_id=CLIENT,
             program_id=PROGRAM,
         )
-        bus.publish.assert_called_once()
-        topic, payload = bus.publish.call_args[0]
-        assert topic == "claim.ingested"
-        assert payload["auth_number"] == "AUTH001"
-        assert payload["tenant_id"] == str(TENANT)
-        assert "occurred_at" in payload
+        assert len(bus.published) == 1
+        envelope = bus.published[0]
+        assert envelope.event_type == "claim.ingested"
+        assert envelope.tenant_id == TENANT
+        assert envelope.schema_version == "1.0"
+        assert envelope.payload["auth_number"] == "AUTH001"
+        assert envelope.payload["net_amount"] == "100.00"
+        assert "occurred_at" in envelope.payload
 
-    def test_publish_claim_classified(self) -> None:
-        bus = MagicMock()
-        publish_claim_classified(
+    @pytest.mark.asyncio
+    async def test_publish_claim_classified_emits_correct_envelope(self) -> None:
+        bus = InMemoryEventBus()
+        await bus.start()
+        claim_id = uuid.uuid4()
+        await publish_claim_classified(
             bus,
             tenant_id=TENANT,
-            claim_id=uuid.uuid4(),
+            claim_id=claim_id,
+            correlation_id=CORR,
             payment_route="echo",
             is_excluded=False,
             is_statement=False,
         )
-        bus.publish.assert_called_once()
-        topic, payload = bus.publish.call_args[0]
-        assert topic == "claim.classified"
-        assert payload["payment_route"] == "echo"
+        envelope = bus.published[0]
+        assert envelope.event_type == "claim.classified"
+        assert envelope.payload["payment_route"] == "echo"
+        assert envelope.ordering_key == str(claim_id)
 
-    def test_publish_claim_classified_none_route(self) -> None:
-        bus = MagicMock()
-        publish_claim_classified(
+    @pytest.mark.asyncio
+    async def test_publish_claim_classified_none_route(self) -> None:
+        bus = InMemoryEventBus()
+        await bus.start()
+        await publish_claim_classified(
             bus,
             tenant_id=TENANT,
             claim_id=uuid.uuid4(),
+            correlation_id=CORR,
             payment_route=None,
             is_excluded=False,
             is_statement=False,
         )
-        _, payload = bus.publish.call_args[0]
-        assert payload["payment_route"] is None
+        envelope = bus.published[0]
+        assert envelope.payload["payment_route"] is None
 
-    def test_publish_payment_batch_generated(self) -> None:
-        bus = MagicMock()
-        publish_payment_batch_generated(
+    @pytest.mark.asyncio
+    async def test_publish_payment_batch_submitted_uses_correct_topic(self) -> None:
+        """Topic is payment_batch.submitted (not .generated) — CR-01 reconciliation."""
+        bus = InMemoryEventBus()
+        await bus.start()
+        batch_id = uuid.uuid4()
+        await publish_payment_batch_submitted(
             bus,
             tenant_id=TENANT,
-            batch_id=uuid.uuid4(),
+            batch_id=batch_id,
+            correlation_id=CORR,
             batch_number="BATCH001",
             payment_route="echo",
             total_amount=Decimal("1000.00"),
             payment_count=5,
         )
-        topic, payload = bus.publish.call_args[0]
-        assert topic == "payment_batch.generated"
-        assert payload["payment_count"] == 5
-        assert payload["total_amount"] == "1000.00"
+        envelope = bus.published[0]
+        assert envelope.event_type == "payment_batch.submitted"
+        assert envelope.payload["payment_count"] == 5
+        assert envelope.payload["total_amount"] == "1000.00"
+        assert envelope.ordering_key == str(batch_id)
+        assert envelope.idempotency_key == f"payment_batch.submitted:{batch_id}"
 
-    def test_publish_payment_batch_voided_with_reason(self) -> None:
-        bus = MagicMock()
-        publish_payment_batch_voided(
+    @pytest.mark.asyncio
+    async def test_publish_payment_batch_voided_with_reason(self) -> None:
+        bus = InMemoryEventBus()
+        await bus.start()
+        await publish_payment_batch_voided(
             bus,
             tenant_id=TENANT,
             batch_id=uuid.uuid4(),
+            correlation_id=CORR,
             batch_number="BATCH001",
             reason="Error in batch",
         )
-        topic, payload = bus.publish.call_args[0]
-        assert topic == "payment_batch.voided"
-        assert payload["reason"] == "Error in batch"
+        envelope = bus.published[0]
+        assert envelope.event_type == "payment_batch.voided"
+        assert envelope.payload["reason"] == "Error in batch"
 
-    def test_publish_payment_batch_voided_no_reason(self) -> None:
-        bus = MagicMock()
-        publish_payment_batch_voided(
+    @pytest.mark.asyncio
+    async def test_publish_payment_batch_voided_no_reason(self) -> None:
+        bus = InMemoryEventBus()
+        await bus.start()
+        await publish_payment_batch_voided(
             bus,
             tenant_id=TENANT,
             batch_id=uuid.uuid4(),
+            correlation_id=CORR,
             batch_number="BATCH001",
         )
-        _, payload = bus.publish.call_args[0]
-        assert payload["reason"] is None
+        envelope = bus.published[0]
+        assert envelope.payload["reason"] is None
 
-    def test_publish_invoice_generated(self) -> None:
-        bus = MagicMock()
-        publish_invoice_generated(
+    @pytest.mark.asyncio
+    async def test_publish_invoice_generated_emits_correct_envelope(self) -> None:
+        bus = InMemoryEventBus()
+        await bus.start()
+        await publish_invoice_generated(
             bus,
             tenant_id=TENANT,
             invoice_id=uuid.uuid4(),
+            correlation_id=CORR,
             invoice_number="INV-001",
             client_id=CLIENT,
             total=Decimal("5000.00"),
             due_date="2026-02-28",
         )
-        topic, payload = bus.publish.call_args[0]
-        assert topic == "invoice.generated"
-        assert payload["invoice_number"] == "INV-001"
-        assert payload["total"] == "5000.00"
+        envelope = bus.published[0]
+        assert envelope.event_type == "invoice.generated"
+        assert envelope.payload["invoice_number"] == "INV-001"
+        assert envelope.payload["total"] == "5000.00"
 
-    def test_publish_ar_payment_received(self) -> None:
-        bus = MagicMock()
-        publish_ar_payment_received(
+    @pytest.mark.asyncio
+    async def test_publish_ar_payment_received_emits_correct_envelope(self) -> None:
+        bus = InMemoryEventBus()
+        await bus.start()
+        await publish_ar_payment_received(
             bus,
             tenant_id=TENANT,
             ar_id=uuid.uuid4(),
+            correlation_id=CORR,
             client_id=CLIENT,
             amount=Decimal("100.00"),
             payment_date="2026-02-15",
             outstanding_after=Decimal("0.00"),
         )
-        topic, payload = bus.publish.call_args[0]
-        assert topic == "ar.payment_received"
-        assert payload["outstanding_after"] == "0.00"
+        envelope = bus.published[0]
+        assert envelope.event_type == "ar.payment_received"
+        assert envelope.payload["outstanding_after"] == "0.00"
 
-    def test_publish_budget_alert_fired(self) -> None:
-        bus = MagicMock()
-        publish_budget_alert_fired(
+    @pytest.mark.asyncio
+    async def test_publish_budget_alert_fired_emits_correct_envelope(self) -> None:
+        bus = InMemoryEventBus()
+        await bus.start()
+        await publish_budget_alert_fired(
             bus,
             tenant_id=TENANT,
             program_budget_id=uuid.uuid4(),
+            correlation_id=CORR,
             program_id=PROGRAM,
             alert_type="over_budget",
             severity="critical",
             message="Budget exceeded",
         )
-        topic, payload = bus.publish.call_args[0]
-        assert topic == "budget.alert_fired"
-        assert payload["alert_type"] == "over_budget"
-        assert payload["severity"] == "critical"
+        envelope = bus.published[0]
+        assert envelope.event_type == "budget.alert_fired"
+        assert envelope.payload["alert_type"] == "over_budget"
+        assert envelope.payload["severity"] == "critical"
 
 
 class TestEventConsumers:

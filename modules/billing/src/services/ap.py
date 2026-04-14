@@ -211,7 +211,7 @@ class APService:
         )
 
         self._events.publish(
-            "payment_batch.generated",
+            "payment_batch.submitted",
             {
                 "tenant_id": str(tenant_id),
                 "batch_id": str(batch_id),
