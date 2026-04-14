@@ -102,7 +102,7 @@ export default function UnifiedSpendPage() {
                   <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#94A3B8" }} />
                   <YAxis tick={{ fontSize: 11, fill: "#94A3B8" }} tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}K`} />
                   <Tooltip
-                    formatter={(v: number) => [`$${v.toLocaleString("en-US", { minimumFractionDigits: 2 })}`]}
+                    formatter={(v) => [`$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2 })}`]}
                     contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
                   />
                   <Legend />

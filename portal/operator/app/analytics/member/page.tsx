@@ -80,9 +80,9 @@ export default function MemberAnalyticsPage() {
                 <BarChart data={adherenceChartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                   <XAxis dataKey="drug_class" tick={{ fontSize: 10, fill: "#94A3B8" }} />
-                  <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#94A3B8" }} tickFormatter={(v: number) => `${v}%`} />
+                  <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#94A3B8" }} tickFormatter={(v: number) => `${Number(v)}%`} />
                   <Tooltip
-                    formatter={(v: number) => [`${v.toFixed(1)}%`]}
+                    formatter={(v) => [`${Number(v).toFixed(1)}%`]}
                     contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
                   />
                   <ReferenceLine y={80} stroke="#F59E0B" strokeDasharray="5 5" label={{ value: "CMS 80%", fill: "#F59E0B", fontSize: 10 }} />

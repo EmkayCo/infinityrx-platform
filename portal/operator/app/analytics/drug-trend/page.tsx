@@ -108,7 +108,7 @@ export default function DrugTrendPage() {
                   <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#94A3B8" }} tickFormatter={(v: string) => v.slice(5)} />
                   <YAxis tick={{ fontSize: 11, fill: "#94A3B8" }} tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}K`} />
                   <Tooltip
-                    formatter={(v: number) => [`$${v.toLocaleString("en-US", { minimumFractionDigits: 2 })}`]}
+                    formatter={(v) => [`$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2 })}`]}
                     contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
                   />
                   <Line type="monotone" dataKey="spend_num" stroke="#00B4D8" strokeWidth={2} dot={false} name="Spend" />
@@ -139,12 +139,12 @@ export default function DrugTrendPage() {
                         innerRadius={50}
                         outerRadius={80}
                         dataKey="value"
-                        label={({ name, value }: { name: string; value: number }) => `${name}: ${value.toFixed(1)}%`}
+                        label={(props: { name?: string; value?: number }) => `${props.name ?? ""}: ${Number(props.value ?? 0).toFixed(1)}%`}
                       >
                         <Cell fill="#8B5CF6" />
                         <Cell fill="#10B981" />
                       </Pie>
-                      <Tooltip formatter={(v: number) => [`${v.toFixed(1)}%`]} contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }} />
+                      <Tooltip formatter={(v) => [`${Number(v).toFixed(1)}%`]} contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }} />
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="grid grid-cols-2 gap-3 mt-3">
@@ -227,7 +227,7 @@ export default function DrugTrendPage() {
                   <XAxis type="number" tick={{ fontSize: 10, fill: "#94A3B8" }} tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}K`} />
                   <YAxis type="category" dataKey="drug_name" tick={{ fontSize: 10, fill: "#94A3B8" }} width={160} />
                   <Tooltip
-                    formatter={(v: number) => [`$${v.toLocaleString("en-US", { minimumFractionDigits: 2 })}`]}
+                    formatter={(v) => [`$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2 })}`]}
                     contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
                   />
                   <Bar dataKey="spend_num" name="Total Spend" radius={[0, 3, 3, 0]}>

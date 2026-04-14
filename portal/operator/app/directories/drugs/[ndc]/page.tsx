@@ -135,9 +135,9 @@ export default function DrugDetailPage() {
               <LineChart data={priceHistory}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                 <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#94A3B8" }} />
-                <YAxis tick={{ fontSize: 11, fill: "#94A3B8" }} tickFormatter={(v: number) => `$${v}`} />
+                <YAxis tick={{ fontSize: 11, fill: "#94A3B8" }} tickFormatter={(v: number) => `$${Number(v)}`} />
                 <Tooltip
-                  formatter={(v: number) => [`$${v.toFixed(2)}`]}
+                  formatter={(v) => [`$${Number(v).toFixed(2)}`]}
                   contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
                 />
                 <Legend />

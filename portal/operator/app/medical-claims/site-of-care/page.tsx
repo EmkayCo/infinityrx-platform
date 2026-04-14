@@ -160,7 +160,7 @@ export default function SiteOfCarePage() {
                 />
                 <YAxis type="category" dataKey="pos" tick={{ fontSize: 10, fill: "#94A3B8" }} width={140} />
                 <Tooltip
-                  formatter={(v: number) => [`$${v.toLocaleString("en-US", { minimumFractionDigits: 2 })}`]}
+                  formatter={(v) => [`$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2 })}`]}
                   contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
                 />
                 <Legend />

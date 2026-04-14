@@ -185,9 +185,9 @@ export default function NetworkAnalyticsPage() {
                 <BarChart data={rejectRateData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                   <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#94A3B8" }} />
-                  <YAxis tick={{ fontSize: 10, fill: "#94A3B8" }} tickFormatter={(v: number) => `${v}%`} />
+                  <YAxis tick={{ fontSize: 10, fill: "#94A3B8" }} tickFormatter={(v: number) => `${Number(v)}%`} />
                   <Tooltip
-                    formatter={(v: number) => [`${v.toFixed(1)}%`, "Reject Rate"]}
+                    formatter={(v) => [`${Number(v).toFixed(1)}%`, "Reject Rate"]}
                     contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
                   />
                   <ReferenceLine y={10} stroke="#F59E0B" strokeDasharray="5 5" label={{ value: "10% target", fill: "#F59E0B", fontSize: 10 }} />
@@ -210,9 +210,9 @@ export default function NetworkAnalyticsPage() {
                 <BarChart data={rejectRateData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                   <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#94A3B8" }} />
-                  <YAxis domain={[0, 1.5]} tick={{ fontSize: 10, fill: "#94A3B8" }} tickFormatter={(v: number) => `${v.toFixed(1)}x`} />
+                  <YAxis domain={[0, 1.5]} tick={{ fontSize: 10, fill: "#94A3B8" }} tickFormatter={(v: number) => `${Number(v).toFixed(1)}x`} />
                   <Tooltip
-                    formatter={(v: number) => [`${v.toFixed(2)}x`, "MAC Ratio"]}
+                    formatter={(v) => [`${Number(v).toFixed(2)}x`, "MAC Ratio"]}
                     contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
                   />
                   <ReferenceLine y={1.0} stroke="#10B981" strokeDasharray="5 5" label={{ value: "1.0x parity", fill: "#10B981", fontSize: 10 }} />

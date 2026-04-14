@@ -140,7 +140,7 @@ export default function EDIMonitorPage() {
                     width={60}
                   />
                   <Tooltip
-                    formatter={(v: number) => [`${v} transactions`]}
+                    formatter={(v) => [`${Number(v)} transactions`]}
                     contentStyle={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 8 }}
                   />
                   <Bar dataKey="count" fill="#EF4444" radius={[0, 3, 3, 0]} name="Rejections" />
