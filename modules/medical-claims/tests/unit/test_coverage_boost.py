@@ -662,6 +662,8 @@ class TestAspPricingFallback:
 def cov_app(_engine):
     from sqlalchemy.orm import sessionmaker
     from src.main import create_app
+    from shared.auth.dependencies import get_current_user
+    from tests.conftest import _FAKE_USER_FOR_TESTS  # noqa: E402
 
     SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False)
     app = create_app()
@@ -675,6 +677,8 @@ def cov_app(_engine):
         finally:
             session.close()
 
+    # CR-03: bypass JWT auth for coverage tests — business logic, not auth, is under test
+    app.dependency_overrides[get_current_user] = lambda: _FAKE_USER_FOR_TESTS
     return TestClient(app)
 
 

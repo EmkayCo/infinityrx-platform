@@ -8,12 +8,26 @@ through without the loader being attached.
 
 from __future__ import annotations
 
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
+
+from src.db.session import set_engine, _get_session_factory
+
+
+def _make_test_engine():
+    """Create a minimal in-memory SQLite engine for session-factory tests."""
+    return create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
 
 
 def test_tenant_loader_installed_on_session_class() -> None:
-    # Import triggers the install_tenant_loader() call at module load time.
-    from src.db import session as billing_session  # noqa: F401
+    # Wire a test engine so _get_session_factory() can construct the sessionmaker.
+    set_engine(_make_test_engine())
+    _get_session_factory()  # triggers install_tenant_loader()
 
     # Once installed, the session class carries the de-dupe flag.
     assert getattr(
@@ -23,9 +37,12 @@ def test_tenant_loader_installed_on_session_class() -> None:
 
 def test_install_is_idempotent() -> None:
     from shared.db.tenant_context import install_tenant_loader
-    from src.db.session import _SessionFactory
 
-    # Calling it again must not raise and must not double-attach.
-    install_tenant_loader(_SessionFactory)
-    install_tenant_loader(_SessionFactory)
+    # Ensure factory is initialised (may already be from prior test).
+    set_engine(_make_test_engine())
+    factory = _get_session_factory()
+
+    # Calling again must not raise and must not double-attach.
+    install_tenant_loader(factory)
+    install_tenant_loader(factory)
     assert getattr(Session, "_infinityrx_tenant_loader_installed", False) is True
