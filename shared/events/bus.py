@@ -2,6 +2,22 @@
 
 All concrete implementations (in-memory, RabbitMQ, Azure Service Bus)
 conform to this interface so modules never couple to a broker.
+
+Publishing modes
+----------------
+1. Direct publish (``bus.publish(envelope)``):
+   Publishes immediately. Simple but NOT crash-safe — if the process dies
+   between the DB commit and the publish() call, the event is lost.
+   Use only for non-financial, non-critical notifications.
+
+2. Transactional outbox (``enqueue_event(session, envelope)`` + OutboxRelay):
+   Writes the event to the ``shared_events.outbox_entries`` table IN THE SAME
+   transaction as the business data. The OutboxRelay polls and publishes to
+   the bus with retries. Crash-safe: if the process dies, the relay picks up
+   on restart. MUST be used for ALL financial events (payment_batch.submitted,
+   claim.ingested, etc.).
+
+   See ``shared.events.outbox`` for the OutboxEntry model and OutboxRelay.
 """
 
 from __future__ import annotations
