@@ -22,13 +22,12 @@ async def wire_consumers(bus: EventBus) -> None:
 
     Each handler is wrapped with idempotency checks per event-bus rules.
     Call this from the lifespan coroutine after bus.start().
+
+    Handlers are dispatched through the consumers module at call time so that
+    test patches applied to ``modules.billing.src.events.consumers.*`` are
+    respected even after wiring (LESSON-006: test the wire, not the component).
     """
-    from .consumers import (
-        handle_claim_adjudicated,
-        handle_claim_reversed,
-        handle_member_enrolled,
-        handle_payment_auto_posted,
-    )
+    import modules.billing.src.events.consumers as _consumers
 
     store = _idempotency_store
 
@@ -36,28 +35,28 @@ async def wire_consumers(bus: EventBus) -> None:
         key = envelope.idempotency_key
         if await store.seen(key, consumer_name="billing.claim_adjudicated"):
             return
-        await handle_claim_adjudicated(envelope, db=None, bus=bus)
+        await _consumers.handle_claim_adjudicated(envelope, db=None, bus=bus)
         await store.mark(key, consumer_name="billing.claim_adjudicated")
 
     async def _wrap_claim_reversed(envelope: EventEnvelope) -> None:
         key = envelope.idempotency_key
         if await store.seen(key, consumer_name="billing.claim_reversed"):
             return
-        await handle_claim_reversed(envelope, db=None, bus=bus)
+        await _consumers.handle_claim_reversed(envelope, db=None, bus=bus)
         await store.mark(key, consumer_name="billing.claim_reversed")
 
     async def _wrap_payment_auto_posted(envelope: EventEnvelope) -> None:
         key = envelope.idempotency_key
         if await store.seen(key, consumer_name="billing.payment_auto_posted"):
             return
-        await handle_payment_auto_posted(envelope, db=None, bus=bus)
+        await _consumers.handle_payment_auto_posted(envelope, db=None, bus=bus)
         await store.mark(key, consumer_name="billing.payment_auto_posted")
 
     async def _wrap_member_enrolled(envelope: EventEnvelope) -> None:
         key = envelope.idempotency_key
         if await store.seen(key, consumer_name="billing.member_enrolled"):
             return
-        await handle_member_enrolled(envelope, db=None, bus=bus)
+        await _consumers.handle_member_enrolled(envelope, db=None, bus=bus)
         await store.mark(key, consumer_name="billing.member_enrolled")
 
     await bus.subscribe("claim.adjudicated", _wrap_claim_adjudicated)
