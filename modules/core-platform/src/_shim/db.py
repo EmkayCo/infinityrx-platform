@@ -2,10 +2,13 @@
 
 Real implementation lives in shared/db/ (T1). This shim uses sync
 SQLAlchemy against SQLite by default so tests run without Postgres.
+
+NOTE (H-03 fix): _current_tenant is re-exported from shared.db.tenant_context
+so that any existing imports of this shim's _current_tenant still work.
+The canonical ContextVar lives in shared.db.tenant_context.current_tenant_id.
 """
 from __future__ import annotations
 
-import contextvars
 import uuid
 from contextlib import contextmanager
 from typing import Iterator, Optional
@@ -13,9 +16,8 @@ from typing import Iterator, Optional
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-_current_tenant: contextvars.ContextVar[Optional[uuid.UUID]] = contextvars.ContextVar(
-    "current_tenant", default=None
-)
+# Re-export the canonical contextvar from shared so legacy imports don't break.
+from shared.db.tenant_context import current_tenant_id as _current_tenant  # noqa: F401
 
 
 class Base(DeclarativeBase):
@@ -58,15 +60,19 @@ def get_session() -> Session:
 
 @contextmanager
 def tenant_context(tenant_id: uuid.UUID) -> Iterator[None]:
-    token = _current_tenant.set(tenant_id)
+    from shared.db.tenant_context import current_tenant_id as _ctx_var
+
+    token = _ctx_var.set(tenant_id)
     try:
         yield
     finally:
-        _current_tenant.reset(token)
+        _ctx_var.reset(token)
 
 
 def current_tenant_id() -> Optional[uuid.UUID]:
-    return _current_tenant.get()
+    from shared.db.tenant_context import current_tenant_id as _ctx_var
+
+    return _ctx_var.get()
 
 
 def create_all() -> None:
