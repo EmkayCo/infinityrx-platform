@@ -12,11 +12,19 @@ through ``app.dependency_overrides[get_audit_sink]``.
 
 from __future__ import annotations
 
+from shared.auth.mfa.challenge import ChallengeStore, InMemoryChallengeStore
 from src.auth.audit_sink import AuditSink, InMemoryAuditSink
 from src.auth.db_audit_sink import DatabaseAuditSink, SessionFactory
 
 _configured_sink: AuditSink | None = None
 _fallback_sink: AuditSink = InMemoryAuditSink()
+
+# MFA challenge store — process-wide singleton used by the login gate and
+# the /auth/mfa/verify endpoint. Tests swap this for an InMemoryChallengeStore
+# via ``configure_challenge_store``; production wiring (in ``main.py``) can
+# substitute a RedisChallengeStore.
+_challenge_store: ChallengeStore | None = None
+_fallback_challenge_store: ChallengeStore = InMemoryChallengeStore()
 
 
 def configure_audit_sink(session_factory: SessionFactory) -> AuditSink:
@@ -47,3 +55,29 @@ def get_audit_sink() -> AuditSink:
            TestClient sessions without explicit override).
     """
     return _configured_sink if _configured_sink is not None else _fallback_sink
+
+
+# ---------------------------------------------------------------------------
+# MFA challenge store
+# ---------------------------------------------------------------------------
+
+
+def configure_challenge_store(store: ChallengeStore) -> ChallengeStore:
+    """Install an MFA challenge store (production: RedisChallengeStore)."""
+    global _challenge_store
+    _challenge_store = store
+    return _challenge_store
+
+
+def reset_challenge_store() -> None:
+    """Clear any configured challenge store and re-initialise the fallback."""
+    global _challenge_store, _fallback_challenge_store
+    _challenge_store = None
+    _fallback_challenge_store = InMemoryChallengeStore()
+
+
+def get_challenge_store() -> ChallengeStore:
+    """FastAPI dependency: returns the active MFA challenge store."""
+    return (
+        _challenge_store if _challenge_store is not None else _fallback_challenge_store
+    )

@@ -1,10 +1,10 @@
-"""/auth router — login, logout, refresh, me."""
+"""/auth router — login, logout, refresh, me, mfa/verify."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from shared.auth._settings import get_auth_settings
@@ -21,13 +21,21 @@ from shared.auth.jwt_tokens import (
     decode_token,
     verify_token_type,
 )
+from shared.auth.mfa.challenge import (
+    ChallengeStore,
+    consume_challenge,
+    create_challenge,
+)
+from shared.auth.mfa.totp import InvalidTotpFormat, verify_totp
 from shared.auth.tokens_repo import RevokedTokenRepo
 from src.auth._db import get_session
 from src.auth.audit_sink import AuditSink
-from src.auth.deps import get_audit_sink
+from src.auth.deps import get_audit_sink, get_challenge_store
 from src.auth.schemas import (
     LoginRequest,
     MeUpdate,
+    MfaChallengeResponse,
+    MfaVerifyRequest,
     RefreshRequest,
     TokenResponse,
     UserResponse,
@@ -35,10 +43,30 @@ from src.auth.schemas import (
 from src.auth.service import (
     AuthenticatedUser,
     InvalidCredentialsError,
+    MfaChallengeRequiredError,
+    MfaEnrollmentRequiredError,
     authenticate,
+    complete_mfa_authentication,
     load_authenticated,
     update_me,
 )
+
+
+def _run_async(coro):
+    """Drive a coroutine from a sync route. FastAPI's sync endpoints run
+    in a threadpool, so creating a new event loop per request is safe."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Fall back to a fresh loop in a thread-bound context.
+            raise RuntimeError("running loop")
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        if not loop.is_closed():
+            loop.close()
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -64,12 +92,14 @@ def _user_response(auth: AuthenticatedUser) -> UserResponse:
     )
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login")
 def login(
     body: LoginRequest,
+    response: Response,
     session: Session = Depends(get_session),
     audit: AuditSink = Depends(get_audit_sink),
-) -> TokenResponse:
+    challenge_store: ChallengeStore = Depends(get_challenge_store),
+):
     try:
         auth = authenticate(
             session,
@@ -83,6 +113,107 @@ def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"error": "invalid_credentials", "message": "invalid credentials"},
         )
+    except MfaEnrollmentRequiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "mfa_enrollment_required",
+                "message": "MFA enrollment required before login",
+                "enrollment_url": f"/auth/mfa/enroll?user_id={exc.user_id}",
+            },
+        )
+    except MfaChallengeRequiredError as exc:
+        # Issue a single-use challenge token. Password is verified but
+        # JWT is NOT issued until /auth/mfa/verify succeeds.
+        token = _run_async(
+            create_challenge(
+                challenge_store,
+                user_id=exc.user.id,
+                tenant_id=exc.user.tenant_id,
+                method=exc.method,
+            )
+        )
+        response.status_code = status.HTTP_202_ACCEPTED
+        return MfaChallengeResponse(
+            method=exc.method,
+            challenge_token=token,
+        ).model_dump()
+
+    s = get_auth_settings()
+    access = create_access_token(auth.user.id, auth.user.tenant_id, auth.roles)
+    refresh = create_refresh_token(auth.user.id)
+    return TokenResponse(
+        access_token=access,
+        refresh_token=refresh,
+        expires_in=s.JWT_EXPIRES_MINUTES * 60,
+    ).model_dump()
+
+
+@router.post("/mfa/verify", response_model=TokenResponse)
+def mfa_verify(
+    body: MfaVerifyRequest,
+    session: Session = Depends(get_session),
+    audit: AuditSink = Depends(get_audit_sink),
+    challenge_store: ChallengeStore = Depends(get_challenge_store),
+) -> TokenResponse:
+    """Consume a challenge token and verify the TOTP code to complete login."""
+    claims = _run_async(consume_challenge(challenge_store, body.challenge_token))
+    if claims is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "invalid_challenge_token",
+                "message": "challenge token invalid, expired, or already used",
+            },
+        )
+
+    # Load the user record fresh so we have the MFA secret.
+    from src.auth._models import User
+
+    user = session.get(User, claims.user_id)
+    if user is None or user.tenant_id != claims.tenant_id or user.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": "invalid_credentials"},
+        )
+
+    if claims.method == "totp":
+        if not user.mfa_enabled or not user.mfa_secret:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"error": "mfa_not_enrolled"},
+            )
+        try:
+            ok = verify_totp(user.mfa_secret, body.code)
+        except InvalidTotpFormat:
+            ok = False
+        if not ok:
+            audit.emit_event = getattr(audit, "emit_event", audit.emit)  # type: ignore[attr-defined]
+            audit.emit(
+                __import__(
+                    "src.auth.audit_sink", fromlist=["make_event"]
+                ).make_event(
+                    tenant_id=user.tenant_id,
+                    user_id=user.id,
+                    action="login.mfa_failed",
+                    entity_type="user",
+                    entity_id=str(user.id),
+                    after={"reason": "bad_totp"},
+                )
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"error": "invalid_mfa_code"},
+            )
+    else:
+        # Future: fido2 verification. For now reject unknown methods.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "unsupported_mfa_method", "method": claims.method},
+        )
+
+    # MFA OK — update last_login_at, emit login.success, issue tokens.
+    auth = complete_mfa_authentication(session, user_id=user.id, audit=audit)
 
     s = get_auth_settings()
     access = create_access_token(auth.user.id, auth.user.tenant_id, auth.roles)

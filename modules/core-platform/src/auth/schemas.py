@@ -25,6 +25,20 @@ class RefreshRequest(BaseModel):
     refresh_token: str = Field(min_length=1)
 
 
+class MfaChallengeResponse(BaseModel):
+    """Returned from /auth/login with status 202 when MFA is required."""
+
+    mfa_required: bool = True
+    method: str  # "totp" | "fido2"
+    challenge_token: str
+    expires_in: int = 300  # seconds
+
+
+class MfaVerifyRequest(BaseModel):
+    challenge_token: str = Field(min_length=1)
+    code: str = Field(min_length=1, max_length=16)
+
+
 class MeUpdate(BaseModel):
     display_name: str | None = Field(default=None, max_length=255)
 

@@ -72,6 +72,12 @@ class Tenant(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    # HIPAA 2026: tenants opt into mandatory MFA per deployment. Default
+    # False so existing fixtures without explicit MFA setup continue to
+    # work; production tenants are created with this set to True.
+    mfa_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -87,6 +93,16 @@ class User(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     failed_login_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # HIPAA 2026 MFA enrollment state. mfa_secret is the base32 TOTP
+    # secret — in production this MUST be wrapped by EncryptedString
+    # (shared.crypto.sqlalchemy_types) once the shim merges with the
+    # shared models. The shim's String column is acceptable only for
+    # tests that run against in-memory SQLite.
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    mfa_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    mfa_enrolled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
@@ -94,6 +110,13 @@ class User(Base):
         secondary="user_roles",
         back_populates="users",
         lazy="selectin",
+    )
+
+    tenant: Mapped["Tenant"] = relationship(
+        "Tenant",
+        primaryjoin="User.tenant_id == Tenant.id",
+        foreign_keys=[tenant_id],
+        lazy="joined",
     )
 
 

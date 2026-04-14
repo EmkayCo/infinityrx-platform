@@ -50,6 +50,28 @@ class ForbiddenError(AuthServiceError):
     pass
 
 
+class MfaEnrollmentRequiredError(AuthServiceError):
+    """Raised after password is verified but the user has not enrolled MFA
+    on a tenant that requires it. The HTTP layer returns 403 and should
+    include an enrollment URL."""
+
+    def __init__(self, user_id: uuid.UUID, tenant_id: uuid.UUID) -> None:
+        super().__init__("mfa enrollment required")
+        self.user_id = user_id
+        self.tenant_id = tenant_id
+
+
+class MfaChallengeRequiredError(AuthServiceError):
+    """Raised after password is verified when MFA is required and the user
+    is enrolled. Carries the resolved ``User`` so the HTTP layer can issue
+    a challenge token without re-querying the DB."""
+
+    def __init__(self, user: "User", method: str = "totp") -> None:
+        super().__init__("mfa challenge required")
+        self.user = user
+        self.method = method
+
+
 @dataclass(frozen=True)
 class AuthenticatedUser:
     user: User
@@ -161,6 +183,41 @@ def authenticate(
         raise InvalidCredentialsError("invalid credentials")
 
     user.failed_login_count = 0
+    session.commit()
+
+    # --- MFA gate -----------------------------------------------------
+    # Password is verified. Before we issue the JWT (or update last_login),
+    # check whether the tenant requires MFA and whether the user has
+    # enrolled. HIPAA 2026 §164.308(a)(5)(ii)(D): MFA must be enforced
+    # before granting access to any system containing ePHI.
+    tenant_requires_mfa = bool(getattr(user.tenant, "mfa_required", False))
+    if tenant_requires_mfa:
+        if not bool(getattr(user, "mfa_enabled", False)) or not getattr(
+            user, "mfa_secret", None
+        ):
+            audit.emit(
+                make_event(
+                    tenant_id=user.tenant_id,
+                    user_id=user.id,
+                    action="login.mfa_enrollment_required",
+                    entity_type="user",
+                    entity_id=str(user.id),
+                )
+            )
+            raise MfaEnrollmentRequiredError(user.id, user.tenant_id)
+        # Enrolled — issue a challenge instead of a JWT. last_login_at is
+        # not updated until MFA is actually verified.
+        audit.emit(
+            make_event(
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                action="login.mfa_challenge_issued",
+                entity_type="user",
+                entity_id=str(user.id),
+            )
+        )
+        raise MfaChallengeRequiredError(user, method="totp")
+
     user.last_login_at = _now()
     session.commit()
 
@@ -174,6 +231,41 @@ def authenticate(
         )
     )
 
+    return AuthenticatedUser(
+        user=user,
+        roles=_user_roles(user),
+        permissions=_user_permissions(user),
+    )
+
+
+def complete_mfa_authentication(
+    session: Session,
+    *,
+    user_id: uuid.UUID,
+    audit: AuditSink,
+) -> AuthenticatedUser:
+    """Complete the authenticated load after a successful MFA verification.
+
+    Called by ``/auth/mfa/verify`` once the challenge token and TOTP code
+    are confirmed. Updates ``last_login_at`` (deferred from authenticate()
+    so that a failed MFA attempt does NOT look like a successful login in
+    the audit trail) and emits the ``login.success`` event.
+    """
+    user = session.get(User, user_id)
+    if user is None or user.status != "active":
+        raise InvalidCredentialsError("invalid credentials")
+    user.last_login_at = _now()
+    session.commit()
+    audit.emit(
+        make_event(
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            action="login.success",
+            entity_type="user",
+            entity_id=str(user.id),
+            after={"mfa_verified": True},
+        )
+    )
     return AuthenticatedUser(
         user=user,
         roles=_user_roles(user),
