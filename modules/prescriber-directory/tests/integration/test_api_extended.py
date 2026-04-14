@@ -13,10 +13,11 @@ if str(_MODULE_ROOT) not in sys.path:
 import pytest
 from fastapi.testclient import TestClient
 
+from shared.auth.dependencies import get_current_user
 from src.api.dependencies import get_db
 from src.main import create_app
 from src.models.tables import CredentialAlert, Prescriber
-from tests.conftest import make_prescriber, now_utc, TENANT_A
+from tests.conftest import make_prescriber, now_utc, TENANT_A, _FAKE_USER_FOR_TESTS
 
 
 @pytest.fixture(scope="module")
@@ -33,6 +34,8 @@ def app(_engine):
             session.close()
 
     application.dependency_overrides[get_db] = override_get_db
+    # CR-03: bypass JWT auth in integration tests that test business logic, not auth
+    application.dependency_overrides[get_current_user] = lambda: _FAKE_USER_FOR_TESTS
     return application
 
 

@@ -39,7 +39,9 @@ class TestSetEngine:
         )
         set_engine(engine)
         assert session_module._engine is engine
-        assert session_module._SessionLocal is not None
+        # _SessionLocal is reset to None so _get_session_factory() will rebuild it
+        # with install_tenant_loader applied to the new engine (CR-09 fix).
+        assert session_module._SessionLocal is None
 
 
 class TestGetEngine:
