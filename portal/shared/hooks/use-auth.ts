@@ -50,15 +50,19 @@ export function useAuth(): UseAuthReturn {
       }
     : null;
 
+  function isAdminRole(role: string | undefined): boolean {
+    return role === Role.Admin || role === "platform_admin";
+  }
+
   function hasRole(role: Role): boolean {
     if (!user) return false;
-    return user.role === role || user.role === Role.Admin;
+    return user.role === role || isAdminRole(user.role);
   }
 
   function hasPermission(permission: Permission): boolean {
     if (!user) return false;
-    if (user.role === Role.Admin) return true;
-    // Check explicit permissions first, then role defaults
+    if (isAdminRole(user.role)) return true;
+    if ((user.permissions as unknown as string[]).includes("*")) return true;
     if (user.permissions.includes(permission)) return true;
     const rolePerms = ROLE_PERMISSIONS[user.role] ?? [];
     return rolePerms.includes(permission);
