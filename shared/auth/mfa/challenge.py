@@ -87,13 +87,27 @@ class InMemoryChallengeStore:
 
 
 class RedisChallengeStore:
-    """Redis-backed challenge store using ``mfa:challenge:{token}`` key space."""
+    """Redis-backed challenge store using ``mfa:challenge:{token}`` key space.
+
+    H-10: Graceful degradation on Redis failure. Each async method catches
+    Redis errors and degrades safely:
+    - put(): log and continue — worst case the challenge is never stored;
+      the user will receive an invalid-challenge error on verification,
+      which they can retry after Redis recovers.
+    - get(): log and return None — the challenge is treated as not found;
+      the user must restart the MFA flow after Redis recovers.
+    - delete(): log and continue — the challenge remains in Redis until
+      its TTL expires naturally (5 minutes), which is acceptable.
+    """
 
     def __init__(self, redis: Any) -> None:
         """Args:
         redis: An async redis client (``redis.asyncio.Redis``).
         """
+        import logging  # noqa: PLC0415
+
         self._redis = redis
+        self._log = logging.getLogger(__name__)
 
     def _key(self, token: str) -> str:
         return f"{_REDIS_PREFIX}{token}"
@@ -107,10 +121,23 @@ class RedisChallengeStore:
                 "enrollment_required": claims.enrollment_required,
             }
         )
-        await self._redis.setex(self._key(token), ttl, payload)
+        try:
+            await self._redis.setex(self._key(token), ttl, payload)
+        except Exception:
+            self._log.exception(
+                "mfa_challenge_store_put_failed",
+                extra={"svc_name": "redis-mfa-challenge"},
+            )
 
     async def get(self, token: str) -> ChallengeClaims | None:
-        raw = await self._redis.get(self._key(token))
+        try:
+            raw = await self._redis.get(self._key(token))
+        except Exception:
+            self._log.exception(
+                "mfa_challenge_store_get_failed",
+                extra={"svc_name": "redis-mfa-challenge"},
+            )
+            return None
         if raw is None:
             return None
         data = json.loads(raw)
@@ -122,7 +149,13 @@ class RedisChallengeStore:
         )
 
     async def delete(self, token: str) -> None:
-        await self._redis.delete(self._key(token))
+        try:
+            await self._redis.delete(self._key(token))
+        except Exception:
+            self._log.exception(
+                "mfa_challenge_store_delete_failed",
+                extra={"svc_name": "redis-mfa-challenge"},
+            )
 
 
 # ---------------------------------------------------------------------------

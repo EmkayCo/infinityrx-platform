@@ -106,3 +106,33 @@ class TestRedisRevokedTokenRepo:
         # Default-prefix repo must NOT see it
         default = RedisRevokedTokenRepo(redis)
         assert default.is_revoked(jti) is False
+
+    def test_is_revoked_returns_false_when_circuit_open(self) -> None:
+        """H-10: When the circuit is open (Redis down), is_revoked fails-open."""
+        broken_redis = BrokenRedis()
+        # failure_threshold=1 so the first failure opens the circuit immediately.
+        repo = RedisRevokedTokenRepo(broken_redis, failure_threshold=1)
+        jti = uuid.uuid4()
+        # First call: circuit trips on BrokenRedis exception.
+        result = repo.is_revoked(jti)
+        # Should fail-open (return False) rather than raising.
+        assert result is False
+
+    def test_revoke_does_not_raise_when_circuit_open(self) -> None:
+        """H-10: revoke() is a no-op (logs) when the circuit is open."""
+        broken_redis = BrokenRedis()
+        repo = RedisRevokedTokenRepo(broken_redis, failure_threshold=1)
+        jti = uuid.uuid4()
+        # Should not raise; graceful degradation.
+        repo.revoke(jti, _future())  # triggers failure, trips circuit
+        repo.revoke(jti, _future())  # circuit open — should still not raise
+
+
+class BrokenRedis:
+    """Test double that always raises a Redis-like error."""
+
+    def setex(self, *args, **kwargs):
+        raise RuntimeError("Redis connection refused")
+
+    def exists(self, *args, **kwargs):
+        raise RuntimeError("Redis connection refused")

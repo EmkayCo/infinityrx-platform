@@ -170,6 +170,49 @@ async def test_redis_delete() -> None:
 
 
 # ---------------------------------------------------------------------------
+# H-10: RedisChallengeStore graceful degradation on Redis failure
+# ---------------------------------------------------------------------------
+
+
+class _BrokenAsyncRedis:
+    """Test double that always raises an error."""
+
+    async def setex(self, *args, **kwargs):
+        raise RuntimeError("Redis connection refused")
+
+    async def get(self, *args, **kwargs):
+        raise RuntimeError("Redis connection refused")
+
+    async def delete(self, *args, **kwargs):
+        raise RuntimeError("Redis connection refused")
+
+
+@pytest.mark.asyncio
+async def test_redis_put_does_not_raise_on_failure() -> None:
+    """H-10: put() logs the error and does not raise on Redis failure."""
+    store = RedisChallengeStore(_BrokenAsyncRedis())
+    claims = ChallengeClaims(user_id=_USER_ID, tenant_id=_TENANT_ID, method="totp")
+    # Must not raise even though Redis is broken.
+    await store.put("tok", claims, 300)
+
+
+@pytest.mark.asyncio
+async def test_redis_get_returns_none_on_failure() -> None:
+    """H-10: get() returns None on Redis failure (challenges treated as expired)."""
+    store = RedisChallengeStore(_BrokenAsyncRedis())
+    result = await store.get("tok")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_redis_delete_does_not_raise_on_failure() -> None:
+    """H-10: delete() logs the error and does not raise on Redis failure."""
+    store = RedisChallengeStore(_BrokenAsyncRedis())
+    # Must not raise even though Redis is broken.
+    await store.delete("tok")
+
+
+# ---------------------------------------------------------------------------
 # create_challenge
 # ---------------------------------------------------------------------------
 
