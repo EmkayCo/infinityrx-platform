@@ -44,3 +44,8 @@ Thumbs.db
 *.swp
 *.swo
 coverage.json
+
+# Portal: large source data files (kept locally for dev, regen aggregations via npm run prepare-data)
+portal/operator/public/data/*.txt
+portal/operator/public/data/*.xlsx
+
