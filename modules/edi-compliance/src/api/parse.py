@@ -10,7 +10,10 @@ from pydantic import BaseModel
 
 from ..x12.parsers.parse_271 import parse_271
 from ..x12.parsers.parse_277 import parse_277
+from ..x12.parsers.parse_278 import parse_278
+from ..x12.parsers.parse_834 import parse_834
 from ..x12.parsers.parse_835 import Parsed835, parse_835
+from ..x12.parsers.parse_999 import parse_999, parse_ta1
 from ..x12.validators.validator import ValidationResult, validate_x12
 
 
@@ -126,6 +129,121 @@ async def api_parse_277(
             "payer_id": parsed.payer_id,
             "payer_name": parsed.payer_name,
             "claim_count": len(parsed.claim_statuses),
+        },
+    )
+
+
+@router.post("/278", response_model=ParseResponse)
+async def api_parse_278(
+    req: ParseRequest,
+    tenant_id: uuid.UUID = Depends(_require_tenant),
+) -> ParseResponse:
+    """Parse an inbound 278 prior authorization request or response."""
+    try:
+        parsed = parse_278(req.content)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"code": "PARSE_FAILED", "message": str(exc), "correlation_id": str(uuid.uuid4())}},
+        )
+    return ParseResponse(
+        transaction_type="278",
+        is_valid=True,
+        errors=[],
+        data={
+            "sender_id": parsed.sender_id,
+            "receiver_id": parsed.receiver_id,
+            "isa_control_number": parsed.isa_control_number,
+            "payer_id": parsed.payer_id,
+            "payer_name": parsed.payer_name,
+            "provider_npi": parsed.provider_npi,
+            "subscriber_id": parsed.subscriber_id,
+            "service_review_count": len(parsed.service_reviews),
+        },
+    )
+
+
+@router.post("/834", response_model=ParseResponse)
+async def api_parse_834(
+    req: ParseRequest,
+    tenant_id: uuid.UUID = Depends(_require_tenant),
+) -> ParseResponse:
+    """Parse an inbound 834 benefit enrollment transaction."""
+    try:
+        parsed = parse_834(req.content)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"code": "PARSE_FAILED", "message": str(exc), "correlation_id": str(uuid.uuid4())}},
+        )
+    return ParseResponse(
+        transaction_type="834",
+        is_valid=True,
+        errors=[],
+        data={
+            "sender_id": parsed.sender_id,
+            "receiver_id": parsed.receiver_id,
+            "isa_control_number": parsed.isa_control_number,
+            "payer_id": parsed.payer_id,
+            "payer_name": parsed.payer_name,
+            "member_count": len(parsed.members),
+            "reference_number": parsed.reference_number,
+        },
+    )
+
+
+@router.post("/999", response_model=ParseResponse)
+async def api_parse_999(
+    req: ParseRequest,
+    tenant_id: uuid.UUID = Depends(_require_tenant),
+) -> ParseResponse:
+    """Parse an inbound 999 functional acknowledgment."""
+    try:
+        parsed = parse_999(req.content)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"code": "PARSE_FAILED", "message": str(exc), "correlation_id": str(uuid.uuid4())}},
+        )
+    return ParseResponse(
+        transaction_type="999",
+        is_valid=True,
+        errors=[],
+        data={
+            "sender_id": parsed.sender_id,
+            "receiver_id": parsed.receiver_id,
+            "isa_control_number": parsed.isa_control_number,
+            "ack_code": parsed.ack_code,
+            "original_gs_control": parsed.original_gs_control,
+            "original_transaction_type": parsed.original_transaction_type,
+            "error_codes": parsed.error_codes,
+        },
+    )
+
+
+@router.post("/ta1", response_model=ParseResponse)
+async def api_parse_ta1(
+    req: ParseRequest,
+    tenant_id: uuid.UUID = Depends(_require_tenant),
+) -> ParseResponse:
+    """Parse an inbound TA1 interchange acknowledgment."""
+    try:
+        parsed = parse_ta1(req.content)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"code": "PARSE_FAILED", "message": str(exc), "correlation_id": str(uuid.uuid4())}},
+        )
+    return ParseResponse(
+        transaction_type="TA1",
+        is_valid=True,
+        errors=[],
+        data={
+            "ack_control_number": parsed.ack_control_number,
+            "ack_date": parsed.ack_date,
+            "ack_time": parsed.ack_time,
+            "ack_code": parsed.ack_code,
+            "error_code": parsed.error_code,
         },
     )
 

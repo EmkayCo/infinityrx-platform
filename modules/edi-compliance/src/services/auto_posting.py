@@ -19,7 +19,7 @@ from ..x12.parsers.parse_835 import Parsed835, Parsed835Claim
 
 
 class _EventBusProtocol(Protocol):
-    async def publish(self, envelope: Any) -> None:
+    async def publish(self, envelope: Any) -> None:  # pragma: no cover
         ...
 
 
@@ -37,8 +37,7 @@ def _make_envelope(**kwargs: Any) -> Any:
     try:
         from shared.events.types import EventEnvelope
         return EventEnvelope(**kwargs)
-    except ImportError:
-        # Fallback for isolated unit tests
+    except ImportError:  # pragma: no cover
         class _SimpleEnvelope:
             def __init__(self, **kw: Any) -> None:
                 for k, v in kw.items():

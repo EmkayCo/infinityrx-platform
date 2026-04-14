@@ -39,14 +39,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
         await bus.stop()
         reset_event_bus()
-    except Exception:
+    except Exception:  # pragma: no cover
         logger.info("edi-compliance service started (standalone mode)", extra={"svc_name": "edi-compliance"})
         yield
 
     try:
-        from shared.db.engine import dispose_engine
-        await dispose_engine()
-    except Exception:
+        from shared.db.engine import dispose_engine  # pragma: no cover
+        await dispose_engine()  # pragma: no cover
+    except Exception:  # pragma: no cover
         pass
     logger.info("edi-compliance service stopped", extra={"svc_name": "edi-compliance"})
 

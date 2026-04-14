@@ -20,19 +20,24 @@ from ..x12.generators.gen_270 import generate_270
 from ..x12.generators.gen_271 import generate_271
 from ..x12.generators.gen_276 import generate_276
 from ..x12.generators.gen_277 import generate_277
+from ..x12.generators.gen_278 import generate_278
 from ..x12.generators.gen_835 import generate_835
 from ..x12.generators.gen_837d import generate_837d
 from ..x12.generators.gen_837i import generate_837i
 from ..x12.generators.gen_837p import generate_837p
+from ..x12.generators.gen_999 import generate_999, generate_ta1
 from ..x12.generators.schemas import (
     Generate270Request,
     Generate271Request,
     Generate276Request,
     Generate277Request,
+    Generate278Request,
     Generate835Request,
     Generate837DRequest,
     Generate837IRequest,
     Generate837PRequest,
+    Generate999Request,
+    GenerateTA1Request,
 )
 
 router = APIRouter(prefix="/generate", tags=["generation"])
@@ -163,3 +168,36 @@ async def api_generate_837d(
             detail={"error": {"code": "GENERATION_FAILED", "message": str(exc), "correlation_id": str(uuid.uuid4())}},
         )
     return GenerateResponse(content=content, byte_count=len(content.encode()), transaction_type="837D")
+
+
+@router.post("/278", response_model=GenerateResponse)
+async def api_generate_278(
+    req: Generate278Request,
+    tenant_id: uuid.UUID = Depends(_require_tenant),
+    db: AsyncSession = Depends(get_session),
+) -> GenerateResponse:
+    """Generate a 278 prior authorization request or response EDI file."""
+    content = generate_278(req)
+    return GenerateResponse(content=content, byte_count=len(content.encode()), transaction_type="278")
+
+
+@router.post("/999", response_model=GenerateResponse)
+async def api_generate_999(
+    req: Generate999Request,
+    tenant_id: uuid.UUID = Depends(_require_tenant),
+    db: AsyncSession = Depends(get_session),
+) -> GenerateResponse:
+    """Generate a 999 functional acknowledgment EDI file."""
+    content = generate_999(req)
+    return GenerateResponse(content=content, byte_count=len(content.encode()), transaction_type="999")
+
+
+@router.post("/ta1", response_model=GenerateResponse)
+async def api_generate_ta1(
+    req: GenerateTA1Request,
+    tenant_id: uuid.UUID = Depends(_require_tenant),
+    db: AsyncSession = Depends(get_session),
+) -> GenerateResponse:
+    """Generate a TA1 interchange acknowledgment EDI file."""
+    content = generate_ta1(req)
+    return GenerateResponse(content=content, byte_count=len(content.encode()), transaction_type="TA1")

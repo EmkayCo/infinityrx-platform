@@ -68,6 +68,31 @@ class TestGen999Branches:
         result = generate_ta1(req)
         assert "TA1*" in result
 
+    def test_generate_999_explicit_delims_and_now(self):
+        from src.x12.delimiters import _DEFAULT_DELIMITERS
+        req = Generate999Request(
+            tenant_id=_T, trading_partner_id=_TP,
+            isa_control_number=4, gs_control_number=4,
+            receiver_id="RECV           ",
+            original_isa_control=1, original_gs_control=1,
+            original_transaction_type="837",
+            ack_code="A",
+        )
+        result = generate_999(req, delims=_DEFAULT_DELIMITERS, now=_FIXED_NOW)
+        assert "AK9*A*" in result
+
+    def test_generate_ta1_explicit_delims_and_now(self):
+        from src.x12.delimiters import _DEFAULT_DELIMITERS
+        req = GenerateTA1Request(
+            tenant_id=_T, trading_partner_id=_TP,
+            isa_control_number=5, gs_control_number=5,
+            receiver_id="RECV           ",
+            ack_control_number=1, ack_date="260101", ack_time="1200",
+            ack_code="A", error_code="000",
+        )
+        result = generate_ta1(req, delims=_DEFAULT_DELIMITERS, now=_FIXED_NOW)
+        assert "TA1*" in result
+
 
 # -- parse_278: 278 segment branches --
 
