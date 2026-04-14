@@ -31,6 +31,15 @@ DEFAULT_SCHEDULES: dict[str, str | None] = {
     "nppes": "0 3 * * 2",             # Weekly Tuesday 3 AM
     "cms_asp": "0 4 1 1,4,7,10 *",   # Quarterly
     "ncpdp": None,                     # Manual only
+    "rxnorm": "0 1 1-7 * 1",           # First Monday of month, 1 AM
+    "fda_rems": "0 5 * * 3",           # Weekly Wednesday 5 AM
+    "fda_drug_shortages": "0 6 * * *", # Daily 6 AM
+    "fda_purple_book": "0 5 15 * *",   # Monthly 15th 5 AM
+    "oig_leie": "0 2 20 * *",          # Monthly 20th 2 AM
+    "dea_registrations": "0 6 1 * *",  # Monthly 1st 6 AM
+    "sam_exclusions": "0 3 20 * *",    # Monthly 20th 3 AM
+    "cms_part_d": "0 4 1 1,4,7,10 *", # Quarterly
+    "cms_opt_out": "0 4 15 * *",       # Monthly 15th 4 AM
 }
 
 # Interval between scheduler ticks
