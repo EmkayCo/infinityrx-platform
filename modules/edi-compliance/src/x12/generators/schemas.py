@@ -238,3 +238,82 @@ class Generate277Request(BaseModel):
     payer_name: str
     claim_statuses: List[Any] = Field(default_factory=list)
     metadata: dict = Field(default_factory=dict)
+
+
+class Generate278Request(BaseModel):
+    """278 Health Care Services Review — Request or Response."""
+    tenant_id: UUID
+    trading_partner_id: UUID
+    isa_control_number: int
+    gs_control_number: int
+    st_control_number: int = 1
+    sender_qualifier: str = "ZZ"
+    sender_id: str = "INFINITYRX     "
+    receiver_qualifier: str = "ZZ"
+    receiver_id: str
+    test_mode: bool = True
+    implementation_guide: str = "005010X217"
+    is_response: bool = False             # False=request (13), True=response (11)
+    payer_id: str
+    payer_name: str
+    provider_npi: str
+    provider_name: str
+    subscriber_id: str
+    subscriber_last_name: str
+    subscriber_first_name: str
+    subscriber_dob: Optional[str] = None
+    service_reviews: List[Any] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
+
+
+class Generate999Request(BaseModel):
+    """999 Implementation Acknowledgment per 005010X231A1."""
+    tenant_id: UUID
+    trading_partner_id: UUID
+    isa_control_number: int
+    gs_control_number: int
+    st_control_number: int = 1
+    sender_qualifier: str = "ZZ"
+    sender_id: str = "INFINITYRX     "
+    receiver_qualifier: str = "ZZ"
+    receiver_id: str
+    test_mode: bool = True
+    implementation_guide: str = "005010X231A1"
+    original_isa_control: int
+    original_gs_control: int
+    original_transaction_type: str      # e.g. "837"
+    ack_code: str = "A"                 # A=accepted, R=rejected, E=accepted with errors
+    error_codes: List[str] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
+
+
+class GenerateTA1Request(BaseModel):
+    """TA1 Interchange Acknowledgment."""
+    tenant_id: UUID
+    trading_partner_id: UUID
+    isa_control_number: int
+    gs_control_number: int
+    st_control_number: int = 1
+    sender_qualifier: str = "ZZ"
+    sender_id: str = "INFINITYRX     "
+    receiver_qualifier: str = "ZZ"
+    receiver_id: str
+    test_mode: bool = True
+    ack_control_number: int             # the ISA control number being acknowledged
+    ack_date: str                       # YYMMDD
+    ack_time: str                       # HHMM
+    ack_code: str = "A"                 # A=accepted, E=accepted with errors, R=rejected
+    error_code: str = "000"             # 3-char error code, 000=no error
+    metadata: dict = Field(default_factory=dict)
+
+
+class GenerateNcpdpBatchRequest(BaseModel):
+    """NCPDP Batch 1.2 claim submission request."""
+    tenant_id: UUID
+    trading_partner_id: UUID
+    batch_control_number: str
+    sender_id: str
+    receiver_id: str
+    transaction_count: int = 0
+    claims: List[Any] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
