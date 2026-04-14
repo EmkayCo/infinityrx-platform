@@ -1,0 +1,117 @@
+[
+  {
+    "id": "label-rems-isotretinoin-001",
+    "effective_time": "20231015",
+    "openfda": {
+      "application_number": ["NDA018662"],
+      "brand_name": ["ACCUTANE"],
+      "generic_name": ["ISOTRETINOIN"],
+      "package_ndc": ["00004-0155-47", "00004-0156-47"],
+      "manufacturer_name": ["Roche Laboratories Inc"],
+      "product_type": ["HUMAN PRESCRIPTION DRUG"]
+    },
+    "rems": [
+      "iPLEDGE REMS Program",
+      "ETASU: Prescriber certification required",
+      "ETASU: Patient enrollment required",
+      "ETASU: Pharmacy certification required",
+      "Medication Guide required"
+    ],
+    "warnings": [
+      "Isotretinoin must not be used by female patients who are or may become pregnant."
+    ],
+    "purpose": ["Isotretinoin is indicated for the treatment of severe recalcitrant nodular acne."],
+    "extra_field_1": "extra_value_1",
+    "extra_field_2": "extra_value_2"
+  },
+  {
+    "id": "label-rems-clozapine-001",
+    "effective_time": "20220801",
+    "openfda": {
+      "application_number": ["NDA019758"],
+      "brand_name": ["CLOZARIL"],
+      "generic_name": ["CLOZAPINE"],
+      "package_ndc": ["00078-0126-05"],
+      "manufacturer_name": ["Novartis Pharmaceuticals Corp"],
+      "product_type": ["HUMAN PRESCRIPTION DRUG"]
+    },
+    "rems": [
+      "Clozapine REMS Program",
+      "Shared system REMS",
+      "ETASU: Prescriber certification required",
+      "ETASU: Patient enrollment required",
+      "Communication Plan: Healthcare providers must counsel patients on agranulocytosis risk"
+    ],
+    "warnings": [
+      "Agranulocytosis: can cause life-threatening and fatal agranulocytosis."
+    ],
+    "shared_system_name": "Clozapine REMS",
+    "extra_field_3": "shared_system_data"
+  },
+  {
+    "id": "label-rems-thalidomide-001",
+    "effective_time": "20230301",
+    "openfda": {
+      "application_number": ["NDA020785"],
+      "brand_name": ["THALOMID"],
+      "generic_name": ["THALIDOMIDE"],
+      "package_ndc": ["59148-0009-07"],
+      "manufacturer_name": ["Celgene Corporation"],
+      "product_type": ["HUMAN PRESCRIPTION DRUG"]
+    },
+    "rems": [
+      "THALOMID REMS",
+      "ETASU: Prescriber certification required",
+      "ETASU: Patient enrollment required",
+      "ETASU: Pharmacy certification required",
+      "Medication Guide required"
+    ],
+    "warnings": [
+      "Thalidomide is known to cause severe, life-threatening human birth defects."
+    ],
+    "extra_teratogen_flag": true
+  },
+  {
+    "id": "label-rems-rosiglitazone-001",
+    "effective_time": "20230601",
+    "openfda": {
+      "application_number": ["NDA021071"],
+      "brand_name": ["AVANDIA"],
+      "generic_name": ["ROSIGLITAZONE MALEATE"],
+      "package_ndc": ["00029-3159-13"],
+      "manufacturer_name": ["GlaxoSmithKline LLC"],
+      "product_type": ["HUMAN PRESCRIPTION DRUG"]
+    },
+    "rems": [
+      "Avandia-Rosiglitazone Medicines Access Program",
+      "Communication Plan: prescribers and patients must discuss cardiovascular risk"
+    ],
+    "warnings": [
+      "Rosiglitazone may cause or exacerbate congestive heart failure."
+    ],
+    "extra_cv_risk_flag": "HIGH"
+  },
+  {
+    "id": "label-rems-natalizumab-001",
+    "effective_time": "20231201",
+    "openfda": {
+      "application_number": ["BLA125104"],
+      "brand_name": ["TYSABRI"],
+      "generic_name": ["NATALIZUMAB"],
+      "package_ndc": ["64406-007-03"],
+      "manufacturer_name": ["Biogen Inc"],
+      "product_type": ["HUMAN PRESCRIPTION DRUG"]
+    },
+    "rems": [
+      "TOUCH Prescribing Program",
+      "ETASU: Prescriber certification required",
+      "ETASU: Patient enrollment required",
+      "ETASU: Pharmacy certification required"
+    ],
+    "warnings": [
+      "Progressive multifocal leukoencephalopathy (PML) has occurred in patients treated with TYSABRI."
+    ],
+    "extra_pml_risk": true,
+    "extra_jc_virus_screening": "required"
+  }
+]

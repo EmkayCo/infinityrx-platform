@@ -1,0 +1,11 @@
+BLA Number,Proprietary Name,Proper Name,BLA Type,Applicant,Strength,Dosage Form,Route of Administration,Product Presentation,Status,Date of Licensure,Interchangeable,Reference Product BLA Number,Reference Product Proper Name,Exclusivity Expiration Date,Extra Column 1,Extra Column 2
+103705,EPOGEN,EPOETIN ALFA,351(a),Amgen Inc.,2000 units/mL,Injection,Intravenous; Subcutaneous,1 mL single-dose vial,Active,1989-06-01,N,,,2028-12-31,extra_val_1,extra_val_2
+761046,MVASI,BEVACIZUMAB-AWWB,351(k),Amgen Inc.,100mg/4mL,Injection,Intravenous,4 mL vial,Active,2017-09-14,Y,125085,BEVACIZUMAB,,mvasi_data,
+761058,KANJINTI,TRASTUZUMAB-ANNS,351(k),Amgen Inc.,440 mg,Injection,Intravenous,Multiple-dose vial,Active,2019-06-13,Y,103792,TRASTUZUMAB,,kanjinti_data,
+761042,IXIFI,INFLIXIMAB-QBTX,351(k),Pfizer Inc.,100 mg,Injection,Intravenous,Vial,Discontinued,2017-12-13,N,103772,INFLIXIMAB,,ixifi_status,disc_reason
+125085,AVASTIN,BEVACIZUMAB,351(a),Genentech Inc.,25 mg/mL,Injection,Intravenous,4 mL vial,Active,2004-02-26,N,,,2026-06-26,avastin_tier,reference_product
+103792,HERCEPTIN,TRASTUZUMAB,351(a),Genentech Inc.,440 mg,Injection,Intravenous,Multiple-dose vial,Active,1998-09-25,N,,,2029-09-25,herceptin_tier,reference_original
+761054,OGIVRI,TRASTUZUMAB-DKST,351(k),Mylan GmbH,150 mg,Injection,Intravenous,Vial,Active,2017-12-01,Y,103792,TRASTUZUMAB,,ogivri_biosim,approved
+103772,REMICADE,INFLIXIMAB,351(a),Janssen Biotech Inc.,100 mg,Injection,Intravenous,20 mL vial,Active,1998-08-24,N,,,2030-08-24,remicade_flagship,
+761068,HADLIMA,ADALIMUMAB-BWWD,351(k),Samsung Bioepis,40 mg/0.8 mL,Injection,Subcutaneous,0.8 mL prefilled syringe,Active,2019-07-23,N,761064,ADALIMUMAB,,hadlima_details,
+761064,HUMIRA,ADALIMUMAB,351(a),AbbVie Inc.,40 mg/0.8 mL,Injection,Subcutaneous,Prefilled syringe,Active,2002-12-31,N,,,2032-12-31,humira_market,blockbuster
