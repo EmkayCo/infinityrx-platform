@@ -8,6 +8,10 @@ All middleware mounted here per LESSON-006:
 """
 from __future__ import annotations
 
+import os
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -40,6 +44,19 @@ async def _get_dlq_permissions() -> set[str]:
     return set()
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Startup: install slow-query logger on the shared async engine (M-04)."""
+    try:
+        from shared.db.engine import get_engine  # noqa: PLC0415
+        from shared.observability.slow_query import install_slow_query_logger  # noqa: PLC0415
+        threshold = int(os.getenv("SLOW_QUERY_THRESHOLD_MS", "1000"))
+        install_slow_query_logger(get_engine().sync_engine, threshold_ms=threshold)
+    except Exception:  # pragma: no cover — best-effort; missing DB is fine in tests
+        pass
+    yield
+
+
 def create_app() -> FastAPI:
     """Application factory. Tests use this to build a fresh app per case."""
     try:
@@ -52,6 +69,7 @@ def create_app() -> FastAPI:
         cors_origins = []
 
     app = FastAPI(
+        lifespan=lifespan,
         title="InfinityRx Member Management",
         version="1.0.0",
         description="Member enrollment, eligibility, accumulators, and benefit tracking.",

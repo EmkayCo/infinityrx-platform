@@ -32,6 +32,8 @@ logger = logging.getLogger("edi-compliance.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    import os  # noqa: PLC0415
+
     try:
         from sqlalchemy import text  # noqa: PLC0415
         from shared.db.engine import get_engine  # noqa: PLC0415
@@ -39,6 +41,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
     except Exception:  # pragma: no cover — DB not required in unit tests
+        pass
+
+    # M-04: install slow-query logger on the shared async engine (sync side).
+    try:
+        from shared.db.engine import get_engine as _get_engine  # noqa: PLC0415
+        from shared.observability.slow_query import install_slow_query_logger  # noqa: PLC0415
+        threshold = int(os.getenv("SLOW_QUERY_THRESHOLD_MS", "1000"))
+        install_slow_query_logger(_get_engine().sync_engine, threshold_ms=threshold)
+    except Exception:  # pragma: no cover — best-effort; missing DB is fine in tests
         pass
 
     try:

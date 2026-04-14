@@ -8,6 +8,9 @@ so integration tests through create_app() catch regressions.
 from __future__ import annotations
 
 import logging
+import os
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,6 +42,19 @@ async def _get_dlq_permissions() -> set[str]:
     return set()
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Startup: install slow-query logger on billing's sync engine (M-04)."""
+    try:
+        from src.db.session import _get_engine  # noqa: PLC0415
+        from shared.observability.slow_query import install_slow_query_logger  # noqa: PLC0415
+        threshold = int(os.getenv("SLOW_QUERY_THRESHOLD_MS", "1000"))
+        install_slow_query_logger(_get_engine(), threshold_ms=threshold)
+    except Exception:  # pragma: no cover — best-effort; missing DB is fine in tests
+        pass
+    yield
+
+
 def create_app() -> FastAPI:
     """Application factory. Tests use this to build a fresh app per case."""
     from shared.config import get_settings  # noqa: PLC0415 — deferred to allow test override
@@ -48,6 +64,7 @@ def create_app() -> FastAPI:
     cors_origins = getattr(settings, "CORS_ALLOW_ORIGINS", [])
 
     app = FastAPI(
+        lifespan=lifespan,
         title="InfinityRx Billing",
         version="1.0.0",
         description="Billing module — claims, AP, AR, invoicing, journal, program monitoring",
