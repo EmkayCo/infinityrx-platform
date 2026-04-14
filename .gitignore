@@ -49,3 +49,7 @@ coverage.json
 portal/operator/public/data/*.txt
 portal/operator/public/data/*.xlsx
 
+
+# Reference data (large files — kept out of git except whitelisted)
+data/reference/
+!data/reference/ncpdp/NCPDP_v3.1_Monthly_Master_20240501.ZIP
