@@ -187,13 +187,15 @@ class NCPDPIngestionService:
                 return self._upsert_batch(model, table_name, rows)
         except Exception as exc:
             logger.error(
-                "NCPDP batch flush error",
+                "NCPDP batch flush error: %s: %s",
+                type(exc).__name__,
+                str(exc)[:1000],
                 extra={
                     "ingest_table": table_name,
                     "ingest_batch_size": len(rows),
-                    "ingest_error": str(exc)[:500],
                 },
             )
+            self._db.rollback()
             return 0, 0, len(rows)
 
     def _delete_insert_batch(

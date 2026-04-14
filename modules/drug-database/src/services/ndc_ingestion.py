@@ -334,7 +334,19 @@ class NDCIngestionService:
 
         for i in range(0, len(rows), _BATCH_SIZE):
             chunk = rows[i : i + _BATCH_SIZE]
-            enriched = [{**r, "created_at": now} for r in chunk]
+            # De-duplicate within batch by ndc_package_code_11 — real FDA data
+            # contains same NDC under multiple SPL document IDs; ON CONFLICT
+            # cannot handle duplicate conflict keys inside one INSERT statement
+            # (CardinalityViolation). Keep the last row (most-recent source order).
+            deduped: dict[str, dict[str, Any]] = {}
+            for r in chunk:
+                key = r.get("ndc_package_code_11")
+                if key is None:
+                    continue
+                deduped[key] = r
+            enriched = [{**r, "created_at": now} for r in deduped.values()]
+            if not enriched:
+                continue
             try:
                 stmt = pg_insert(DrugPackage.__table__).values(enriched)
                 stmt = stmt.on_conflict_do_update(

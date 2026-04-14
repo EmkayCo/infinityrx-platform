@@ -39,8 +39,10 @@ logger = logging.getLogger(__name__)
 _CMS_INDEX_URL = "https://download.cms.gov/nppes/NPI_Files.html"
 
 # Regex to locate the weekly zip href — LESSON-004
+# CMS filename pattern: NPPES_Data_Dissemination_MMDDYY_MMDDYY_Weekly[_V2].zip
+# (dates are 6-digit MMDDYY, optional _V2/_V3 versioning suffix).
 _WEEKLY_ZIP_RE = re.compile(
-    r"NPPES_Data_Dissemination_\d{8}-\d{8}_Weekly\.zip",
+    r"NPPES_Data_Dissemination_\d{6}_\d{6}_Weekly(?:_V\d+)?\.zip",
     re.IGNORECASE,
 )
 

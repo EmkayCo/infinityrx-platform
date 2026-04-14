@@ -160,10 +160,17 @@ class OrangeBookIngestionService:
         errored = 0
         error_samples: list[dict[str, Any]] = []
 
-        valid_rows: list[dict[str, Any]] = []
+        # De-duplicate within batch by (appl_type, appl_no, product_no) — real
+        # FDA Orange Book has same product across multiple list revisions.
+        deduped: dict[tuple[str, str, str], dict[str, Any]] = {}
         for row in rows:
             try:
-                valid_rows.append({**row, "created_at": now, "updated_at": now})
+                key = (
+                    row.get("appl_type", ""),
+                    row.get("appl_no", ""),
+                    row.get("product_no", ""),
+                )
+                deduped[key] = {**row, "created_at": now, "updated_at": now}
             except Exception as exc:
                 errored += 1
                 if len(error_samples) < 10:
@@ -172,6 +179,7 @@ class OrangeBookIngestionService:
                         "raw_row": str(row)[:500],
                         "error": str(exc)[:500],
                     })
+        valid_rows = list(deduped.values())
 
         if not valid_rows:
             return inserted, updated, errored, error_samples
@@ -184,7 +192,7 @@ class OrangeBookIngestionService:
                 if c.name not in ("id", "created_at")
             }
             stmt = stmt.on_conflict_do_update(
-                constraint="uq_orange_book_appl_product",
+                index_elements=["appl_type", "appl_no", "product_no"],
                 set_=update_cols,
             )
             self._db.execute(stmt)
