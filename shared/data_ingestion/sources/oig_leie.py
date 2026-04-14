@@ -281,6 +281,7 @@ class OigLeieIngester(DataSourceIngester):
             self._db.commit()
             return result.rowcount if hasattr(result, "rowcount") else 0
         except Exception as exc:
+            self._db.rollback()
             logger.info(
                 "Prescriber cross-reference skipped (table not in scope)",
                 extra={"ingest_source": self.source_name, "leie_note": str(exc)[:200]},
@@ -307,6 +308,7 @@ class OigLeieIngester(DataSourceIngester):
             self._db.commit()
             return result.rowcount if hasattr(result, "rowcount") else 0
         except Exception as exc:
+            self._db.rollback()
             logger.info(
                 "Pharmacy cross-reference skipped (table not in scope)",
                 extra={"ingest_source": self.source_name, "leie_note": str(exc)[:200]},
@@ -338,6 +340,7 @@ class OigLeieIngester(DataSourceIngester):
                 self._db.commit()
                 cleared += result.rowcount if hasattr(result, "rowcount") else 0
             except Exception as exc:
+                self._db.rollback()
                 logger.info(
                     "Reinstatement cross-reference skipped",
                     extra={

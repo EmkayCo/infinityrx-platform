@@ -252,6 +252,7 @@ class DeaRegistrationsIngester(DataSourceIngester):
             self._db.commit()
             return result.rowcount if hasattr(result, "rowcount") else 0
         except Exception as exc:
+            self._db.rollback()
             logger.info(
                 "DEA prescriber cross-reference skipped",
                 extra={"ingest_source": self.source_name, "dea_note": str(exc)[:200]},

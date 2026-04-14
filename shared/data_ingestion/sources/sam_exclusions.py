@@ -326,6 +326,7 @@ class SamExclusionsIngester(DataSourceIngester):
             self._db.commit()
             return result.rowcount if hasattr(result, "rowcount") else 0
         except Exception as exc:
+            self._db.rollback()
             logger.info(
                 "SAM prescriber cross-reference skipped",
                 extra={"ingest_source": self.source_name, "sam_note": str(exc)[:200]},
@@ -359,6 +360,7 @@ class SamExclusionsIngester(DataSourceIngester):
                 self._db.commit()
                 total += result.rowcount if hasattr(result, "rowcount") else 0
             except Exception as exc:
+                self._db.rollback()
                 logger.info(
                     "SAM pharmacy cross-reference skipped",
                     extra={"ingest_source": self.source_name, "sam_note": str(exc)[:200]},
