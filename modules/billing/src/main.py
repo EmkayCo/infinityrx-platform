@@ -44,7 +44,7 @@ async def _get_dlq_permissions() -> set[str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Startup: install slow-query logger on billing's sync engine (M-04)."""
+    """Startup: install slow-query logger and wire event-bus consumers."""
     try:
         from src.db.session import _get_engine  # noqa: PLC0415
         from shared.observability.slow_query import install_slow_query_logger  # noqa: PLC0415
@@ -52,7 +52,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         install_slow_query_logger(_get_engine(), threshold_ms=threshold)
     except Exception:  # pragma: no cover — best-effort; missing DB is fine in tests
         pass
+
+    # CR-01/CR-11: subscribe consumers to the event bus with idempotency wrappers.
+    try:
+        from shared.events.factory import get_event_bus  # noqa: PLC0415
+        from .events import wire_consumers  # noqa: PLC0415
+        bus = get_event_bus()
+        await bus.start()
+        await wire_consumers(bus)
+        app.state.event_bus = bus
+    except Exception:  # pragma: no cover — best-effort; missing broker is fine in tests
+        logger.exception("billing.consumer_wiring_failed")
+
     yield
+
+    bus = getattr(app.state, "event_bus", None)
+    if bus is not None:
+        try:
+            await bus.stop()
+        except Exception:  # pragma: no cover
+            pass
 
 
 def create_app() -> FastAPI:
@@ -97,7 +116,36 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict:
-        return {"status": "ok", "module": "billing"}
+        from sqlalchemy import text  # noqa: PLC0415
+        from src.db.session import _get_engine  # noqa: PLC0415
+        from fastapi.responses import JSONResponse  # noqa: PLC0415
+
+        db_status: str
+        db_critical_failed: bool
+        try:
+            engine = _get_engine()
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            db_status = "ok"
+            db_critical_failed = False
+        except Exception as exc:  # noqa: BLE001
+            db_status = f"error: {type(exc).__name__}"
+            db_critical_failed = True
+
+        dependencies: dict[str, str] = {"database": db_status}
+
+        if db_critical_failed:
+            overall = "unhealthy"
+        elif any(v != "ok" for v in dependencies.values()):
+            overall = "degraded"
+        else:
+            overall = "healthy"
+
+        status_code = 503 if db_critical_failed else 200
+        return JSONResponse(
+            status_code=status_code,
+            content={"status": overall, "module": "billing", "dependencies": dependencies},
+        )
 
     return app
 
