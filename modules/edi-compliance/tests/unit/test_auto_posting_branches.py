@@ -16,7 +16,7 @@ from src.x12.generators.schemas import (
     TrnTrace,
 )
 from src.x12.parsers.parse_835 import parse_835
-from src.services.auto_posting import auto_post_835, _make_envelope
+from src.services.auto_posting import auto_post_835
 
 _DELIMS = Delimiters(element="*", sub_element=":", segment="~")
 TENANT_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
@@ -183,51 +183,3 @@ async def test_auto_post_with_svc_adjustments():
     assert payload["service_lines"][0]["adjustments"][0]["amount"] == "20.00"
 
 
-def test_make_envelope_fallback():
-    """_make_envelope creates a simple namespace when shared import is unavailable."""
-    envelope = _make_envelope(
-        event_type="test.event",
-        tenant_id=TENANT_ID,
-        correlation_id=uuid.uuid4(),
-        source_module="edi-compliance",
-        schema_version="1.0",
-        ordering_key="test",
-        idempotency_key="test:key",
-        payload={"key": "value"},
-    )
-    assert envelope.event_type == "test.event"
-    assert envelope.payload["key"] == "value"
-
-
-def test_make_envelope_with_shared_success():
-    """_make_envelope uses shared.events.types.EventEnvelope when available."""
-    from unittest.mock import MagicMock, patch
-
-    mock_envelope_class = MagicMock(return_value=MagicMock(event_type="test.event"))
-    mock_shared_events = MagicMock()
-    mock_shared_events.EventEnvelope = mock_envelope_class
-
-    with patch.dict("sys.modules", {
-        "shared": MagicMock(),
-        "shared.events": MagicMock(),
-        "shared.events.types": mock_shared_events,
-    }):
-        import importlib
-        import src.services.auto_posting as ap_module
-        importlib.reload(ap_module)
-        result = ap_module._make_envelope(
-            event_type="test.event",
-            tenant_id=TENANT_ID,
-            correlation_id=uuid.uuid4(),
-            source_module="edi-compliance",
-            schema_version="1.0",
-            ordering_key="test",
-            idempotency_key="test:key",
-            payload={"key": "value"},
-        )
-        mock_envelope_class.assert_called_once()
-
-    # Reload back to original state
-    import importlib
-    import src.services.auto_posting as ap_module
-    importlib.reload(ap_module)
