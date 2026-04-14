@@ -50,7 +50,7 @@ def _get_or_404(db: Session, npi: str) -> Prescriber:
 # ─── Lookup ────────────────────────────────────────────────────────────────────
 
 @router.get("/lookup/{npi}", response_model=PrescriberResponse)
-def lookup_by_npi(npi: str, db: DBSession, tenant_id: TenantId) -> Prescriber:
+async def lookup_by_npi(npi: str, db: DBSession, tenant_id: TenantId) -> Prescriber:
     try:
         validate_npi(npi)
     except NpiValidationError as exc:
@@ -63,7 +63,7 @@ def lookup_by_npi(npi: str, db: DBSession, tenant_id: TenantId) -> Prescriber:
 
 
 @router.get("/lookup/dea/{dea_number}", response_model=PrescriberResponse)
-def lookup_by_dea(dea_number: str, db: DBSession, tenant_id: TenantId) -> Prescriber:
+async def lookup_by_dea(dea_number: str, db: DBSession, tenant_id: TenantId) -> Prescriber:
     # DEA numbers must never appear in logs — redact here
     logger.info("prescriber_dea_lookup", extra={"svc_tenant": str(tenant_id)})
     stmt = select(Prescriber).where(Prescriber.dea_number == dea_number.upper())
@@ -79,7 +79,7 @@ def lookup_by_dea(dea_number: str, db: DBSession, tenant_id: TenantId) -> Prescr
 # ─── Search ────────────────────────────────────────────────────────────────────
 
 @router.get("/search", response_model=SearchResponse)
-def search_prescribers(
+async def search_prescribers(
     db: DBSession,
     tenant_id: TenantId,
     name: Optional[str] = Query(None),
@@ -117,7 +117,7 @@ def search_prescribers(
 
 
 @router.get("/batch", response_model=BatchLookupResponse)
-def batch_lookup(
+async def batch_lookup(
     db: DBSession,
     tenant_id: TenantId,
     npis: list[str] = Query(..., max_length=100),
@@ -132,7 +132,7 @@ def batch_lookup(
 # ─── Validation ────────────────────────────────────────────────────────────────
 
 @router.get("/validate/{npi}", response_model=ValidationResponse)
-def validate_prescriber(npi: str, db: DBSession, tenant_id: TenantId) -> ValidationResponse:
+async def validate_prescriber(npi: str, db: DBSession, tenant_id: TenantId) -> ValidationResponse:
     try:
         validate_npi(npi)
     except NpiValidationError as exc:
@@ -156,7 +156,7 @@ def validate_prescriber(npi: str, db: DBSession, tenant_id: TenantId) -> Validat
 
 
 @router.get("/validate/{npi}/controlled/{schedule}", response_model=ControlledSubstanceAuthResponse)
-def validate_controlled_substance(
+async def validate_controlled_substance(
     npi: str,
     schedule: str,
     db: DBSession,
@@ -216,7 +216,7 @@ def validate_controlled_substance(
 # ─── Taxonomy ──────────────────────────────────────────────────────────────────
 
 @router.get("/taxonomies")
-def list_taxonomies(tenant_id: TenantId) -> dict:
+async def list_taxonomies(tenant_id: TenantId) -> dict:
     entries = _taxonomy_service.all_entries()
     return {
         "taxonomies": [
@@ -234,7 +234,7 @@ def list_taxonomies(tenant_id: TenantId) -> dict:
 
 
 @router.get("/taxonomies/{code}")
-def get_taxonomy(code: str, tenant_id: TenantId) -> dict:
+async def get_taxonomy(code: str, tenant_id: TenantId) -> dict:
     entry = _taxonomy_service.get_entry(code.upper())
     if entry is None:
         raise HTTPException(
@@ -254,7 +254,7 @@ def get_taxonomy(code: str, tenant_id: TenantId) -> dict:
 
 
 @router.get("/specialties")
-def list_specialties(tenant_id: TenantId) -> dict:
+async def list_specialties(tenant_id: TenantId) -> dict:
     specialties = sorted(set(
         e.simplified_specialty
         for e in _taxonomy_service.all_entries()
@@ -266,7 +266,7 @@ def list_specialties(tenant_id: TenantId) -> dict:
 # ─── Organizations ─────────────────────────────────────────────────────────────
 
 @router.get("/organizations", response_model=SearchResponse)
-def list_organizations(
+async def list_organizations(
     db: DBSession,
     tenant_id: TenantId,
     name: Optional[str] = Query(None),
@@ -289,7 +289,7 @@ def list_organizations(
 
 
 @router.get("/organizations/{npi}", response_model=PrescriberResponse)
-def get_organization(npi: str, db: DBSession, tenant_id: TenantId) -> Prescriber:
+async def get_organization(npi: str, db: DBSession, tenant_id: TenantId) -> Prescriber:
     try:
         validate_npi(npi)
     except NpiValidationError as exc:
@@ -310,7 +310,7 @@ def get_organization(npi: str, db: DBSession, tenant_id: TenantId) -> Prescriber
 # ─── Monitoring ────────────────────────────────────────────────────────────────
 
 @router.get("/monitoring/alerts", response_model=list[CredentialAlertResponse])
-def list_alerts(
+async def list_alerts(
     db: DBSession,
     tenant_id: TenantId,
     acknowledged: Optional[bool] = Query(None),
@@ -325,7 +325,7 @@ def list_alerts(
 
 
 @router.put("/monitoring/alerts/{alert_id}/acknowledge")
-def acknowledge_alert(
+async def acknowledge_alert(
     alert_id: uuid.UUID,
     db: DBSession,
     tenant_id: TenantId,
@@ -347,7 +347,7 @@ def acknowledge_alert(
 # ─── Stats ─────────────────────────────────────────────────────────────────────
 
 @router.get("/stats", response_model=DirectoryStatsResponse)
-def directory_stats(db: DBSession, tenant_id: TenantId) -> DirectoryStatsResponse:
+async def directory_stats(db: DBSession, tenant_id: TenantId) -> DirectoryStatsResponse:
     total = db.execute(select(func.count(Prescriber.id))).scalar_one()
     active = db.execute(select(func.count(Prescriber.id)).where(Prescriber.status == "active")).scalar_one()
     inactive = db.execute(select(func.count(Prescriber.id)).where(Prescriber.status == "inactive")).scalar_one()
@@ -368,7 +368,7 @@ def directory_stats(db: DBSession, tenant_id: TenantId) -> DirectoryStatsRespons
 # ─── Relationships ──────────────────────────────────────────────────────────────
 
 @router.get("/relationships/{npi}/pharmacies", response_model=list[PrescriberPharmacyRelationshipResponse])
-def prescriber_pharmacy_relationships(
+async def prescriber_pharmacy_relationships(
     npi: str,
     db: DBSession,
     tenant_id: TenantId,
@@ -405,7 +405,7 @@ def prescriber_pharmacy_relationships(
 
 
 @router.get("/relationships/{npi}/stats")
-def prescriber_relationship_stats(
+async def prescriber_relationship_stats(
     npi: str,
     db: DBSession,
     tenant_id: TenantId,

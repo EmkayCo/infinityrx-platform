@@ -57,7 +57,7 @@ router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
 
 
 @router.post("/claims", status_code=status.HTTP_201_CREATED, response_model=dict)
-def submit_claim(
+async def submit_claim(
     body: ClaimSubmitRequest,
     tenant_id: TenantId,
     db: DBSession,
@@ -72,7 +72,7 @@ def submit_claim(
 
 
 @router.get("/claims", response_model=list[dict])
-def list_claims(
+async def list_claims(
     tenant_id: TenantId,
     db: DBSession,
     client_id: uuid.UUID | None = Query(default=None),
@@ -89,7 +89,7 @@ def list_claims(
 
 
 @router.get("/claims/{claim_id}", response_model=dict)
-def get_claim(
+async def get_claim(
     claim_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -104,7 +104,7 @@ def get_claim(
 
 
 @router.get("/routing-rules", response_model=list[dict])
-def list_routing_rules(
+async def list_routing_rules(
     tenant_id: TenantId,
     db: DBSession,
 ) -> list[dict]:
@@ -113,7 +113,7 @@ def list_routing_rules(
 
 
 @router.post("/routing-rules", status_code=status.HTTP_201_CREATED, response_model=dict)
-def create_routing_rule(
+async def create_routing_rule(
     body: RoutingRuleCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
@@ -123,7 +123,7 @@ def create_routing_rule(
 
 
 @router.put("/routing-rules/{rule_id}", response_model=dict)
-def update_routing_rule(
+async def update_routing_rule(
     rule_id: uuid.UUID,
     body: RoutingRuleUpdateRequest,
     tenant_id: TenantId,
@@ -134,7 +134,7 @@ def update_routing_rule(
 
 
 @router.post("/routing-rules/test", response_model=RoutingTestResponse)
-def test_routing_rules(
+async def test_routing_rules(
     body: RoutingTestRequest,
     tenant_id: TenantId,
     db: DBSession,
@@ -149,7 +149,7 @@ def test_routing_rules(
 
 
 @router.get("/ap", response_model=list[dict])
-def list_ap_records(
+async def list_ap_records(
     tenant_id: TenantId,
     db: DBSession,
     client_id: uuid.UUID | None = Query(default=None),
@@ -164,7 +164,7 @@ def list_ap_records(
 
 
 @router.get("/ap/summary", response_model=list[dict])
-def ap_summary(
+async def ap_summary(
     tenant_id: TenantId,
     db: DBSession,
 ) -> list[dict]:
@@ -173,7 +173,7 @@ def ap_summary(
 
 
 @router.get("/ap/{ap_id}", response_model=dict)
-def get_ap_record(
+async def get_ap_record(
     ap_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -188,7 +188,7 @@ def get_ap_record(
 
 
 @router.get("/payment-batches", response_model=list[dict])
-def list_payment_batches(
+async def list_payment_batches(
     tenant_id: TenantId,
     db: DBSession,
     limit: int = Query(default=50, ge=1, le=500),
@@ -199,7 +199,7 @@ def list_payment_batches(
 
 
 @router.post("/payment-batches/generate", status_code=status.HTTP_201_CREATED, response_model=dict)
-def generate_payment_batch(
+async def generate_payment_batch(
     body: BatchGenerateRequest,
     tenant_id: TenantId,
     db: DBSession,
@@ -209,7 +209,7 @@ def generate_payment_batch(
 
 
 @router.get("/payment-batches/{batch_id}", response_model=dict)
-def get_payment_batch(
+async def get_payment_batch(
     batch_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -219,7 +219,7 @@ def get_payment_batch(
 
 
 @router.post("/payment-batches/{batch_id}/validate", response_model=BatchValidateResponse)
-def validate_payment_batch(
+async def validate_payment_batch(
     batch_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -229,7 +229,7 @@ def validate_payment_batch(
 
 
 @router.post("/payment-batches/{batch_id}/approve", response_model=dict)
-def approve_payment_batch(
+async def approve_payment_batch(
     batch_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -239,7 +239,7 @@ def approve_payment_batch(
 
 
 @router.post("/payment-batches/{batch_id}/submit", response_model=dict)
-def submit_payment_batch(
+async def submit_payment_batch(
     batch_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -249,7 +249,7 @@ def submit_payment_batch(
 
 
 @router.post("/payment-batches/{batch_id}/void", response_model=dict)
-def void_payment_batch(
+async def void_payment_batch(
     batch_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -259,7 +259,7 @@ def void_payment_batch(
 
 
 @router.get("/payment-batches/{batch_id}/payments", response_model=list[dict])
-def list_batch_payments(
+async def list_batch_payments(
     batch_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -274,7 +274,7 @@ def list_batch_payments(
 
 
 @router.post("/settlement/record", status_code=status.HTTP_200_OK, response_model=dict)
-def record_settlement(
+async def record_settlement(
     body: SettlementRecordRequest,
     tenant_id: TenantId,
     db: DBSession,
@@ -284,7 +284,7 @@ def record_settlement(
 
 
 @router.get("/settlement/unmatched", response_model=list[dict])
-def list_unmatched_payments(
+async def list_unmatched_payments(
     tenant_id: TenantId,
     db: DBSession,
 ) -> list[dict]:
@@ -298,7 +298,7 @@ def list_unmatched_payments(
 
 
 @router.get("/invoicing-configs", response_model=list[dict])
-def list_invoicing_configs(
+async def list_invoicing_configs(
     tenant_id: TenantId,
     db: DBSession,
 ) -> list[dict]:
@@ -307,7 +307,7 @@ def list_invoicing_configs(
 
 
 @router.post("/invoicing-configs", status_code=status.HTTP_201_CREATED, response_model=dict)
-def create_invoicing_config(
+async def create_invoicing_config(
     body: InvoicingConfigCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
@@ -317,7 +317,7 @@ def create_invoicing_config(
 
 
 @router.put("/invoicing-configs/{config_id}", response_model=dict)
-def update_invoicing_config(
+async def update_invoicing_config(
     config_id: uuid.UUID,
     body: InvoicingConfigCreateRequest,
     tenant_id: TenantId,
@@ -333,7 +333,7 @@ def update_invoicing_config(
 
 
 @router.get("/invoices", response_model=list[dict])
-def list_invoices(
+async def list_invoices(
     tenant_id: TenantId,
     db: DBSession,
     client_id: uuid.UUID | None = Query(default=None),
@@ -346,7 +346,7 @@ def list_invoices(
 
 
 @router.post("/invoices/generate", status_code=status.HTTP_201_CREATED, response_model=dict)
-def generate_invoice(
+async def generate_invoice(
     body: InvoiceGenerateRequest,
     tenant_id: TenantId,
     db: DBSession,
@@ -356,7 +356,7 @@ def generate_invoice(
 
 
 @router.get("/invoices/{invoice_id}", response_model=dict)
-def get_invoice(
+async def get_invoice(
     invoice_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -366,7 +366,7 @@ def get_invoice(
 
 
 @router.get("/invoices/{invoice_id}/pdf")
-def get_invoice_pdf(
+async def get_invoice_pdf(
     invoice_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -376,7 +376,7 @@ def get_invoice_pdf(
 
 
 @router.post("/invoices/{invoice_id}/approve", response_model=dict)
-def approve_invoice(
+async def approve_invoice(
     invoice_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -386,7 +386,7 @@ def approve_invoice(
 
 
 @router.post("/invoices/{invoice_id}/send", response_model=dict)
-def send_invoice(
+async def send_invoice(
     invoice_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -396,7 +396,7 @@ def send_invoice(
 
 
 @router.post("/invoices/{invoice_id}/void", response_model=dict)
-def void_invoice(
+async def void_invoice(
     invoice_id: uuid.UUID,
     body: dict,
     tenant_id: TenantId,
@@ -407,7 +407,7 @@ def void_invoice(
 
 
 @router.get("/invoices/{invoice_id}/line-items", response_model=list[dict])
-def list_invoice_line_items(
+async def list_invoice_line_items(
     invoice_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -422,7 +422,7 @@ def list_invoice_line_items(
 
 
 @router.get("/ar", response_model=list[dict])
-def list_ar_records(
+async def list_ar_records(
     tenant_id: TenantId,
     db: DBSession,
     client_id: uuid.UUID | None = Query(default=None),
@@ -435,7 +435,7 @@ def list_ar_records(
 
 
 @router.get("/ar/aging", response_model=ARAgingResponse)
-def get_ar_aging(
+async def get_ar_aging(
     tenant_id: TenantId,
     db: DBSession,
     client_id: uuid.UUID | None = Query(default=None),
@@ -453,7 +453,7 @@ def get_ar_aging(
 
 
 @router.post("/ar/{ar_id}/payment", status_code=status.HTTP_200_OK, response_model=dict)
-def record_ar_payment(
+async def record_ar_payment(
     ar_id: uuid.UUID,
     body: ARPaymentRequest,
     tenant_id: TenantId,
@@ -464,7 +464,7 @@ def record_ar_payment(
 
 
 @router.post("/ar/{ar_id}/dispute", status_code=status.HTTP_200_OK, response_model=dict)
-def dispute_ar_record(
+async def dispute_ar_record(
     ar_id: uuid.UUID,
     body: ARDisputeRequest,
     tenant_id: TenantId,
@@ -475,7 +475,7 @@ def dispute_ar_record(
 
 
 @router.post("/ar/{ar_id}/write-off", status_code=status.HTTP_200_OK, response_model=dict)
-def write_off_ar_record(
+async def write_off_ar_record(
     ar_id: uuid.UUID,
     body: ARWriteOffRequest,
     tenant_id: TenantId,
@@ -491,7 +491,7 @@ def write_off_ar_record(
 
 
 @router.get("/journal", response_model=list[dict])
-def query_journal(
+async def query_journal(
     tenant_id: TenantId,
     db: DBSession,
     client_id: uuid.UUID | None = Query(default=None),
@@ -509,7 +509,7 @@ def query_journal(
 
 
 @router.get("/journal/summary", response_model=dict)
-def journal_summary(
+async def journal_summary(
     tenant_id: TenantId,
     db: DBSession,
     date_from: date | None = Query(default=None),
@@ -520,7 +520,7 @@ def journal_summary(
 
 
 @router.get("/journal/export", response_model=dict)
-def export_journal(
+async def export_journal(
     tenant_id: TenantId,
     db: DBSession,
     date_from: date | None = Query(default=None),
@@ -532,7 +532,7 @@ def export_journal(
 
 
 @router.post("/journal/close-period", response_model=dict)
-def close_period(
+async def close_period(
     body: PeriodCloseRequest,
     tenant_id: TenantId,
     db: DBSession,
@@ -547,7 +547,7 @@ def close_period(
 
 
 @router.get("/fees", response_model=list[dict])
-def list_fee_configs(
+async def list_fee_configs(
     tenant_id: TenantId,
     db: DBSession,
     client_id: uuid.UUID | None = Query(default=None),
@@ -557,7 +557,7 @@ def list_fee_configs(
 
 
 @router.post("/fees", status_code=status.HTTP_201_CREATED, response_model=dict)
-def create_fee_config(
+async def create_fee_config(
     body: FeeConfigCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
@@ -567,7 +567,7 @@ def create_fee_config(
 
 
 @router.put("/fees/{fee_id}", response_model=dict)
-def update_fee_config(
+async def update_fee_config(
     fee_id: uuid.UUID,
     body: FeeConfigUpdateRequest,
     tenant_id: TenantId,
@@ -583,7 +583,7 @@ def update_fee_config(
 
 
 @router.get("/program-budgets", response_model=list[dict])
-def list_program_budgets(
+async def list_program_budgets(
     tenant_id: TenantId,
     db: DBSession,
     client_id: uuid.UUID | None = Query(default=None),
@@ -594,7 +594,7 @@ def list_program_budgets(
 
 
 @router.post("/program-budgets", status_code=status.HTTP_201_CREATED, response_model=dict)
-def create_program_budget(
+async def create_program_budget(
     body: ProgramBudgetCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
@@ -604,7 +604,7 @@ def create_program_budget(
 
 
 @router.put("/program-budgets/{budget_id}", response_model=dict)
-def update_program_budget(
+async def update_program_budget(
     budget_id: uuid.UUID,
     body: ProgramBudgetUpdateRequest,
     tenant_id: TenantId,
@@ -615,7 +615,7 @@ def update_program_budget(
 
 
 @router.get("/program-budgets/{budget_id}/dashboard", response_model=dict)
-def budget_dashboard(
+async def budget_dashboard(
     budget_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -625,7 +625,7 @@ def budget_dashboard(
 
 
 @router.get("/program-budgets/{budget_id}/snapshots", response_model=list[dict])
-def list_budget_snapshots(
+async def list_budget_snapshots(
     budget_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -635,7 +635,7 @@ def list_budget_snapshots(
 
 
 @router.get("/program-budgets/{budget_id}/alerts", response_model=list[dict])
-def list_budget_alerts(
+async def list_budget_alerts(
     budget_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -648,7 +648,7 @@ def list_budget_alerts(
     "/program-budgets/{budget_id}/alerts/{alert_id}/acknowledge",
     response_model=dict,
 )
-def acknowledge_budget_alert(
+async def acknowledge_budget_alert(
     budget_id: uuid.UUID,
     alert_id: uuid.UUID,
     tenant_id: TenantId,
@@ -664,7 +664,7 @@ def acknowledge_budget_alert(
 
 
 @router.get("/payment-vendors", response_model=list[dict])
-def list_payment_vendors(
+async def list_payment_vendors(
     tenant_id: TenantId,
     db: DBSession,
 ) -> list[dict]:
@@ -673,7 +673,7 @@ def list_payment_vendors(
 
 
 @router.post("/payment-vendors", status_code=status.HTTP_201_CREATED, response_model=dict)
-def create_payment_vendor(
+async def create_payment_vendor(
     body: PaymentVendorCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
@@ -683,7 +683,7 @@ def create_payment_vendor(
 
 
 @router.put("/payment-vendors/{vendor_id}", response_model=dict)
-def update_payment_vendor(
+async def update_payment_vendor(
     vendor_id: uuid.UUID,
     body: PaymentVendorCreateRequest,
     tenant_id: TenantId,
@@ -699,7 +699,7 @@ def update_payment_vendor(
 
 
 @router.get("/bank-accounts", response_model=list[dict])
-def list_bank_accounts(
+async def list_bank_accounts(
     tenant_id: TenantId,
     db: DBSession,
 ) -> list[dict]:
@@ -708,7 +708,7 @@ def list_bank_accounts(
 
 
 @router.post("/bank-accounts", status_code=status.HTTP_201_CREATED, response_model=dict)
-def create_bank_account(
+async def create_bank_account(
     body: BankAccountCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
@@ -718,7 +718,7 @@ def create_bank_account(
 
 
 @router.put("/bank-accounts/{account_id}", response_model=dict)
-def update_bank_account(
+async def update_bank_account(
     account_id: uuid.UUID,
     body: BankAccountCreateRequest,
     tenant_id: TenantId,
@@ -734,7 +734,7 @@ def update_bank_account(
 
 
 @router.get("/accounting/config", response_model=dict)
-def get_accounting_config(
+async def get_accounting_config(
     tenant_id: TenantId,
     db: DBSession,
 ) -> dict[str, Any]:
@@ -743,7 +743,7 @@ def get_accounting_config(
 
 
 @router.put("/accounting/config", response_model=dict)
-def update_accounting_config(
+async def update_accounting_config(
     body: AccountingConfigUpdateRequest,
     tenant_id: TenantId,
     db: DBSession,
@@ -758,7 +758,7 @@ def update_accounting_config(
 
 
 @router.get("/remittance-configs", response_model=list[dict])
-def list_remittance_configs(
+async def list_remittance_configs(
     tenant_id: TenantId,
     db: DBSession,
 ) -> list[dict]:
@@ -767,7 +767,7 @@ def list_remittance_configs(
 
 
 @router.post("/remittance-configs", status_code=status.HTTP_201_CREATED, response_model=dict)
-def create_remittance_config(
+async def create_remittance_config(
     body: RemittanceConfigCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
@@ -782,7 +782,7 @@ def create_remittance_config(
 
 
 @router.get("/sftp-configs", response_model=list[dict])
-def list_sftp_configs(
+async def list_sftp_configs(
     tenant_id: TenantId,
     db: DBSession,
 ) -> list[dict]:
@@ -791,7 +791,7 @@ def list_sftp_configs(
 
 
 @router.post("/sftp-configs", status_code=status.HTTP_201_CREATED, response_model=dict)
-def create_sftp_config(
+async def create_sftp_config(
     body: SFTPConfigCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
@@ -801,7 +801,7 @@ def create_sftp_config(
 
 
 @router.post("/sftp-configs/{config_id}/test", response_model=SFTPTestResponse)
-def test_sftp_config(
+async def test_sftp_config(
     config_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -816,7 +816,7 @@ def test_sftp_config(
 
 
 @router.get("/funding", response_model=list[dict])
-def list_funding_configs(
+async def list_funding_configs(
     tenant_id: TenantId,
     db: DBSession,
 ) -> list[dict]:
@@ -825,7 +825,7 @@ def list_funding_configs(
 
 
 @router.put("/funding/{config_id}", response_model=dict)
-def update_funding_config(
+async def update_funding_config(
     config_id: uuid.UUID,
     body: dict,
     tenant_id: TenantId,
@@ -836,7 +836,7 @@ def update_funding_config(
 
 
 @router.get("/funding/{config_id}/ledger", response_model=list[dict])
-def get_funding_ledger(
+async def get_funding_ledger(
     config_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -846,7 +846,7 @@ def get_funding_ledger(
 
 
 @router.post("/funding/{config_id}/deposit", status_code=status.HTTP_200_OK, response_model=dict)
-def record_funding_deposit(
+async def record_funding_deposit(
     config_id: uuid.UUID,
     body: FundingDepositRequest,
     tenant_id: TenantId,
@@ -857,7 +857,7 @@ def record_funding_deposit(
 
 
 @router.get("/funding/{config_id}/projection", response_model=dict)
-def get_funding_projection(
+async def get_funding_projection(
     config_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
@@ -872,7 +872,7 @@ def get_funding_projection(
 
 
 @router.get("/reports/ap-summary", response_model=dict)
-def report_ap_summary(
+async def report_ap_summary(
     tenant_id: TenantId,
     db: DBSession,
     date_from: date | None = Query(default=None),
@@ -884,7 +884,7 @@ def report_ap_summary(
 
 
 @router.get("/reports/ar-aging", response_model=dict)
-def report_ar_aging(
+async def report_ar_aging(
     tenant_id: TenantId,
     db: DBSession,
     client_id: uuid.UUID | None = Query(default=None),
@@ -894,7 +894,7 @@ def report_ar_aging(
 
 
 @router.get("/reports/payment-history", response_model=list[dict])
-def report_payment_history(
+async def report_payment_history(
     tenant_id: TenantId,
     db: DBSession,
     date_from: date | None = Query(default=None),
@@ -906,7 +906,7 @@ def report_payment_history(
 
 
 @router.get("/reports/fee-summary", response_model=dict)
-def report_fee_summary(
+async def report_fee_summary(
     tenant_id: TenantId,
     db: DBSession,
     client_id: uuid.UUID | None = Query(default=None),
@@ -918,7 +918,7 @@ def report_fee_summary(
 
 
 @router.get("/reports/prefund-history", response_model=list[dict])
-def report_prefund_history(
+async def report_prefund_history(
     tenant_id: TenantId,
     db: DBSession,
     client_id: uuid.UUID | None = Query(default=None),
@@ -928,7 +928,7 @@ def report_prefund_history(
 
 
 @router.get("/reports/cash-flow", response_model=dict)
-def report_cash_flow(
+async def report_cash_flow(
     tenant_id: TenantId,
     db: DBSession,
     date_from: date | None = Query(default=None),
@@ -939,7 +939,7 @@ def report_cash_flow(
 
 
 @router.get("/reports/program-performance", response_model=dict)
-def report_program_performance(
+async def report_program_performance(
     tenant_id: TenantId,
     db: DBSession,
     program_id: uuid.UUID | None = Query(default=None),
@@ -951,7 +951,7 @@ def report_program_performance(
 
 
 @router.get("/reports/period-close", response_model=dict)
-def report_period_close(
+async def report_period_close(
     tenant_id: TenantId,
     db: DBSession,
     period_end: date | None = Query(default=None),
@@ -961,7 +961,7 @@ def report_period_close(
 
 
 @router.get("/reports/1099-data", response_model=list[dict])
-def report_1099_data(
+async def report_1099_data(
     tenant_id: TenantId,
     db: DBSession,
     tax_year: int = Query(default=2025, ge=2020, le=2099),

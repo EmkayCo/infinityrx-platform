@@ -51,7 +51,7 @@ def _error(code: str, message: str, status_code: int = 400) -> HTTPException:
 
 
 @router.get("/lookup/batch", response_model=list[DrugProductResponse])
-def batch_lookup(
+async def batch_lookup(
     ndcs: list[str] = Query(...),
     db: DBSession = None,
     tenant_id: TenantId = None,
@@ -69,7 +69,7 @@ def batch_lookup(
 
 
 @router.get("/lookup/{ndc}", response_model=DrugProductResponse)
-def lookup_drug(ndc: str, db: DBSession, tenant_id: TenantId) -> Any:
+async def lookup_drug(ndc: str, db: DBSession, tenant_id: TenantId) -> Any:
     try:
         ndc_11 = normalize_ndc(ndc)
     except InvalidNDCError as e:
@@ -82,7 +82,7 @@ def lookup_drug(ndc: str, db: DBSession, tenant_id: TenantId) -> Any:
 
 
 @router.get("/search", response_model=DrugSearchResponse)
-def search_drugs(
+async def search_drugs(
     q: str = Query(..., min_length=1),
     drug_type: str | None = Query(None),
     marketing_status: str | None = Query(None),
@@ -120,7 +120,7 @@ def search_drugs(
 
 
 @router.get("/pricing/{ndc}", response_model=list[PricingResponse])
-def get_pricing(
+async def get_pricing(
     ndc: str,
     as_of: date | None = Query(None),
     db: DBSession = None,
@@ -153,7 +153,7 @@ def get_pricing(
 
 
 @router.get("/pricing/{ndc}/history", response_model=list[PricingHistoryResponse])
-def get_pricing_history(
+async def get_pricing_history(
     ndc: str,
     db: DBSession = None,
     tenant_id: TenantId = None,
@@ -175,7 +175,7 @@ def get_pricing_history(
 
 
 @router.get("/interactions", response_model=list[InteractionResponse])
-def check_interactions(
+async def check_interactions(
     identifiers: list[str] = Query(...),
     db: DBSession = None,
     tenant_id: TenantId = None,
@@ -212,7 +212,7 @@ def check_interactions(
 
 
 @router.get("/equivalents/{ndc}", response_model=list[TherapeuticEquivalenceResponse])
-def get_equivalents(
+async def get_equivalents(
     ndc: str,
     db: DBSession = None,
     tenant_id: TenantId = None,
@@ -237,7 +237,7 @@ def get_equivalents(
 
 
 @router.get("/overrides", response_model=list[TenantOverrideResponse])
-def list_overrides(db: DBSession, tenant_id: TenantId) -> Any:
+async def list_overrides(db: DBSession, tenant_id: TenantId) -> Any:
     return (
         db.query(TenantPricingOverride)
         .filter(TenantPricingOverride.tenant_id == tenant_id)
@@ -246,7 +246,7 @@ def list_overrides(db: DBSession, tenant_id: TenantId) -> Any:
 
 
 @router.post("/overrides/upload", response_model=MACUploadResponse)
-def upload_mac_list(
+async def upload_mac_list(
     file: UploadFile,
     db: DBSession,
     tenant_id: TenantId,
@@ -282,7 +282,7 @@ def upload_mac_list(
 
 
 @router.delete("/overrides/{override_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_override(
+async def delete_override(
     override_id: uuid.UUID,
     db: DBSession,
     tenant_id: TenantId,
@@ -305,7 +305,7 @@ def delete_override(
 
 
 @router.get("/rems/{ndc}", response_model=list[RemsProgramResponse])
-def get_rems(ndc: str, db: DBSession, tenant_id: TenantId) -> Any:
+async def get_rems(ndc: str, db: DBSession, tenant_id: TenantId) -> Any:
     try:
         ndc_11 = normalize_ndc(ndc)
     except InvalidNDCError as e:
@@ -318,7 +318,7 @@ def get_rems(ndc: str, db: DBSession, tenant_id: TenantId) -> Any:
 
 
 @router.get("/shortages", response_model=list[DrugShortageResponse])
-def list_shortages(
+async def list_shortages(
     status_filter: str | None = Query(None, alias="status"),
     db: DBSession = None,
     tenant_id: TenantId = None,
@@ -330,7 +330,7 @@ def list_shortages(
 
 
 @router.get("/shortages/{ndc}", response_model=list[DrugShortageResponse])
-def get_shortage(ndc: str, db: DBSession, tenant_id: TenantId) -> Any:
+async def get_shortage(ndc: str, db: DBSession, tenant_id: TenantId) -> Any:
     try:
         ndc_11 = normalize_ndc(ndc)
     except InvalidNDCError as e:
@@ -343,7 +343,7 @@ def get_shortage(ndc: str, db: DBSession, tenant_id: TenantId) -> Any:
 
 
 @router.get("/refresh/status", response_model=list[RefreshStatusResponse])
-def refresh_status(db: DBSession, tenant_id: TenantId) -> Any:
+async def refresh_status(db: DBSession, tenant_id: TenantId) -> Any:
     return (
         db.query(DataRefreshLog)
         .order_by(DataRefreshLog.started_at.desc())
@@ -353,5 +353,5 @@ def refresh_status(db: DBSession, tenant_id: TenantId) -> Any:
 
 
 @router.get("/health")
-def health() -> dict[str, str]:
+async def health() -> dict[str, str]:
     return {"status": "ok", "module": "drug-database"}
