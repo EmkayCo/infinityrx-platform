@@ -26,10 +26,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
-from contextlib import asynccontextmanager
+import uuid
+from contextlib import asynccontextmanager, contextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from sqlalchemy import text
 
 from shared.db.engine import dispose_engine, get_engine
@@ -39,8 +40,10 @@ from shared.observability import configure_logging
 from shared.observability.slow_query import install_slow_query_logger
 
 from .api import router as api_router
+from .audit.middleware import AuditContext, AuditMiddleware
 from .infrastructure.rate_limiter import RateLimitConfig, RateLimitMiddleware
 from .infrastructure.security_headers import SecurityHeadersMiddleware
+from .infrastructure.tenant_middleware import AuthContext, AuthResolver, TenantIsolationMiddleware
 
 logger = logging.getLogger("core-platform.main")
 
@@ -151,6 +154,85 @@ async def _get_dlq_permissions() -> set[str]:
     return set()
 
 
+def _audit_session_factory():
+    """Return a context-manager-compatible sync session for the audit middleware.
+
+    Uses the shim's session factory so this works in both test and production
+    mode (the shim uses SQLite in tests, Postgres in production).
+    """
+    from .._shim import db as db_shim  # noqa: PLC0415 — deferred to avoid circular import
+
+    @contextmanager
+    def _cm():
+        SessionLocal = db_shim.get_sessionmaker()
+        session = SessionLocal()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    return _cm()
+
+
+def _audit_user_resolver(request: Request) -> AuditContext | None:
+    """Resolve tenant/user from bearer token for audit logging.
+
+    Gracefully falls back to None (unauthenticated) when no valid JWT is
+    present — AuditMiddleware skips the audit write for unauthenticated calls
+    (e.g., /auth/login itself). Returns None rather than raising so that the
+    middleware never fails a request due to resolver errors.
+    """
+    try:
+        from shared.auth.dependencies import get_current_user  # noqa: PLC0415
+        from shared.auth.jwt_tokens import decode_token  # noqa: PLC0415
+        from shared.auth.exceptions import InvalidTokenError, ExpiredTokenError  # noqa: PLC0415
+        from fastapi.security.utils import get_authorization_scheme_param  # noqa: PLC0415
+
+        auth_header = request.headers.get("Authorization", "")
+        scheme, token = get_authorization_scheme_param(auth_header)
+        if scheme.lower() != "bearer" or not token:
+            return None
+        claims = decode_token(token)
+        tenant_id = claims.tenant_id
+        if tenant_id is None:
+            return None
+        return AuditContext(
+            tenant_id=tenant_id,
+            user_id=claims.user_id,
+        )
+    except Exception:  # noqa: BLE001 — best-effort; never fail the request
+        return None
+
+
+class _TenantResolver:
+    """Resolve auth context from bearer JWT for TenantIsolationMiddleware.
+
+    Returns None for requests without a valid bearer token so that
+    unauthenticated routes (health, /auth/login) can be made explicitly
+    exempt via the ``@tenant_exempt_route`` decorator without breaking the
+    middleware chain.
+    """
+
+    def __call__(self, request: Request) -> AuthContext | None:
+        try:
+            from shared.auth.jwt_tokens import decode_token  # noqa: PLC0415
+            from fastapi.security.utils import get_authorization_scheme_param  # noqa: PLC0415
+
+            auth_header = request.headers.get("Authorization", "")
+            scheme, token = get_authorization_scheme_param(auth_header)
+            if scheme.lower() != "bearer" or not token:
+                return None
+            claims = decode_token(token)
+            roles: frozenset[str] = frozenset()
+            return AuthContext(
+                user_id=claims.user_id,
+                tenant_id=claims.tenant_id,
+                roles=roles,
+            )
+        except Exception:  # noqa: BLE001 — best-effort resolver
+            return None
+
+
 def create_app() -> FastAPI:
     """Application factory. Tests use this to build a fresh app per case."""
     app = FastAPI(
@@ -159,10 +241,23 @@ def create_app() -> FastAPI:
         description="Tenants, auth, RBAC, audit, jobs, files, notifications.",
         lifespan=lifespan,
     )
-    # HIPAA-grade defaults. Middleware is applied outermost-first, so
-    # RateLimitMiddleware runs before SecurityHeadersMiddleware and the
-    # 429 response still gets HSTS/CSP/Cache-Control applied on its way
-    # back out.
+    # Middleware ordering note: Starlette applies middleware in LIFO order
+    # (last add_middleware call = outermost layer). The desired request flow:
+    #
+    #   SecurityHeaders → RateLimit → TenantIsolation → Audit → routes
+    #
+    # So we add them in the reverse order (innermost first):
+    #   AuditMiddleware (innermost, closest to routes)
+    #   TenantIsolationMiddleware (pure ASGI, runs before routes)
+    #   RateLimitMiddleware
+    #   SecurityHeadersMiddleware (outermost — headers on ALL responses)
+    app.add_middleware(
+        AuditMiddleware,
+        session_factory=_audit_session_factory,
+        user_resolver=_audit_user_resolver,
+        event_bus=get_event_bus(),
+    )
+    app.add_middleware(TenantIsolationMiddleware, resolver=_TenantResolver())
     app.add_middleware(RateLimitMiddleware, config=RateLimitConfig())
     app.add_middleware(SecurityHeadersMiddleware)
 
