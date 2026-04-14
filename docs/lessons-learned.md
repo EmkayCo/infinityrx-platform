@@ -4,7 +4,122 @@ Entries added by builders during the build. Critical/high severity lessons are p
 
 ---
 
-### LESSON-008: `after_transaction_end` sync event listener is incompatible with AsyncSession + StaticPool
+### LESSON-010: NPI columns in claim records — public reference data vs PHI in context
+**Date:** 2026-04-14
+**Module:** medical-claims
+**Builder:** Teammate 3 (data-integrity) — audit remediation session
+**Severity:** medium
+
+**What happened:**
+The medical-claims audit (CR-02) flagged `rendering_provider_npi` and
+`billing_provider_npi` as PHI because they appear in a claim record that links
+to a patient. The question arose whether to encrypt them alongside `patient_member_id`
+and diagnosis codes.
+
+**Root cause / decision:**
+NPI is a public NPPES registry identifier — it's published in the federal provider
+directory and is intentionally non-secret. Encrypting NPI would break `GROUP BY`
+queries in analytics (waste report, provider denial analytics, credentialing cross-
+checks) because AES-256-GCM produces a different ciphertext every time (random
+nonce), making NPI-based aggregation impossible without decrypting every row.
+
+**Decision taken:**
+- `patient_member_id` and `diagnosis_code_1..4` → encrypted (`EncryptedString`)
+- `rendering_provider_npi` and `billing_provider_npi` → left plaintext
+
+**Rationale:**
+The HIPAA minimum necessary standard does not require encrypting public directory
+identifiers. The patient-linking PHI is encrypted, so a DB dump cannot reconstruct
+a complete care episode without the tenant-scoped AES key. NPI alone (without
+the patient link) does not constitute PHI.
+
+**Mitigation:**
+Row-level encryption of the patient identifiers + diagnosis codes means a DB dump
+exposes provider patterns (which NPIs filed claims) but NOT which patients received
+care from which providers.
+
+**Where to apply:**
+This decision applies to any module that stores provider NPIs alongside patient
+identifiers. Document explicitly in the model file when an NPI column is intentionally
+not encrypted, referencing this lesson.
+
+---
+
+### LESSON-011: Global reference tables (NPI, NDC) should not inherit TenantScopedMixin
+**Date:** 2026-04-14
+**Module:** prescriber-directory
+**Builder:** Teammate 1 (security-wiring) — audit remediation session
+**Severity:** medium
+
+**What happened:**
+Audit CR-09 flagged `prescriber-directory/src/db/session.py` as creating its own
+`sessionmaker` without `install_tenant_loader`, and the `Prescriber` model as having
+no `tenant_id` column — characterizing this as "no tenant isolation fence."
+
+However, upon investigation, the `Prescriber` model is a global NPPES registry
+reference table — analogous to how `drug-database` handles NDC reference data.
+NPI records are public federal registry data shared across all tenants. Tenant-
+scoping a global reference table would mean duplicating the entire NPPES registry
+per tenant, which is incorrect.
+
+**Root cause:**
+The audit rule "every model must have TenantScopedMixin" is correct for
+business/transactional data but incorrect for global reference tables.
+
+**Decision taken:**
+- `Prescriber` (NPI reference) → no `TenantScopedMixin`, no `tenant_id`
+- `CredentialAlert`, network assignments → DO use `TenantScopedMixin`
+
+**Prevention rule:**
+Distinguish between three categories of data:
+1. **Global reference data** (NDC, NPI, taxonomy codes): `TenantScopedMixin` MUST NOT be used.
+   These are shared, read-mostly catalogs.
+2. **Tenant-owned transactional data** (claims, members, invoices): `TenantScopedMixin` REQUIRED.
+3. **Tenant configuration of global data** (formulary, network, pricing): `TenantScopedMixin` REQUIRED
+   on the configuration/overlay table, but NOT on the underlying reference table.
+
+Document this distinction in `docs/architecture/tenant_isolation_policy.md` (future task).
+
+---
+
+### LESSON-009: AuditMiddleware requires 3 injectable args — shim carefully when wiring to new modules
+**Date:** 2026-04-14
+**Module:** core-platform / all modules
+**Builder:** Teammate 1 (security-wiring) — audit remediation session
+**Severity:** high
+
+**What happened:**
+When mounting `AuditMiddleware` in module `create_app()` factories (audit CR-04,
+CR-07), it became apparent that `AuditMiddleware.__init__` requires three
+non-trivial arguments: `session_factory`, `user_resolver`, and `event_bus`.
+Modules that do not yet have a full auth stack (billing, payment-processing,
+reclaimrx) could not wire `AuditMiddleware` without either importing from
+core-platform (a cross-module import violation) or duplicating the user_resolver.
+
+**Root cause:**
+`AuditMiddleware` was designed for core-platform's fully-wired auth stack.
+The three args reflect real dependencies — but they create a wiring burden for
+every module that needs audit coverage.
+
+**Fix applied:**
+Each module uses a `NullAuditMiddleware` shim (passes through without logging)
+until the module's own JWT auth layer is fully wired. The shim is visible in
+the `create_app()` factory so it can't be missed. Once JWT auth is added (per
+CR-03 remediation), replace the shim with the real middleware.
+
+**Prevention rule:**
+Any middleware with injectable dependencies MUST have a "null" or "passthrough"
+variant that is safe to use during transitional wiring states. The null variant
+must be the explicit choice (requiring a comment), not the default — so engineers
+can't accidentally ship with no-op middleware.
+
+Candidate file: `.claude/rules/architecture.md` — "Middleware with injectable
+dependencies MUST provide a null/passthrough variant with an explicit TODO comment
+indicating when to replace it."
+
+---
+
+### LESSON-008: `after_transaction_end` sync event listener is incompatible with AsyncSession + StaticPool `after_transaction_end` sync event listener is incompatible with AsyncSession + StaticPool
 **Date:** 2026-04-13
 **Module:** pharmacy-directory
 **Builder:** Builder-PharmacyDirectory
