@@ -1,0 +1,151 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap");
+
+@import "tailwindcss";
+
+:root {
+  /* Primary palette */
+  --ifx-navy-900: #0b1d3a;
+  --ifx-navy-700: #1b3a5c;
+  --ifx-navy-500: #2d5f8a;
+
+  /* Accent */
+  --ifx-teal-600: #0891b2;
+  --ifx-teal-500: #00b4d8;
+  --ifx-teal-400: #22d3ee;
+
+  /* Semantic */
+  --ifx-success: #10b981;
+  --ifx-warning: #f59e0b;
+  --ifx-error: #ef4444;
+  --ifx-info: #3b82f6;
+
+  /* Surfaces — light mode */
+  --ifx-bg: #f8fafc;
+  --ifx-surface: #ffffff;
+  --ifx-border: #e2e8f0;
+
+  /* Text — light mode */
+  --ifx-text-primary: #1e293b;
+  --ifx-text-secondary: #64748b;
+
+  /* shadcn/ui compatibility */
+  --background: 248 250 252;
+  --foreground: 30 41 59;
+  --card: #ffffff;
+  --card-foreground: #1e293b;
+  --popover: #ffffff;
+  --popover-foreground: #1e293b;
+  --primary: #00b4d8;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #1e293b;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --accent: #22d3ee;
+  --accent-foreground: #0f172a;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #00b4d8;
+  --radius: 8px;
+}
+
+.dark {
+  --ifx-bg: #0f172a;
+  --ifx-surface: #1e293b;
+  --ifx-border: #334155;
+  --ifx-text-primary: #f1f5f9;
+  --ifx-text-secondary: #94a3b8;
+
+  --card: #1e293b;
+  --card-foreground: #f1f5f9;
+  --popover: #1e293b;
+  --popover-foreground: #f1f5f9;
+  --secondary: #1e293b;
+  --secondary-foreground: #f1f5f9;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  --accent-foreground: #0f172a;
+  --border: #334155;
+  --input: #334155;
+  --background: 15 23 42;
+  --foreground: 241 245 249;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--ifx-bg);
+  color: var(--ifx-text-primary);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: "Inter", system-ui, sans-serif;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+code, pre, kbd, samp {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--ifx-teal-500);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Skip nav */
+.skip-nav {
+  position: absolute;
+  top: -9999px;
+  left: 1rem;
+  z-index: 50;
+  background: var(--ifx-teal-500);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  text-decoration: none;
+  font-size: 0.875rem;
+}
+.skip-nav:focus {
+  top: 1rem;
+}
+
+/* Shimmer animation for skeleton loaders */
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(148, 163, 184, 0.1) 25%,
+    rgba(148, 163, 184, 0.2) 50%,
+    rgba(148, 163, 184, 0.1) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}

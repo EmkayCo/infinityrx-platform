@@ -1,0 +1,188 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Primary palette */
+  --ifx-navy-900: #0b1d3a;
+  --ifx-navy-700: #1b3a5c;
+  --ifx-navy-500: #2d5f8a;
+
+  /* Accent */
+  --ifx-teal-600: #0891b2;
+  --ifx-teal-500: #00b4d8;
+  --ifx-teal-400: #22d3ee;
+
+  /* Semantic */
+  --ifx-success: #10b981;
+  --ifx-warning: #f59e0b;
+  --ifx-error: #ef4444;
+  --ifx-info: #3b82f6;
+
+  /* Surfaces — light mode */
+  --ifx-bg: #f8fafc;
+  --ifx-surface: #ffffff;
+  --ifx-border: #e2e8f0;
+
+  /* Text — light mode */
+  --ifx-text-primary: #1e293b;
+  --ifx-text-secondary: #64748b;
+
+  /* Typography */
+  --ifx-font-display: "Inter", system-ui, sans-serif;
+  --ifx-font-body: "Inter", system-ui, sans-serif;
+  --ifx-font-mono: "JetBrains Mono", "Fira Code", monospace;
+
+  /* Spacing & Radius */
+  --ifx-radius-sm: 6px;
+  --ifx-radius: 8px;
+  --ifx-radius-lg: 12px;
+  --ifx-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --ifx-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+
+  /* shadcn/ui compatibility */
+  --background: 248 250 252;
+  --foreground: 30 41 59;
+  --card: 255 255 255;
+  --card-foreground: 30 41 59;
+  --popover: 255 255 255;
+  --popover-foreground: 30 41 59;
+  --primary: 0 180 216;
+  --primary-foreground: 255 255 255;
+  --secondary: 241 245 249;
+  --secondary-foreground: 30 41 59;
+  --muted: 241 245 249;
+  --muted-foreground: 100 116 139;
+  --accent: 34 211 238;
+  --accent-foreground: 15 23 42;
+  --destructive: 239 68 68;
+  --destructive-foreground: 255 255 255;
+  --border: 226 232 240;
+  --input: 226 232 240;
+  --ring: 0 180 216;
+  --radius: 8px;
+}
+
+.dark {
+  /* Surfaces — dark mode */
+  --ifx-bg: #0f172a;
+  --ifx-surface: #1e293b;
+  --ifx-border: #334155;
+
+  /* Text — dark mode */
+  --ifx-text-primary: #f1f5f9;
+  --ifx-text-secondary: #94a3b8;
+
+  /* shadcn/ui compatibility */
+  --background: 15 23 42;
+  --foreground: 241 245 249;
+  --card: 30 41 59;
+  --card-foreground: 241 245 249;
+  --popover: 30 41 59;
+  --popover-foreground: 241 245 249;
+  --primary: 0 180 216;
+  --primary-foreground: 15 23 42;
+  --secondary: 30 41 59;
+  --secondary-foreground: 241 245 249;
+  --muted: 30 41 59;
+  --muted-foreground: 148 163 184;
+  --accent: 34 211 238;
+  --accent-foreground: 15 23 42;
+  --destructive: 239 68 68;
+  --destructive-foreground: 255 255 255;
+  --border: 51 65 85;
+  --input: 51 65 85;
+  --ring: 0 180 216;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: var(--ifx-bg);
+    color: var(--ifx-text-primary);
+    font-family: var(--ifx-font-body);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--ifx-font-display);
+    font-weight: 600;
+    line-height: 1.25;
+  }
+
+  code,
+  pre,
+  kbd,
+  samp {
+    font-family: var(--ifx-font-mono);
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--ifx-teal-500);
+    outline-offset: 2px;
+    border-radius: var(--ifx-radius-sm);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .skip-nav {
+    @apply absolute -top-full left-4 z-50 rounded-md bg-teal-500 px-4 py-2 text-white transition-all focus:top-4;
+  }
+
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      rgba(148, 163, 184, 0.1) 25%,
+      rgba(148, 163, 184, 0.2) 50%,
+      rgba(148, 163, 184, 0.1) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+
+  .dollar-large {
+    @apply text-2xl font-bold tabular-nums;
+  }
+
+  .dollar-million {
+    @apply text-2xl font-bold tabular-nums rounded-md px-2 py-0.5 bg-teal-500/10 text-teal-600 dark:text-teal-400;
+  }
+}
