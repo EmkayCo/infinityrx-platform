@@ -201,7 +201,7 @@ class FdaRemsIngester(DataSourceIngester):
             skip = 0
             while skip <= _API_MAX_SKIP:
                 params = {
-                    "search": "_exists_:rems",
+                    "search": '(warnings_and_cautions:"REMS" OR boxed_warning:"REMS") AND _exists_:openfda.brand_name',
                     "limit": _API_LIMIT,
                     "skip": skip,
                 }

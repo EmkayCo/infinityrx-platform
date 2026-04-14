@@ -239,9 +239,20 @@ class FdaPurpleBookIngester(DataSourceIngester):
         _DEST_DIR.mkdir(parents=True, exist_ok=True)
         dest = _DEST_DIR / _FILENAME
 
+        _BROWSER_HEADERS = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://purplebooksearch.fda.gov/",
+        }
+
         async with httpx.AsyncClient(
             timeout=60.0,
             follow_redirects=True,
+            headers=_BROWSER_HEADERS,
         ) as client:
             # Step 1: fetch the downloads page to find the latest CSV href
             try:
@@ -290,6 +301,14 @@ class FdaPurpleBookIngester(DataSourceIngester):
     def parse(self, file_path: Path) -> Iterator[dict[str, Any]]:
         """Parse Purple Book CSV and yield one dict per BLA record."""
         content = file_path.read_text(encoding="utf-8-sig", errors="replace")
+        # FDA Monthly Historical CSVs prepend 1-3 banner rows before the real
+        # header. Skip until we find a line starting with "N/R/U" or "BLA".
+        lines = content.splitlines()
+        header_idx = next(
+            (i for i, ln in enumerate(lines) if ln.startswith(("N/R/U", "BLA Number", '"BLA Number"'))),
+            0,
+        )
+        content = "\n".join(lines[header_idx:])
         reader = csv.DictReader(io.StringIO(content))
         fieldnames = list(reader.fieldnames or [])
         logger.info(

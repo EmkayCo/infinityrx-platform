@@ -44,9 +44,9 @@ logger = logging.getLogger(__name__)
 _SOURCE_NAME = "cms_part_d"
 
 # Dataset ID for Medicare Part D Prescribers by Provider (CY2022 current)
-_DATASET_ID = "3ntk-nwcc"
+_DATASET_ID = "14d8e8a9-7e9b-4370-a044-bf97c46b4b44"
 _API_BASE_URL = f"https://data.cms.gov/data-api/v1/dataset/{_DATASET_ID}/data"
-_PAGE_SIZE = 50_000
+_PAGE_SIZE = 5_000  # data.cms.gov v1 API caps page size; 5000 is a safe limit
 _TIMEOUT_SECONDS = 120.0
 _DEST_DIR = Path("data/reference/cms-part-d")
 _FILENAME = "part_d_prescriber.json"
@@ -190,7 +190,7 @@ def parse_part_d_row(raw: dict[str, Any], year: int) -> dict[str, Any] | None:
     Negative values are allowed (CMS adjustment rows can be negative).
     Missing numeric columns → None (not 0).
     """
-    npi_raw = str(_get(raw, "Prscrbr_NPI", "prscrbr_npi") or "").strip()
+    npi_raw = str(_get(raw, "Prscrbr_NPI", "PRSCRBR_NPI", "prscrbr_npi") or "").strip()
     if not _NPI_RE.match(npi_raw):
         logger.warning(
             "Part D: skipping row with invalid NPI",
@@ -206,41 +206,41 @@ def parse_part_d_row(raw: dict[str, Any], year: int) -> dict[str, Any] | None:
         "prscrbr_city": str(_get(raw, "Prscrbr_City", "prscrbr_city") or "").strip() or None,
         "prscrbr_state_abrvtn": str(_get(raw, "Prscrbr_State_Abrvtn", "prscrbr_state_abrvtn") or "").strip() or None,
         "prscrbr_state_fips": str(_get(raw, "Prscrbr_State_FIPS", "prscrbr_state_fips") or "").strip() or None,
-        "prscrbr_zip5": str(_get(raw, "Prscrbr_Zip5", "prscrbr_zip5") or "").strip() or None,
+        "prscrbr_zip5": str(_get(raw, "Prscrbr_Zip5", "Prscrbr_zip5", "prscrbr_zip5") or "").strip() or None,
         "prscrbr_ruca": str(_get(raw, "Prscrbr_RUCA", "prscrbr_ruca") or "").strip() or None,
         "prscrbr_cntry": str(_get(raw, "Prscrbr_Cntry", "prscrbr_cntry") or "").strip() or None,
         "prscrbr_type": str(_get(raw, "Prscrbr_Type", "prscrbr_type") or "").strip() or None,
-        "prscrbr_type_src": str(_get(raw, "Prscrbr_Type_Src", "prscrbr_type_src") or "").strip() or None,
+        "prscrbr_type_src": str(_get(raw, "Prscrbr_Type_Src", "Prscrbr_Type_src", "prscrbr_type_src") or "").strip() or None,
         # Utilization
         "tot_clms": _parse_int(_get(raw, "Tot_Clms", "tot_clms")),
-        "tot_30day_fills": _parse_int(_get(raw, "Tot_30day_Fills", "tot_30day_fills")),
+        "tot_30day_fills": _parse_decimal_2(_get(raw, "Tot_30day_Fills", "tot_30day_fills")),
         "tot_day_suply": _parse_int(_get(raw, "Tot_Day_Suply", "tot_day_suply")),
         "tot_drug_cst": _parse_decimal_2(_get(raw, "Tot_Drug_Cst", "tot_drug_cst")),
         "tot_benes": _parse_int(_get(raw, "Tot_Benes", "tot_benes")),
-        # Brand/Generic
-        "brnd_clms": _parse_int(_get(raw, "Brnd_Clms", "brnd_clms")),
-        "brnd_drug_cst": _parse_decimal_2(_get(raw, "Brnd_Drug_Cst", "brnd_drug_cst")),
-        "gnrc_clms": _parse_int(_get(raw, "Gnrc_Clms", "gnrc_clms")),
-        "gnrc_drug_cst": _parse_decimal_2(_get(raw, "Gnrc_Drug_Cst", "gnrc_drug_cst")),
-        "othr_clms": _parse_int(_get(raw, "Othr_Clms", "othr_clms")),
-        "othr_drug_cst": _parse_decimal_2(_get(raw, "Othr_Drug_Cst", "othr_drug_cst")),
+        # Brand/Generic — newer API uses *_Tot_* infix
+        "brnd_clms": _parse_int(_get(raw, "Brnd_Tot_Clms", "Brnd_Clms", "brnd_clms")),
+        "brnd_drug_cst": _parse_decimal_2(_get(raw, "Brnd_Tot_Drug_Cst", "Brnd_Drug_Cst", "brnd_drug_cst")),
+        "gnrc_clms": _parse_int(_get(raw, "Gnrc_Tot_Clms", "Gnrc_Clms", "gnrc_clms")),
+        "gnrc_drug_cst": _parse_decimal_2(_get(raw, "Gnrc_Tot_Drug_Cst", "Gnrc_Drug_Cst", "gnrc_drug_cst")),
+        "othr_clms": _parse_int(_get(raw, "Othr_Tot_Clms", "Othr_Clms", "othr_clms")),
+        "othr_drug_cst": _parse_decimal_2(_get(raw, "Othr_Tot_Drug_Cst", "Othr_Drug_Cst", "othr_drug_cst")),
         # Plan split
-        "mapd_clms": _parse_int(_get(raw, "MAPD_Clms", "mapd_clms")),
-        "mapd_drug_cst": _parse_decimal_2(_get(raw, "MAPD_Drug_Cst", "mapd_drug_cst")),
-        "pdp_clms": _parse_int(_get(raw, "PDP_Clms", "pdp_clms")),
-        "pdp_drug_cst": _parse_decimal_2(_get(raw, "PDP_Drug_Cst", "pdp_drug_cst")),
-        "lis_clms": _parse_int(_get(raw, "LIS_Clms", "lis_clms")),
+        "mapd_clms": _parse_int(_get(raw, "MAPD_Tot_Clms", "MAPD_Clms", "mapd_clms")),
+        "mapd_drug_cst": _parse_decimal_2(_get(raw, "MAPD_Tot_Drug_Cst", "MAPD_Drug_Cst", "mapd_drug_cst")),
+        "pdp_clms": _parse_int(_get(raw, "PDP_Tot_Clms", "PDP_Clms", "pdp_clms")),
+        "pdp_drug_cst": _parse_decimal_2(_get(raw, "PDP_Tot_Drug_Cst", "PDP_Drug_Cst", "pdp_drug_cst")),
+        "lis_clms": _parse_int(_get(raw, "LIS_Tot_Clms", "LIS_Clms", "lis_clms")),
         "lis_drug_cst": _parse_decimal_2(_get(raw, "LIS_Drug_Cst", "lis_drug_cst")),
         # Drug classes
-        "opioid_clms": _parse_int(_get(raw, "Opioid_Clms", "opioid_clms")),
-        "opioid_drug_cst": _parse_decimal_2(_get(raw, "Opioid_Drug_Cst", "opioid_drug_cst")),
+        "opioid_clms": _parse_int(_get(raw, "Opioid_Tot_Clms", "Opioid_Clms", "opioid_clms")),
+        "opioid_drug_cst": _parse_decimal_2(_get(raw, "Opioid_Tot_Drug_Cst", "Opioid_Drug_Cst", "opioid_drug_cst")),
         "opioid_prscrbr_rate": _parse_decimal_4(_get(raw, "Opioid_Prscrbr_Rate", "opioid_prscrbr_rate")),
-        "opioid_la_clms": _parse_int(_get(raw, "Opioid_LA_Clms", "opioid_la_clms")),
-        "opioid_la_drug_cst": _parse_decimal_2(_get(raw, "Opioid_LA_Drug_Cst", "opioid_la_drug_cst")),
-        "antbtc_clms": _parse_int(_get(raw, "Antbtc_Clms", "antbtc_clms")),
-        "antbtc_drug_cst": _parse_decimal_2(_get(raw, "Antbtc_Drug_Cst", "antbtc_drug_cst")),
-        "antpsycht_ge65_clms": _parse_int(_get(raw, "Antpsycht_GE65_Clms", "antpsycht_ge65_clms")),
-        "antpsycht_ge65_drug_cst": _parse_decimal_2(_get(raw, "Antpsycht_GE65_Drug_Cst", "antpsycht_ge65_drug_cst")),
+        "opioid_la_clms": _parse_int(_get(raw, "Opioid_LA_Tot_Clms", "Opioid_LA_Clms", "opioid_la_clms")),
+        "opioid_la_drug_cst": _parse_decimal_2(_get(raw, "Opioid_LA_Tot_Drug_Cst", "Opioid_LA_Drug_Cst", "opioid_la_drug_cst")),
+        "antbtc_clms": _parse_int(_get(raw, "Antbtc_Tot_Clms", "Antbtc_Clms", "antbtc_clms")),
+        "antbtc_drug_cst": _parse_decimal_2(_get(raw, "Antbtc_Tot_Drug_Cst", "Antbtc_Drug_Cst", "antbtc_drug_cst")),
+        "antpsycht_ge65_clms": _parse_int(_get(raw, "Antpsyct_GE65_Tot_Clms", "Antpsycht_GE65_Clms", "antpsycht_ge65_clms")),
+        "antpsycht_ge65_drug_cst": _parse_decimal_2(_get(raw, "Antpsyct_GE65_Tot_Drug_Cst", "Antpsycht_GE65_Drug_Cst", "antpsycht_ge65_drug_cst")),
         # Demographics
         "bene_avg_age": _parse_int(_get(raw, "Bene_Avg_Age", "bene_avg_age")),
         "bene_avg_risk_scre": _parse_decimal_4(_get(raw, "Bene_Avg_Risk_Scre", "bene_avg_risk_scre")),
@@ -300,7 +300,7 @@ class CmsPartDPrescriberIngester(DataSourceIngester):
             follow_redirects=True,
         ) as client:
             while True:
-                params = {"$limit": str(_PAGE_SIZE), "$offset": str(offset)}
+                params = {"size": str(_PAGE_SIZE), "offset": str(offset)}
                 logger.info(
                     "Part D: fetching page",
                     extra={

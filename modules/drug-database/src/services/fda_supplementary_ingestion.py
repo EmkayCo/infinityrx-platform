@@ -455,52 +455,53 @@ class PurpleBookIngestionService:
                 if not bla_number:
                     continue
 
-                stmt = pg_insert(DrugPurpleBook).values(
-                    bla_number=bla_number,
-                    proprietary_name=row.get("proprietary_name"),
-                    proper_name=row.get("proper_name"),
-                    bla_type=row.get("bla_type"),
-                    applicant=row.get("applicant"),
-                    strength=row.get("strength"),
-                    dosage_form=row.get("dosage_form"),
-                    route=row.get("route"),
-                    product_presentation=row.get("product_presentation"),
-                    status=row.get("status"),
-                    licensure_date=row.get("licensure_date"),
-                    interchangeable=row.get("interchangeable"),
-                    reference_product_bla=row.get("reference_product_bla"),
-                    reference_product_proper_name=row.get("reference_product_proper_name"),
-                    exclusivity_expiration_date=row.get("exclusivity_expiration_date"),
-                    raw_payload=row.get("raw_payload"),
-                    created_at=now,
-                    updated_at=now,
-                )
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["bla_number"],
-                    set_={
-                        "proprietary_name": stmt.excluded.proprietary_name,
-                        "proper_name": stmt.excluded.proper_name,
-                        "bla_type": stmt.excluded.bla_type,
-                        "applicant": stmt.excluded.applicant,
-                        "strength": stmt.excluded.strength,
-                        "dosage_form": stmt.excluded.dosage_form,
-                        "route": stmt.excluded.route,
-                        "product_presentation": stmt.excluded.product_presentation,
-                        "status": stmt.excluded.status,
-                        "licensure_date": stmt.excluded.licensure_date,
-                        "interchangeable": stmt.excluded.interchangeable,
-                        "reference_product_bla": stmt.excluded.reference_product_bla,
-                        "reference_product_proper_name": stmt.excluded.reference_product_proper_name,
-                        "exclusivity_expiration_date": stmt.excluded.exclusivity_expiration_date,
-                        "raw_payload": stmt.excluded.raw_payload,
-                        "updated_at": stmt.excluded.updated_at,
-                    },
-                )
-                result = self._db.execute(stmt)
-                if result.rowcount and result.rowcount > 0:
-                    inserted += 1
-                else:
-                    updated += 1
+                with self._db.begin_nested():
+                    stmt = pg_insert(DrugPurpleBook).values(
+                        bla_number=bla_number,
+                        proprietary_name=row.get("proprietary_name"),
+                        proper_name=row.get("proper_name"),
+                        bla_type=row.get("bla_type"),
+                        applicant=row.get("applicant"),
+                        strength=row.get("strength"),
+                        dosage_form=row.get("dosage_form"),
+                        route=row.get("route"),
+                        product_presentation=row.get("product_presentation"),
+                        status=row.get("status"),
+                        licensure_date=row.get("licensure_date"),
+                        interchangeable=row.get("interchangeable"),
+                        reference_product_bla=row.get("reference_product_bla"),
+                        reference_product_proper_name=row.get("reference_product_proper_name"),
+                        exclusivity_expiration_date=row.get("exclusivity_expiration_date"),
+                        raw_payload=row.get("raw_payload"),
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["bla_number"],
+                        set_={
+                            "proprietary_name": stmt.excluded.proprietary_name,
+                            "proper_name": stmt.excluded.proper_name,
+                            "bla_type": stmt.excluded.bla_type,
+                            "applicant": stmt.excluded.applicant,
+                            "strength": stmt.excluded.strength,
+                            "dosage_form": stmt.excluded.dosage_form,
+                            "route": stmt.excluded.route,
+                            "product_presentation": stmt.excluded.product_presentation,
+                            "status": stmt.excluded.status,
+                            "licensure_date": stmt.excluded.licensure_date,
+                            "interchangeable": stmt.excluded.interchangeable,
+                            "reference_product_bla": stmt.excluded.reference_product_bla,
+                            "reference_product_proper_name": stmt.excluded.reference_product_proper_name,
+                            "exclusivity_expiration_date": stmt.excluded.exclusivity_expiration_date,
+                            "raw_payload": stmt.excluded.raw_payload,
+                            "updated_at": stmt.excluded.updated_at,
+                        },
+                    )
+                    result = self._db.execute(stmt)
+                    if result.rowcount and result.rowcount > 0:
+                        inserted += 1
+                    else:
+                        updated += 1
 
             except Exception as exc:
                 errored += 1

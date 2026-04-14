@@ -39,9 +39,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _SOURCE_NAME = "cms_opt_out"
-_DATASET_ID = "7yuw-3alc"
+_DATASET_ID = "9887a515-7552-4693-bf58-735c77af46d7"
 _API_BASE_URL = f"https://data.cms.gov/data-api/v1/dataset/{_DATASET_ID}/data"
-_PAGE_SIZE = 10_000
+_PAGE_SIZE = 5_000  # data.cms.gov v1 API uses `size` param, not `$limit`
 _TIMEOUT_SECONDS = 60.0
 _DEST_DIR = Path("data/reference/cms-opt-out")
 _FILENAME = "opt_out.json"
@@ -152,18 +152,21 @@ def parse_opt_out_row(raw: dict[str, Any]) -> dict[str, Any] | None:
         "middle_name": str(_get(raw, "Middle Name", "middle_name", "middleName") or "").strip() or None,
         "specialty": str(_get(raw, "Specialty", "specialty") or "").strip() or None,
         "opt_out_effective_date": _parse_date(
-            _get(raw, "Opt Out Effective Date", "opt_out_effective_date", "optOutEffectiveDate")
+            _get(raw, "Optout Effective Date", "Opt Out Effective Date", "opt_out_effective_date", "optOutEffectiveDate")
         ),
         "opt_out_end_date": _parse_date(
-            _get(raw, "Opt Out End Date", "opt_out_end_date", "optOutEndDate")
+            _get(raw, "Optout End Date", "Opt Out End Date", "opt_out_end_date", "optOutEndDate")
         ),
         "order_referring": _parse_bool(
-            _get(raw, "Order/Referring", "order_referring", "orderReferring", "Order Referring")
+            _get(raw, "Eligible to Order and Refer", "Order/Referring", "order_referring", "orderReferring", "Order Referring")
         ),
-        "address": str(_get(raw, "Address", "address") or "").strip() or None,
-        "city": str(_get(raw, "City", "city") or "").strip() or None,
-        "state": str(_get(raw, "State", "state") or "").strip() or None,
-        "zip": str(_get(raw, "Zip", "zip", "ZIP") or "").strip() or None,
+        "address": " ".join(filter(None, [
+            str(_get(raw, "First Line Street Address", "Address", "address") or "").strip(),
+            str(_get(raw, "Second Line Street Address") or "").strip(),
+        ])) or None,
+        "city": str(_get(raw, "City Name", "City", "city") or "").strip() or None,
+        "state": str(_get(raw, "State Code", "State", "state") or "").strip() or None,
+        "zip": str(_get(raw, "Zip code", "Zip", "zip", "ZIP") or "").strip() or None,
         "phone": str(_get(raw, "Phone", "phone") or "").strip() or None,
         "raw_payload": dict(raw),
     }
@@ -198,7 +201,7 @@ class CmsOptOutIngester(DataSourceIngester):
             follow_redirects=True,
         ) as client:
             while True:
-                params = {"$limit": str(_PAGE_SIZE), "$offset": str(offset)}
+                params = {"size": str(_PAGE_SIZE), "offset": str(offset)}
                 logger.info(
                     "Opt-Out: fetching page",
                     extra={
@@ -256,6 +259,13 @@ class CmsOptOutIngester(DataSourceIngester):
         def _flush(b: list[dict[str, Any]]) -> int:
             for row in b:
                 row["updated_at"] = now
+            # Dedupe by NPI within batch — last occurrence wins. CMS publishes
+            # multiple opt-out affidavits per provider; ON CONFLICT cannot
+            # affect the same row twice in one statement.
+            deduped: dict[str, dict[str, Any]] = {}
+            for row in b:
+                deduped[row["npi"]] = row
+            b = list(deduped.values())
             if dialect_name == "postgresql":
                 tbl = OptOutModel.__table__
                 stmt = pg_insert(tbl).values(b)
