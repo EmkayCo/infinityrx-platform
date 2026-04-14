@@ -58,7 +58,17 @@ py-modules = []
 [tool.pytest.ini_options]
 minversion = "8.0"
 asyncio_mode = "auto"
-testpaths = ["modules/core-platform/tests", "modules/ai-nlp/tests", "shared/tests", "tests"]
+testpaths = ["modules/core-platform/tests", "shared/tests", "tests"]
+# NOTE: billing / payment-processing / reclaimrx / reporting / ai-nlp
+# tests are NOT in the default testpaths. The root conftest pins
+# ``modules/core-platform/src`` to sys.path so ``src.*`` resolves for
+# core-platform. Every other module uses the same top-level ``src``
+# package name and would collide, and each has its own ``conftest.py``
+# with a ``sys.path`` insert that conflicts with the others under
+# ``--import-mode=importlib``. Each module is run separately:
+#   uv run pytest modules/<name>/tests
+# Unifying them needs a namespace-package rename (or per-module
+# package names) — tracked as its own follow-up task.
 addopts = "-ra -q --strict-markers --strict-config --import-mode=importlib -m 'not integration'"
 markers = [
   "integration: marks tests that require a live Postgres/RabbitMQ/Redis instance",

@@ -123,7 +123,15 @@ class PostgresIdempotencyStore:
             return result.fetchone() is not None
 
     async def mark(self, key: str, *, consumer_name: str = "", ttl_seconds: int = 86400) -> None:
-        """Insert (key, consumer_name) — silently ignores conflicts."""
+        """Insert (key, consumer_name) — silently ignores conflicts.
+
+        ``ttl_seconds`` is retained for API compatibility but is NOT
+        enforced per-row (Postgres does not have native row TTL).
+        Bulk expiration is handled by :meth:`purge_expired` which the
+        scheduled-jobs framework calls once per day. Callers that need
+        a different retention than the default MUST invoke
+        ``purge_expired`` with their own cutoff.
+        """
         async with self._engine.begin() as conn:
             await conn.execute(
                 text(
@@ -133,6 +141,27 @@ class PostgresIdempotencyStore:
                 ),
                 {"key": key, "cn": consumer_name},
             )
+
+    async def purge_expired(self, *, older_than_seconds: int = 7 * 86400) -> int:
+        """Delete processed_events rows older than the cutoff.
+
+        Default retention is 7 days, which is long enough to cover any
+        reasonable consumer retry window (RabbitMQ retries run on the
+        order of minutes) while keeping the table small enough to index
+        efficiently at 100M+ events/year throughput.
+
+        Returns the number of rows deleted so the scheduled job can log
+        operational metrics.
+        """
+        async with self._engine.begin() as conn:
+            result = await conn.execute(
+                text(
+                    "DELETE FROM core.processed_events "
+                    "WHERE processed_at < NOW() - (:secs || ' seconds')::interval"
+                ),
+                {"secs": str(older_than_seconds)},
+            )
+            return result.rowcount or 0
 
 
 def idempotent_handler(
