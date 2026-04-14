@@ -38,7 +38,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.models.base import PharmacyBase as Base
+from .base import PharmacyBase as Base
 
 # Re-export JSON to use in place of JSONB for cross-dialect compatibility.
 _JSONB = JSON

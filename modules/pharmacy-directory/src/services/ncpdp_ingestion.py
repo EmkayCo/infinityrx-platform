@@ -27,7 +27,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from shared.data_ingestion.base import IngestionResult
-from src.models.ncpdp_tables import (
+from ..models.ncpdp_tables import (
     NCPDPPharmacy,
     NCPDPPharmacyAdditionalInfo,
     NCPDPPharmacyCoordinate,

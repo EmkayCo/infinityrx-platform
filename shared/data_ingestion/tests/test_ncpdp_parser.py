@@ -20,8 +20,10 @@ LESSON-005: Log extra keys prefixed with 'ingest_'.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import sys
+import types
 import uuid
 from collections.abc import Iterator
 from datetime import date
@@ -48,12 +50,17 @@ os.environ.setdefault(
     "ENCRYPTION_KEY_ACTIVE", "dGVzdC1rZXktMzItYnl0ZXMtZm9yLXVuaXQtdGVzdHM="
 )
 
+# Only add the repo root to sys.path — NOT the pharmacy-directory src root.
+# Other teammate test files (drug-database) register "src" in sys.modules as
+# drug-database's src; binding this module's "src" to pharmacy-directory
+# would collide. Load pharmacy-directory modules under the namespaced
+# alias "pharmacy_src.*" via importlib (mirrors T6's prescriber_src pattern).
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PHARM_ROOT = _REPO_ROOT / "modules" / "pharmacy-directory"
+_PHARM_SRC = _PHARM_ROOT / "src"
 
-for _p in (str(_REPO_ROOT), str(_PHARM_ROOT)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 # ---------------------------------------------------------------------------
 # SQLite compatibility — LESSON-007
@@ -92,23 +99,64 @@ def _patch_for_sqlite(tables: list[Any]) -> None:
         table._sqlite_patched = True
 
 
-# Import all NCPDP ORM models so their metadata is registered
-from src.models.ncpdp_tables import (  # noqa: E402
-    NCPDPPharmacy,
-    NCPDPPharmacyAdditionalInfo,
-    NCPDPPharmacyCoordinate,
-    NCPDPPharmacyErxCapability,
-    NCPDPPharmacyFwaAction,
-    NCPDPPharmacyMedicaid,
-    NCPDPPharmacyPatientCare,
-    NCPDPPharmacyProgram,
-    NCPDPPharmacyRecertification,
-    NCPDPPharmacyRemittance,
-    NCPDPPharmacyService,
-    NCPDPPharmacyStateLicense,
-    NCPDPPharmacyTaxonomy,
+def _load_file_as(file_path: Path, full_name: str) -> Any:
+    """Load a .py file under sys.modules[full_name] with parent namespace
+    packages registered so relative imports inside resolve through the
+    `pharmacy_src.*` hierarchy (mirrors test_nppes._load_file_as)."""
+    if full_name in sys.modules:
+        return sys.modules[full_name]
+
+    parts = full_name.split(".")
+    for i in range(1, len(parts)):
+        pkg_name = ".".join(parts[:i])
+        if pkg_name not in sys.modules:
+            pkg = types.ModuleType(pkg_name)
+            dir_parts = parts[1:i]
+            pkg_dir = _PHARM_SRC.joinpath(*dir_parts) if dir_parts else _PHARM_MODULE_ROOT
+            pkg.__path__ = [str(pkg_dir)]  # type: ignore[attr-defined]
+            pkg.__package__ = pkg_name
+            sys.modules[pkg_name] = pkg
+
+    spec = importlib.util.spec_from_file_location(full_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load {file_path} as {full_name}")
+    mod = importlib.util.module_from_spec(spec)
+    mod.__package__ = ".".join(parts[:-1]) if len(parts) > 1 else full_name
+    sys.modules[full_name] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+_PHARM_MODULE_ROOT = _PHARM_ROOT  # alias used inside _load_file_as
+
+# Load pharmacy-directory modules under "pharmacy_src.*" namespace.
+_base_mod = _load_file_as(
+    _PHARM_SRC / "models" / "base.py", "pharmacy_src.models.base"
 )
-from src.models.base import PharmacyBase
+_ncpdp_tables_mod = _load_file_as(
+    _PHARM_SRC / "models" / "ncpdp_tables.py",
+    "pharmacy_src.models.ncpdp_tables",
+)
+_ncpdp_service_mod = _load_file_as(
+    _PHARM_SRC / "services" / "ncpdp_ingestion.py",
+    "pharmacy_src.services.ncpdp_ingestion",
+)
+
+PharmacyBase = _base_mod.PharmacyBase
+NCPDPPharmacy = _ncpdp_tables_mod.NCPDPPharmacy
+NCPDPPharmacyAdditionalInfo = _ncpdp_tables_mod.NCPDPPharmacyAdditionalInfo
+NCPDPPharmacyCoordinate = _ncpdp_tables_mod.NCPDPPharmacyCoordinate
+NCPDPPharmacyErxCapability = _ncpdp_tables_mod.NCPDPPharmacyErxCapability
+NCPDPPharmacyFwaAction = _ncpdp_tables_mod.NCPDPPharmacyFwaAction
+NCPDPPharmacyMedicaid = _ncpdp_tables_mod.NCPDPPharmacyMedicaid
+NCPDPPharmacyPatientCare = _ncpdp_tables_mod.NCPDPPharmacyPatientCare
+NCPDPPharmacyProgram = _ncpdp_tables_mod.NCPDPPharmacyProgram
+NCPDPPharmacyRecertification = _ncpdp_tables_mod.NCPDPPharmacyRecertification
+NCPDPPharmacyRemittance = _ncpdp_tables_mod.NCPDPPharmacyRemittance
+NCPDPPharmacyService = _ncpdp_tables_mod.NCPDPPharmacyService
+NCPDPPharmacyStateLicense = _ncpdp_tables_mod.NCPDPPharmacyStateLicense
+NCPDPPharmacyTaxonomy = _ncpdp_tables_mod.NCPDPPharmacyTaxonomy
+NCPDPIngestionService = _ncpdp_service_mod.NCPDPIngestionService
 
 # Patch all tables for SQLite
 _NCPDP_TABLES = [
@@ -148,7 +196,6 @@ from shared.data_ingestion.sources.ncpdp_dataq import (  # noqa: E402
     _parse_mas_tx_record,
 )
 from shared.data_ingestion.date_parsers import parse_mmddyyyy  # noqa: E402
-from src.services.ncpdp_ingestion import NCPDPIngestionService  # noqa: E402
 
 # Sample data directory
 _SAMPLE_DIR = Path(__file__).parent / "sample_data" / "ncpdp"
