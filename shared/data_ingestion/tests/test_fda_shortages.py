@@ -119,7 +119,7 @@ def _patch_tables_for_sqlite() -> None:
                 col.server_default = None  # type: ignore[attr-defined]
         table._sqlite_patched = True  # type: ignore[attr-defined]
 
-    for table in [DrugShortage.__table__, DrugShortageHistory.__table__]:
+    for table in SupplementaryBase.metadata.tables.values():
         if getattr(table, "_sqlite_patched", False):
             continue
         for col in table.columns:
