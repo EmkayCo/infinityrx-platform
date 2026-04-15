@@ -196,7 +196,12 @@ class OrangeBookIngestionService:
                 set_=update_cols,
             )
             self._db.execute(stmt)
-            self._db.flush()
+            self._db.commit()  # BUG-05 fix: per-batch durability
+            logger.info(
+                "Orange Book product batch committed",
+                extra={"ingest_source": "fda_orange_book",
+                       "ingest_batch_size": len(valid_rows)},
+            )
             inserted += len(valid_rows)
         except Exception as exc:
             errored += len(valid_rows)
@@ -268,7 +273,7 @@ class OrangeBookIngestionService:
                     },
                 )
 
-        self._db.flush()
+        self._db.commit()  # commit the deletes before any inserts
 
         # Insert in batches
         for i in range(0, len(rows), _BATCH_SIZE):
@@ -276,7 +281,7 @@ class OrangeBookIngestionService:
             enriched = [{**r, "created_at": now} for r in chunk]
             try:
                 self._db.execute(DrugPatent.__table__.insert(), enriched)
-                self._db.flush()
+                self._db.commit()  # BUG-05 fix: per-batch durability
                 inserted += len(enriched)
             except Exception as exc:
                 errored += len(enriched)
@@ -348,7 +353,7 @@ class OrangeBookIngestionService:
                     },
                 )
 
-        self._db.flush()
+        self._db.commit()  # commit the deletes before any inserts
 
         # Insert in batches
         for i in range(0, len(rows), _BATCH_SIZE):
@@ -356,7 +361,7 @@ class OrangeBookIngestionService:
             enriched = [{**r, "created_at": now} for r in chunk]
             try:
                 self._db.execute(DrugExclusivity.__table__.insert(), enriched)
-                self._db.flush()
+                self._db.commit()  # BUG-05 fix: per-batch durability
                 inserted += len(enriched)
             except Exception as exc:
                 errored += len(enriched)
