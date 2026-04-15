@@ -205,7 +205,14 @@ class NCPDPIngestionService:
         rows: list[dict[str, Any]],
         deleted_ids: dict[str, set[str]],
     ) -> tuple[int, int, int]:
-        """Delete existing rows for ncpdp_ids in this batch, then insert fresh rows."""
+        """Delete existing rows for ncpdp_ids in this batch, then insert fresh rows.
+
+        BUG-02 fix: commits the batch so a later batch's failure can't
+        roll back this one (rollback() in _flush_buffer used to wipe
+        every flushed row in the same transaction — that's why the main
+        pharmacies table stayed empty even though the loader reported
+        ~1M rows inserted).
+        """
         # Collect unique ncpdp_provider_ids not yet deleted this run
         ids_to_delete = {
             r["ncpdp_provider_id"]
@@ -223,6 +230,11 @@ class NCPDPIngestionService:
             deleted_ids[table_name].update(ids_to_delete)
 
         self._db.execute(insert(model), rows)
+        self._db.commit()  # per-batch durability
+        logger.debug(
+            "ncpdp delete-insert batch committed",
+            extra={"ingest_table": table_name, "ingest_batch_size": len(rows)},
+        )
         return len(rows), 0, 0
 
     def _upsert_batch(
@@ -269,6 +281,15 @@ class NCPDPIngestionService:
                 )
             self._db.execute(stmt)
 
+        # BUG-02 fix: per-batch commit so this batch is durable before
+        # the next batch runs. Without this, a later batch's rollback
+        # (e.g. on a duplicate-key cardinality violation) would wipe the
+        # rows we just inserted.
+        self._db.commit()
+        logger.debug(
+            "ncpdp upsert batch committed",
+            extra={"ingest_table": table_name, "ingest_batch_size": len(rows)},
+        )
         return len(rows), 0, 0
 
     @staticmethod
