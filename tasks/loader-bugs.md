@@ -157,35 +157,57 @@ Convention:
   explodes. Duration 550s for the full file.
 
 ### LOADER-BUG-03a — residual 478K errored NADAC rows
-- **Status**: **diagnosed** — root cause known, fix not yet applied
+- **Status**: **open, deferred** — three fix theories tested in session
+  2026-04-15 (second loader-fix session), all three left the error
+  count unchanged at exactly 478,354. Rabbit hole.
 - **Priority**: P2
-- **Symptom**: `records_errored = 478,354` in the post-fix run. Source
-  has ~2M rows; ~17% are erroring.
-- **Root cause** (identified in session 2026-04-15 review):
-  `modules/drug-database/src/services/pricing_ingestion.py:185`
-  `_validate_nadac_row()` calls
-  `nadac_per_unit = _require_decimal(raw.get("nadac_per_unit"), "nadac_per_unit")`
-  which raises `ValueError` on any row where `nadac_per_unit` is null,
-  empty, or non-decimal. The CMS NADAC source legitimately publishes
-  rows with NULL prices for drugs that are discontinued or temporarily
-  unavailable.
-  The DB schema reinforces the rejection:
-  `drug_database.drug_nadac_pricing.nadac_per_unit numeric(18,6) NOT NULL`.
-- **Required fix** (schema + code, both needed):
-  1. Alembic migration to drop `NOT NULL` from
-     `drug_database.drug_nadac_pricing.nadac_per_unit` AND
-     `drug_nadac_pricing_history.nadac_per_unit`.
-  2. Change `_require_decimal` call site to a soft `_parse_decimal`
-     that returns `None` on missing/invalid input.
-  3. Re-run loader. Expected new error count: < 50K (other validation
-     issues like invalid `ndc_11` patterns).
-- **Architectural decision needed**: storing NULL-price NADAC rows is
-  the right call for analytics (you want to know the drug exists in
-  NADAC even when the price is temporarily gone), but it changes the
-  meaning of the table — downstream queries that join on
-  `nadac_per_unit IS NOT NULL` will need to be checked.
-- **Repro**: validated by reading the loader code path. Did not need a
-  full 9-minute re-run because the validation logic is deterministic.
+- **Symptom**: `records_errored = 478,354` in every post-BUG-03 run.
+  Source has ~2M rows; ~17% are marked errored every time. The count
+  is suspiciously stable across unrelated fixes, suggesting a single
+  systematic cause rather than per-row data-quality issues.
+- **Theories tested this session (ALL failed to move the count)**:
+  1. **Null-price rejection** — changed `_require_decimal` to
+     `_parse_decimal` for `nadac_per_unit`. Applied migration
+     `0007_nadac_price_nullable` to drop `NOT NULL` on both
+     `drug_nadac_pricing` and `drug_nadac_pricing_history`. Result:
+     `drug_nadac_pricing_null_prices = 0` in the DB after re-run. The
+     source file apparently has NO null-price rows — validation was
+     never rejecting on this path. The migration is still correct
+     architecturally (kept, applied to dev) but it does not fix the
+     error count.
+  2. **Cardinality violation from duplicate `ndc_11` within a batch**
+     — added per-batch dedup by `ndc_11` (keep row with latest
+     `as_of_date`) before the upsert. Result: error count unchanged.
+     Not the issue.
+  3. **History-row transaction abort** — wrapped each
+     `_insert_history_row` call in `with self._db.begin_nested()` so
+     a single history-row failure rolls back via savepoint without
+     aborting the outer transaction. Same pattern that worked for
+     BUG-01 Phase 2. Result: error count unchanged.
+- **What we know**:
+  - `records_in_source = 2,063,346`
+  - `records_processed = 2,063,346` (every raw row reaches the
+    service's main loop)
+  - `records_inserted = 0` every time (no new rows — the existing
+    26,044 are preserved)
+  - `records_updated = 363,744` (varies ±100 between runs)
+  - `records_errored = 478,354` (STABLE across all 3 theories)
+  - `drug_nadac_pricing` physical row count stays at 26,044
+  - `drug_nadac_pricing_history` physical row count stays at ~364K
+  - Unaccounted rows: 2,063,346 − 478,354 − 363,744 = 1,221,248. Most
+    likely the "price + effective_date unchanged" no-op branch which
+    doesn't increment any counter. Not phantom-missing, just
+    silently-skipped-because-identical.
+- **Next investigation step (not done this session)**: add diagnostic
+  logging at every `records_errored += ...` site to find which exit
+  path accumulates the 478K. The counter is incremented in two places:
+  validation-level (line 131) and batch-level (line 145/152 via
+  `_upsert_batch` return). Need to know which one owns the 478K
+  before attempting another fix.
+- **Architectural note**: the migration `0007_nadac_price_nullable`
+  is still valid and applied to dev. Leaving it in place; it's a
+  real improvement even though it didn't by itself close BUG-03a.
+  Should be applied to mock + prod as part of the next session.
 
 ---
 
@@ -219,7 +241,12 @@ Convention:
   `drug_database.rxnorm_concepts` (0) vs `rxnorm_relationships` (455K).
 
 ### LOADER-BUG-04a — RxNorm parser column alignment bug
-- **Status**: open
+- **Status**: open — **deferred** after partial investigation in
+  session 2026-04-15 (second loader-fix session). Deeper than an
+  off-by-one: the "prescribable subset" file used when `UMLS_API_KEY`
+  fallback triggers may have different row semantics than the full
+  release. Needs inspection of an actual RXNCONSO.RRF file alongside
+  the NLM RxNorm technical documentation before attempting a fix.
 - **Priority**: P1 for rxnorm load (concepts table is the FK target for
   the other rxnorm tables — without it, the relationships are orphaned)
 - **Discovered**: while testing the `--sample 10000` fix from
@@ -430,14 +457,33 @@ Convention:
 - **Wrapper status** (`scripts/load_sam.py`, commit `ecd411d`):
   CLI wrapper exists, mirrors `scripts/load_oig_leie.py` shape, calls
   `SamExclusionsIngester(db_session=session).run(run_type="manual_trigger")`.
-  Verified that the wrapper raises a clear error when `SAM_API_KEY` is
-  unset:
-  `_SamApiKeyMissingError: SAM_API_KEY environment variable not configured.
-  Register at sam.gov/api to obtain a key.`
-- **Remaining blocker**: register at sam.gov/api → free API key → set
-  `SAM_API_KEY=...` in `.env.dev/.env.mock/.env.prod` → run loader.
-  Expected row count after key obtained: 120,000–160,000 active
-  exclusions as of 2026-01.
+- **API key status**: `SAM_API_KEY` was added to `.env.{dev,mock,prod}`
+  by the operator during the 2026-04-15 second loader-fix session.
+  Verified the key is accepted by sam.gov (API returns 404, not 401/403).
+
+### LOADER-BUG-07a — outdated SAM.gov API URL in ingester source
+- **Status**: **blocks LOADER-07 end-to-end**
+- **Priority**: P1 (prereq for SAM loader working)
+- **Symptom**: After adding `SAM_API_KEY`, running `scripts/load_sam.py`
+  fails with
+  `httpx.HTTPStatusError: Client error '404 Not Found' for url 'https://api.sam.gov/exclusions/v1/?api_key=...&limit=100&offset=0'`.
+- **Root cause**: the URL hardcoded in
+  `shared/data_ingestion/sources/sam_exclusions.py` is the old (v1)
+  SAM.gov endpoint. SAM.gov has since moved to a versioned API under
+  `https://api.sam.gov/entity-information/v3/exclusions` (or a similar
+  newer path — needs verification against current SAM.gov API docs).
+- **Suggested fix**: update the `_SAM_API_BASE_URL` constant (or
+  equivalent) in `shared/data_ingestion/sources/sam_exclusions.py` to
+  the current endpoint. Check the SAM.gov OpenAPI spec at
+  https://open.gsa.gov/api/entity-api/ for the right path and response
+  shape. May also need to adjust the JSON parser if the response
+  structure changed between v1 and v3.
+- **Repro**:
+  ```bash
+  source infrastructure/scripts/switch_env.sh dev
+  python scripts/load_sam.py
+  # → httpx.HTTPStatusError: 404 Not Found on api.sam.gov/exclusions/v1/
+  ```
 
 ---
 
