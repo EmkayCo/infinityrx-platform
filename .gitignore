@@ -65,3 +65,5 @@ data/mock/
 data/reference/
 !data/reference/ncpdp/NCPDP_v3.1_Monthly_Master_20240501.ZIP
 data/demo/
+test-results/
+.gstack/
