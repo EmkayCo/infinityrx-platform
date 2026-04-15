@@ -1,8 +1,11 @@
 """Tests for event consumers and scheduled jobs."""
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
+from shared.events.types import EventEnvelope
 from sqlalchemy.orm import Session
 from src.events.consumers import (
     CONSUMER_ROUTING,
@@ -31,35 +34,69 @@ from src.models.tables import PaymentHold
 from tests.conftest import TEST_TENANT_ID, TEST_USER_ID
 
 
+def _env(event_type: str, payload: dict) -> EventEnvelope:
+    return EventEnvelope(
+        event_type=event_type,
+        tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+        correlation_id=uuid.uuid4(),
+        source_module="test",
+        schema_version="1.0",
+        ordering_key="t1",
+        idempotency_key=f"{event_type}:{uuid.uuid4()}",
+        payload=payload,
+    )
+
+
 class TestEventConsumers:
-    def test_handle_claim_adjudicated(self) -> None:
-        handle_claim_adjudicated({"claim_id": "c1", "tenant_id": "t1"})
+    """Smoke tests: handlers accept envelopes and return without raising on db=None."""
 
-    def test_handle_claim_reversed(self) -> None:
-        handle_claim_reversed({"claim_id": "c2", "tenant_id": "t1"})
+    @pytest.mark.asyncio
+    async def test_handle_claim_adjudicated(self) -> None:
+        await handle_claim_adjudicated(
+            _env("claim.adjudicated", {"claim_id": "c1", "auth_number": "A1", "pharmacy_npi": "1234567890"}),
+            db=None,
+            bus=None,
+        )
 
-    def test_handle_ap_created(self) -> None:
-        handle_ap_created({"ap_id": "ap1", "tenant_id": "t1"})
+    @pytest.mark.asyncio
+    async def test_handle_claim_reversed(self) -> None:
+        await handle_claim_reversed(_env("claim.reversed", {"auth_number": "A1"}), db=None, bus=None)
 
-    def test_handle_ap_settled(self) -> None:
-        handle_ap_settled({"ap_id": "ap2", "tenant_id": "t1"})
+    @pytest.mark.asyncio
+    async def test_handle_ap_created(self) -> None:
+        await handle_ap_created(_env("ap.created", {"ap_id": "ap1", "claim_id": "c1"}), db=None, bus=None)
 
-    def test_handle_exclusion_match_found(self) -> None:
-        handle_exclusion_match_found({"entity_type": "pharmacy", "entity_id": "npi1", "tenant_id": "t1"})
+    @pytest.mark.asyncio
+    async def test_handle_ap_settled(self) -> None:
+        await handle_ap_settled(_env("ap.settled", {"ap_id": "ap2", "claim_id": "c1"}), db=None, bus=None)
 
-    def test_handle_payment_return_suspicious(self) -> None:
-        handle_payment_return_suspicious({
-            "payment_id": "p1",
-            "tenant_id": "t1",
-            "entity_id": "e1",
-            "amount": "500.00",
-        })
+    @pytest.mark.asyncio
+    async def test_handle_exclusion_match_found(self) -> None:
+        await handle_exclusion_match_found(
+            _env("exclusion.match_found", {"entity_type": "pharmacy", "entity_id": "1234567890"}),
+            db=None, bus=None,
+        )
 
-    def test_handle_pharmacy_application_submitted(self) -> None:
-        handle_pharmacy_application_submitted({"pharmacy_npi": "1234567890", "tenant_id": "t1"})
+    @pytest.mark.asyncio
+    async def test_handle_payment_return_suspicious(self) -> None:
+        await handle_payment_return_suspicious(
+            _env("payment.return_suspicious", {"payment_id": "p1", "entity_id": "1234567890", "amount": "500.00"}),
+            db=None, bus=None,
+        )
 
-    def test_handle_pharmacy_ownership_changed(self) -> None:
-        handle_pharmacy_ownership_changed({"pharmacy_npi": "1234567890", "tenant_id": "t1"})
+    @pytest.mark.asyncio
+    async def test_handle_pharmacy_application_submitted(self) -> None:
+        await handle_pharmacy_application_submitted(
+            _env("pharmacy.application_submitted", {"pharmacy_npi": "1234567890"}),
+            db=None, bus=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_handle_pharmacy_ownership_changed(self) -> None:
+        await handle_pharmacy_ownership_changed(
+            _env("pharmacy.ownership_changed", {"pharmacy_npi": "1234567890"}),
+            db=None, bus=None,
+        )
 
     def test_consumer_routing_has_all_handlers(self) -> None:
         expected_topics = {

@@ -8,7 +8,8 @@ re-invoke the handler (idempotency).
 from __future__ import annotations
 
 import uuid
-from unittest.mock import MagicMock, patch
+from contextlib import contextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -38,6 +39,12 @@ def _reset_idempotency_store() -> None:
     _idempotency_store._store.clear()
 
 
+@contextmanager
+def _no_session():
+    """No-DB session factory for wiring tests that mock handlers."""
+    yield MagicMock()
+
+
 @pytest.mark.asyncio
 async def test_wire_consumers_subscribes_all_routing_keys() -> None:
     bus = InMemoryEventBus()
@@ -46,7 +53,7 @@ async def test_wire_consumers_subscribes_all_routing_keys() -> None:
     from src.events import wire_consumers
     from src.events.consumers import CONSUMER_ROUTING
 
-    await wire_consumers(bus)
+    await wire_consumers(bus, session_factory=_no_session)
 
     # Every topic in CONSUMER_ROUTING must have a subscriber
     subscribed = {pat for pat, _ in bus._subs}
@@ -59,24 +66,24 @@ async def test_each_topic_invokes_its_handler() -> None:
     bus = InMemoryEventBus()
     await bus.start()
 
-    import src.events.consumers as _consumers
-    mocks: dict[str, MagicMock] = {}
+    import modules.reclaimrx.src.events.consumers as _consumers
+    mocks: dict[str, AsyncMock] = {}
     patchers = []
     for topic, original in list(_consumers.CONSUMER_ROUTING.items()):
-        mock = MagicMock()
+        mock = AsyncMock()
         mocks[topic] = mock
         _consumers.CONSUMER_ROUTING[topic] = mock  # type: ignore[assignment]
         patchers.append((topic, original))
 
     try:
         from src.events import wire_consumers
-        await wire_consumers(bus)
+        await wire_consumers(bus, session_factory=_no_session)
 
         for topic in mocks:
             await bus.publish(_envelope(topic, ordering=topic))
 
         for topic, mock in mocks.items():
-            assert mock.call_count == 1, f"{topic} not invoked"
+            assert mock.await_count == 1, f"{topic} not invoked"
     finally:
         for topic, original in patchers:
             _consumers.CONSUMER_ROUTING[topic] = original  # type: ignore[assignment]
@@ -87,17 +94,17 @@ async def test_duplicate_delivery_is_idempotent() -> None:
     bus = InMemoryEventBus()
     await bus.start()
 
-    mock_handler = MagicMock()
+    mock_handler = AsyncMock()
     with patch.dict(
-        "src.events.consumers.CONSUMER_ROUTING",
+        "modules.reclaimrx.src.events.consumers.CONSUMER_ROUTING",
         {"exclusion.match_found": mock_handler},
         clear=False,
     ):
         from src.events import wire_consumers
-        await wire_consumers(bus)
+        await wire_consumers(bus, session_factory=_no_session)
 
         env = _envelope("exclusion.match_found", ordering="dup-1")
         await bus.publish(env)
         await bus.publish(env)
 
-    assert mock_handler.call_count == 1
+    assert mock_handler.await_count == 1
