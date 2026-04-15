@@ -134,19 +134,35 @@ Convention:
   explodes. Duration 550s for the full file.
 
 ### LOADER-BUG-03a — residual 478K errored NADAC rows
-- **Status**: open
-- **Priority**: P2 (the loader works end-to-end and 364K rows
-  successfully process; the residual errors are likely additional
-  data-quality patterns to find)
+- **Status**: **diagnosed** — root cause known, fix not yet applied
+- **Priority**: P2
 - **Symptom**: `records_errored = 478,354` in the post-fix run. Source
-  file has ~2M rows; ~17% are erroring. Cause unknown — needs error
-  log review to find the pattern. Could be more column-width issues,
-  could be invalid date parses, could be something else.
-- **Suggested fix**: capture the first 100 distinct error messages with
-  a one-off log-grepping pass, group by error type, fix the top 1-2
-  patterns. Likely candidates: more `VARCHAR(N)` columns whose actual
-  data exceeds N, or `parse_date` failing on placeholder rows.
-- **Repro**: `python scripts/load_cms_nadac.py 2>&1 | grep -E "Error|Exception" | sort | uniq -c | sort -rn | head -20`
+  has ~2M rows; ~17% are erroring.
+- **Root cause** (identified in session 2026-04-15 review):
+  `modules/drug-database/src/services/pricing_ingestion.py:185`
+  `_validate_nadac_row()` calls
+  `nadac_per_unit = _require_decimal(raw.get("nadac_per_unit"), "nadac_per_unit")`
+  which raises `ValueError` on any row where `nadac_per_unit` is null,
+  empty, or non-decimal. The CMS NADAC source legitimately publishes
+  rows with NULL prices for drugs that are discontinued or temporarily
+  unavailable.
+  The DB schema reinforces the rejection:
+  `drug_database.drug_nadac_pricing.nadac_per_unit numeric(18,6) NOT NULL`.
+- **Required fix** (schema + code, both needed):
+  1. Alembic migration to drop `NOT NULL` from
+     `drug_database.drug_nadac_pricing.nadac_per_unit` AND
+     `drug_nadac_pricing_history.nadac_per_unit`.
+  2. Change `_require_decimal` call site to a soft `_parse_decimal`
+     that returns `None` on missing/invalid input.
+  3. Re-run loader. Expected new error count: < 50K (other validation
+     issues like invalid `ndc_11` patterns).
+- **Architectural decision needed**: storing NULL-price NADAC rows is
+  the right call for analytics (you want to know the drug exists in
+  NADAC even when the price is temporarily gone), but it changes the
+  meaning of the table — downstream queries that join on
+  `nadac_per_unit IS NOT NULL` will need to be checked.
+- **Repro**: validated by reading the loader code path. Did not need a
+  full 9-minute re-run because the validation logic is deterministic.
 
 ---
 
