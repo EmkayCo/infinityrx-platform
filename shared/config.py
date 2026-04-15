@@ -1,10 +1,17 @@
 """Platform configuration loader.
 
-Loads settings from environment variables (optionally seeded by .env.local).
-Exposes a cached singleton `get_settings()` that returns a validated
-`Settings` instance. All downstream modules MUST read configuration through
-this module — never `os.environ` directly — so that validation is centralised
-and tests can override settings deterministically.
+Loads settings from environment variables, seeded by the .env file matching
+the active environment. Exposes a cached singleton `get_settings()` that
+returns a validated `Settings` instance. All downstream modules MUST read
+configuration through this module — never `os.environ` directly — so that
+validation is centralised and tests can override settings deterministically.
+
+Environment selection (see CLAUDE.md → Environment Architecture):
+
+  INFINITYRX_ENV=development → loads .env.dev   (or .env.local if present)
+  INFINITYRX_ENV=mock        → loads .env.mock
+  INFINITYRX_ENV=production  → loads .env.prod
+  INFINITYRX_ENV unset       → loads .env.local (legacy / dev fallback)
 
 The JWT_SECRET minimum-length constraint is a security boundary: tokens
 signed with a short secret are trivially brute-forceable. Validation happens
@@ -14,6 +21,7 @@ requests are served.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -26,11 +34,35 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _ENV_LOCAL = _REPO_ROOT / ".env.local"
 
 
+def _resolve_env_file() -> Path | None:
+    """Pick the .env file to load based on INFINITYRX_ENV.
+
+    Falls back to .env.local for backward compatibility with the legacy
+    single-environment setup and existing test fixtures.
+    """
+    name = os.environ.get("INFINITYRX_ENV", "").strip().lower()
+    candidates: list[Path] = []
+    if name == "development" or name == "dev":
+        candidates.append(_REPO_ROOT / ".env.dev")
+    elif name == "mock":
+        candidates.append(_REPO_ROOT / ".env.mock")
+    elif name == "production" or name == "prod":
+        candidates.append(_REPO_ROOT / ".env.prod")
+    candidates.append(_ENV_LOCAL)
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
+
+
+_ENV_FILE = _resolve_env_file()
+
+
 class Settings(BaseSettings):
     """Validated runtime configuration."""
 
     model_config = SettingsConfigDict(
-        env_file=str(_ENV_LOCAL) if _ENV_LOCAL.exists() else None,
+        env_file=str(_ENV_FILE) if _ENV_FILE else None,
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",
@@ -46,6 +78,11 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str
     DATABASE_URL_SYNC: str
+    # Reference data connection (read-only ifx_ref_reader role). May point
+    # at the same physical database as DATABASE_URL — reference tables live
+    # in a dedicated `reference` schema in every operational database.
+    # Falls back to DATABASE_URL if not explicitly set.
+    REFERENCE_DB_URL: str = ""
     REDIS_URL: str
     RABBITMQ_URL: str
 
@@ -101,3 +138,36 @@ def get_settings() -> Settings:
 def reset_settings_cache() -> None:
     """Clear the settings cache. Tests use this to reload env vars."""
     get_settings.cache_clear()
+
+
+def get_operational_db_url() -> str:
+    """Return the URL of the current environment's operational database.
+
+    Operational data = claims, members, payments, audit, tenant config —
+    everything that is environment-isolated. Read/write via the per-env
+    app role (ifx_dev_app, ifx_mock_app, ifx_prod_app).
+    """
+    return get_settings().DATABASE_URL
+
+
+def get_reference_db_url() -> str:
+    """Return the URL of the reference-data database (read-only).
+
+    Reference data = drug NDC, NPPES prescribers, NCPDP pharmacies, CMS
+    rates, etc. Logically the same in every environment, physically
+    replicated in a `reference` schema inside each operational database.
+    Falls back to the operational URL if REFERENCE_DB_URL is unset.
+    """
+    settings = get_settings()
+    return settings.REFERENCE_DB_URL or settings.DATABASE_URL
+
+
+def get_environment() -> str:
+    """Return the active environment name from INFINITYRX_ENV.
+
+    Distinct from Settings.ENVIRONMENT (which is the value loaded from the
+    .env file) — this is the shell-level marker set by switch_env.sh.
+    Useful for code paths that need to behave differently per environment
+    (e.g., disabling destructive migrations against prod).
+    """
+    return os.environ.get("INFINITYRX_ENV", "development")
