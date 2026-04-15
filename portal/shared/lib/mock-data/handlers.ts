@@ -79,6 +79,29 @@ import {
   MASTER_FEE_SCHEDULE,
   STATEMENT_PROVIDERS,
   BLOCKED_PROVIDERS,
+  // ICP Phase 1B manufacturer analytics
+  CLAIM_SUMMARY_MONTHLY,
+  CLAIM_STATUS_BY_PERIOD,
+  CLAIM_OCC_DISTRIBUTION,
+  REJECT_CODES_DISTRIBUTION,
+  FILL_SUMMARY_MONTHLY,
+  FILL_BY_DRUG,
+  FILL_BY_PHARMACY_TYPE,
+  FILL_BY_CHAIN,
+  FILL_DAYS_SUPPLY,
+  NBRX_TREND,
+  ADHERENCE_PDC_HISTOGRAM,
+  ADHERENCE_PERSISTENCE_CURVE,
+  COPAY_IMPACT_COMPARISON,
+  ADHERENCE_BY_PHARMACY,
+  PATIENT_ADHERENCE_TABLE,
+  STATE_ANALYTICS,
+  TOP_PHARMACIES_BY_VOLUME,
+  PHARMACY_TYPE_DISTRIBUTION,
+  TREND_YOY_SPEND,
+  TREND_DECOMPOSITION,
+  TREND_TOP_MOVERS_INCREASE,
+  TREND_TOP_MOVERS_DECREASE,
 } from "./seed";
 
 // ── Real-data helpers ─────────────────────────────────────────────────────────
@@ -2036,6 +2059,111 @@ const ROUTES: RouteEntry[] = [
       if (body) return { ...fee, ...(body as Record<string, unknown>) };
       return fee;
     },
+  },
+
+  // ── ICP Manufacturer Analytics (Phase 1B) ─────────────────────────────────
+  // Claim Summary
+  {
+    pattern: /\/api\/v1\/analytics\/claims\/summary$/,
+    methods: ["GET"],
+    handler: () => ({
+      kpis: {
+        claim_count: CLAIM_SUMMARY_MONTHLY.reduce((s, m) => s + m.net_claim_count, 0),
+        ingredient_cost: money(CLAIM_SUMMARY_MONTHLY.reduce((s, m) => s + parseFloat(m.ingredient_cost), 0)),
+        sales_tax: money(CLAIM_SUMMARY_MONTHLY.reduce((s, m) => s + parseFloat(m.sales_tax), 0)),
+        patient_paid: money(CLAIM_SUMMARY_MONTHLY.reduce((s, m) => s + parseFloat(m.patient_paid), 0)),
+        dispensing_fee: money(CLAIM_SUMMARY_MONTHLY.reduce((s, m) => s + parseFloat(m.dispensing_fee), 0)),
+        paid_claim: money(CLAIM_SUMMARY_MONTHLY.reduce((s, m) => s + parseFloat(m.benefit_spend), 0)),
+        copay_assistance_total: money(CLAIM_SUMMARY_MONTHLY.reduce((s, m) => s + parseFloat(m.copay_assistance), 0)),
+        transaction_fee: money(CLAIM_SUMMARY_MONTHLY.reduce((s, m) => s + parseFloat(m.transaction_fee), 0)),
+      },
+      monthly: CLAIM_SUMMARY_MONTHLY,
+      claim_status: CLAIM_STATUS_BY_PERIOD,
+      occ_distribution: CLAIM_OCC_DISTRIBUTION,
+      reject_codes: REJECT_CODES_DISTRIBUTION,
+    }),
+  },
+  // Fill Performance
+  {
+    pattern: /\/api\/v1\/analytics\/fills\/summary$/,
+    methods: ["GET"],
+    handler: () => ({
+      kpis: {
+        total_fills: FILL_SUMMARY_MONTHLY.reduce((s, m) => s + m.total_fills, 0),
+        new_starts: FILL_SUMMARY_MONTHLY.reduce((s, m) => s + m.new_starts, 0),
+        refills: FILL_SUMMARY_MONTHLY.reduce((s, m) => s + m.refills, 0),
+        avg_fills_per_patient: parseFloat(
+          (FILL_SUMMARY_MONTHLY.reduce((s, m) => s + m.avg_fills_per_patient, 0) / FILL_SUMMARY_MONTHLY.length).toFixed(1)
+        ),
+        avg_days_supply: Math.round(
+          FILL_SUMMARY_MONTHLY.reduce((s, m) => s + m.avg_days_supply, 0) / FILL_SUMMARY_MONTHLY.length
+        ),
+      },
+      monthly: FILL_SUMMARY_MONTHLY,
+      by_drug: FILL_BY_DRUG,
+      by_pharmacy_type: FILL_BY_PHARMACY_TYPE,
+      by_chain: FILL_BY_CHAIN,
+      days_supply: FILL_DAYS_SUPPLY,
+      nbrx_trend: NBRX_TREND,
+    }),
+  },
+  // Adherence
+  {
+    pattern: /\/api\/v1\/analytics\/adherence\/summary$/,
+    methods: ["GET"],
+    handler: () => ({
+      kpis: {
+        overall_pdc: COPAY_IMPACT_COMPARISON.with_card.avg_pdc,
+        persistence_6mo: COPAY_IMPACT_COMPARISON.with_card.persistence_6mo,
+        persistence_12mo: COPAY_IMPACT_COMPARISON.with_card.persistence_12mo,
+        avg_fills_per_patient: COPAY_IMPACT_COMPARISON.with_card.avg_fills_per_patient,
+      },
+      pdc_histogram: ADHERENCE_PDC_HISTOGRAM,
+      persistence_curve: ADHERENCE_PERSISTENCE_CURVE,
+      by_pharmacy: ADHERENCE_BY_PHARMACY,
+      copay_impact: COPAY_IMPACT_COMPARISON,
+      patient_table: PATIENT_ADHERENCE_TABLE,
+    }),
+  },
+  // Pharmacy Insights
+  {
+    pattern: /\/api\/v1\/analytics\/pharmacies\/summary$/,
+    methods: ["GET"],
+    handler: () => ({
+      kpis: {
+        total_pharmacies: TOP_PHARMACIES_BY_VOLUME.length,
+        avg_claims_per_pharmacy: Math.round(
+          TOP_PHARMACIES_BY_VOLUME.reduce((s, p) => s + p.net_claims, 0) / TOP_PHARMACIES_BY_VOLUME.length
+        ),
+        avg_benefit_per_pharmacy: money(
+          Math.round(TOP_PHARMACIES_BY_VOLUME.reduce((s, p) => s + parseFloat(p.total_spend), 0) / TOP_PHARMACIES_BY_VOLUME.length)
+        ),
+        total_spend: money(TOP_PHARMACIES_BY_VOLUME.reduce((s, p) => s + parseFloat(p.total_spend), 0)),
+      },
+      by_state: STATE_ANALYTICS,
+      top_20: TOP_PHARMACIES_BY_VOLUME,
+      type_distribution: PHARMACY_TYPE_DISTRIBUTION,
+    }),
+  },
+  // Geographic Analysis
+  {
+    pattern: /\/api\/v1\/analytics\/geography\/summary$/,
+    methods: ["GET"],
+    handler: () => ({
+      states: STATE_ANALYTICS,
+      total_states_active: STATE_ANALYTICS.filter((s) => s.claim_count > 0).length,
+    }),
+  },
+  // Trend Analysis
+  {
+    pattern: /\/api\/v1\/analytics\/trends\/summary$/,
+    methods: ["GET"],
+    handler: () => ({
+      yoy_spend: TREND_YOY_SPEND,
+      decomposition: TREND_DECOMPOSITION,
+      top_movers_increase: TREND_TOP_MOVERS_INCREASE,
+      top_movers_decrease: TREND_TOP_MOVERS_DECREASE,
+    }),
   },
 ];
 
