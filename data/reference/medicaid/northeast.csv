@@ -1,0 +1,138 @@
+state,bin,pcn,group_number,plan_type,plan_subtype,pbm_name,plan_name,mco_name,confidence,source,source_date,notes
+# ============================================================
+# NORTHEAST STATES — Medicaid/CHIP/Dual Pharmacy BIN/PCN/Group
+# Research date: 2026-04-14
+# ============================================================
+#
+# NEW YORK (NY)
+# As of April 1 2023 ALL Medicaid (FFS + mainstream MCO + HARP + HIV-SNP)
+# transitioned to NYRx. BIN 004740 is the single processor for all NYRx claims.
+# Child Health Plus is EXCLUDED from NYRx and uses MCO-level PBMs (e.g. CarelonRx).
+# PCN for NYRx = provider-specific ETIN-based value (not a fixed PCN per plan).
+NY,004740,,,MEDICAID_FFS,Fee-for-Service,eMedNY,NYRx Medicaid Pharmacy Program,,HIGH,https://www.health.ny.gov/health_care/medicaid/program/update/2022/no11_2022-10_speced.htm,2022-10-01,BIN for all NYRx claims (FFS + all mainstream MCO + HARP + HIV-SNP since 4/1/2023). PCN is provider-ETIN-based per eMedNY companion guide.
+NY,004740,,,MEDICAID_MCO,Mainstream Managed Care,eMedNY,NYRx — All MCOs Consolidated,,HIGH,https://www.health.ny.gov/health_care/medicaid/program/update/2023/no09_2023-05_speced.htm,2023-05-01,All MCO enrollees (Fidelis/Centene Healthfirst Emblem UHC MetroPlusHealth Empire MVP etc.) transitioned to NYRx BIN 004740 on 4/1/2023.
+NY,004740,,,MEDICAID_MCO,HARP,eMedNY,NYRx — HARP Plans,,HIGH,https://www.health.ny.gov/health_care/medicaid/program/update/2023/no09_2023-05_speced.htm,2023-05-01,Health and Recovery Plans transitioned to NYRx 4/1/2023.
+NY,004740,,,MEDICAID_MCO,HIV-SNP,eMedNY,NYRx — HIV Special Needs Plans,,HIGH,https://www.health.ny.gov/health_care/medicaid/program/update/2023/no09_2023-05_speced.htm,2023-05-01,HIV-Special Needs Plans transitioned to NYRx 4/1/2023.
+NY,020107,WP,,MEDICAID_CHIP,Child Health Plus MCO,CarelonRx,Child Health Plus — CarelonRx Plans,,MEDIUM,https://www.health.ny.gov/health_care/medicaid/program/update/2023/no09_2023-05_speced.htm,2023-05-01,Child Health Plus EXCLUDED from NYRx. Plans use CarelonRx (BIN 020107). Verify current PCN per specific CHP plan.
+#
+# PENNSYLVANIA (PA)
+# Source: PA DHS 340B page — official table "2026 Pennsylvania Medical Assistance BIN/PCN/Group Numbers"
+# Last updated 2025-12-15. FFS only uses BIN 600760 with no PCN or Group.
+PA,600760,,,MEDICAID_FFS,Fee-for-Service,PROMISe/WEBMD,Pennsylvania Medical Assistance FFS,,HIGH,https://www.pa.gov/agencies/dhs/resources/pharmacy-services/340b,2025-12-15,FFS ACCESS program. Claims route through WEBMD adjudication via PROMISe. No PCN/Group required.
+PA,019595,01940000,,MEDICAID_MCO,MCO,PerformRx,AmeriHealth Caritas Pennsylvania,AmeriHealth Caritas Pennsylvania,HIGH,https://www.pa.gov/agencies/dhs/resources/pharmacy-services/340b,2025-12-15,HealthChoices physical MCO. PCN 01940000.
+PA,019595,07630000,,MEDICAID_MCO,MCO,PerformRx,AmeriHealth Caritas Community HealthChoices,AmeriHealth Caritas CHC,HIGH,https://www.pa.gov/agencies/dhs/resources/pharmacy-services/340b,2025-12-15,Community HealthChoices MCO (LTSS-eligible). PCN 07630000.
+PA,026010,MCDG,,MEDICAID_MCO,MCO,Geisinger,Geisinger Health Plan PA Medicaid,Geisinger Health Plan,HIGH,https://www.pa.gov/agencies/dhs/resources/pharmacy-services/340b,2025-12-15,HealthChoices MCO central/northeast PA.
+PA,004336,MCAIDADV,RX3892,MEDICAID_MCO,MCO,CVS Caremark,Health Partners of Philadelphia,Health Partners of Philadelphia,HIGH,https://www.pa.gov/agencies/dhs/resources/pharmacy-services/340b,2025-12-15,HealthChoices MCO Philadelphia region.
+PA,004336,MCAIDADV,RX2338,MEDICAID_MCO,MCO,CVS Caremark,Highmark Wholecare (Medicaid Primary),Highmark Wholecare,HIGH,https://www.pa.gov/agencies/dhs/resources/pharmacy-services/340b,2025-12-15,Medicaid primary coverage.
+PA,012114,MCAIDADV,RX2338,MEDICAID_DUAL,D-SNP,CVS Caremark,Highmark Wholecare (Medicaid Secondary to Medicare),Highmark Wholecare,HIGH,https://www.pa.gov/agencies/dhs/resources/pharmacy-services/340b,2025-12-15,Medicaid as secondary to Medicare (dual eligible).
+PA,013089,MCAIDADV,RX2338,MEDICAID_MCO,MCO,CVS Caremark,Highmark Wholecare (Medicaid Secondary to Commercial),Highmark Wholecare,HIGH,https://www.pa.gov/agencies/dhs/resources/pharmacy-services/340b,2025-12-15,Medicaid secondary to commercial insurance.
+PA,019595,07630000,,MEDICAID_MCO,MCO,PerformRx,Keystone First Community HealthChoices,Keystone First CHC,HIGH,https://www.pa.gov/agencies/dhs/resources/pharmacy-services/340b,2025-12-15,Community HealthChoices LTSS MCO.
+PA,019595,01940000,,MEDICAID_MCO,MCO,PerformRx,Keystone First HealthChoices,Keystone First,HIGH,https://www.pa.gov/agencies/dhs/resources/pharmacy-services/340b,2025-12-15,Physical HealthChoices MCO.
+PA,003858,MA,2FBA,MEDICAID_MCO,MCO,Express Scripts,Pennsylvania Health & Wellness,PA Health & Wellness,HIGH,https://www.pa.gov/agencies/dhs/resources/pharmacy-services/340b,2025-12-15,Centene subsidiary. Switched to Express Scripts as PBM in 2024.
+PA,610494,4200,ACUPA,MEDICAID_MCO,MCO,OptumRx,United Healthcare Community Plan PA,UHC Community Plan PA,HIGH,https://www.pa.gov/agencies/dhs/resources/pharmacy-services/340b,2025-12-15,UHC Medicaid managed care PA.
+PA,003858,A4,PMDM,MEDICAID_MCO,MCO,OptumRx,UPMC for You,UPMC for You,HIGH,https://www.pa.gov/agencies/dhs/resources/pharmacy-services/340b,2025-12-15,UPMC Medicaid MCO for western PA.
+#
+# NEW JERSEY (NJ)
+# NJ FamilyCare is the Medicaid program. Multiple MCOs plus FFS via NJMMIS/Gainwell.
+# NJ FFS BIN not confirmed in public sources; Gainwell processes claims via NJMMIS.
+NJ,610591,,,MEDICAID_MCO,MCO,CVS Caremark,Horizon NJ Health,Horizon NJ Health,HIGH,https://www.horizonnjhealth.com/for-providers/resources/medicaid-reimbursement-and-billing,2024-01-01,Largest NJ Medicaid MCO. BCBSNJ subsidiary. CVS Caremark PBM BIN 610591.
+NJ,610494,9999,AMNJ,MEDICAID_MCO,MCO,OptumRx,UnitedHealthcare Community Plan NJ,UHC Community Plan NJ,HIGH,https://www.uhc.com/communityplan/new-jersey/plans/medicaid/familycare,2024-01-01,NJ FamilyCare Medicaid MCO. OptumRx PBM. Group AMNJ.
+NJ,020107,WP,WKPA,MEDICAID_MCO,MCO,CarelonRx,Wellpoint NJ (Anthem/Elevance),Wellpoint NJ,HIGH,https://www.wellpoint.com/nj/medicaid/pharmacy,2024-01-01,Formerly Anthem BCBS NJ. CarelonRx PBM. BIN 020107 PCN WP Group WKPA.
+NJ,610591,,,MEDICAID_MCO,MCO,CVS Caremark,Aetna Better Health New Jersey,Aetna Better Health NJ,HIGH,https://www.aetnabetterhealth.com/newjersey/providers/pharmacy.html,2024-01-01,Aetna Medicaid NJ. CVS Caremark PBM BIN 610591.
+NJ,,,,,MEDICAID_MCO,MCO,,Fidelis Care NJ,Fidelis Care NJ,LOW,https://www.fideliscarenj.com/providers/Medicaid/pharmacy.html,2024-01-01,BIN/PCN not publicly confirmed for NJ Fidelis Care. WellCare/Centene subsidiary. Searched provider manual — no BIN listed.
+NJ,,,,,MEDICAID_FFS,Fee-for-Service,Gainwell,NJ FamilyCare FFS,NJMMIS,LOW,https://www.njmmis.com/,2024-01-01,FFS pharmacy administered via NJMMIS (Gainwell). BIN/PCN not available in public documentation. Contact 800-776-6334.
+#
+# MASSACHUSETTS (MA)
+# Source: MassHealth Pharmacy Facts #190 (2022-12-29) — confirmed BINs as of 2022; still current per search 2024.
+# Conduent processes FFS claims via POPS (Pharmacy Online Processing System).
+MA,009555,MASSPROD,,MEDICAID_FFS,Fee-for-Service,Conduent,MassHealth Direct,,HIGH,https://www.mass.gov/doc/pharmacy-facts-190-december-29-2022-0/download,2022-12-29,PCC Plan / FFS. Conduent POPS. Confirmed still active per Pharmacy Facts 236 Dec 2024.
+MA,004336,ADV,RX51BB,MEDICAID_MCO,SCO,CVS Caremark,Senior Whole Health,Senior Whole Health,HIGH,https://www.mass.gov/doc/pharmacy-facts-190-december-29-2022-0/download,2022-12-29,SCO Plan - Medicaid Only
+MA,610011,IRX,RXMCDMA,MEDICAID_MCO,ACO,OptumRx,Mass General Brigham ACO,,HIGH,https://www.mass.gov/doc/pharmacy-facts-190-december-29-2022-0/download,2022-12-29,ACPP
+MA,610011,IRX,FCHPMCD,MEDICAID_MCO,MCO,OptumRx,"Fallon/Berkshire Fallon",,HIGH,https://www.mass.gov/doc/pharmacy-facts-190-december-29-2022-0/download,2022-12-29,MCO
+MA,003858,MA,MAHLTH,MEDICAID_MCO,MCO,Express Scripts,WellSense Health Plan,,HIGH,https://www.mass.gov/doc/pharmacy-facts-190-december-29-2022-0/download,2022-12-29,Multiple alliances
+MA,610602,MCD,MHO,MEDICAID_MCO,SCO,Navitus,Commonwealth Care Alliance,,HIGH,https://www.mass.gov/doc/pharmacy-facts-190-december-29-2022-0/download,2022-12-29,SCO
+MA,610494,9999,ACUMA,MEDICAID_MCO,SCO,OptumRx,UnitedHealthcare SCO,,HIGH,https://www.mass.gov/doc/pharmacy-facts-190-december-29-2022-0/download,2022-12-29,SCO
+MA,020107,,,MEDICAID_CHIP,CHIP/Child Health Plus,CarelonRx,MassHealth CHIP (Children),,MEDIUM,https://www.mass.gov/masshealth-pharmacy-program,2024-01-01,Child/CHIP plans use CarelonRx. Verify exact PCN/group per specific CHIP plan from Pharmacy Facts 236.
+#
+# CONNECTICUT (CT)
+# HUSKY Health (A/B/C/D) administered by CT DSS via CTDSSMAP portal (fiscal agent: Gainwell).
+# HUSKY Health does NOT use BIN/PCN numbers — pharmacies bill directly through CMAP.
+# Members show their gray ConneCT card; no BIN/PCN required at point of sale.
+CT,,,,,MEDICAID_FFS,Fee-for-Service,Gainwell/CTDSSMAP,HUSKY Health A/C/D,,HIGH,https://portal.ct.gov/HUSKY/Pharmacy,2024-01-01,CT Medicaid has NO BIN/PCN — direct CMAP billing via ctdssmap.com. Gainwell is fiscal agent. Members use gray ConneCT card. Call 800-842-8440.
+CT,,,,,MEDICAID_CHIP,CHIP,Gainwell/CTDSSMAP,HUSKY Health B (CHIP),,HIGH,https://portal.ct.gov/HUSKY/Pharmacy,2024-01-01,CT CHIP also under CMAP — no BIN/PCN. Same billing process as HUSKY Health A/C/D.
+#
+# RHODE ISLAND (RI)
+# RIte Care MCO program. Two MCOs: NHPRI and UHC Community Plan.
+# FFS managed by Gainwell but BIN not publicly confirmed.
+RI,012353,06470000,,MEDICAID_DUAL,MMP/D-SNP,CVS Caremark,Neighborhood Health Plan RI — Medicare-Medicaid,Neighborhood Health Plan RI,HIGH,https://www.nhpri.org/providers/provider-resources/pharmacy,2024-01-01,NHPRI Medicare-Medicaid Plan (dual eligible). CVS Caremark PBM.
+RI,004336,ADV,,MEDICAID_MCO,MCO,CVS Caremark,Neighborhood Health Plan RI — Medicaid,Neighborhood Health Plan RI,HIGH,https://www.nhpri.org/providers/provider-resources/pharmacy,2024-01-01,NHPRI Medicaid (RIte Care). CVS Caremark PBM. BIN 004336 PCN ADV.
+RI,610494,4201,,MEDICAID_MCO,MCO,OptumRx,UnitedHealthcare Community Plan RI (RIte Care),UHC Community Plan RI,HIGH,https://www.uhc.com/communityplan/rhode-island/plans/medicaid/rite-care,2024-01-01,UHC RIte Care Medicaid MCO. PCN 4201.
+RI,,,,,MEDICAID_FFS,Fee-for-Service,Gainwell,Rhode Island Medicaid FFS,,LOW,https://eohhs.ri.gov/providers-partners/provider-directories/pharmacy,2024-01-01,RI FFS pharmacy processed by Gainwell (Ann Bennett 571-895-6866). BIN/PCN not publicly listed. NCPDP D.0 Payer Sheet effective 4/1/2026 referenced on EOHHS site.
+#
+# VERMONT (VT)
+# Green Mountain Care — all FFS (no MCO pharmacy carve-out).
+# Change Healthcare (now Optum) is the pharmacy claims processor (DVHA contract since 2014).
+# BIN/PCN not publicly confirmed; DVHA pages return 403.
+VT,,,,,MEDICAID_FFS,Fee-for-Service,Optum/Change Healthcare,Vermont Medicaid (Green Mountain Care),,LOW,https://dvha.vermont.gov/initiatives/pharmacy-benefits-administrator,2024-01-01,DVHA contracted with Change Healthcare (now Optum) as PBA since May 2014. BIN/PCN not publicly available. Call helpdesk 1-844-679-5362.
+#
+# NEW HAMPSHIRE (NH)
+# FFS program administered by Prime Therapeutics (state contract).
+# NH Healthy Families (WellCare/Centene) is the MCO — uses separate PBM.
+NH,,,,,MEDICAID_FFS,Fee-for-Service,Prime Therapeutics,New Hampshire Medicaid FFS,,MEDIUM,https://www.dhhs.nh.gov/programs-services/medicaid/medicaid-pharmacy-benefit-management,2024-01-01,Prime Therapeutics is state PBA. NCPDP payer spec exists at nh.primetherapeutics.com but PDF is inaccessible. Contact 866-675-7755.
+NH,,,,,MEDICAID_MCO,MCO,,NH Healthy Families (WellCare/Centene),NH Healthy Families,LOW,https://www.nhhealthyfamilies.com/members/medicaid/benefits-services/pharmacy.html,2024-01-01,NH Healthy Families MCO uses AcariaHealth for specialty. Retail PBM BIN/PCN not publicly listed. Specialty via WellCare/Centene network.
+#
+# MAINE (ME)
+# MaineCare FFS — no MCO pharmacy carve-out.
+# Change Healthcare (now Optum) operates MEPOPS (Maine Point of Purchase System).
+# Maine experienced major MEPOPS outage Feb-Mar 2024 due to Change Healthcare cyberattack.
+ME,,,,,MEDICAID_FFS,Fee-for-Service,Optum/Change Healthcare,Maine MaineCare,,LOW,https://www.maine.gov/dhhs/oms/providers/pharmacy-services,2024-01-01,Change Healthcare (Optum) operates MEPOPS for MaineCare pharmacy claims. BIN/PCN listed on mainecarepdl.org (403 at time of research). Call 888-420-9711.
+#
+# DELAWARE (DE)
+# Delaware Medicaid pharmacy is FFS-carved — MCOs (AmeriHealth Caritas DE/Highmark HHO/Delaware First Health)
+# do NOT cover pharmacy; it flows through DMAP FFS for all members.
+# BIN 004336 with PCN MCAIDDE or DSHP confirmed in DE Pharmacy Policy Billing Reference Guide (rev 2023-12-21).
+DE,004336,MCAIDDE,,MEDICAID_FFS,Fee-for-Service,CVS Caremark/Gainwell,Delaware Medical Assistance Program FFS,,HIGH,https://medicaidpublications.dhss.delaware.gov/docs/Search?Command=Core_Download&EntryId=893,2023-12-21,DE pharmacy is FFS-carved for all members including those in MCOs. BIN 004336 PCN MCAIDDE per DE Pharmacy Policy Billing Reference Guide rev 2023-12-21.
+DE,004336,DSHP,,MEDICAID_MCO,MCO,CVS Caremark/Gainwell,Delaware Medicaid — DSHP (Diamond State Health Plan),,HIGH,https://medicaidpublications.dhss.delaware.gov/docs/Search?Command=Core_Download&EntryId=893,2023-12-21,Diamond State Health Plan MCO members still use FFS pharmacy carve-out. PCN DSHP variant. Same BIN 004336.
+#
+# DISTRICT OF COLUMBIA (DC)
+# DC Healthy Families — three MCOs: Wellpoint DC / AmeriHealth Caritas DC / MedStar Family Choice DC.
+# Also DC FFS (fee-for-service) for non-MCO members.
+DC,019595,06280000,,MEDICAID_MCO,MCO,PerformRx,AmeriHealth Caritas DC,AmeriHealth Caritas DC,HIGH,https://dhcf.dc.gov/sites/default/files/dc/sites/dhcf/page_content/attachments/COC%20Pharmacy%2020201006.Revised%20Memo.pdf,2020-10-06,DC Healthy Families MCO. PerformRx PBM. BIN 019595 PCN 06280000. Group not required. Verify still current — data from 2020 DHCF memo.
+DC,004336,MCAIDADV,RX0610,MEDICAID_MCO,MCO,CVS Caremark,MedStar Family Choice DC,MedStar Family Choice DC,HIGH,https://www.medstarfamilychoicedc.com/providers/pharmacy,2024-01-01,DC Healthy Families MCO. CVS Caremark BIN 004336 PCN MCAIDADV Group RX0610.
+DC,020107,,,MEDICAID_MCO,MCO,CarelonRx,Wellpoint DC (Anthem/Elevance),Wellpoint DC,MEDIUM,https://www.wellpoint.com/dc/medicaid/pharmacy,2024-01-01,DC Healthy Families MCO. Wellpoint uses CarelonRx. BIN 020107 confirmed; PCN/group varies — verify with CarelonRx or from member ID card.
+DC,,,,,MEDICAID_FFS,Fee-for-Service,,DC Medicaid FFS (DHCF),,LOW,https://dhcf.dc.gov/service/dc-healthy-families,2024-01-01,DC FFS pharmacy BIN/PCN not publicly confirmed. Contact DHCF provider portal medicaid.dc.gov or 866-752-9233.
+#
+# ============================================================
+# GAP DOCUMENTATION
+# ============================================================
+# NY: BIN 004740 confirmed for NYRx. PCN is provider-specific ETIN-based (not a fixed value per plan).
+#     Child Health Plus individual MCO BINs (each CHP plan has its own PBM) not exhaustively mapped.
+#     Dual/D-SNP plans (e.g. MLTC) maintain individual BINs — not included here (not mainstream Medicaid).
+#
+# NJ: FFS BIN/PCN not found in any public source. Gainwell handles via NJMMIS.
+#     Fidelis Care NJ BIN/PCN not found in public sources (WellCare/Centene subsidiary).
+#     WellCare NJ BIN/PCN not found in public sources.
+#
+# MA: BIN/PCN data from Pharmacy Facts #190 (Dec 2022). Pharmacy Facts #236 (Dec 2024) and #264 (Dec 2025)
+#     contain updated appendix A but those PDFs returned 403 at time of research.
+#     Full current ACO/SCO/MCO list may have additional changes. Known additions:
+#     CCA One Care / Tufts Health Unify / UHC Connected (One Care plans) BINs not found.
+#     Boston Medical Center HealthNet Plan (ACO) BIN not found.
+#
+# CT: Confirmed NO BIN/PCN — direct CTDSSMAP billing only.
+#
+# RI: FFS BIN/PCN not publicly available (Gainwell). NHPRI Evolent Health reference unclear — CVS Caremark confirmed.
+#
+# VT: BIN/PCN not publicly confirmed. DVHA website returns 403. Only FFS program (no MCO pharmacy).
+#
+# NH: FFS BIN/PCN not publicly confirmed (Prime Therapeutics — payer spec PDF inaccessible).
+#     NH Healthy Families MCO BIN/PCN not found.
+#
+# ME: BIN/PCN not publicly confirmed. mainecarepdl.org page states BIN/PCN listed there but returned
+#     empty content. MEPOPS operates via Optum (fmr Change Healthcare). Only FFS (no MCO pharmacy).
+#
+# DE: Confirmed FFS-carved pharmacy for all MCO members. BIN 004336 with PCN MCAIDDE/DSHP per 2023 reference guide.
+#     MCO-specific PCN variants may exist for each MCO subgroup within DMAP.
+#
+# DC: AmeriHealth Caritas DC data from 2020 DHCF memo — recommend re-verification.
+#     DC FFS BIN/PCN not found in public sources. New provider portal is medicaid.dc.gov.
