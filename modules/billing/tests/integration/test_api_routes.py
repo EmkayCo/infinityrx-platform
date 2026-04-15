@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+from src.models.tables import BillingBase
 
 TENANT = str(uuid.UUID("11111111-1111-1111-1111-111111111111"))
 CLIENT = str(uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
@@ -16,18 +21,49 @@ HEADERS = {"X-Tenant-Id": TENANT}
 
 @pytest.fixture(scope="module")
 def client() -> TestClient:
-    from unittest.mock import MagicMock
-
+    """TestClient wired to a StaticPool in-memory SQLite so all sessions
+    share the same connection and the tables created by create_all are visible
+    to every subsequent session regardless of thread."""
     from src.api.dependencies import get_db
+    from src.db.session import set_engine
     from src.main import app
 
-    def override_db():
-        yield MagicMock()
+    # StaticPool ensures a single shared connection — tables created by
+    # create_all are visible to all sessions/threads during the test module.
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    @event.listens_for(engine, "connect")
+    def _set_pragma(dbapi_conn, _):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    for table in BillingBase.metadata.tables.values():
+        table.schema = None
+
+    BillingBase.metadata.create_all(engine)
+
+    set_engine(engine)
+
+    SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+    def override_db() -> Iterator[Session]:
+        session = SessionLocal()
+        try:
+            yield session
+            session.rollback()
+        finally:
+            session.close()
 
     app.dependency_overrides[get_db] = override_db
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
+    engine.dispose()
 
 
 class TestHealthEndpoint:
