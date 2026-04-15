@@ -246,6 +246,373 @@ export const ACTIVITY_EVENTS: ActivityEvent[] = Array.from({ length: 30 }, (_, i
   };
 });
 
+// ─── Manufacturer analytics seed data (ICP Portal Phase 1B) ──────────────────
+
+// 16 months of claim summary data (Jan 2025 – Apr 2026)
+export const CLAIM_SUMMARY_MONTHLY = Array.from({ length: 16 }, (_, i) => {
+  const base = new Date("2025-01-01T00:00:00Z");
+  base.setUTCMonth(base.getUTCMonth() + i);
+  const label = `${base.getUTCFullYear()}-${String(base.getUTCMonth() + 1).padStart(2, "0")}`;
+  const netClaims = rngInt(6800, 14200);
+  const reversals = rngInt(120, 480);
+  const paid = rngInt(5800, 12000);
+  const benefitSpend = rngInt(1200000, 3800000);
+  const copaySpend = rngInt(480000, 1600000);
+  const abandonmentRate = (rngInt(8, 22)) / 100;
+  return {
+    period: label,
+    net_claim_count: netClaims,
+    reversals,
+    paid_claims: paid,
+    new_enrollments: rngInt(280, 950),
+    ingredient_cost: money(rngInt(900000, 2800000)),
+    sales_tax: money(rngInt(12000, 48000)),
+    patient_paid: money(rngInt(80000, 320000)),
+    dispensing_fee: money(rngInt(45000, 180000)),
+    benefit_spend: money(benefitSpend),
+    copay_assistance: money(copaySpend),
+    transaction_fee: money(rngInt(24000, 96000)),
+    avg_benefit: money(Math.round(benefitSpend / netClaims)),
+    abandonment_rate: abandonmentRate,
+    total_pharmacies: rngInt(180, 480),
+  };
+});
+
+// Claim status distribution (stacked bar)
+export const CLAIM_STATUS_BY_PERIOD = CLAIM_SUMMARY_MONTHLY.map((m) => ({
+  period: m.period,
+  paid: m.paid_claims,
+  reversed: m.reversals,
+  pending: rngInt(80, 320),
+  rejected: rngInt(40, 180),
+}));
+
+// OCC (Other Coverage Code) distribution
+export const CLAIM_OCC_DISTRIBUTION = [
+  { occ: "00 – Not Specified", count: rngInt(4200, 9800), pct: 0 },
+  { occ: "01 – No Other Coverage", count: rngInt(1200, 3400), pct: 0 },
+  { occ: "03 – Medicare Supplement", count: rngInt(480, 1200), pct: 0 },
+  { occ: "04 – Medicaid", count: rngInt(280, 840), pct: 0 },
+  { occ: "07 – Other Liability", count: rngInt(120, 480), pct: 0 },
+  { occ: "08 – Other Health Plan", count: rngInt(80, 320), pct: 0 },
+].map((row, _, arr) => {
+  const total = arr.reduce((s, r) => s + r.count, 0);
+  return { ...row, pct: parseFloat((row.count / total * 100).toFixed(1)) };
+});
+
+// Reject codes distribution
+export const REJECT_CODES_DISTRIBUTION = [
+  { code: "70 – Product/Service Not Covered", count: rngInt(180, 520), pct: 0 },
+  { code: "75 – Prior Auth Required", count: rngInt(120, 380), pct: 0 },
+  { code: "76 – Plan Limitations Exceeded", count: rngInt(80, 260), pct: 0 },
+  { code: "25 – Missing/Invalid Info", count: rngInt(60, 200), pct: 0 },
+  { code: "88 – DUR Reject Error", count: rngInt(40, 140), pct: 0 },
+  { code: "27 – Unmatched Cardholder ID", count: rngInt(30, 120), pct: 0 },
+].map((row, _, arr) => {
+  const total = arr.reduce((s, r) => s + r.count, 0);
+  return { ...row, pct: parseFloat((row.count / total * 100).toFixed(1)) };
+});
+
+// Fill performance by drug and month
+const DRUG_NAMES = [
+  { name: "Cardavix 10mg", ndc: "12345-0010-30", company: "Apex Biosciences" },
+  { name: "Lumivex 25mg", ndc: "12345-0025-30", company: "Apex Biosciences" },
+  { name: "Nexovir 100mg", ndc: "67890-0100-28", company: "Stellar Pharma" },
+  { name: "Trelova 5mg", ndc: "67890-0005-30", company: "Stellar Pharma" },
+  { name: "Renavar 50mg", ndc: "54321-0050-30", company: "Pinnacle Therapeutics" },
+];
+
+export const FILL_SUMMARY_MONTHLY = Array.from({ length: 16 }, (_, i) => {
+  const base = new Date("2025-01-01T00:00:00Z");
+  base.setUTCMonth(base.getUTCMonth() + i);
+  const label = `${base.getUTCFullYear()}-${String(base.getUTCMonth() + 1).padStart(2, "0")}`;
+  const newFills = rngInt(1200, 3800);
+  const refills = rngInt(3200, 8400);
+  return {
+    period: label,
+    total_fills: newFills + refills,
+    new_starts: newFills,
+    refills,
+    avg_fills_per_patient: parseFloat((rngInt(28, 52) / 10).toFixed(1)),
+    avg_days_supply: rngInt(28, 34),
+  };
+});
+
+export const FILL_BY_DRUG = DRUG_NAMES.map((d) => ({
+  drug_name: d.name,
+  ndc: d.ndc,
+  company_name: d.company,
+  net_fills: rngInt(1800, 9400),
+  new_starts: rngInt(320, 1800),
+  refills: rngInt(1200, 7200),
+  avg_quantity: parseFloat((rngInt(280, 1200) / 10).toFixed(1)),
+  avg_days_supply: rngInt(28, 34),
+  total_spend: money(rngInt(480000, 2400000)),
+}));
+
+export const FILL_BY_PHARMACY_TYPE = [
+  { type: "Retail – Chain", fills: rngInt(18000, 42000), pct: 0 },
+  { type: "Retail – Independent", fills: rngInt(4200, 9800), pct: 0 },
+  { type: "Mail Order", fills: rngInt(6800, 18000), pct: 0 },
+  { type: "Specialty", fills: rngInt(2400, 7200), pct: 0 },
+  { type: "340B", fills: rngInt(480, 1800), pct: 0 },
+].map((row, _, arr) => {
+  const total = arr.reduce((s, r) => s + r.fills, 0);
+  return { ...row, pct: parseFloat((row.fills / total * 100).toFixed(1)) };
+});
+
+export const FILL_BY_CHAIN = [
+  { chain: "InfinityChain Rx", fills: rngInt(8400, 18000) },
+  { chain: "CrestMed Pharmacy", fills: rngInt(6200, 14000) },
+  { chain: "NovaCare Rx", fills: rngInt(4800, 10400) },
+  { chain: "Meridian Drugs", fills: rngInt(3200, 7800) },
+  { chain: "Pinnacle Drug", fills: rngInt(2400, 5800) },
+  { chain: "SunLife Pharmacy", fills: rngInt(1800, 4200) },
+  { chain: "Gateway Rx", fills: rngInt(1200, 3200) },
+  { chain: "Apex Pharmacy", fills: rngInt(900, 2400) },
+  { chain: "BlueCross Rx", fills: rngInt(640, 1800) },
+  { chain: "Unity Pharmacy", fills: rngInt(420, 1200) },
+].sort((a, b) => b.fills - a.fills);
+
+export const FILL_DAYS_SUPPLY = [
+  { days: "30-day", fills: rngInt(18000, 38000) },
+  { days: "60-day", fills: rngInt(4200, 9800) },
+  { days: "90-day", fills: rngInt(8400, 18000) },
+  { days: "Other", fills: rngInt(240, 840) },
+];
+
+export const NBRX_TREND = Array.from({ length: 16 }, (_, i) => {
+  const base = new Date("2025-01-01T00:00:00Z");
+  base.setUTCMonth(base.getUTCMonth() + i);
+  const label = `${base.getUTCFullYear()}-${String(base.getUTCMonth() + 1).padStart(2, "0")}`;
+  return { period: label, nbrx: rngInt(280, 980), trx: rngInt(3200, 9800) };
+});
+
+// Adherence data
+export const ADHERENCE_PDC_HISTOGRAM = Array.from({ length: 10 }, (_, i) => ({
+  bucket: `${i * 10}–${(i + 1) * 10}%`,
+  patient_count: i < 3 ? rngInt(80, 280)
+    : i < 7 ? rngInt(280, 840)
+    : rngInt(1200, 3200),
+  is_adherent: i >= 8,
+}));
+
+export const ADHERENCE_PERSISTENCE_CURVE = [
+  { month: 0, pct_with_card: 100, pct_without_card: 100 },
+  { month: 1, pct_with_card: 94, pct_without_card: 82 },
+  { month: 2, pct_with_card: 90, pct_without_card: 74 },
+  { month: 3, pct_with_card: 87, pct_without_card: 68 },
+  { month: 4, pct_with_card: 85, pct_without_card: 63 },
+  { month: 5, pct_with_card: 83, pct_without_card: 59 },
+  { month: 6, pct_with_card: 82, pct_without_card: 56 },
+  { month: 7, pct_with_card: 80, pct_without_card: 52 },
+  { month: 8, pct_with_card: 79, pct_without_card: 49 },
+  { month: 9, pct_with_card: 78, pct_without_card: 47 },
+  { month: 10, pct_with_card: 77, pct_without_card: 44 },
+  { month: 11, pct_with_card: 76, pct_without_card: 42 },
+  { month: 12, pct_with_card: 75, pct_without_card: 40 },
+];
+
+// Copay impact comparison (with-card vs without-card cohorts) — the ROI proof chart
+export const COPAY_IMPACT_COMPARISON = {
+  with_card: {
+    cohort_label: "With Copay Card",
+    patient_count: 4284,
+    avg_pdc: 0.84,
+    persistence_6mo: 0.82,
+    persistence_12mo: 0.75,
+    avg_fills_per_patient: 9.2,
+    avg_copay_paid: money(12),
+    avg_program_spend_per_patient: money(2840),
+    adherent_pct: 0.84,
+  },
+  without_card: {
+    cohort_label: "Without Copay Card",
+    patient_count: 1847,
+    avg_pdc: 0.62,
+    persistence_6mo: 0.56,
+    persistence_12mo: 0.40,
+    avg_fills_per_patient: 5.4,
+    avg_copay_paid: money(148),
+    avg_program_spend_per_patient: money(0),
+    adherent_pct: 0.62,
+  },
+  pdc_lift: 0.22,
+  persistence_lift_6mo: 0.26,
+  persistence_lift_12mo: 0.35,
+  incremental_fills: 3.8,
+  roi_per_dollar_spent: "4.20",
+};
+
+export const ADHERENCE_BY_PHARMACY = [
+  { pharmacy_name: "SunLife Specialty Rx", npi: "8084000021", avg_pdc: 0.91, patient_count: 284 },
+  { pharmacy_name: "NovaCare Specialty", npi: "8084000022", avg_pdc: 0.88, patient_count: 412 },
+  { pharmacy_name: "InfinityChain Rx #12", npi: "8084000023", avg_pdc: 0.86, patient_count: 1240 },
+  { pharmacy_name: "Meridian Drugs #04", npi: "8084000024", avg_pdc: 0.84, patient_count: 820 },
+  { pharmacy_name: "CrestMed Pharmacy", npi: "8084000025", avg_pdc: 0.82, patient_count: 564 },
+  { pharmacy_name: "Gateway Rx #09", npi: "8084000026", avg_pdc: 0.79, patient_count: 390 },
+  { pharmacy_name: "Apex Pharmacy #03", npi: "8084000027", avg_pdc: 0.74, patient_count: 218 },
+  { pharmacy_name: "BlueCross Rx Center", npi: "8084000028", avg_pdc: 0.69, patient_count: 176 },
+  { pharmacy_name: "Unity Pharmacy #07", npi: "8084000029", avg_pdc: 0.64, patient_count: 144 },
+  { pharmacy_name: "Discount Drug Mart", npi: "8084000030", avg_pdc: 0.58, patient_count: 98 },
+];
+
+export const PATIENT_ADHERENCE_TABLE = Array.from({ length: 30 }, (_, i) => {
+  const pdc = (rngInt(40, 97)) / 100;
+  return {
+    patient_id: `PAT-${String(10000 + i).padStart(6, "0")}`,
+    drug_name: rngPick(DRUG_NAMES).name,
+    pdc: parseFloat(pdc.toFixed(2)),
+    fills: rngInt(3, 12),
+    first_fill: isoDate(-(rngInt(90, 365))).slice(0, 10),
+    last_fill: isoDate(-(rngInt(0, 30))).slice(0, 10),
+    status: pdc >= 0.80 ? "Adherent" : pdc >= 0.50 ? "Non-Adherent" : "Discontinued",
+    has_copay_card: rngInt(0, 1) === 1,
+  };
+});
+
+// State-level geographic data (all 50 states + DC)
+const STATE_ABBRS = [
+  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
+  "HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
+  "MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+  "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC",
+  "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC",
+];
+
+const STATE_NAMES: Record<string, string> = {
+  AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",
+  CO:"Colorado",CT:"Connecticut",DE:"Delaware",FL:"Florida",GA:"Georgia",
+  HI:"Hawaii",ID:"Idaho",IL:"Illinois",IN:"Indiana",IA:"Iowa",
+  KS:"Kansas",KY:"Kentucky",LA:"Louisiana",ME:"Maine",MD:"Maryland",
+  MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",MS:"Mississippi",MO:"Missouri",
+  MT:"Montana",NE:"Nebraska",NV:"Nevada",NH:"New Hampshire",NJ:"New Jersey",
+  NM:"New Mexico",NY:"New York",NC:"North Carolina",ND:"North Dakota",OH:"Ohio",
+  OK:"Oklahoma",OR:"Oregon",PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",
+  SD:"South Dakota",TN:"Tennessee",TX:"Texas",UT:"Utah",VT:"Vermont",
+  VA:"Virginia",WA:"Washington",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming",
+  DC:"District of Columbia",
+};
+
+export const STATE_ANALYTICS = STATE_ABBRS.map((abbr) => {
+  const claimCount = rngInt(80, 8400);
+  const spend = rngInt(40000, 4200000);
+  return {
+    state_abbr: abbr,
+    state_name: STATE_NAMES[abbr] ?? abbr,
+    claim_count: claimCount,
+    spend: money(spend),
+    pharmacy_count: rngInt(4, 280),
+    avg_benefit: money(Math.round(spend / claimCount)),
+    abandonment_rate: parseFloat((rngInt(8, 22) / 100).toFixed(2)),
+  };
+});
+
+// Top 20 pharmacies for pharmacy insights bar chart
+export const TOP_PHARMACIES_BY_VOLUME = Array.from({ length: 20 }, (_, i) => ({
+  pharmacy_name: [
+    "InfinityChain Rx #1047",
+    "CrestMed Pharmacy #3821",
+    "NovaCare Rx #0542",
+    "Meridian Drugs #412",
+    "Pinnacle Drug Store",
+    "SunLife Pharmacy #88",
+    "Gateway Rx Corp",
+    "Hometown Pharmacy",
+    "MedPlus Specialty Rx",
+    "ExpressMail Rx",
+    "CrestMed Mail",
+    "OptimRx Specialty",
+    "BioPlus Pharmacy",
+    "Summit Pharmacy",
+    "City Drug Store",
+    "Central Rx",
+    "Alliance Drug",
+    "Metro Pharmacy",
+    "Regional Rx #22",
+    "Valley Drug Store",
+  ][i],
+  npi: `${String(8084000041 + i)}`,
+  ncpdp: `${String(4100000 + i)}`,
+  state: rngPick(["TX","CA","FL","NY","IL","PA","OH","GA","NC","MI"] as const),
+  net_claims: rngInt(480, 6800),
+  pct_covered: parseFloat(((rngInt(82, 98)) / 100).toFixed(2)),
+  total_spend: money(rngInt(120000, 3200000)),
+  avg_benefit: money(rngInt(180, 480)),
+  abandonment_rate: parseFloat((rngInt(6, 22) / 100).toFixed(2)),
+  risk_score: rngInt(12, 78),
+  pharmacy_type: rngPick(["Retail – Chain","Retail – Independent","Mail Order","Specialty"] as const),
+})).sort((a, b) => b.net_claims - a.net_claims);
+
+// Pharmacy type distribution for pie chart
+export const PHARMACY_TYPE_DISTRIBUTION = [
+  { type: "Retail – Chain", count: rngInt(180, 340), claim_share: 0 },
+  { type: "Retail – Independent", count: rngInt(80, 160), claim_share: 0 },
+  { type: "Mail Order", count: rngInt(12, 28), claim_share: 0 },
+  { type: "Specialty", count: rngInt(24, 56), claim_share: 0 },
+  { type: "340B", count: rngInt(4, 16), claim_share: 0 },
+].map((row, _, arr) => {
+  const total = arr.reduce((s, r) => s + r.count, 0);
+  return { ...row, claim_share: parseFloat((row.count / total * 100).toFixed(1)) };
+});
+
+// Trend analysis — YoY spend comparison
+export const TREND_YOY_SPEND = Array.from({ length: 24 }, (_, i) => {
+  const base2024 = new Date("2024-05-01T00:00:00Z");
+  base2024.setUTCMonth(base2024.getUTCMonth() + (i % 12));
+  const label = `${base2024.getUTCFullYear() + Math.floor(i / 12)}-${String(base2024.getUTCMonth() + 1).padStart(2, "0")}`;
+  const isCurrentYear = i >= 12;
+  const baseSpend = 1200000 + i * 28000;
+  return {
+    period: label,
+    year: isCurrentYear ? 2026 : 2025,
+    spend: money(baseSpend + rngInt(-80000, 120000)),
+    is_current_year: isCurrentYear,
+  };
+});
+
+// Trend decomposition waterfall
+export const TREND_DECOMPOSITION = {
+  period_label: "Q1 2026 vs Q1 2025",
+  starting_spend: money(8420000),
+  utilization_change: money(640000),
+  unit_cost_change: money(380000),
+  mix_change: money(-120000),
+  ending_spend: money(9320000),
+  total_change: money(900000),
+  total_change_pct: 10.7,
+  components: [
+    { label: "Starting Spend (Q1 2025)", value: money(8420000), is_total: true, is_start: true },
+    { label: "Utilization Change", value: money(640000), is_positive: true, is_total: false },
+    { label: "Unit Cost Change", value: money(380000), is_positive: true, is_total: false },
+    { label: "Mix Change", value: money(-120000), is_positive: false, is_total: false },
+    { label: "Ending Spend (Q1 2026)", value: money(9320000), is_total: true, is_end: true },
+  ],
+};
+
+// Top movers tables
+export const TREND_TOP_MOVERS_INCREASE = DRUG_NAMES.slice(0, 5).map((d, i) => ({
+  drug_name: d.name,
+  ndc: d.ndc,
+  company_name: d.company,
+  prior_spend: money(rngInt(280000, 1200000)),
+  current_spend: money(rngInt(480000, 1800000)),
+  dollar_change: money(rngInt(80000, 480000)),
+  pct_change: parseFloat((rngInt(12, 68)).toFixed(1)),
+  driver: rngPick(["Volume increase", "Unit cost increase", "Mix shift", "New NDC added"] as const),
+})).sort((a, b) => parseFloat(b.dollar_change) - parseFloat(a.dollar_change));
+
+export const TREND_TOP_MOVERS_DECREASE = DRUG_NAMES.slice(0, 5).map((d, i) => ({
+  drug_name: `${d.name} (generic)`,
+  ndc: d.ndc.replace("0", "9"),
+  company_name: d.company,
+  prior_spend: money(rngInt(480000, 1800000)),
+  current_spend: money(rngInt(180000, 680000)),
+  dollar_change: money(rngInt(-680000, -80000)),
+  pct_change: parseFloat((-rngInt(8, 48)).toFixed(1)),
+  driver: rngPick(["Generic entry", "Volume decline", "Coverage change", "Program modification"] as const),
+})).sort((a, b) => parseFloat(a.dollar_change) - parseFloat(b.dollar_change));
+
 export const SERVICE_HEALTH: ServiceHealth[] = [
   { service: "Core Platform", status: "healthy", latency_ms: 42, last_checked: isoDate(0), error: undefined },
   { service: "Billing", status: "healthy", latency_ms: 78, last_checked: isoDate(0), error: undefined },
