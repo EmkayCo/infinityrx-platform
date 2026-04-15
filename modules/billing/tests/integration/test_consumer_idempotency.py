@@ -9,12 +9,19 @@ records in the face of broker re-delivery or producer retries.
 from __future__ import annotations
 
 import uuid
-from unittest.mock import AsyncMock, patch
+from contextlib import contextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from shared.events.in_memory_bus import InMemoryEventBus
 from shared.events.types import EventEnvelope
+
+
+@contextmanager
+def _fake_session():
+    """No-DB session factory for wrapper tests that mock the handler body."""
+    yield MagicMock()
 
 
 @pytest.fixture(autouse=True)
@@ -56,7 +63,7 @@ async def test_duplicate_claim_adjudicated_invokes_handler_once(envelope: EventE
     ):
         from src.events import wire_consumers
 
-        await wire_consumers(bus)
+        await wire_consumers(bus, session_factory=_fake_session)
 
         await bus.publish(envelope)
         await bus.publish(envelope)  # same idempotency_key
@@ -79,7 +86,7 @@ async def test_distinct_idempotency_keys_invoke_handler_each_time() -> None:
     ):
         from src.events import wire_consumers
 
-        await wire_consumers(bus)
+        await wire_consumers(bus, session_factory=_fake_session)
 
         for i in range(3):
             await bus.publish(
