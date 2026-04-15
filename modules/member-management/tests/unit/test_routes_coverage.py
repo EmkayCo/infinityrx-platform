@@ -30,12 +30,37 @@ from src.services.edi_834_parser import (
     _parse_date,
 )
 from src.services.member_service import MemberService
+from shared.db.tenant_context import set_tenant_context, clear_tenant_context
+from tests.conftest import TENANT_A
+
+import src.api.routes.members as _members_mod
+import src.api.routes.groups as _groups_mod
+import src.api.routes.enrollment as _enrollment_mod
+import src.api.routes.cob as _cob_mod
+import src.api.routes.coverage as _coverage_mod
 
 
 @pytest.fixture()
-def client():
+def client(db_session):
+    """TestClient wired to a real in-memory DB and Tenant A context."""
     app = create_app()
-    return TestClient(app, raise_server_exceptions=False)
+
+    # Override all _get_db dependencies to return the test session
+    def _override_db():
+        return db_session
+
+    app.dependency_overrides[_members_mod._get_db] = _override_db
+    app.dependency_overrides[_groups_mod._get_db] = _override_db
+    app.dependency_overrides[_enrollment_mod._get_db] = _override_db
+    app.dependency_overrides[_cob_mod._get_db] = _override_db
+    app.dependency_overrides[_coverage_mod._get_db] = _override_db
+
+    token = set_tenant_context(TENANT_A)
+    try:
+        yield TestClient(app, raise_server_exceptions=False)
+    finally:
+        clear_tenant_context(token)
+        app.dependency_overrides.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -100,9 +125,9 @@ class TestGroupRoutes:
         })
         assert resp.status_code == 404
 
-    def test_get_group_members_returns_empty(self, client):
+    def test_get_group_members_nonexistent_returns_404(self, client):
         resp = client.get(f"/api/v1/groups/{uuid.uuid4()}/members")
-        assert resp.status_code == 200
+        assert resp.status_code == 404
 
 
 class TestEnrollmentRoutes:

@@ -17,16 +17,39 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.main import create_app
+from shared.db.tenant_context import set_tenant_context, clear_tenant_context
+from tests.conftest import TENANT_A
 
+import src.api.routes.members as _members_mod
+import src.api.routes.groups as _groups_mod
+import src.api.routes.enrollment as _enrollment_mod
+import src.api.routes.cob as _cob_mod
+import src.api.routes.coverage as _coverage_mod
 
 TENANT_ID = str(uuid.UUID("11111111-1111-1111-1111-111111111111"))
 MEMBER_UUID = str(uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
 
 
 @pytest.fixture
-def client():
+def client(db_session):
+    """TestClient with real DB session and Tenant A context."""
     app = create_app()
-    return TestClient(app, raise_server_exceptions=False)
+
+    def _override_db():
+        return db_session
+
+    app.dependency_overrides[_members_mod._get_db] = _override_db
+    app.dependency_overrides[_groups_mod._get_db] = _override_db
+    app.dependency_overrides[_enrollment_mod._get_db] = _override_db
+    app.dependency_overrides[_cob_mod._get_db] = _override_db
+    app.dependency_overrides[_coverage_mod._get_db] = _override_db
+
+    token = set_tenant_context(TENANT_A)
+    try:
+        yield TestClient(app, raise_server_exceptions=False)
+    finally:
+        clear_tenant_context(token)
+        app.dependency_overrides.clear()
 
 
 @pytest.fixture

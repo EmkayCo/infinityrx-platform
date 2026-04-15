@@ -18,9 +18,32 @@ from src.services.x12_270_271 import (
     _parse_x12_date,
     _split_x12,
 )
+from shared.db.tenant_context import set_tenant_context, clear_tenant_context
+from tests.conftest import TENANT_A
+
+import src.api.routes.members as _members_mod
+import src.api.routes.groups as _groups_mod
+import src.api.routes.enrollment as _enrollment_mod
+import src.api.routes.cob as _cob_mod
+import src.api.routes.coverage as _coverage_mod
 
 TENANT_ID = str(uuid.UUID("11111111-1111-1111-1111-111111111111"))
 MEMBER_UUID = str(uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+
+
+def _make_wired_client(db_session) -> TestClient:
+    """Build a TestClient with the DB dependency wired to db_session and Tenant A context."""
+    app = create_app()
+
+    def _override_db():
+        return db_session
+
+    app.dependency_overrides[_members_mod._get_db] = _override_db
+    app.dependency_overrides[_groups_mod._get_db] = _override_db
+    app.dependency_overrides[_enrollment_mod._get_db] = _override_db
+    app.dependency_overrides[_cob_mod._get_db] = _override_db
+    app.dependency_overrides[_coverage_mod._get_db] = _override_db
+    return app, TestClient(app, raise_server_exceptions=False)
 
 
 # ---------------------------------------------------------------------------
@@ -259,47 +282,51 @@ class TestEligibilityRoute270EligiblePath:
 
 
 # ---------------------------------------------------------------------------
-# COB route — update path (line 71 404)
+# COB route — update path (404 when member not found)
 # ---------------------------------------------------------------------------
 
 class TestCobRouteUpdate:
     @pytest.fixture
-    def client(self):
-        return TestClient(create_app(), raise_server_exceptions=False)
+    def wired(self, db_session):
+        token = set_tenant_context(TENANT_A)
+        app, client = _make_wired_client(db_session)
+        yield client
+        clear_tenant_context(token)
+        app.dependency_overrides.clear()
 
-    @pytest.fixture
-    def headers(self):
-        return {"x-tenant-id": TENANT_ID}
-
-    def test_update_cob_returns_404(self, client, headers):
+    def test_update_cob_returns_404(self, wired):
+        """PUT /members/{nonexistent}/cob/{id} → 404 (member not found)."""
         cob_id = str(uuid.uuid4())
-        resp = client.put(
+        resp = wired.put(
             f"/api/v1/members/{MEMBER_UUID}/cob/{cob_id}",
             json={"termination_date": "2026-12-31"},
-            headers=headers,
         )
         assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
-# Enrollment route — upload path (line 15)
+# Enrollment route — upload path
 # ---------------------------------------------------------------------------
 
 class TestEnrollmentUploadRoute:
     @pytest.fixture
-    def client(self):
-        return TestClient(create_app(), raise_server_exceptions=False)
+    def wired(self, db_session):
+        token = set_tenant_context(TENANT_A)
+        app, client = _make_wired_client(db_session)
+        yield client
+        clear_tenant_context(token)
+        app.dependency_overrides.clear()
 
-    @pytest.fixture
-    def headers(self):
-        return {"x-tenant-id": TENANT_ID}
-
-    def test_upload_enrollment_file_returns_201(self, client, headers):
-        import io
-        resp = client.post(
+    def test_upload_enrollment_file_returns_201(self, wired):
+        # Columns match _DEFAULT_FIELD_MAPPING column names
+        csv_body = (
+            "member_id,first_name,last_name,date_of_birth,gender,effective_date,rx_bin\n"
+            "M001,Jane,Doe,1990-01-01,F,2026-01-01,610014\n"
+        )
+        resp = wired.post(
             "/api/v1/members/enrollment/upload",
-            files={"file": ("test.csv", io.BytesIO(b"member_id,first_name\nM001,Jane"), "text/csv")},
-            headers=headers,
+            content=csv_body.encode(),
+            headers={"content-type": "text/csv"},
         )
         assert resp.status_code == 201
         data = resp.json()
@@ -384,23 +411,23 @@ class TestX12ParserShortNm1:
 
 
 # ---------------------------------------------------------------------------
-# Coverage route — update path (line 60 404)
+# Coverage route — update path (404 when member not found)
 # ---------------------------------------------------------------------------
 
 class TestCoverageRouteUpdate:
     @pytest.fixture
-    def client(self):
-        return TestClient(create_app(), raise_server_exceptions=False)
+    def wired(self, db_session):
+        token = set_tenant_context(TENANT_A)
+        app, client = _make_wired_client(db_session)
+        yield client
+        clear_tenant_context(token)
+        app.dependency_overrides.clear()
 
-    @pytest.fixture
-    def headers(self):
-        return {"x-tenant-id": TENANT_ID}
-
-    def test_update_coverage_returns_404(self, client, headers):
+    def test_update_coverage_returns_404(self, wired):
+        """PUT /members/{nonexistent}/coverage/{id} → 404 (member not found)."""
         period_id = str(uuid.uuid4())
-        resp = client.put(
+        resp = wired.put(
             f"/api/v1/members/{MEMBER_UUID}/coverage/{period_id}",
             json={"termination_date": "2026-12-31"},
-            headers=headers,
         )
         assert resp.status_code == 404
