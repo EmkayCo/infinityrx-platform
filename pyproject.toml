@@ -34,6 +34,7 @@ dependencies = [
   "jinja2>=3.1",
   "pgvector>=0.3",
   "numpy>=2.0",
+  "tenacity>=9.0",
 ]
 
 

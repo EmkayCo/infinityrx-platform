@@ -1,0 +1,116 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "modules/**"
+      - "shared/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "modules/**"
+      - "shared/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/backend-ci.yml"
+
+# Cancel in-flight runs on the same branch when a new commit is pushed.
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: All-modules pytest (postgres + redis)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17.5
+        env:
+          POSTGRES_USER: infinityrx
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: infinityrx_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7.4.3
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Prepare results directory
+        run: mkdir -p test-results
+
+      - name: Run all module tests
+        env:
+          DATABASE_URL: postgresql://infinityrx:test@localhost:5432/infinityrx_test
+          REDIS_URL: redis://localhost:6379/0
+          ENCRYPTION_KEY_ACTIVE: test-key-for-ci-only-do-not-use-in-prod
+          # Disable any module-level start-up that requires external services
+          IFX_DISABLE_BUS_AUTOSTART: "1"
+        run: |
+          set -o pipefail
+          FAILED=0
+          for mod in core-platform billing payment-processing reclaimrx reporting ai-nlp dataiq drug-database member-management pharmacy-directory prescriber-directory edi-compliance medical-claims; do
+            echo "::group::$mod"
+            if [ -d "modules/$mod/tests" ]; then
+              if ! (cd "modules/$mod" && uv run pytest tests/ -q --tb=short --junitxml="../../test-results/$mod.xml"); then
+                echo "::error title=$mod::tests failed"
+                FAILED=1
+              fi
+            else
+              echo "::warning title=$mod::no tests/ directory — skipping"
+            fi
+            echo "::endgroup::"
+          done
+          exit $FAILED
+
+      - name: Run shared tests
+        if: always()
+        env:
+          DATABASE_URL: postgresql://infinityrx:test@localhost:5432/infinityrx_test
+          REDIS_URL: redis://localhost:6379/0
+          ENCRYPTION_KEY_ACTIVE: test-key-for-ci-only-do-not-use-in-prod
+        run: |
+          if [ -d "shared/tests" ]; then
+            uv run pytest shared/tests/ -q --tb=short --junitxml=test-results/shared.xml
+          fi
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results
+          path: test-results/
+          retention-days: 14

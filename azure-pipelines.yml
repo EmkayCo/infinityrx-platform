@@ -7,6 +7,10 @@ trigger:
     include:
       - portal/operator
       - portal/shared
+      - modules
+      - shared
+      - pyproject.toml
+      - uv.lock
 
 pr:
   branches:
@@ -16,6 +20,10 @@ pr:
     include:
       - portal/operator
       - portal/shared
+      - modules
+      - shared
+      - pyproject.toml
+      - uv.lock
 
 pool:
   vmImage: "ubuntu-latest"
@@ -105,3 +113,63 @@ stages:
             inputs:
               targetPath: "$(workingDirectory)/test-results"
               artifact: "playwright-test-results-failures"
+
+  - stage: BackendTests
+    displayName: "Backend (pytest, all 13 modules)"
+    dependsOn: []
+    jobs:
+      - job: Pytest
+        displayName: "All-modules pytest"
+        services:
+          postgres: postgres:17.5
+          redis: redis:7.4.3
+        variables:
+          POSTGRES_USER: infinityrx
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: infinityrx_test
+          DATABASE_URL: postgresql://infinityrx:test@localhost:5432/infinityrx_test
+          REDIS_URL: redis://localhost:6379/0
+          ENCRYPTION_KEY_ACTIVE: ci-only-test-key
+          IFX_DISABLE_BUS_AUTOSTART: "1"
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: "3.13"
+
+          - script: |
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+            displayName: "Install uv"
+
+          - script: uv sync --frozen
+            displayName: "Sync Python dependencies"
+
+          - script: |
+              set -o pipefail
+              mkdir -p test-results
+              FAILED=0
+              for mod in core-platform billing payment-processing reclaimrx reporting ai-nlp dataiq drug-database member-management pharmacy-directory prescriber-directory edi-compliance medical-claims; do
+                echo "##[group]$mod"
+                if [ -d "modules/$mod/tests" ]; then
+                  if ! (cd "modules/$mod" && uv run pytest tests/ -q --tb=short --junitxml="../../test-results/$mod.xml"); then
+                    echo "##vso[task.logissue type=error]$mod tests failed"
+                    FAILED=1
+                  fi
+                fi
+                echo "##[endgroup]"
+              done
+              exit $FAILED
+            displayName: "Run all module tests"
+
+          - task: PublishTestResults@2
+            condition: always()
+            inputs:
+              testResultsFormat: "JUnit"
+              testResultsFiles: "test-results/*.xml"
+              testRunTitle: "Backend modules"
+
+          - task: PublishPipelineArtifact@1
+            condition: always()
+            inputs:
+              targetPath: "test-results"
+              artifact: "backend-test-results"
