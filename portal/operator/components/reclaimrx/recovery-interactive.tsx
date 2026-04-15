@@ -5,15 +5,16 @@ import { useRouter } from "next/navigation";
 import { DollarDisplay } from "@shared/components/dollar-display";
 import { DataTable, type ColDef } from "@shared/components/data-table";
 import { ExportMenu } from "@shared/components/export-menu";
+import { KpiCardRow } from "@/components/ui/kpi-card-row";
 import type { RecoveryRecord } from "@shared/types/reclaimrx";
 import { cn, formatDate } from "@shared/lib/format";
 
 const STATUS_BADGE: Record<string, string> = {
-  new: "bg-slate-700 text-slate-300",
-  assigned: "bg-blue-900/40 text-blue-300",
-  evidence: "bg-yellow-900/40 text-yellow-300",
-  demand: "bg-orange-900/40 text-orange-300",
-  resolved: "bg-green-900/40 text-green-300",
+  new: "bg-gray-100 text-gray-600",
+  assigned: "bg-blue-100 text-blue-700",
+  evidence: "bg-yellow-100 text-yellow-700",
+  demand: "bg-orange-100 text-orange-700",
+  resolved: "bg-green-100 text-green-700",
 };
 
 const columns: ColDef<RecoveryRecord>[] = [
@@ -21,7 +22,7 @@ const columns: ColDef<RecoveryRecord>[] = [
     accessorKey: "investigation_id",
     header: "Investigation ID",
     cell: (c) => (
-      <span className="font-mono text-xs text-teal-400">
+      <span className="font-mono text-xs text-ifx-blue">
         {(c.getValue() as string).slice(0, 8)}
       </span>
     ),
@@ -29,13 +30,15 @@ const columns: ColDef<RecoveryRecord>[] = [
   {
     accessorKey: "entity_name",
     header: "Entity",
-    cell: (c) => <span className="font-medium text-white">{c.getValue() as string}</span>,
+    cell: (c) => (
+      <span className="font-medium text-ifx-gray-700">{c.getValue() as string}</span>
+    ),
   },
   {
     accessorKey: "flag_type",
     header: "Flag Type",
     cell: (c) => (
-      <span className="text-xs text-slate-300 capitalize">
+      <span className="text-xs text-ifx-gray-400 capitalize">
         {(c.getValue() as string).replace(/_/g, " ")}
       </span>
     ),
@@ -61,7 +64,12 @@ const columns: ColDef<RecoveryRecord>[] = [
     cell: (c) => {
       const val = parseFloat(c.getValue() as string);
       return (
-        <span className={cn("text-sm font-mono", val < 0 ? "text-red-400" : "text-green-400")}>
+        <span
+          className={cn(
+            "text-sm font-mono",
+            val < 0 ? "text-red-500" : "text-green-600"
+          )}
+        >
           {val >= 0 ? "+" : ""}
           <DollarDisplay amount={c.getValue() as string} size="sm" showScale={false} />
         </span>
@@ -74,8 +82,8 @@ const columns: ColDef<RecoveryRecord>[] = [
     cell: (c) => (
       <span
         className={cn(
-          "text-xs px-2 py-0.5 rounded capitalize",
-          STATUS_BADGE[c.getValue() as string] ?? "bg-slate-700 text-slate-400"
+          "text-xs px-2 py-0.5 rounded-full capitalize",
+          STATUS_BADGE[c.getValue() as string] ?? "bg-gray-100 text-gray-600"
         )}
       >
         {c.getValue() as string}
@@ -86,7 +94,7 @@ const columns: ColDef<RecoveryRecord>[] = [
     accessorKey: "updated_at",
     header: "Last Updated",
     cell: (c) => (
-      <span className="text-xs text-slate-400">{formatDate(c.getValue() as string)}</span>
+      <span className="text-xs text-ifx-gray-400">{formatDate(c.getValue() as string)}</span>
     ),
   },
 ];
@@ -98,7 +106,6 @@ interface Props {
 export function RecoveryInteractive({ records }: Props) {
   const router = useRouter();
 
-  // Totals are derived from server-supplied records — no client fetch.
   const totals = records.reduce(
     (acc, r) => ({
       estimated: acc.estimated + parseFloat(r.estimated || "0"),
@@ -108,38 +115,72 @@ export function RecoveryInteractive({ records }: Props) {
     { estimated: 0, demanded: 0, collected: 0 }
   );
 
+  const recoveryRate =
+    totals.estimated > 0 ? (totals.collected / totals.estimated) * 100 : 0;
+
+  const pending = totals.demanded - totals.collected;
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Recovery Tracking</h1>
-          <p className="text-slate-400 text-sm mt-1">
+          <h1 className="text-2xl font-bold text-ifx-gray-900">Recovery Tracking</h1>
+          <p className="text-ifx-gray-400 text-sm mt-1">
             {records.length} investigations tracked
           </p>
         </div>
         <ExportMenu
-          onExportCsv={() => {/* export */}}
-          onExportExcel={() => {/* export */}}
+          onExportCsv={() => {
+            /* export */
+          }}
+          onExportExcel={() => {
+            /* export */
+          }}
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        {[
-          { label: "Total Estimated", amount: totals.estimated.toFixed(2) },
-          { label: "Total Demanded", amount: totals.demanded.toFixed(2) },
-          { label: "Total Collected", amount: totals.collected.toFixed(2) },
-        ].map(({ label, amount }) => (
-          <div
-            key={label}
-            className="rounded-lg border border-ifx-border-dark bg-ifx-surface-dark p-4"
-          >
-            <p className="text-xs text-slate-400 mb-1">{label}</p>
-            <DollarDisplay amount={amount} size="lg" />
-          </div>
-        ))}
-      </div>
+      {/* KPI Cards */}
+      <KpiCardRow
+        columns={5}
+        cards={[
+          {
+            label: "Total Identified",
+            value: totals.estimated.toFixed(2),
+            format: "currency-compact",
+            accentColor: "var(--ifx-blue, #324AB2)",
+          },
+          {
+            label: "Total Recovered",
+            value: totals.collected.toFixed(2),
+            format: "currency-compact",
+            accentColor: "var(--ifx-success, #10B981)",
+          },
+          {
+            label: "Recovery Rate",
+            value: recoveryRate.toFixed(1) + "%",
+            format: "raw",
+            accentColor:
+              recoveryRate >= 50
+                ? "var(--ifx-success, #10B981)"
+                : "var(--ifx-error, #EF4444)",
+          },
+          {
+            label: "Pending Recovery",
+            value: Math.max(0, pending).toFixed(2),
+            format: "currency-compact",
+            accentColor: "var(--ifx-warning, #F59E0B)",
+          },
+          {
+            label: "Avg Time to Recover",
+            value: "34d",
+            format: "raw",
+            accentColor: "var(--ifx-gray-300, #9BA3B5)",
+          },
+        ]}
+      />
 
-      <div className="rounded-lg border border-ifx-border-dark bg-ifx-surface-dark p-5">
+      {/* Table */}
+      <div className="bg-white rounded-lg ifx-card-shadow p-5">
         <DataTable
           columns={columns}
           data={records}

@@ -19,6 +19,19 @@ export type FlagType =
   | "kickback"
   | "other";
 
+// GTN / Leakage category types
+export type LeakageCategory =
+  | "pharmacy_misuse"
+  | "accumulator"
+  | "maximizer"
+  | "three_forty_b_overlap"
+  | "alternative_funding"
+  | "prescriber_anomaly"
+  | "patient_anomaly";
+
+export type RecoveryMethod = "offset" | "demand_letter" | "legal" | "write_off";
+export type RecoveryStatus = "pending" | "in_progress" | "recovered" | "written_off";
+
 export interface FWAFlag {
   id: UUID;
   tenant_id: UUID;
@@ -99,4 +112,71 @@ export interface FWADashboardStats {
     estimated_recovery: Money;
   }>;
   trend_90d: Array<{ date: string; count: number }>;
+}
+
+// ─── GTN Summary ─────────────────────────────────────────────────────────────
+
+export interface GTNSummary {
+  total_copay_spend: Money;
+  identified_leakage: Money;
+  gtn_ratio: string; // e.g. "0.8234"
+  gtn_ratio_prev: string;
+  active_investigations: number;
+  recovered: Money;
+  recovery_rate: string; // e.g. "0.4512"
+  leakage_by_category: Array<{ category: LeakageCategory; amount: Money; count: number }>;
+  leakage_by_program: Array<{ program_name: string; amount: Money }>;
+  top_flagged_pharmacies: Array<{
+    npi: string;
+    pharmacy_name: string;
+    risk_score: number;
+    total_leakage: Money;
+    active_investigations: number;
+  }>;
+}
+
+export interface GTNTrendPoint {
+  month: string; // "2026-01"
+  gtn_ratio: string;
+  leakage_amount: Money;
+}
+
+// ─── Leakage Flag ────────────────────────────────────────────────────────────
+
+export interface LeakageFlag {
+  id: UUID;
+  tenant_id: UUID;
+  category: LeakageCategory;
+  entity_type: "pharmacy" | "prescriber" | "patient";
+  entity_name: string;
+  entity_id: UUID;
+  estimated_leakage: Money;
+  status: "new" | "under_investigation" | "confirmed" | "dismissed";
+  date_flagged: ISODateTimeString;
+  investigation_id?: UUID;
+  program_name?: string;
+}
+
+// ─── Pharmacy Risk Score ─────────────────────────────────────────────────────
+
+export interface PharmacyRiskFactor {
+  factor: string;
+  score: number; // 0-100
+  description: string;
+}
+
+export interface PharmacyRiskScore {
+  npi: string;
+  pharmacy_name: string;
+  ncpdp: string;
+  chain_code: string;
+  state: string;
+  risk_score: number; // 0-100
+  risk_tier: "low" | "medium" | "high" | "critical";
+  factors: PharmacyRiskFactor[];
+  total_claims: number;
+  total_copay_paid: Money;
+  reversal_rate: string; // e.g. "0.12"
+  active_investigations: number;
+  last_updated: ISODateTimeString;
 }
