@@ -79,12 +79,14 @@ export default function LoginPage() {
       />
 
       <div className="relative w-full max-w-sm">
-        {/* Logo */}
-        <div className="mb-8 flex flex-col items-center gap-4">
-          <IfxLogo variant="navy" size="xl" showWordmark />
-          <p className="text-xs font-medium tracking-[0.2em] text-ifx-gray-500 uppercase">
-            ICP Portal
-          </p>
+        {/* Logo — fill swaps with theme: #0B1120 light, white dark */}
+        <div className="mb-8 flex flex-col items-center">
+          <IfxLogo
+            variant="theme"
+            size="xl"
+            showWordmark
+            className="text-[#0B1120] dark:text-white"
+          />
         </div>
 
         {/* Card */}
