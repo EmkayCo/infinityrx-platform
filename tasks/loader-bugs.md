@@ -206,7 +206,183 @@ Convention:
   `infrastructure/scripts/run_migrations.sh` and remove
   `infrastructure/scripts/_bootstrap_billing.py`.
 - **Likely sibling bugs**: every other module that has `src/models/tables.py`
-  but no `alembic/`. Spot check needed for: payment-processing, reclaimrx,
-  reporting, ai-nlp, dataiq, member-management, edi-compliance,
-  medical-claims. Same root cause pattern — these will need MISSING-
-  MIGRATIONS-02..09 entries when each is touched by feature work.
+  but no `alembic/`. Spot check needed for: payment-processing (see
+  MISSING-MIGRATIONS-02 below — confirmed), reclaimrx, reporting, ai-nlp,
+  dataiq, member-management, edi-compliance, medical-claims. Same root
+  cause pattern — these will need MISSING-MIGRATIONS-03..09 entries when
+  each is touched by feature work.
+
+---
+
+## MISSING-MIGRATIONS-02 — modules/payment-processing/ has no alembic history (OFAC tables)
+- **Status**: open
+- **Priority**: P2 (same blast radius as billing but the OFAC path is not
+  on the demo critical path)
+- **Module**: payment-processing
+- **Symptom**: `modules/payment-processing/src/models/tables.py` defines
+  `PaymentProcOfacSdn` (table `payment_proc_ofac_sdn`) and
+  `PaymentProcOfacAlerts` (table `payment_proc_ofac_alerts`), plus other
+  tables for payment vendor integration. The `payment_proc` schema exists
+  (created by `init-multi-db.sql`) but has ZERO tables in any environment
+  (dev/mock/prod). `modules/payment-processing/` has no `alembic.ini` and
+  no `alembic/versions/` directory.
+- **Impact**:
+    * OFAC SDN screening at pay-to-entity resolution time cannot run
+    * `payment_processing.ofac_screening.py` service has nothing to query
+      against and will fail at first call
+    * No OFAC alerts can be persisted
+- **Workaround available**: write an
+  `infrastructure/scripts/_bootstrap_payment_processing.py` analog to
+  `_bootstrap_billing.py` — one-liner calling
+  `PaymentProcBase.metadata.create_all()`. Not implemented yet because
+  OFAC is not on the demo critical path.
+- **Required fix**: same pattern as MISSING-MIGRATIONS-01. Create
+  `modules/payment-processing/alembic.ini`, `alembic/env.py`, and
+  `alembic/versions/0001_payment_processing_baseline.py` mirroring every
+  table in `src/models/tables.py`. Add `payment-processing` to
+  `infrastructure/scripts/run_migrations.sh`.
+- **Gate**: any PR that adds, removes, or modifies a column in
+  `modules/payment-processing/src/models/tables.py` MUST be blocked until
+  the baseline migration exists.
+
+---
+
+## MISSING-LOADER-07 — `shared.sam_exclusions` has no loader script
+- **Status**: open
+- **Priority**: P1 prod (SAM is half of the federal exclusion-screening
+  pair — OIG catches healthcare-specific exclusions, SAM catches
+  debarments across all federal programs. You can't ship prod without
+  both.)
+- **Module**: core-platform / shared.data_ingestion
+- **Schema**: `shared.sam_exclusions` — exists, created by
+  `modules/core-platform/alembic/versions/0008_compliance_reference_tables.py`
+- **Ingester**: `shared/data_ingestion/sources/sam_exclusions.py` exists
+- **Missing**: `scripts/load_sam.py` wrapper (or a `sam` target in
+  `scripts/load_new_sources.py`)
+- **Symptom**: Row count in all three DBs is **0**. No way to trigger the
+  ingester from the CLI. `load_new_sources.py` does not include `sam` in
+  its `_ingester_for()` dispatcher.
+- **Data source**: `api.sam.gov` has a public API (requires a free SAM.gov
+  API key stored in the `SAM_API_KEY` env var — already declared in
+  `shared/config.py` Settings). CSV dumps also available via
+  sam.gov/data-services/Exclusions/Public.
+- **Suggested fix**: copy `scripts/load_oig_leie.py` as a template, swap
+  in `SamExclusionsIngester` from the existing source file, and add a
+  `sam` target to `load_new_sources.py` for consistency. Expected row
+  count: 120,000–160,000 active exclusions as of 2026-01.
+- **Repro**:
+  ```bash
+  grep -rn "SamExclusions" shared/data_ingestion/sources/
+  ls scripts/load_*sam*  # → empty
+  ```
+
+---
+
+## MISSING-LOADER-08 — `shared.government_program_bins` has no state Medicaid loader
+- **Status**: open (partial shim workaround in place)
+- **Priority**: P1 prod (Medicaid claim routing cannot function without
+  the full BIN/PCN table — every Medicaid claim has to be matched to the
+  correct state program before adjudication)
+- **Module**: core-platform / shared.data_ingestion
+- **Schema**: `shared.government_program_bins` — exists, created by
+  `modules/core-platform/alembic/versions/0009_government_program_bins.py`
+- **Ingester**: `shared/data_ingestion/sources/state_medicaid_bins.py`
+  exists with full logic for **50 states + DC + 5 US territories (56
+  total)** — confirmed by reading the `VALID_STATES` constant in the
+  source file.
+- **Missing**: `scripts/load_medicaid_bins.py` wrapper
+- **Symptom**: Row count in all three DBs is **0**, but as of the
+  2026-04-15 shim-update commit, 10 representative state Medicaid entries
+  (CA/TX/NY/FL/PA/IL/OH/GA/NC/MI) are seeded via
+  `infrastructure/scripts/seed_reference_shim.py` so the demo can show
+  Medicaid routing for the largest states.
+- **Data source**: each state Medicaid agency publishes BIN/PCN/Group
+  information on its pharmacy provider portal. The ingester source
+  supports CSV upload via the
+  `shared.data_ingestion.sources.gov_exclusion.load_state_medicaid_csv_from_bytes`
+  function. The admin API route
+  `modules/core-platform/src/government_programs/api.py` already wires
+  the upload path.
+- **Suggested fix**: write `scripts/load_medicaid_bins.py` that
+  instantiates `StateMedicaidBinLoader`, passes the curated CSV under
+  `data/reference/medicaid/`, and reports coverage
+  (`summary.states_covered` / `summary.states_missing`).
+- **Repro**:
+  ```bash
+  ls scripts/load_*medicaid*  # → empty
+  ls data/reference/medicaid/  # → check for source CSVs
+  ```
+
+---
+
+## MISSING-LOADER-09 — `prescriber_dir.dea_registrations` has no loader script
+- **Status**: open
+- **Priority**: P2 (needed for controlled-substance prescribing validation
+  — not on the demo critical path but required for any DEA-2 through
+  DEA-5 claim adjudication)
+- **Module**: prescriber-directory / shared.data_ingestion
+- **Schema**: `prescriber_dir.dea_registrations` — exists, created by
+  `modules/prescriber-directory/alembic/versions/0003_dea_compliance_tables.py`
+- **Ingester**: `shared/data_ingestion/sources/dea_registrations.py`
+  exists
+- **Missing**: `scripts/load_dea.py` wrapper
+- **Symptom**: Row count in all three DBs is **0**.
+- **Data source**: DEA Controlled Substance Act registrant list — the
+  public ARCOS / CSA registrant file. Access is gated behind a DEA data
+  request process; the ingester likely expects a CSV dropped in
+  `data/reference/dea/`.
+- **Suggested fix**: copy `scripts/load_oig_leie.py` as a template, swap
+  in the `DeaRegistrationsIngester`, and document the source CSV path in
+  the script docstring. Also add a `dea` target to `load_new_sources.py`
+  for consistency with the other simple loaders.
+- **Repro**:
+  ```bash
+  ls scripts/load_*dea*  # → empty
+  ```
+
+---
+
+## MISSING-LOADER-10 — `core.exclusion_list` unified crosswalk has no aggregator
+- **Status**: open
+- **Priority**: P1 prod (this is the table the claim adjudication engine
+  queries to block excluded entities — without it, every claim has to hit
+  OIG and SAM separately)
+- **Module**: core-platform
+- **Schema**: `core.exclusion_list` + `core.exclusion_matches` — both
+  exist, created by
+  `modules/core-platform/alembic/versions/0008_compliance_reference_tables.py`.
+  Physically present in all three DBs.
+- **Constraint on `core.exclusion_list.source`**:
+  `CHECK (source IN ('OIG', 'SAM'))` — the table is scoped to unified
+  OIG + SAM aggregation only. OFAC SDN and state exclusion lists are NOT
+  supported by this schema; they would need either a schema change or
+  a separate unified table.
+- **Missing**: an aggregator job that reads from
+  `shared.oig_leie_exclusions` and `shared.sam_exclusions` and populates
+  `core.exclusion_list` with a normalized row per distinct entity, plus
+  a matcher that writes `core.exclusion_matches` when a claim's
+  pharmacy/prescriber/member resolves to an entry.
+- **Symptom**: Row count in all three DBs is **0** for both tables.
+  `shared.oig_leie_exclusions` has 82,896 rows but those rows never flow
+  into `core.exclusion_list`.
+- **Suggested fix** (two-part):
+    1. `scripts/build_exclusion_crosswalk.py` — batch job that
+       SELECTs from `shared.oig_leie_exclusions` + `shared.sam_exclusions`
+       and INSERTs normalized rows into `core.exclusion_list`, keyed on
+       `(source, npi)` or `(source, last_name, first_name, state)` when
+       NPI is absent. Upsert semantics so re-running refreshes without
+       duplication.
+    2. A runtime matcher service (probably in
+       `modules/core-platform/src/exclusions/`) that on each claim ingest
+       event queries `core.exclusion_list` by pharmacy_npi / prescriber_npi
+       and writes a `core.exclusion_matches` row if a hit is found, with
+       confidence level and status `pending`.
+- **Also needed**: schema extension to support OFAC and state lists. The
+  CHECK constraint will block any attempt to insert a row with
+  `source='OFAC'` or `source='CA_MEDICAID_BLOCKED'`. Either drop the
+  constraint or replace it with a more permissive regex.
+- **Repro**:
+  ```bash
+  psql ... -c "SELECT COUNT(*) FROM core.exclusion_list;"  # → 0
+  psql ... -c "SELECT COUNT(*) FROM shared.oig_leie_exclusions;"  # → 82896
+  ```
