@@ -30,21 +30,20 @@ Domain specialists are in `.claude/agents/tier2-specialists/` and are called on-
 
 | Module | Phase | Status | Notes |
 |---|---|---|---|
-| core-platform | 1 | Built | Auth, MFA, audit hash chain, tenants, sessions, API keys, DLQ, middleware — security/audit primitives now mounted and integration-tested |
-| billing | 2 | In progress | AP/AR, journal hash chain, NACHA, 835, state compliance — 50-state compliance tables and accounting adapters missing |
-| payment-processing | 2 | In progress | Vendor adapters, ACH returns (80+ codes), OFAC, business-day calendar |
-| reclaimrx | 2 | In progress | FWA detection, ML scoring, graph analysis, recovery estimation |
-| reporting | 2 | In progress | Dashboards, Star Ratings PDC, Excel/PDF exports — scheduled delivery not wired |
-| ai-nlp | 3 | Built | RAG, extraction, guardrails, NLP pipeline — 20+ advanced features (denial prediction, FHIR PA, fax splitting) not yet implemented; PRD coverage ~48% |
-| dataiq | 3 | Built | Analytics endpoints, dashboards — what-if, NL query, forecast, MTM targeting missing from router |
+| core-platform | 1 | Built | Auth, MFA, audit hash chain, tenants, sessions, API keys, DLQ, middleware — security/audit primitives mounted; notifications + bank-holidays + audit query routers wired (W1) |
+| billing | 2 | Built | AP/AR, journal hash chain, NACHA, 835; event consumers persist real records with per-delivery DB session (W1); 27 router handlers wired to service layer (W2F); all 77 handlers run sync def → threadpool (W3B). 50-state compliance tables still gap |
+| payment-processing | 2 | Built | Vendor adapters, ACH returns, OFAC, business-day calendar; sync handlers run in threadpool (W3B) |
+| reclaimrx | 2 | Built | FWA detection, ML scoring, graph analysis; 8 event consumers subscribed via lifespan (W1); sync handlers threadpooled (W3B) |
+| reporting | 2 | Built | Dashboards, report preview, client-api wired; scheduled-job skeleton (W2C). Excel/PDF rendering deferred |
+| ai-nlp | 3 | Built | RAG, extraction, guardrails, NLP pipeline; 12 router endpoints wired to RagService/guardrails/extraction/usage_logger (W2A). 20+ advanced features (denial prediction, FHIR PA, fax splitting) still gap |
+| dataiq | 3 | Built | Analytics endpoints, dashboards; 34 router endpoints wired to SPC/trend/repricing/KPI/geo (W2B). what-if, NL query, forecast still gap |
 | drug-database | 3 | Built | NDC/pricing/drug interactions complete; compound ingredients missing |
-| member-management | 3 | Built | 834/CSV ingestion, accumulators, 270/271 — consent and COBRA tracking missing |
-| pharmacy-directory | 3 | Built | Lookup, credentialing, PSAO — accreditation, LDD, contract rate history missing |
-| prescriber-directory | 3 | Built | NPPES, state rules — DEA authority check, panel size, supervisory relationships missing; no tenant isolation fence (CR-09) |
-| medical-prescriber-directory | 3 | Not started | No implementation files |
+| member-management | 3 | Built | 834/CSV ingestion, accumulators, 270/271; real CRUD on members/groups/enrollment/cob/coverage (W2D); EligibilityService._query_db real ORM queries (W1). Consent and COBRA tracking still gap |
+| pharmacy-directory | 3 | Built | Lookup, credentialing, PSAO; reviewer_id resolved from JWT identity, audit-trail repaired (W3D). Accreditation, LDD, contract rate history still gap |
+| prescriber-directory | 3 | Built | NPPES, state rules with safe restricted-default for unmodeled states + 10 populous states (W3C). No tenant isolation fence (CR-09 still open) |
 | adjudication-engine | 4 | Not started | Placeholder README only |
 | edi-compliance | 4 | Built | Full X12 suite (835/837/270/271/276/277/278/834/999), AS2+SFTP, NCPDP Batch 1.2, FHIR bridge — test coverage 15% (CR-12); no JWT auth (CR-03) |
-| medical-claims | 4 | Built | Full claim pipeline, CMS-1500/UB-04, accumulator integration — PHI stored plaintext (CR-02); no JWT auth (CR-03) |
+| medical-claims | 4 | Built | Full claim pipeline, CMS-1500/UB-04, accumulator integration; httpx + tenacity HTTP clients with circuit-breaker fallback to pharmacy-directory/member-management/drug-database (W2E). PHI stored plaintext (CR-02); no JWT auth (CR-03) |
 | mtm-clinical | 4 | Not started | Placeholder README only |
 | part-d-pde | 4 | Not started | Placeholder README only |
 | plan-design | 4 | Not started | Placeholder README only |
@@ -58,7 +57,13 @@ Domain specialists are in `.claude/agents/tier2-specialists/` and are called on-
 
 ## Session Remediation (2026-04-14)
 
-Audit-remediation session conducted 2026-04-14 by 4 parallel teammates (Teammate 1: wiring, Teammate 2: events, Teammate 3: models/tests, Teammate 4: docs). Findings catalogued in `docs/audit/full-platform-audit-2026-04-14.md`. Overall platform score: **63/100**. Critical blockers: 13 critical findings (CR-01 through CR-13); see audit doc for full list. This session addresses: CR-13 (this table), H-04 (event catalog), H-06 (HIPAA SOPs), M-10 (module READMEs), M-11 (ERD), M-12 (unused imports), M-14 (dead test), M-21 (Docker image pinning), L-01 (coverage.json gitignore), L-02 (empty agent dir). Critical code wiring issues (CR-01 through CR-12) are addressed by Teammates 1–3.
+Audit-remediation session conducted 2026-04-14 by 4 parallel teammates (Teammate 1: wiring, Teammate 2: events, Teammate 3: models/tests, Teammate 4: docs). Findings catalogued in `docs/audit/full-platform-audit-2026-04-14.md`. Overall starting platform score: **63/100**.
+
+**Wave 1 (CR-01 through CR-13)** — `docs/audit/wave1-remediation-report.md` — addressed: secret rotation, billing event consumers persisting real records, reclaimrx 8 consumers subscribed, eligibility _query_db real queries, core-platform notifications + bank-holidays + audit query routers mounted. Wave 1 score: **76/100**.
+
+**Wave 2 + 3** — `docs/audit/wave2-3-remediation-report.md` — wired 100+ stubbed router endpoints across ai-nlp/dataiq/reporting/member-management/medical-claims/billing; backend CI pipeline (Postgres + Redis services, all 13 modules); sync def + threadpool perf band-aid; prescriber state-rules safe default + 10 populous states; pharmacy-directory reviewer_id resolved from JWT; medical-prescriber-directory removed. Test totals: **3,919 → 4,118 passing, 0 failing**. Wave 2/3 score: **~85/100**.
+
+Still open: CR-02 (PHI plaintext in medical-claims), CR-03 (no JWT on medical-claims + edi-compliance), full async session migration, Phase-4 modules.
 
 ## System
 Multi-module PBM ecosystem. Multi-tenant, API-first. Build local, deploy to Azure.
