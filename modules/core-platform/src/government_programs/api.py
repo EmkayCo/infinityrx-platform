@@ -18,9 +18,12 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 import uuid
 from datetime import date, datetime
 from typing import Any, Optional
+
+_BIN_PATTERN = re.compile(r"\A\d{6}\Z")
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -108,7 +111,7 @@ class GovernmentBinOut(BaseModel):
 
 
 class GovernmentBinCreate(BaseModel):
-    bin: str = Field(pattern=r"\A\d{6}\Z", description="6-digit BIN")
+    bin: str = Field(description="6-digit BIN")
     pcn: Optional[str] = Field(default=None, max_length=20)
     group_number: Optional[str] = Field(default=None, max_length=20)
     plan_type: str
@@ -124,6 +127,13 @@ class GovernmentBinCreate(BaseModel):
     effective_date: Optional[date] = None
     end_date: Optional[date] = None
     notes: Optional[str] = None
+
+    @field_validator("bin")
+    @classmethod
+    def validate_bin(cls, v: str) -> str:
+        if not _BIN_PATTERN.fullmatch(v):
+            raise ValueError("bin must be exactly 6 digits")
+        return v
 
     @field_validator("plan_type")
     @classmethod

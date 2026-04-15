@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 
@@ -65,7 +66,9 @@ class TestGetReconciliationRows:
 
     def test_days_outstanding_computed_for_pending(self, db_session, vendor_adapter):
         sub = _add_submission(db_session, vendor_adapter)
-        _add_settlement(db_session, sub, status="pending")
+        settle = _add_settlement(db_session, sub, status="pending")
+        settle.created_at = datetime.now(UTC) - timedelta(days=5)
+        db_session.flush()
         svc = ReconciliationService(db_session)
         rows = svc.get_reconciliation_rows(TENANT_ID)
         assert rows[0].days_outstanding is not None
