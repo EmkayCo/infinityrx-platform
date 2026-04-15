@@ -56,6 +56,8 @@ MODULES=(
   "drug-database"
   "pharmacy-directory"
   "prescriber-directory"
+  "billing"
+  "payment-processing"
 )
 
 echo "════════════════════════════════════════════════════════════"
@@ -79,21 +81,26 @@ for module in "${MODULES[@]}"; do
   # its own per-dir env and can't find alembic since modules don't ship
   # individual pyproject.toml files.
   #
-  # prescriber-directory's env.py uses a sync engine_from_config(), so it
-  # needs a sync-driver URL (psycopg2). The other modules use async_engine.
-  if [ "$module" = "prescriber-directory" ]; then
-    SYNC_URL="${DATABASE_URL/+asyncpg/+psycopg2}"
-    ( cd "$module_dir" && \
-      DATABASE_URL="$SYNC_URL" \
-      DATABASE_URL_SYNC="$SYNC_URL" \
-      "$REPO_ROOT/.venv/bin/alembic" upgrade head ) || {
-      echo "FAILED: $module"; exit 1
-    }
-  else
-    ( cd "$module_dir" && "$REPO_ROOT/.venv/bin/alembic" upgrade head ) || {
-      echo "FAILED: $module"; exit 1
-    }
-  fi
+  # prescriber-directory, billing, and payment-processing use sync
+  # engine_from_config() in their env.py and need a psycopg2 URL. The other
+  # modules (core-platform, drug-database, pharmacy-directory) use
+  # async_engine_from_config and want the asyncpg URL.
+  case "$module" in
+    prescriber-directory|billing|payment-processing)
+      SYNC_URL="${DATABASE_URL/+asyncpg/+psycopg2}"
+      ( cd "$module_dir" && \
+        DATABASE_URL="$SYNC_URL" \
+        DATABASE_URL_SYNC="$SYNC_URL" \
+        "$REPO_ROOT/.venv/bin/alembic" upgrade head ) || {
+        echo "FAILED: $module"; exit 1
+      }
+      ;;
+    *)
+      ( cd "$module_dir" && "$REPO_ROOT/.venv/bin/alembic" upgrade head ) || {
+        echo "FAILED: $module"; exit 1
+      }
+      ;;
+  esac
 done
 
 echo
