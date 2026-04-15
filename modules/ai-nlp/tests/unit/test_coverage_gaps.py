@@ -352,20 +352,71 @@ class TestOpenAIClientCoverageGaps:
 # ---------------------------------------------------------------------------
 
 
+def _make_mock_db_session() -> AsyncMock:
+    """Build an AsyncMock DB session that returns empty result sets by default."""
+    mock_db = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = []
+    mock_result.scalar_one_or_none.return_value = None
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_db.add = MagicMock()
+    mock_db.commit = AsyncMock()
+    return mock_db
+
+
 class TestRouterEndpointBodies:
+    """Tests for router endpoint response shapes with mocked services."""
+
     @pytest.fixture(scope="class")
-    def client(self) -> Any:
-        from fastapi.testclient import TestClient
+    def app_with_mock_db(self) -> Any:
         from src.app import create_app
-        return TestClient(create_app(), raise_server_exceptions=False)
+        from shared.db.session import get_session
+
+        application = create_app()
+
+        async def _mock_get_session():
+            yield _make_mock_db_session()
+
+        application.dependency_overrides[get_session] = _mock_get_session
+        return application
+
+    @pytest.fixture(scope="class")
+    def client(self, app_with_mock_db: Any) -> Any:
+        from fastapi.testclient import TestClient
+        return TestClient(app_with_mock_db, raise_server_exceptions=False)
 
     def test_chat_returns_json_body(self, client: Any) -> None:
         from uuid import uuid4
-        resp = client.post(
-            "/api/v1/ai/chat",
-            json={"session_id": "s1", "portal_type": "pharmacy", "message": "test"},
-            headers={"x-tenant-id": str(uuid4())},
+        from decimal import Decimal
+        from shared.ai.openai_client import OpenAIResponse
+
+        mock_response = OpenAIResponse(
+            content="Your copay is $10. [Source: claim | abc | 'copay is $10']",
+            model="gpt-4.1",
+            prompt_tokens=100,
+            completion_tokens=50,
+            total_cost_usd=Decimal("0.001"),
         )
+        with patch("src.api.router._openai_client") as mock_factory:
+            mock_client = MagicMock()
+            mock_client.complete = AsyncMock(return_value=mock_response)
+            mock_factory.return_value = mock_client
+            with patch("src.services.rag_service.RagService._retrieve_chunks", return_value=[
+                MagicMock(
+                    id=uuid4(),
+                    tenant_id=uuid4(),
+                    source_type="claim",
+                    source_id=uuid4(),
+                    chunk_text="copay is $10",
+                    similarity=0.95,
+                    section=None,
+                )
+            ]):
+                resp = client.post(
+                    "/api/v1/ai/chat",
+                    json={"session_id": "s1", "portal_type": "pharmacy", "message": "What is my copay?"},
+                    headers={"x-tenant-id": str(uuid4())},
+                )
         assert resp.status_code == 200
         data = resp.json()
         assert "content" in data
@@ -373,44 +424,104 @@ class TestRouterEndpointBodies:
 
     def test_documents_process_returns_json_body(self, client: Any) -> None:
         from uuid import uuid4
-        resp = client.post(
-            "/api/v1/ai/documents/process",
-            json={
-                "document_type": "eob",
-                "extracted_text": "sample",
-                "fields_to_extract": ["member_id"],
-            },
-            headers={"x-tenant-id": str(uuid4())},
+        from decimal import Decimal
+        from shared.ai.openai_client import OpenAIResponse
+
+        mock_response = OpenAIResponse(
+            content='{"member_id": {"value": "M123", "confidence": 0.92}}',
+            model="gpt-4.1",
+            prompt_tokens=80,
+            completion_tokens=40,
+            total_cost_usd=Decimal("0.001"),
         )
+        with patch("src.api.router._openai_client") as mock_factory:
+            mock_client = MagicMock()
+            mock_client.complete = AsyncMock(return_value=mock_response)
+            mock_factory.return_value = mock_client
+            resp = client.post(
+                "/api/v1/ai/documents/process",
+                json={
+                    "document_type": "eob",
+                    "extracted_text": "sample",
+                    "fields_to_extract": ["member_id"],
+                },
+                headers={"x-tenant-id": str(uuid4())},
+            )
         assert resp.status_code == 200
         data = resp.json()
         assert "document_type" in data
 
     def test_text_classify_returns_json(self, client: Any) -> None:
         from uuid import uuid4
-        resp = client.post(
-            "/api/v1/ai/text/classify",
-            json={"text": "prior authorization for Humira"},
-            headers={"x-tenant-id": str(uuid4())},
+        from decimal import Decimal
+        from shared.ai.openai_client import OpenAIResponse
+
+        mock_response = OpenAIResponse(
+            content='{"document_type": {"value": "prior_auth", "confidence": 0.88}}',
+            model="gpt-4.1",
+            prompt_tokens=50,
+            completion_tokens=30,
+            total_cost_usd=Decimal("0.001"),
         )
+        with patch("src.api.router._openai_client") as mock_factory:
+            mock_client = MagicMock()
+            mock_client.complete = AsyncMock(return_value=mock_response)
+            mock_factory.return_value = mock_client
+            resp = client.post(
+                "/api/v1/ai/text/classify",
+                json={"text": "prior authorization for Humira"},
+                headers={"x-tenant-id": str(uuid4())},
+            )
         assert resp.status_code == 200
+        data = resp.json()
+        assert "classifications" in data
 
     def test_text_extract_entities_returns_json(self, client: Any) -> None:
         from uuid import uuid4
-        resp = client.post(
-            "/api/v1/ai/text/extract-entities",
-            json={"text": "member 12345 copay for metformin"},
-            headers={"x-tenant-id": str(uuid4())},
+        from decimal import Decimal
+        from shared.ai.openai_client import OpenAIResponse
+
+        mock_response = OpenAIResponse(
+            content='{"ndc": {"value": "12345678901", "confidence": 0.91}}',
+            model="gpt-4.1",
+            prompt_tokens=50,
+            completion_tokens=30,
+            total_cost_usd=Decimal("0.001"),
         )
+        with patch("src.api.router._openai_client") as mock_factory:
+            mock_client = MagicMock()
+            mock_client.complete = AsyncMock(return_value=mock_response)
+            mock_factory.return_value = mock_client
+            resp = client.post(
+                "/api/v1/ai/text/extract-entities",
+                json={"text": "member 12345 copay for metformin"},
+                headers={"x-tenant-id": str(uuid4())},
+            )
         assert resp.status_code == 200
+        data = resp.json()
+        assert "entities" in data
 
     def test_generate_returns_draft_content(self, client: Any) -> None:
         from uuid import uuid4
-        resp = client.post(
-            "/api/v1/ai/generate",
-            json={"template_name": "PA Request Letter", "context_data": {}},
-            headers={"x-tenant-id": str(uuid4())},
+        from decimal import Decimal
+        from shared.ai.openai_client import OpenAIResponse
+
+        mock_response = OpenAIResponse(
+            content="PA Request Letter for member regarding coverage denial.",
+            model="gpt-4.1",
+            prompt_tokens=100,
+            completion_tokens=60,
+            total_cost_usd=Decimal("0.002"),
         )
+        with patch("src.api.router._openai_client") as mock_factory:
+            mock_client = MagicMock()
+            mock_client.complete = AsyncMock(return_value=mock_response)
+            mock_factory.return_value = mock_client
+            resp = client.post(
+                "/api/v1/ai/generate",
+                json={"template_name": "PA Request Letter", "context_data": {}},
+                headers={"x-tenant-id": str(uuid4())},
+            )
         assert resp.status_code == 200
         data = resp.json()
         assert data["requires_human_review"] is True
