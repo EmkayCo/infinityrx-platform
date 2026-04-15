@@ -7,7 +7,7 @@
 # .env.local, which Settings still loads via env_file. .env.{dev,mock,prod}
 # is the source of truth for everything else.
 
-set -euo pipefail
+set -eo pipefail
 
 ENV_NAME="${1:-dev}"
 REPO_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
@@ -22,6 +22,16 @@ esac
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "Missing $ENV_FILE" >&2
+  exit 2
+fi
+
+# .env.prod uses vault-injected ${PROD_*} placeholders. Local runs cannot
+# resolve them — prod migrations run from the deploy pipeline where the
+# secrets are real. Refuse rather than hand-construct a half-real URL.
+if [ "$ENV_NAME" = "prod" ] && [ -z "${PROD_DB_PASSWORD:-}" ]; then
+  echo "ERROR: prod migrations require PROD_DB_PASSWORD (and other PROD_*)" >&2
+  echo "       to be exported in the shell before this script runs."       >&2
+  echo "       In local development, run against dev or mock instead."     >&2
   exit 2
 fi
 
@@ -69,15 +79,15 @@ for module in "${MODULES[@]}"; do
   # its own per-dir env and can't find alembic since modules don't ship
   # individual pyproject.toml files.
   #
-  # prescriber-directory's env.py uses sync engine_from_config(), so it needs
-  # a sync driver URL (psycopg2). All other modules use async_engine.
+  # prescriber-directory: BLOCKED on missing baseline migration (task #15).
+  # Migration 0004 ALTERs prescriber_dir.prescribers but no prior migration
+  # creates the table. Bootstrap the schema via metadata.create_all() until
+  # a real 0000_baseline.py is added.
   if [ "$module" = "prescriber-directory" ]; then
-    SYNC_URL="${DATABASE_URL/+asyncpg/+psycopg2}"
-    ( cd "$module_dir" && \
-      DATABASE_URL="$SYNC_URL" \
-      DATABASE_URL_SYNC="$SYNC_URL" \
-      "$REPO_ROOT/.venv/bin/alembic" upgrade head ) || {
-      echo "FAILED: $module"; exit 1
+    DATABASE_URL="$DATABASE_URL" \
+      "$REPO_ROOT/.venv/bin/python" \
+      "$REPO_ROOT/infrastructure/scripts/_bootstrap_prescriber_dir.py" || {
+      echo "FAILED: $module (bootstrap)"; exit 1
     }
   else
     ( cd "$module_dir" && "$REPO_ROOT/.venv/bin/alembic" upgrade head ) || {
