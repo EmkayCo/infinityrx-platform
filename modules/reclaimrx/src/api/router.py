@@ -57,7 +57,7 @@ router = APIRouter(prefix="/api/v1/reclaimrx", tags=["reclaimrx"])
 # ── Real-time Evaluation ──────────────────────────────────────────────────────
 
 @router.post("/evaluate", response_model=ClaimEvaluateResponse)
-async def evaluate_claim(
+def evaluate_claim(
     req: ClaimEvaluateRequest,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
@@ -180,7 +180,7 @@ async def evaluate_claim(
 # ── Detection Rules ───────────────────────────────────────────────────────────
 
 @router.get("/rules", response_model=list[DetectionRuleRead])
-async def list_rules(
+def list_rules(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ) -> list:
@@ -191,7 +191,7 @@ async def list_rules(
 
 
 @router.get("/rules/{rule_id}", response_model=DetectionRuleRead)
-async def get_rule(
+def get_rule(
     rule_id: str,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
@@ -207,7 +207,7 @@ async def get_rule(
 # ── Flagged Claims ────────────────────────────────────────────────────────────
 
 @router.get("/flags", response_model=PaginatedResponse[FlaggedClaimRead])
-async def list_flags(
+def list_flags(
     severity: str | None = Query(None),
     rule_code: str | None = Query(None),
     investigation_status: str | None = Query(None),
@@ -238,7 +238,7 @@ async def list_flags(
 
 
 @router.get("/flags/{flag_id}", response_model=FlaggedClaimRead)
-async def get_flag(
+def get_flag(
     flag_id: str,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
@@ -255,7 +255,7 @@ async def get_flag(
 
 
 @router.put("/flags/{flag_id}", response_model=FlaggedClaimRead)
-async def update_flag(
+def update_flag(
     flag_id: str,
     body: FlaggedClaimUpdate,
     db: Session = Depends(get_db),
@@ -285,7 +285,7 @@ async def update_flag(
 # ── Investigations ────────────────────────────────────────────────────────────
 
 @router.get("/investigations", response_model=list[InvestigationRead])
-async def list_investigations(
+def list_investigations(
     status: str | None = Query(None),
     subject_type: str | None = Query(None),
     limit: int = Query(50, le=200),
@@ -304,7 +304,7 @@ async def list_investigations(
 
 
 @router.post("/investigations", response_model=InvestigationRead, status_code=201)
-async def create_investigation(
+def create_investigation(
     body: InvestigationCreate,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_investigator),
@@ -329,7 +329,7 @@ async def create_investigation(
 
 
 @router.get("/investigations/{investigation_id}", response_model=InvestigationRead)
-async def get_investigation(
+def get_investigation(
     investigation_id: str,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
@@ -342,7 +342,7 @@ async def get_investigation(
 
 
 @router.put("/investigations/{investigation_id}", response_model=InvestigationRead)
-async def update_investigation(
+def update_investigation(
     investigation_id: str,
     body: InvestigationUpdate,
     db: Session = Depends(get_db),
@@ -368,7 +368,7 @@ async def update_investigation(
 
 
 @router.get("/investigations/{investigation_id}/timeline", response_model=list[ActivityRead])
-async def get_investigation_timeline(
+def get_investigation_timeline(
     investigation_id: str,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
@@ -378,7 +378,7 @@ async def get_investigation_timeline(
 
 
 @router.post("/investigations/{investigation_id}/activity", response_model=ActivityRead, status_code=201)
-async def add_investigation_activity(
+def add_investigation_activity(
     investigation_id: str,
     body: ActivityCreate,
     db: Session = Depends(get_db),
@@ -400,7 +400,7 @@ async def add_investigation_activity(
 # ── Recoveries ────────────────────────────────────────────────────────────────
 
 @router.get("/recoveries", response_model=list[RecoveryRead])
-async def list_recoveries(
+def list_recoveries(
     investigation_id: str | None = Query(None),
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
@@ -412,7 +412,7 @@ async def list_recoveries(
 
 
 @router.post("/recoveries", response_model=RecoveryRead, status_code=201)
-async def create_recovery(
+def create_recovery(
     body: RecoveryCreate,
     investigation_id: str = Query(...),
     db: Session = Depends(get_db),
@@ -435,7 +435,7 @@ async def create_recovery(
 # ── Payment Holds ─────────────────────────────────────────────────────────────
 
 @router.post("/holds", response_model=PaymentHoldRead, status_code=201)
-async def create_hold(
+def create_hold(
     body: PaymentHoldCreate,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_investigator),
@@ -458,7 +458,7 @@ async def create_hold(
 
 
 @router.get("/holds", response_model=list[PaymentHoldRead])
-async def list_holds(
+def list_holds(
     entity_type: str | None = Query(None),
     entity_id: str | None = Query(None),
     db: Session = Depends(get_db),
@@ -473,7 +473,7 @@ async def list_holds(
 
 
 @router.delete("/holds/{hold_id}", response_model=PaymentHoldRead)
-async def release_hold(
+def release_hold(
     hold_id: str,
     reason: str = Query(default="Released"),
     db: Session = Depends(get_db),
@@ -496,7 +496,7 @@ async def release_hold(
 # ── Entity Profiles ───────────────────────────────────────────────────────────
 
 @router.get("/pharmacy-profiles", response_model=list[PharmacyProfileRead])
-async def list_pharmacy_profiles(
+def list_pharmacy_profiles(
     min_risk_score: int = Query(0, ge=0),
     limit: int = Query(50, le=200),
     offset: int = Query(0, ge=0),
@@ -517,7 +517,7 @@ async def list_pharmacy_profiles(
 
 
 @router.get("/pharmacy-profiles/{npi}", response_model=PharmacyProfileRead)
-async def get_pharmacy_profile(
+def get_pharmacy_profile(
     npi: str,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
@@ -534,7 +534,7 @@ async def get_pharmacy_profile(
 
 
 @router.get("/prescriber-profiles", response_model=list[PrescriberProfileRead])
-async def list_prescriber_profiles(
+def list_prescriber_profiles(
     limit: int = Query(50, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -552,7 +552,7 @@ async def list_prescriber_profiles(
 
 
 @router.get("/member-profiles", response_model=list[MemberProfileRead])
-async def list_member_profiles(
+def list_member_profiles(
     limit: int = Query(50, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -572,7 +572,7 @@ async def list_member_profiles(
 # ── Accumulator ───────────────────────────────────────────────────────────────
 
 @router.get("/accumulator/detections", response_model=list[AccumulatorDetectionRead])
-async def list_accumulator_detections(
+def list_accumulator_detections(
     limit: int = Query(50, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -592,7 +592,7 @@ async def list_accumulator_detections(
 # ── Tips ─────────────────────────────────────────────────────────────────────
 
 @router.post("/tips", response_model=TipRead, status_code=201)
-async def submit_tip(
+def submit_tip(
     body: TipCreate,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
@@ -621,7 +621,7 @@ async def submit_tip(
 
 
 @router.get("/tips", response_model=list[TipRead])
-async def list_tips(
+def list_tips(
     status: str | None = Query(None),
     limit: int = Query(50, le=200),
     db: Session = Depends(get_db),

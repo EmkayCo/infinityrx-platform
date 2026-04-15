@@ -57,7 +57,7 @@ def _tenant(user: CurrentUser) -> str:
 
 
 @router.get("/vendors", response_model=list[VendorAdapterRead])
-async def list_vendors(
+def list_vendors(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_readonly),
 ) -> list[VendorAdapterRead]:
@@ -71,7 +71,7 @@ async def list_vendors(
 
 
 @router.post("/vendors", response_model=VendorAdapterRead, status_code=status.HTTP_201_CREATED)
-async def create_vendor(
+def create_vendor(
     body: VendorAdapterCreate,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_payment_role),
@@ -107,7 +107,7 @@ async def create_vendor(
 
 
 @router.put("/vendors/{vendor_id}", response_model=VendorAdapterRead)
-async def update_vendor(
+def update_vendor(
     vendor_id: str,
     body: VendorAdapterUpdate,
     db: Session = Depends(get_db),
@@ -127,7 +127,7 @@ async def update_vendor(
 
 
 @router.get("/vendors/{vendor_id}/health", response_model=list[VendorHealthRead])
-async def vendor_health(
+def vendor_health(
     vendor_id: str,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_readonly),
@@ -147,7 +147,7 @@ async def vendor_health(
 
 
 @router.get("/submissions", response_model=list[SubmissionRead])
-async def list_submissions(
+def list_submissions(
     status_filter: str | None = None,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_readonly),
@@ -160,7 +160,7 @@ async def list_submissions(
 
 
 @router.get("/submissions/{submission_id}", response_model=SubmissionRead)
-async def get_submission(
+def get_submission(
     submission_id: str,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_readonly),
@@ -172,7 +172,7 @@ async def get_submission(
 
 
 @router.post("/submissions/{submission_id}/retry", response_model=SubmissionRead)
-async def retry_submission(
+def retry_submission(
     submission_id: str,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_payment_role),
@@ -203,7 +203,7 @@ async def retry_submission(
 
 
 @router.get("/settlements", response_model=list[SettlementRead])
-async def list_settlements(
+def list_settlements(
     status_filter: str | None = None,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_readonly),
@@ -216,7 +216,7 @@ async def list_settlements(
 
 
 @router.get("/settlements/pending", response_model=list[SettlementRead])
-async def pending_settlements(
+def pending_settlements(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_readonly),
 ) -> list[SettlementRead]:
@@ -230,7 +230,7 @@ async def pending_settlements(
 
 
 @router.post("/settlements/{settlement_id}/manual", response_model=SettlementRead)
-async def manual_settlement(
+def manual_settlement(
     settlement_id: str,
     body: ManualSettlementRequest,
     db: Session = Depends(get_db),
@@ -255,7 +255,7 @@ async def manual_settlement(
 
 
 @router.get("/returns", response_model=list[SettlementRead])
-async def list_returns(
+def list_returns(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_readonly),
 ) -> list[SettlementRead]:
@@ -269,7 +269,7 @@ async def list_returns(
 
 
 @router.post("/returns", response_model=SettlementRead, status_code=status.HTTP_201_CREATED)
-async def record_return(
+def record_return(
     body: ReturnRecordRequest,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_payment_role),
@@ -312,7 +312,7 @@ async def record_return(
 
 
 @router.get("/returns/codes", response_model=list[AchReturnCodeRead])
-async def list_return_codes(
+def list_return_codes(
     user: CurrentUser = Depends(require_readonly),
     db: Session = Depends(get_db),
 ) -> list[AchReturnCodeRead]:
@@ -341,7 +341,7 @@ async def list_return_codes(
 
 
 @router.get("/enrollments", response_model=list[EnrollmentRead])
-async def list_enrollments(
+def list_enrollments(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_readonly),
 ) -> list[EnrollmentRead]:
@@ -356,7 +356,7 @@ async def list_enrollments(
     response_model=EnrollmentRead,
     status_code=status.HTTP_201_CREATED,
 )
-async def initiate_enrollment(
+def initiate_enrollment(
     entity_id: str,
     vendor_adapter_id: str,
     db: Session = Depends(get_db),
@@ -389,7 +389,7 @@ async def initiate_enrollment(
 
 
 @router.get("/enrollments/unenrolled", response_model=list[EnrollmentRead])
-async def unenrolled_pharmacies(
+def unenrolled_pharmacies(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_readonly),
 ) -> list[EnrollmentRead]:
@@ -408,7 +408,7 @@ async def unenrolled_pharmacies(
 
 
 @router.get("/dashboard")
-async def dashboard(
+def dashboard(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_readonly),
 ) -> dict:
@@ -428,7 +428,7 @@ async def dashboard(
 
 
 @router.get("/dashboard/reconciliation", response_model=list[ReconciliationRow])
-async def reconciliation(
+def reconciliation(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_readonly),
 ) -> list[ReconciliationRow]:
