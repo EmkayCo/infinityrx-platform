@@ -45,8 +45,10 @@ Convention:
   fixed.
 
 ### LOADER-BUG-01a — residual `ndc_11` unique constraint violations
-- **Status**: open
-- **Priority**: P1 (blocks getting from 25K drugs to the expected ~130K)
+- **Status**: **fixed** (commit `d2d7eea`) — drugs went from 25K → 99,038.
+  Some legitimate duplicates by `ndc_11` are still evicted by the
+  last-seen dedup; full count is ~99K vs FDA-published ~130K. Acceptable.
+- **Priority**: was P1 — RESOLVED
 - **Symptom**: After BUG-01 fix, the loader still reports
   `records_errored = 267,264`. Spot-check of the error log shows the
   pattern is `Key (ndc_11)=(00009000309) already exists` —
@@ -72,8 +74,29 @@ Convention:
 ---
 
 ## LOADER-BUG-02 — `scripts/load_ncpdp.py` main table empty after success
+- **Status**: **fixed** (commit `548e782`) — same single-transaction-rollback
+  pattern as BUG-01/03/05. Per-batch `self._db.commit()` added inside
+  both `_upsert_batch` and `_delete_insert_batch`. Result:
+  ncpdp_pharmacies 0 → 81,693, plus all 11 other child tables now
+  populated.
+- **Priority**: was P1 — RESOLVED
+
+### LOADER-BUG-02a — `ncpdp_pharmacy_medicaid` still empty after BUG-02 fix
 - **Status**: open
-- **Priority**: P1
+- **Priority**: P2
+- **Symptom**: After the BUG-02 fix, 12 of 13 NCPDP child tables
+  populate. The exception is `pharmacy_dir.ncpdp_pharmacy_medicaid`:
+  the parser yields multiple rows for the same `(ncpdp_provider_id, state)`
+  tuple, and the table has a unique constraint
+  `uq_ncpdp_md_ncpdp_state` on those columns. Every batch fails with
+  `psycopg2.errors.UniqueViolation: duplicate key value violates unique
+  constraint "uq_ncpdp_md_ncpdp_state" Key (ncpdp_provider_id, state)=(5938797, TX) already exists.`
+- **Suggested fix**: per-batch dedup by `(ncpdp_provider_id, state)`
+  before insert in `_delete_insert_batch` (the medicaid table is in
+  `_DELETE_INSERT_TABLES`, not the upsert path). Same dedup pattern as
+  the FDA NDC `ndc_11` fix from LOADER-BUG-01a.
+
+## LOADER-BUG-02-LEGACY-BODY (kept for reference)
 - **Module**: pharmacy-directory
 - **Loader**: `scripts/load_ncpdp.py` →
   `modules/pharmacy-directory/src/services/ncpdp_ingestion.py`
@@ -167,7 +190,11 @@ Convention:
 ---
 
 ## LOADER-BUG-04 — `scripts/load_new_sources.py rxnorm` uncontrolled download / partial commit
-- **Status**: open
+- **Status**: **partial fix** (commit `53a21d1`) — `--sample N` flag now
+  works for any ingester, not just rxnorm. Verified `--sample 10000`
+  loads 9,995 rxnorm_relationships in 17.5s. Still pending: download
+  caching, resume capability, concept ordering, and the new
+  LOADER-BUG-04a parser-alignment bug found while testing.
 - **Priority**: P2 (rxnorm is supplementary; not a P1 reference dataset)
 - **Module**: drug-database
 - **Loader**: `scripts/load_new_sources.py rxnorm` →
@@ -191,11 +218,61 @@ Convention:
 - **Repro**: `python scripts/load_new_sources.py rxnorm` → check
   `drug_database.rxnorm_concepts` (0) vs `rxnorm_relationships` (455K).
 
+### LOADER-BUG-04a — RxNorm parser column alignment bug
+- **Status**: open
+- **Priority**: P1 for rxnorm load (concepts table is the FK target for
+  the other rxnorm tables — without it, the relationships are orphaned)
+- **Discovered**: while testing the `--sample 10000` fix from
+  LOADER-BUG-04 above. The loader processed 10K records but
+  `rxnorm_concepts` stayed at 0 due to
+  `psycopg2.errors.StringDataRightTruncation: value too long for type
+  character varying(1)` on every concept INSERT.
+- **Root cause**: the parameter values in the failing INSERT show field
+  misalignment. Examples from the actual SQL parameters:
+  - `srl_m1: 'Paracetamol'` — `srl` column (Source Restriction Level)
+    is `VARCHAR(1)` and should be a code like `'N'`, but the parser is
+    putting drug names there
+  - `code_m1: 'Acetaminophen 325 MG Oral Tablet'` — `code` should be a
+    short identifier, not a full name
+  - `tty_m1: 'ATC'` and `sab_m1: None` — these look swapped relative to
+    the canonical RXNCONSO column order
+- **Located in**: `shared/data_ingestion/sources/rxnorm.py` — the
+  RXNCONSO RRF reader. The RxNorm RRF format has a specific column
+  order; the parser is reading them in the wrong sequence somewhere.
+- **Suggested fix**: check the RxNorm RRF spec
+  (https://www.nlm.nih.gov/research/umls/rxnorm/docs/techdoc.html)
+  against the parser's column index map. Likely a one-line off-by-one
+  or a swap of two adjacent fields.
+- **Repro**:
+  ```bash
+  source infrastructure/scripts/switch_env.sh dev
+  python scripts/load_new_sources.py rxnorm --sample 100
+  psql ... -c "SELECT COUNT(*) FROM drug_database.rxnorm_concepts;"  # → 0
+  ```
+
 ---
 
 ## LOADER-BUG-05 — `scripts/load_orange_book.py` silent failure
+- **Status**: **fixed** (commit `4d31d9a`) — same single-transaction-
+  rollback pattern as BUG-01/02/03. Per-batch `self._db.commit()` added
+  to `_upsert_product_batch`, `_replace_patents`, and `_replace_exclusivity`.
+  Result: drug_orange_book 0 → 44,083, drug_patents 0 → 7,858,
+  drug_exclusivity 0 → 1,000.
+- **Priority**: was P1 — RESOLVED
+
+### LOADER-BUG-05a — drug_exclusivity only loads 1K of expected ~10K
 - **Status**: open
-- **Priority**: P1
+- **Priority**: P3
+- **Symptom**: After BUG-05 fix, drug_exclusivity gets 1,000 rows but
+  the FDA Orange Book exclusivity file should have ~10K rows. The
+  loader log shows `records_errored=18,054` — the missing exclusivity
+  rows are being rejected. Same likely cause as LOADER-BUG-01a: the
+  source has duplicate `(appl_type, appl_no, product_no, exclusivity_code,
+  exclusivity_date)` tuples that need per-batch dedup.
+- **Suggested fix**: dedup `enriched` list in `_replace_exclusivity`
+  by the unique-constraint key tuple before insert.
+
+## LOADER-BUG-05-LEGACY-BODY (kept for reference)
 - **Module**: drug-database
 - **Loader**: `scripts/load_orange_book.py`
 - **Symptom**: Loader runs to completion in ~14 seconds, log shows no
