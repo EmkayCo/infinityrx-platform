@@ -92,15 +92,17 @@ class RxNormIngestionService:
                 counters["updated"] += upd
                 counters["errored"] += err
 
-        self._db.flush()
+        # Commit the main loads BEFORE crosswalk build so a crosswalk
+        # failure doesn't roll back 15M concept/relationship/attribute rows.
+        self._db.commit()
 
-        # Build derived crosswalk tables
+        # Build derived crosswalk tables — each in its own SAVEPOINT
         ndc_ins, ndc_err = self._build_ndc_crosswalk()
         atc_ins, atc_err = self._build_atc_crosswalk()
         counters["inserted"] += ndc_ins + atc_ins
         counters["errored"] += ndc_err + atc_err
 
-        self._db.flush()
+        self._db.commit()
 
         logger.info(
             "RxNorm load complete",
@@ -150,9 +152,11 @@ class RxNormIngestionService:
             )
             result = self._db.execute(stmt)
             inserted = result.rowcount
+            self._db.commit()
         except Exception:
+            self._db.rollback()
             logger.exception(
-                "RxNorm concepts upsert error",
+                "RxNorm concepts upsert error (rolled back)",
                 extra={"ingest_source": "rxnorm", "ingest_batch_size": len(batch)},
             )
             errored = len(batch)
@@ -187,9 +191,11 @@ class RxNormIngestionService:
             )
             result = self._db.execute(stmt)
             inserted = result.rowcount
+            self._db.commit()
         except Exception:
+            self._db.rollback()
             logger.exception(
-                "RxNorm relationships upsert error",
+                "RxNorm relationships upsert error (rolled back)",
                 extra={"ingest_source": "rxnorm", "ingest_batch_size": len(batch)},
             )
             errored = len(batch)
@@ -221,9 +227,11 @@ class RxNormIngestionService:
             )
             result = self._db.execute(stmt)
             inserted = result.rowcount
+            self._db.commit()
         except Exception:
+            self._db.rollback()
             logger.exception(
-                "RxNorm attributes upsert error",
+                "RxNorm attributes upsert error (rolled back)",
                 extra={"ingest_source": "rxnorm", "ingest_batch_size": len(batch)},
             )
             errored = len(batch)
@@ -248,9 +256,11 @@ class RxNormIngestionService:
             )
             result = self._db.execute(stmt)
             inserted = result.rowcount
+            self._db.commit()
         except Exception:
+            self._db.rollback()
             logger.exception(
-                "RxNorm semantic types upsert error",
+                "RxNorm semantic types upsert error (rolled back)",
                 extra={"ingest_source": "rxnorm", "ingest_batch_size": len(batch)},
             )
             errored = len(batch)
@@ -261,34 +271,37 @@ class RxNormIngestionService:
 
         Selects RXNSAT rows where ATN='NDC', joins to preferred atom in RXNCONSO
         (where ISPREF='Y' and LAT='ENG') for drug name and TTY.
-        Uses INSERT...ON CONFLICT DO UPDATE.
+        Uses INSERT...ON CONFLICT DO UPDATE. Wrapped in SAVEPOINT so failure
+        does not poison the outer transaction.
         """
         try:
-            sql = text("""
-                INSERT INTO drug_database.rxnorm_ndc_crosswalk (ndc_11, rxcui, drug_name, tty, created_at, updated_at)
-                SELECT
-                    SUBSTRING(ra.atv FROM 1 FOR 11) AS ndc_11,
-                    ra.rxcui,
-                    rc.str AS drug_name,
-                    rc.tty,
-                    NOW(),
-                    NOW()
-                FROM drug_database.rxnorm_attributes ra
-                LEFT JOIN drug_database.rxnorm_concepts rc
-                    ON rc.rxcui = ra.rxcui
-                    AND rc.ispref = 'Y'
-                    AND rc.lat = 'ENG'
-                WHERE ra.atn = 'NDC'
-                  AND ra.atv IS NOT NULL
-                  AND LENGTH(ra.atv) >= 11
-                ON CONFLICT (ndc_11) DO UPDATE
-                    SET rxcui = EXCLUDED.rxcui,
-                        drug_name = EXCLUDED.drug_name,
-                        tty = EXCLUDED.tty,
-                        updated_at = NOW()
-            """)
-            result = self._db.execute(sql)
-            return result.rowcount, 0
+            with self._db.begin_nested():
+                sql = text("""
+                    INSERT INTO drug_database.rxnorm_ndc_crosswalk (ndc_11, rxcui, drug_name, tty, created_at, updated_at)
+                    SELECT DISTINCT ON (SUBSTRING(ra.atv FROM 1 FOR 11))
+                        SUBSTRING(ra.atv FROM 1 FOR 11) AS ndc_11,
+                        ra.rxcui,
+                        rc.str AS drug_name,
+                        rc.tty,
+                        NOW(),
+                        NOW()
+                    FROM drug_database.rxnorm_attributes ra
+                    LEFT JOIN drug_database.rxnorm_concepts rc
+                        ON rc.rxcui = ra.rxcui
+                        AND rc.ispref = 'Y'
+                        AND rc.lat = 'ENG'
+                    WHERE ra.atn = 'NDC'
+                      AND ra.atv IS NOT NULL
+                      AND LENGTH(ra.atv) >= 11
+                    ORDER BY SUBSTRING(ra.atv FROM 1 FOR 11), ra.rxcui
+                    ON CONFLICT (ndc_11) DO UPDATE
+                        SET rxcui = EXCLUDED.rxcui,
+                            drug_name = EXCLUDED.drug_name,
+                            tty = EXCLUDED.tty,
+                            updated_at = NOW()
+                """)
+                result = self._db.execute(sql)
+                return result.rowcount, 0
         except Exception:
             logger.exception(
                 "RxNorm NDC crosswalk build error",
@@ -305,41 +318,43 @@ class RxNormIngestionService:
         Uses INSERT...ON CONFLICT DO UPDATE.
         """
         try:
-            sql = text("""
-                INSERT INTO drug_database.rxnorm_atc_crosswalk (rxcui, atc_code, atc_level, atc_name, created_at, updated_at)
-                SELECT
-                    rxcui,
-                    atc_code,
-                    CASE
-                        WHEN LENGTH(atc_code) = 1 THEN '1'
-                        WHEN LENGTH(atc_code) = 3 THEN '2'
-                        WHEN LENGTH(atc_code) = 4 THEN '3'
-                        WHEN LENGTH(atc_code) = 5 THEN '4'
-                        ELSE '5'
-                    END AS atc_level,
-                    atc_name,
-                    NOW(),
-                    NOW()
-                FROM (
-                    SELECT ra.rxcui, ra.atv AS atc_code, rc.str AS atc_name
-                    FROM drug_database.rxnorm_attributes ra
-                    LEFT JOIN drug_database.rxnorm_concepts rc
-                        ON rc.rxcui = ra.rxcui AND rc.sab = 'ATC' AND rc.ispref = 'Y'
-                    WHERE ra.atn = 'ATC' AND ra.atv IS NOT NULL
+            with self._db.begin_nested():
+                sql = text("""
+                    INSERT INTO drug_database.rxnorm_atc_crosswalk (rxcui, atc_code, atc_level, atc_name, created_at, updated_at)
+                    SELECT DISTINCT ON (rxcui, atc_code)
+                        rxcui,
+                        atc_code,
+                        CASE
+                            WHEN LENGTH(atc_code) = 1 THEN '1'
+                            WHEN LENGTH(atc_code) = 3 THEN '2'
+                            WHEN LENGTH(atc_code) = 4 THEN '3'
+                            WHEN LENGTH(atc_code) = 5 THEN '4'
+                            ELSE '5'
+                        END AS atc_level,
+                        atc_name,
+                        NOW(),
+                        NOW()
+                    FROM (
+                        SELECT ra.rxcui, ra.atv AS atc_code, rc.str AS atc_name
+                        FROM drug_database.rxnorm_attributes ra
+                        LEFT JOIN drug_database.rxnorm_concepts rc
+                            ON rc.rxcui = ra.rxcui AND rc.sab = 'ATC' AND rc.ispref = 'Y'
+                        WHERE ra.atn = 'ATC' AND ra.atv IS NOT NULL
 
-                    UNION
+                        UNION
 
-                    SELECT rc.rxcui, rc.code AS atc_code, rc.str AS atc_name
-                    FROM drug_database.rxnorm_concepts rc
-                    WHERE rc.sab = 'ATC' AND rc.code IS NOT NULL
-                ) combined
-                ON CONFLICT ON CONSTRAINT uq_rxnorm_atc_crosswalk DO UPDATE
-                    SET atc_level = EXCLUDED.atc_level,
-                        atc_name = EXCLUDED.atc_name,
-                        updated_at = NOW()
-            """)
-            result = self._db.execute(sql)
-            return result.rowcount, 0
+                        SELECT rc.rxcui, rc.code AS atc_code, rc.str AS atc_name
+                        FROM drug_database.rxnorm_concepts rc
+                        WHERE rc.sab = 'ATC' AND rc.code IS NOT NULL
+                    ) combined
+                    ORDER BY rxcui, atc_code
+                    ON CONFLICT ON CONSTRAINT uq_rxnorm_atc_crosswalk DO UPDATE
+                        SET atc_level = EXCLUDED.atc_level,
+                            atc_name = EXCLUDED.atc_name,
+                            updated_at = NOW()
+                """)
+                result = self._db.execute(sql)
+                return result.rowcount, 0
         except Exception:
             logger.exception(
                 "RxNorm ATC crosswalk build error",
