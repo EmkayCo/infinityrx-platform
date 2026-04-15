@@ -121,6 +121,17 @@ class NADACIngestionService:
         records_errored = 0
         error_samples: list[dict[str, Any]] = []
 
+        # BUG-03a DIAG: bucket error counts by exit path so we can see
+        # which one owns the 478K.
+        diag_counters = {
+            "validation_valueerror": 0,
+            "upsert_batch_exception": 0,
+            "final_flush_exception": 0,
+        }
+        diag_batch_num = 0
+        diag_first_validation_error: str | None = None
+        diag_first_batch_error: str | None = None
+
         batch: list[dict[str, Any]] = []
 
         for raw in records:
@@ -129,6 +140,13 @@ class NADACIngestionService:
                 row = self._validate_nadac_row(raw)
             except ValueError as exc:
                 records_errored += 1
+                diag_counters["validation_valueerror"] += 1
+                if diag_first_validation_error is None:
+                    diag_first_validation_error = f"{type(exc).__name__}: {exc} (raw keys={list(raw.keys())[:5]})"
+                    logger.info(
+                        f"DIAG-03a: first validation ValueError at row "
+                        f"{records_processed}: {diag_first_validation_error}"
+                    )
                 if len(error_samples) < 10:
                     error_samples.append({
                         "field": "nadac_row",
@@ -139,19 +157,55 @@ class NADACIngestionService:
 
             batch.append(row)
             if len(batch) >= _BATCH_SIZE:
-                ins, upd, err = self._upsert_batch(batch, error_samples)
+                diag_batch_num += 1
+                ins, upd, err = self._upsert_batch(
+                    batch, error_samples,
+                    _diag_batch_num=diag_batch_num,
+                    _diag_counters=diag_counters,
+                    _diag_first_error_holder=lambda m: None if diag_first_batch_error is not None else logger.info(
+                        f"DIAG-03a: first batch-level error at batch {diag_batch_num}: {m}"
+                    ),
+                )
                 records_inserted += ins
                 records_updated += upd
                 records_errored += err
+                if err > 0:
+                    logger.info(
+                        f"DIAG-03a: records_errored += {err} from MAIN-LOOP "
+                        f"batch #{diag_batch_num} (processed={records_processed})"
+                    )
                 batch = []
 
         if batch:
-            ins, upd, err = self._upsert_batch(batch, error_samples)
+            diag_batch_num += 1
+            ins, upd, err = self._upsert_batch(
+                batch, error_samples,
+                _diag_batch_num=diag_batch_num,
+                _diag_counters=diag_counters,
+                _diag_first_error_holder=lambda m: logger.info(
+                    f"DIAG-03a: first batch-level error at FINAL-FLUSH batch {diag_batch_num}: {m}"
+                ),
+            )
             records_inserted += ins
             records_updated += upd
             records_errored += err
+            if err > 0:
+                diag_counters["final_flush_exception"] += err
+                logger.info(
+                    f"DIAG-03a: records_errored += {err} from FINAL-FLUSH "
+                    f"batch #{diag_batch_num}"
+                )
 
         self._db.commit()
+
+        logger.info(
+            "DIAG-03a summary: "
+            f"validation_valueerror={diag_counters['validation_valueerror']} "
+            f"upsert_batch_exception={diag_counters['upsert_batch_exception']} "
+            f"final_flush_exception={diag_counters['final_flush_exception']} "
+            f"total_batches={diag_batch_num} "
+            f"total_errored={records_errored}"
+        )
 
         logger.info(
             "NADAC ingestion load complete",
@@ -207,6 +261,10 @@ class NADACIngestionService:
         self,
         rows: list[dict[str, Any]],
         error_samples: list[dict[str, Any]],
+        *,
+        _diag_batch_num: int | None = None,
+        _diag_counters: dict[str, int] | None = None,
+        _diag_first_error_holder: Any = None,
     ) -> tuple[int, int, int]:
         """Upsert a batch of validated NADAC rows.
 
@@ -272,6 +330,18 @@ class NADACIngestionService:
 
         except Exception as exc:
             errored += len(rows)
+            # BUG-03a DIAG: log the exact exception type + message at the
+            # increment site so we can see what's causing the 478K.
+            msg = f"{type(exc).__name__}: {str(exc)[:400]}"
+            logger.info(
+                f"DIAG-03a: _upsert_batch EXCEPTION at batch #{_diag_batch_num} "
+                f"batch_size={len(rows)} first_row_ndc={rows[0].get('ndc_11') if rows else None} | {msg}"
+            )
+            if _diag_counters is not None:
+                _diag_counters["upsert_batch_exception"] += len(rows)
+            if _diag_first_error_holder is not None:
+                _diag_first_error_holder(msg)
+
             logger.exception(
                 "NADAC batch upsert failed",
                 extra={
