@@ -231,7 +231,13 @@ class TestEventConsumers:
     @pytest.mark.asyncio
     async def test_handle_claim_adjudicated_logs_and_returns(self) -> None:
         envelope = _make_envelope("claim.adjudicated")
-        await handle_claim_adjudicated(envelope, db=MagicMock(), bus=MagicMock())
+        envelope.payload.update(
+            auth_number="AUTH1",
+            claim_type="new",
+            net_amount="10.00",
+            pharmacy_npi="1234567890",
+        )
+        await handle_claim_adjudicated(envelope, db=None, bus=MagicMock())
 
     @pytest.mark.asyncio
     async def test_handle_payment_vendor_confirmed_logs_and_returns(self) -> None:
@@ -246,12 +252,14 @@ class TestEventConsumers:
     @pytest.mark.asyncio
     async def test_handle_claim_reversed_logs_and_returns(self) -> None:
         envelope = _make_envelope("claim.reversed")
-        await handle_claim_reversed(envelope, db=MagicMock(), bus=MagicMock())
+        envelope.payload.update(auth_number="AUTH1")
+        await handle_claim_reversed(envelope, db=None, bus=MagicMock())
 
     @pytest.mark.asyncio
     async def test_handle_payment_auto_posted_logs_and_returns(self) -> None:
         envelope = _make_envelope("payment.auto_posted")
-        await handle_payment_auto_posted(envelope, db=MagicMock(), bus=MagicMock())
+        envelope.payload.update(claim_id=str(uuid.uuid4()), paid_amount="5.00")
+        await handle_payment_auto_posted(envelope, db=None, bus=MagicMock())
 
 
 class TestScheduledJobs:
