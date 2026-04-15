@@ -16,11 +16,12 @@ Convention:
 ---
 
 ## LOADER-BUG-01 — `scripts/load_fda_ndc.py` foreign-key violation
-- **Status**: open
+- **Status**: **partial fix** (commit `b6de01c`) — primary FK bug resolved,
+  residual `ndc_11` dedup issue tracked as LOADER-BUG-01a below
 - **Priority**: P1
 - **Module**: drug-database
 - **Loader**: `scripts/load_fda_ndc.py`
-- **Symptom**: Loader reports `status=completed records_inserted=25,000
+- **Symptom (original)**: Loader reports `status=completed records_inserted=25,000
   records_errored=301,264 duration_seconds=46.8s`. After the run,
   `drug_database.drugs` has **0 rows** and the log is full of
   `psycopg2.errors.ForeignKeyViolation: insert or update on table
@@ -34,17 +35,38 @@ Convention:
   in a different batch from its parent drug), the FK fails and the entire
   batch transaction rolls back — including all the drug rows. Subsequent
   batches' drug inserts then re-collide, etc.
-- **Suggested fix**: split the loader into two passes — first ingest ALL
-  drugs (commit), then ingest drug_packages (commit), then drug_active_
-  ingredients, then drug_pharm_classes. The dependency order is:
-  drugs → drug_packages → {drug_active_ingredients, drug_pharm_classes}.
-  Alternatively, set the FK constraints to DEFERRABLE INITIALLY DEFERRED
-  and commit at the end of the entire run.
+- **Fix applied** (commit `b6de01c`): per-batch `self._db.commit()` inside
+  both `_upsert_drug_batch` and `_insert_packages` in
+  `modules/drug-database/src/services/ndc_ingestion.py`. A failure in
+  batch N now only rolls back that batch — prior batches are durable.
+- **Result**: drugs went from 0 → 25,050. drug_packages 0 → 34,000.
+  drug_active_ingredients 0 → 35,117. drug_pharm_classes 0 → 61,673.
+  FK integrity 100% (0 orphan drug_packages). The original FK bug is
+  fixed.
+
+### LOADER-BUG-01a — residual `ndc_11` unique constraint violations
+- **Status**: open
+- **Priority**: P1 (blocks getting from 25K drugs to the expected ~130K)
+- **Symptom**: After BUG-01 fix, the loader still reports
+  `records_errored = 267,264`. Spot-check of the error log shows the
+  pattern is `Key (ndc_11)=(00009000309) already exists` —
+  UniqueViolation on `uq_drugs_ndc_11`.
+- **Root cause**: The FDA NDC source file legitimately contains multiple
+  `product_id` values that share the same `ndc_11` (relabeled or
+  reformulated products). The loader's
+  `pg_insert(Drug.__table__).on_conflict_do_update(index_elements=["product_id"])`
+  resolves conflicts on `product_id` only — when two different
+  `product_id`s collide on `ndc_11`, the UNIQUE index `uq_drugs_ndc_11`
+  fires and the batch fails.
+- **Suggested fix**: per-batch dedup by `ndc_11` BEFORE insertion (keep
+  the row with the latest `start_marketing_date`, fall back to last-seen
+  on ties). The dedup pattern already exists in
+  `modules/pharmacy-directory/src/services/ncpdp_ingestion.py`
+  `_insert_packages` for the same reason.
 - **Repro**:
   ```bash
   source infrastructure/scripts/switch_env.sh dev
-  python scripts/load_fda_ndc.py
-  psql ... -c "SELECT COUNT(*) FROM drug_database.drugs;"  # → 0
+  python scripts/load_fda_ndc.py 2>&1 | grep "already exists" | wc -l
   ```
 
 ---
@@ -83,28 +105,48 @@ Convention:
 
 ---
 
-## LOADER-BUG-03 — `scripts/load_cms_nadac.py` missing ON CONFLICT, infinite retry loop
-- **Status**: open
-- **Priority**: P1
+## LOADER-BUG-03 — `scripts/load_cms_nadac.py` `StringDataRightTruncation`
+- **Status**: **fixed** (commit `b562e58`)
+- **Priority**: P1 (was)
 - **Module**: drug-database
 - **Loader**: `scripts/load_cms_nadac.py`
-- **Symptom**: After ~30 seconds of progress the log starts emitting
-  `psycopg2.errors.UniqueViolation: duplicate key value violates unique
-  constraint`. SQLAlchemy dumps every parameter from the failing batch
-  (~14,000 params per dump) — the log file grows by ~80 MB/minute. After
-  4 minutes the log was 474 MB and the loader was still running. Killed
-  manually.
-- **Root cause**: the loader is doing plain `INSERT` instead of
-  `INSERT ... ON CONFLICT DO UPDATE`. NADAC publishes a daily file with
-  the same NDCs each day; on the second run (or after a partial first
-  run), the unique constraint on `(ndc_11, effective_date)` collides.
-- **Suggested fix**: rewrite `_flush_buffer` (or wherever the insert
-  happens) to use the postgres dialect's
-  `insert(...).on_conflict_do_update(...)`. Same pattern as the NCPDP
-  upsert path. Also: cap the SQLAlchemy error log truncation so a single
-  failed batch doesn't dump 80 MB.
-- **Repro**: `python scripts/load_cms_nadac.py` → wait ~30s → tail the
-  log file and watch it explode.
+- **Original tracking note**: "missing ON CONFLICT" — this was wrong.
+  The loader already used `pg_insert().on_conflict_do_update()`. The
+  ACTUAL bug was a schema-vs-data mismatch.
+- **Real root cause**: `drug_nadac_pricing.pharmacy_type_indicator` and
+  `drug_nadac_pricing.otc` were declared `VARCHAR(1)`, but the CMS NADAC
+  source file publishes multi-character values for
+  `pharmacy_type_indicator` (notably `C/I` meaning "Chain/Independent
+  combined", which is 3 characters). Every batch hit
+  `psycopg2.errors.StringDataRightTruncation: value too long for type
+  character varying(1)`. The service's `rollback()` retried on a fresh
+  transaction and repeated the same error — 474 MB of SQLAlchemy error
+  dumps in 4 minutes.
+- **Fix applied**:
+  1. New migration
+     `modules/drug-database/alembic/versions/0006_widen_nadac_indicators.py`
+     widens both `pharmacy_type_indicator` and `otc` to `VARCHAR(5)` on
+     `drug_nadac_pricing` AND `drug_nadac_pricing_history`.
+  2. Per-batch `self._db.commit()` added inside `_upsert_batch` in
+     `modules/drug-database/src/services/pricing_ingestion.py` (same
+     pattern as the BUG-01 fix to `ndc_ingestion.py`).
+- **Result**: 0 rows → 26,044 inserted + 338,487 updated. Log no longer
+  explodes. Duration 550s for the full file.
+
+### LOADER-BUG-03a — residual 478K errored NADAC rows
+- **Status**: open
+- **Priority**: P2 (the loader works end-to-end and 364K rows
+  successfully process; the residual errors are likely additional
+  data-quality patterns to find)
+- **Symptom**: `records_errored = 478,354` in the post-fix run. Source
+  file has ~2M rows; ~17% are erroring. Cause unknown — needs error
+  log review to find the pattern. Could be more column-width issues,
+  could be invalid date parses, could be something else.
+- **Suggested fix**: capture the first 100 distinct error messages with
+  a one-off log-grepping pass, group by error type, fix the top 1-2
+  patterns. Likely candidates: more `VARCHAR(N)` columns whose actual
+  data exceeds N, or `parse_date` failing on placeholder rows.
+- **Repro**: `python scripts/load_cms_nadac.py 2>&1 | grep -E "Error|Exception" | sort | uniq -c | sort -rn | head -20`
 
 ---
 
@@ -156,22 +198,36 @@ Convention:
 ---
 
 ## LOADER-BUG-06 — `scripts/load_cms_asp.py` missing xlrd dep
-- **Status**: **fixed** (in `pyproject.toml` commit `ec48e9d`)
+- **Status**: **fixed and verified** (xlrd added in `ec48e9d`,
+  end-to-end run committed in `3666d1c`)
 - **Priority**: P3
 - **Module**: drug-database
 - **Loader**: `scripts/load_cms_asp.py`
 - **Symptom**: Loader exits in <1s with `xlrd is required to parse .xls
   files. Install it with: pip install xlrd`.
 - **Fix applied**: `uv add xlrd` — added to `pyproject.toml` dependencies.
-- **Verification**: not yet re-run end-to-end. Should now reach the parse
-  step. Whether the parsed data actually commits to
-  `drug_database.drug_asp_pricing` is a separate question.
+- **Verification** (commit `3666d1c`): full run against dev produced
+  `records_inserted = 885`, `records_errored = 0`,
+  `drug_database.drug_asp_pricing = 885 rows`. CLOSED.
 
 ---
 
 ## MISSING-MIGRATIONS-01 — modules/billing/ has no alembic history
-- **Status**: open (worked around)
-- **Priority**: **P1** — must be resolved before any feature work touches
+- **Status**: **fixed** (commit `7807b8e`)
+- **Priority**: was P1 — RESOLVED. Feature work can now touch billing
+  schema safely.
+- **Resolution**: created
+  `modules/billing/alembic.ini`, `alembic/env.py`,
+  `alembic/script.py.mako`, and
+  `alembic/versions/0001_billing_baseline.py` (723 lines, 25 tables in FK
+  dependency order with ondelete policies). Applied to dev (fresh
+  upgrade), mock (alembic stamp because `_bootstrap_billing.py` had
+  already created the rows and we needed to preserve the 100K demo
+  claim_records), and prod (fresh upgrade). Removed
+  `infrastructure/scripts/_bootstrap_billing.py`. Removed dead
+  `modules/billing/migrations/` legacy stub.
+- **Historical context** (kept for reference): **P1** — must have been
+  resolved before any feature work touches
   the billing schema. The `_bootstrap_billing.py` workaround is acceptable
   for environment scaffolding but NOT for ongoing development:
     * `metadata.create_all()` cannot evolve the schema — every column
@@ -215,8 +271,19 @@ Convention:
 ---
 
 ## MISSING-MIGRATIONS-02 — modules/payment-processing/ has no alembic history (OFAC tables)
-- **Status**: open
-- **Priority**: P2 (same blast radius as billing but the OFAC path is not
+- **Status**: **fixed** (commit `7807b8e`)
+- **Priority**: was P2 — RESOLVED.
+- **Resolution**: created
+  `modules/payment-processing/alembic.ini`, `alembic/env.py`,
+  `alembic/script.py.mako`, and
+  `alembic/versions/0001_payment_processing_baseline.py` (280 lines, 8
+  tables: vendor_adapters, ach_return_codes, ofac_sdn, submissions,
+  settlements, vendor_health_log, ofac_alerts, payee_enrollments).
+  Applied cleanly to dev/mock/prod. Both OFAC tables now exist — when
+  the OFAC SDN loader is built (still tracked separately), it has
+  somewhere to write. Added `payment-processing` to
+  `infrastructure/scripts/run_migrations.sh` MODULES list.
+- **Historical context** (kept for reference): P2 (same blast radius as billing but the OFAC path is not
   on the demo critical path)
 - **Module**: payment-processing
 - **Symptom**: `modules/payment-processing/src/models/tables.py` defines
@@ -248,7 +315,8 @@ Convention:
 ---
 
 ## MISSING-LOADER-07 — `shared.sam_exclusions` has no loader script
-- **Status**: open
+- **Status**: **wrapper written** (commit `ecd411d`), blocked on
+  `SAM_API_KEY` env var
 - **Priority**: P1 prod (SAM is half of the federal exclusion-screening
   pair — OIG catches healthcare-specific exclusions, SAM catches
   debarments across all federal programs. You can't ship prod without
@@ -266,20 +334,23 @@ Convention:
   API key stored in the `SAM_API_KEY` env var — already declared in
   `shared/config.py` Settings). CSV dumps also available via
   sam.gov/data-services/Exclusions/Public.
-- **Suggested fix**: copy `scripts/load_oig_leie.py` as a template, swap
-  in `SamExclusionsIngester` from the existing source file, and add a
-  `sam` target to `load_new_sources.py` for consistency. Expected row
-  count: 120,000–160,000 active exclusions as of 2026-01.
-- **Repro**:
-  ```bash
-  grep -rn "SamExclusions" shared/data_ingestion/sources/
-  ls scripts/load_*sam*  # → empty
-  ```
+- **Wrapper status** (`scripts/load_sam.py`, commit `ecd411d`):
+  CLI wrapper exists, mirrors `scripts/load_oig_leie.py` shape, calls
+  `SamExclusionsIngester(db_session=session).run(run_type="manual_trigger")`.
+  Verified that the wrapper raises a clear error when `SAM_API_KEY` is
+  unset:
+  `_SamApiKeyMissingError: SAM_API_KEY environment variable not configured.
+  Register at sam.gov/api to obtain a key.`
+- **Remaining blocker**: register at sam.gov/api → free API key → set
+  `SAM_API_KEY=...` in `.env.dev/.env.mock/.env.prod` → run loader.
+  Expected row count after key obtained: 120,000–160,000 active
+  exclusions as of 2026-01.
 
 ---
 
 ## MISSING-LOADER-08 — `shared.government_program_bins` has no state Medicaid loader
-- **Status**: open (partial shim workaround in place)
+- **Status**: **wrapper written and working** (commit `ecd411d`); 43 of
+  56 states covered; 51 row-validation errors to clean up
 - **Priority**: P1 prod (Medicaid claim routing cannot function without
   the full BIN/PCN table — every Medicaid claim has to be matched to the
   correct state program before adjudication)
@@ -303,15 +374,48 @@ Convention:
   function. The admin API route
   `modules/core-platform/src/government_programs/api.py` already wires
   the upload path.
-- **Suggested fix**: write `scripts/load_medicaid_bins.py` that
-  instantiates `StateMedicaidBinLoader`, passes the curated CSV under
-  `data/reference/medicaid/`, and reports coverage
-  (`summary.states_covered` / `summary.states_missing`).
-- **Repro**:
-  ```bash
-  ls scripts/load_*medicaid*  # → empty
-  ls data/reference/medicaid/  # → check for source CSVs
-  ```
+- **Wrapper status** (`scripts/load_medicaid_bins.py`, commit `ecd411d`):
+  CLI wrapper exists, iterates over the 5 regional CSVs under
+  `data/reference/medicaid/` (midwest, northeast, south_central,
+  southeast, west) and calls `StateMedicaidBinLoader.load_csv()` per
+  region.
+- **Prerequisite migration** (commit `ecd411d`):
+  `modules/core-platform/alembic/versions/0011_gpb_id_to_uuid.py`
+  fixes a schema drift between migration 0009 (created `id` as
+  `VARCHAR(36)`) and the ORM model (declared `PG_UUID(as_uuid=True)`).
+  Without this, ORM upserts through the model failed with `operator
+  does not exist: character varying = uuid`.
+- **Result** (against dev, mock, prod — all three now identical):
+  - rows_upserted: 219
+  - states covered: 43 / 56
+  - states missing: AS, AZ, CO, CT, GU, ID, ME, MP, NH, PR, VI, VT, WY
+  - validation errors: 51 (specific source-CSV row issues —
+    LOADER-BUG-08a below)
+- **The `seed_reference_shim.py` 10-state seed is now superseded** by
+  this loader for any environment with the regional CSVs present. The
+  shim's 10 rows still exist and the loader's ON CONFLICT DO UPDATE
+  refreshes them.
+
+### LOADER-BUG-08a — 51 row validation errors in regional Medicaid CSVs
+- **Status**: open
+- **Priority**: P3 (clean-up, not a blocker)
+- **Symptom**: `_validate_row()` rejects 51 rows across the 5 regional
+  CSVs. Northeast: 10 errors, south_central: 16, west: 23, midwest: 2.
+  Cause is per-row data-quality issues in the source CSVs themselves
+  (missing required fields, malformed BIN values, etc.).
+- **Suggested fix**: dump the rejected rows + their error reasons,
+  audit each one against the original source URL in the row's `source`
+  column, fix the CSV. This is data-curation work, not loader work.
+
+### LOADER-BUG-08b — 13 states/territories with no Medicaid coverage
+- **Status**: open
+- **Priority**: P2 (claim routing for these states is silently broken)
+- **Missing**: AS, AZ, CO, CT, GU, ID, ME, MP, NH, PR, VI, VT, WY
+- **Suggested fix**: research each state's Medicaid PBM / FFS BIN/PCN
+  configuration from the state pharmacy provider portal, add rows to
+  the appropriate regional CSV under `data/reference/medicaid/`. Most
+  of the missing list is small/territorial; the noteworthy gaps are
+  AZ (large state) and CT/CO (mid-size).
 
 ---
 
