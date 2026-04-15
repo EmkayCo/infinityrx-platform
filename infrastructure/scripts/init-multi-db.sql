@@ -1,28 +1,54 @@
 -- ---------------------------------------------------------------------------
--- IFX local-dev Postgres bootstrap — creates THREE separate databases
+-- IFX local-dev Postgres bootstrap — three databases, one cluster.
 -- ---------------------------------------------------------------------------
--- prod : clean slate, awaits first real production batch
--- dev  : developer/testing sandbox, freely re-seedable
--- mock : demo environment, populated with SCRAMBLED claims (no real PHI)
+-- prod : real PHI, real money. Awaits first production batch.
+-- dev  : developer/testing sandbox. Synthetic test data only.
+-- mock : demo environment. Sanitized synthetic data from scramble_claims.py.
+--
+-- Architecture (see CLAUDE.md → Environment Architecture):
+--
+--   ┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐
+--   │   infinityrx_prod   │ │   infinityrx_dev    │ │   infinityrx_mock   │
+--   │  owner ifx_prod_app │ │  owner ifx_dev_app  │ │  owner ifx_mock_app │
+--   ├─────────────────────┤ ├─────────────────────┤ ├─────────────────────┤
+--   │ schema: reference   │ │ schema: reference   │ │ schema: reference   │
+--   │  (read-only via     │ │  (read-only via     │ │  (read-only via     │
+--   │   ifx_ref_reader)   │ │   ifx_ref_reader)   │ │   ifx_ref_reader)   │
+--   ├─────────────────────┤ ├─────────────────────┤ ├─────────────────────┤
+--   │ schema: core, ...   │ │ schema: core, ...   │ │ schema: core, ...   │
+--   │ schema: billing,    │ │ schema: billing,    │ │ schema: billing,    │
+--   │   payment_proc, ... │ │   payment_proc, ... │ │   payment_proc, ... │
+--   │ (full CRUD via      │ │ (full CRUD via      │ │ (full CRUD via      │
+--   │   ifx_prod_app)     │ │   ifx_dev_app)      │ │   ifx_mock_app)     │
+--   └─────────────────────┘ └─────────────────────┘ └─────────────────────┘
+--
+-- Reference data (drug NDC, NPPES prescribers, NCPDP pharmacies, CMS, etc.)
+-- is logically the same across all three environments — public/licensed data
+-- loaded from raw files in data/raw/. Physically replicated per database to
+-- avoid cross-database queries.
 --
 -- This script runs ONCE on first container start (when the postgres data
--- volume is empty). To re-run, you must `docker compose down -v` first.
---
--- Schema names below MUST match the SCHEMA constants in each module's
--- src/models/*.py. Keep this list in sync with init-db.sql (legacy single-db).
+-- volume is empty). To re-run: docker compose down -v
 -- ---------------------------------------------------------------------------
 
--- Per-environment roles for credential isolation. Each role can only log into
--- its own database. Real production passwords are loaded via the deploy vault;
--- the local-dev passwords below are baked into .env.{dev,mock,prod} so they
--- match exactly. Change them in BOTH places if you rotate.
-CREATE ROLE ifx_prod LOGIN PASSWORD 'CHANGEME_PROD_PASSWORD';
-CREATE ROLE ifx_dev  LOGIN PASSWORD 'ifx_local_dev_2026';
-CREATE ROLE ifx_mock LOGIN PASSWORD 'ifx_mock_demo_2026';
+-- ── Roles ───────────────────────────────────────────────────────────────────
+-- Three per-environment app roles + one shared read-only reference reader.
+-- Local-dev passwords are baked into .env.{dev,mock,prod} — change BOTH
+-- places if you rotate. Real prod password comes from a secrets vault.
+CREATE ROLE ifx_prod_app   LOGIN PASSWORD 'CHANGEME_PROD_PASSWORD';
+CREATE ROLE ifx_dev_app    LOGIN PASSWORD 'dev_password';
+CREATE ROLE ifx_mock_app   LOGIN PASSWORD 'mock_password';
+CREATE ROLE ifx_ref_reader LOGIN PASSWORD 'ref_password';
 
-CREATE DATABASE infinityrx_prod OWNER ifx_prod;
-CREATE DATABASE infinityrx_dev  OWNER ifx_dev;
-CREATE DATABASE infinityrx_mock OWNER ifx_mock;
+CREATE DATABASE infinityrx_prod OWNER ifx_prod_app;
+CREATE DATABASE infinityrx_dev  OWNER ifx_dev_app;
+CREATE DATABASE infinityrx_mock OWNER ifx_mock_app;
+
+-- ifx_ref_reader needs CONNECT on every database so it can read reference
+-- data from any environment.
+GRANT CONNECT ON DATABASE infinityrx_prod TO ifx_ref_reader;
+GRANT CONNECT ON DATABASE infinityrx_dev  TO ifx_ref_reader;
+GRANT CONNECT ON DATABASE infinityrx_mock TO ifx_ref_reader;
 
 -- Bootstrap superuser keeps full access for migrations and admin ops.
 GRANT ALL PRIVILEGES ON DATABASE infinityrx_prod TO infinityrx;
@@ -30,11 +56,21 @@ GRANT ALL PRIVILEGES ON DATABASE infinityrx_dev  TO infinityrx;
 GRANT ALL PRIVILEGES ON DATABASE infinityrx_mock TO infinityrx;
 
 -- ---------------------------------------------------------------------------
--- infinityrx_prod
+-- Per-database schema scaffolding. Identical across all three databases —
+-- any drift would be a bug. Schema names MUST match the SCHEMA constants
+-- in each module's src/models/*.py.
 -- ---------------------------------------------------------------------------
+
 \connect infinityrx_prod
+SET ROLE ifx_prod_app;
 
-SET ROLE ifx_prod;
+CREATE SCHEMA IF NOT EXISTS reference;
+GRANT USAGE ON SCHEMA reference TO ifx_ref_reader;
+ALTER DEFAULT PRIVILEGES IN SCHEMA reference
+  GRANT SELECT ON TABLES TO ifx_ref_reader;
+ALTER DEFAULT PRIVILEGES IN SCHEMA reference
+  GRANT SELECT ON SEQUENCES TO ifx_ref_reader;
+
 CREATE SCHEMA IF NOT EXISTS core;
 CREATE SCHEMA IF NOT EXISTS shared;
 CREATE SCHEMA IF NOT EXISTS billing;
@@ -62,15 +98,21 @@ CREATE SCHEMA IF NOT EXISTS rules_engine;
 CREATE SCHEMA IF NOT EXISTS switch_conn;
 CREATE SCHEMA IF NOT EXISTS testing_sim;
 CREATE SCHEMA IF NOT EXISTS ebv_ebi;
+CREATE SCHEMA IF NOT EXISTS tenant_config;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+RESET ROLE;
 
--- ---------------------------------------------------------------------------
--- infinityrx_dev
--- ---------------------------------------------------------------------------
 \connect infinityrx_dev
+SET ROLE ifx_dev_app;
 
-SET ROLE ifx_dev;
+CREATE SCHEMA IF NOT EXISTS reference;
+GRANT USAGE ON SCHEMA reference TO ifx_ref_reader;
+ALTER DEFAULT PRIVILEGES IN SCHEMA reference
+  GRANT SELECT ON TABLES TO ifx_ref_reader;
+ALTER DEFAULT PRIVILEGES IN SCHEMA reference
+  GRANT SELECT ON SEQUENCES TO ifx_ref_reader;
+
 CREATE SCHEMA IF NOT EXISTS core;
 CREATE SCHEMA IF NOT EXISTS shared;
 CREATE SCHEMA IF NOT EXISTS billing;
@@ -98,15 +140,21 @@ CREATE SCHEMA IF NOT EXISTS rules_engine;
 CREATE SCHEMA IF NOT EXISTS switch_conn;
 CREATE SCHEMA IF NOT EXISTS testing_sim;
 CREATE SCHEMA IF NOT EXISTS ebv_ebi;
+CREATE SCHEMA IF NOT EXISTS tenant_config;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+RESET ROLE;
 
--- ---------------------------------------------------------------------------
--- infinityrx_mock  (demo environment — safe for prospect demos)
--- ---------------------------------------------------------------------------
 \connect infinityrx_mock
+SET ROLE ifx_mock_app;
 
-SET ROLE ifx_mock;
+CREATE SCHEMA IF NOT EXISTS reference;
+GRANT USAGE ON SCHEMA reference TO ifx_ref_reader;
+ALTER DEFAULT PRIVILEGES IN SCHEMA reference
+  GRANT SELECT ON TABLES TO ifx_ref_reader;
+ALTER DEFAULT PRIVILEGES IN SCHEMA reference
+  GRANT SELECT ON SEQUENCES TO ifx_ref_reader;
+
 CREATE SCHEMA IF NOT EXISTS core;
 CREATE SCHEMA IF NOT EXISTS shared;
 CREATE SCHEMA IF NOT EXISTS billing;
@@ -134,5 +182,7 @@ CREATE SCHEMA IF NOT EXISTS rules_engine;
 CREATE SCHEMA IF NOT EXISTS switch_conn;
 CREATE SCHEMA IF NOT EXISTS testing_sim;
 CREATE SCHEMA IF NOT EXISTS ebv_ebi;
+CREATE SCHEMA IF NOT EXISTS tenant_config;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+RESET ROLE;

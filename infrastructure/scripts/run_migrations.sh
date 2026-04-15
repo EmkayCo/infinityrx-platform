@@ -25,6 +25,8 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 2
 fi
 
+export INFINITYRX_ENV="$ENV_NAME"
+
 # Source the env file into this script only (don't pollute the caller).
 set -a
 # shellcheck disable=SC1090

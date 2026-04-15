@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Usage: source infrastructure/scripts/switch_env.sh [prod|dev|mock]
-# Loads the matching .env.* file into the current shell.
+#
+# Sets INFINITYRX_ENV and loads the matching .env.* file into the current
+# shell. Code never reads .env.* files directly — shared/config.py reads
+# INFINITYRX_ENV and resolves the right env file. The variables exported
+# here are also used by the Makefile, run_migrations.sh, and the portal.
 
 ENV_NAME="${1:-dev}"
 
@@ -41,11 +45,11 @@ set -a
 source "$ENV_FILE"
 set +a
 
-export IFX_ENV="$ENV_NAME"
+export INFINITYRX_ENV="$ENV_NAME"
 export PS1="($PS_TAG) ${PS1:-\\$ }"
 
 echo "$BANNER environment loaded"
-echo "  ENVIRONMENT  : $ENVIRONMENT"
-echo "  DATABASE_URL : ${DATABASE_URL%@*}@***"
-echo "  REDIS_URL    : $REDIS_URL"
-echo "  CORS_ORIGINS : $CORS_ORIGINS"
+echo "  INFINITYRX_ENV  : $INFINITYRX_ENV"
+echo "  DATABASE_URL    : ${DATABASE_URL%@*}@***"
+echo "  REFERENCE_DB_URL: ${REFERENCE_DB_URL%@*}@***"
+echo "  REDIS_URL       : $REDIS_URL"
