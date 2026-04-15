@@ -247,7 +247,6 @@ class NADACIngestionService:
                 set_=update_cols,
             )
             self._db.execute(stmt)
-            self._db.flush()
 
             for r in rows:
                 ndc = r["ndc_11"]
@@ -264,6 +263,12 @@ class NADACIngestionService:
                         updated += 1
                         self._insert_history_row(r)
                     # else: no change — no history row
+
+            # BUG-03 fix: per-batch commit. Previously the whole run
+            # accumulated in a single transaction so a late failure
+            # wiped earlier batches AND progress was invisible until
+            # the very end.
+            self._db.commit()
 
         except Exception as exc:
             errored += len(rows)
