@@ -247,8 +247,17 @@ class EligibilityService:
         )
 
     async def _query_db(self, db: Any, request: EligibilityRequest) -> Any:
-        """Query DB for member eligibility data. Returns a result object."""
+        """Query DB for member eligibility data.
+
+        Looks up the member by (tenant_id, member_id | cardholder_id | alternate_id),
+        then joins to the coverage_period whose window includes date_of_service,
+        and collects active COB records. All queries are tenant-scoped so no
+        cross-tenant data can leak through ``_query_db``.
+        """
         from dataclasses import make_dataclass
+        from sqlalchemy import or_, select
+
+        from ..models.tables import CobRecord, CoveragePeriod, Member
 
         DBResult = make_dataclass(
             "DBResult",
@@ -259,7 +268,7 @@ class EligibilityService:
                 "benefit_year_start", "benefit_year_end", "cob_records",
             ],
         )
-        return DBResult(
+        empty = DBResult(
             member_found=False,
             member_status=None,
             coverage_found=False,
@@ -274,6 +283,87 @@ class EligibilityService:
             benefit_year_start=None,
             benefit_year_end=None,
             cob_records=[],
+        )
+
+        if db is None:
+            return empty
+
+        lookup_key = request.member_id or request.cardholder_id
+        if lookup_key is None:
+            return empty
+
+        conditions = [Member.member_id == lookup_key, Member.cardholder_id == lookup_key, Member.alternate_id == lookup_key]
+        stmt = select(Member).where(
+            Member.tenant_id == request.tenant_id,
+            or_(*conditions),
+        )
+        if request.person_code is not None:
+            stmt = stmt.where(Member.person_code == request.person_code)
+
+        member = db.execute(stmt).scalars().first()
+        if member is None:
+            return empty
+
+        bin_match = member.rx_bin == request.rx_bin
+        if request.rx_pcn is not None:
+            bin_match = bin_match and (member.rx_pcn == request.rx_pcn)
+        if request.rx_group is not None:
+            bin_match = bin_match and (member.rx_group == request.rx_group)
+
+        cov_stmt = (
+            select(CoveragePeriod)
+            .where(
+                CoveragePeriod.tenant_id == request.tenant_id,
+                CoveragePeriod.member_id == member.id,
+                CoveragePeriod.effective_date <= request.date_of_service,
+                or_(
+                    CoveragePeriod.termination_date.is_(None),
+                    CoveragePeriod.termination_date >= request.date_of_service,
+                ),
+            )
+            .order_by(CoveragePeriod.effective_date.desc())
+        )
+        coverage = db.execute(cov_stmt).scalars().first()
+
+        cob_stmt = select(CobRecord).where(
+            CobRecord.tenant_id == request.tenant_id,
+            CobRecord.member_id == member.id,
+            CobRecord.effective_date <= request.date_of_service,
+            or_(
+                CobRecord.termination_date.is_(None),
+                CobRecord.termination_date >= request.date_of_service,
+            ),
+        )
+        cob_rows = db.execute(cob_stmt).scalars().all()
+
+        cob_results = [
+            COBInfo(
+                payer_sequence=c.payer_sequence,
+                other_payer_name=c.other_payer_name,
+                other_payer_bin=c.other_payer_bin,
+                other_payer_pcn=c.other_payer_pcn,
+                other_payer_group=c.other_payer_group,
+                other_payer_member_id=c.other_payer_member_id,
+                other_payer_type=c.other_payer_type,
+            )
+            for c in cob_rows
+        ]
+
+        return DBResult(
+            member_found=True,
+            member_status=member.status,
+            coverage_found=coverage is not None,
+            coverage_status=coverage.status if coverage else None,
+            effective_date=coverage.effective_date if coverage else None,
+            termination_date=coverage.termination_date if coverage else None,
+            bin_pcn_group_match=bin_match,
+            member_uuid=member.id,
+            plan_id=coverage.plan_id if coverage else None,
+            plan_name=coverage.plan_name if coverage else None,
+            coverage_type=coverage.coverage_type if coverage else None,
+            benefit_year_start=coverage.benefit_year_start if coverage else None,
+            benefit_year_end=coverage.benefit_year_end if coverage else None,
+            cob_records=cob_results,
         )
 
     async def invalidate_cache(
