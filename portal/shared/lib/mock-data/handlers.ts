@@ -21,6 +21,10 @@ import {
   INVESTIGATIONS,
   RECOVERY_ROWS,
   FWA_DASHBOARD,
+  GTN_SUMMARY,
+  GTN_TREND,
+  LEAKAGE_FLAGS,
+  PHARMACY_RISK_SCORES,
   PHARMACIES,
   PRESCRIBERS,
   DRUGS,
@@ -1517,6 +1521,28 @@ const ROUTES: RouteEntry[] = [
     pattern: /\/api\/v1\/analytics\/member\/high-cost$/,
     methods: ["GET"],
     handler: () => HIGH_COST_MEMBERS,
+  },
+
+  // ── GTN / ReclaimRx ──────────────────────────────────────────────────────────
+  {
+    pattern: /\/api\/v1\/reclaimrx\/gtn-summary$/,
+    methods: ["GET"],
+    handler: () => GTN_SUMMARY,
+  },
+  {
+    pattern: /\/api\/v1\/reclaimrx\/gtn-trend$/,
+    methods: ["GET"],
+    handler: () => GTN_TREND,
+  },
+  {
+    pattern: /\/api\/v1\/reclaimrx\/leakage$/,
+    methods: ["GET"],
+    handler: () => LEAKAGE_FLAGS,
+  },
+  {
+    pattern: /\/api\/v1\/reclaimrx\/risk-scores$/,
+    methods: ["GET"],
+    handler: () => PHARMACY_RISK_SCORES,
   },
 
   // ── Eligibility check ─────────────────────────────────────────────────────────

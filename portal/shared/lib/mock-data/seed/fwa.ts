@@ -1,5 +1,14 @@
 import { rngInt, rngPick, money, isoDate, isoDateTime, makeUUID, PRIMARY_TENANT } from "./prng";
-import type { FWAFlag, Investigation, RecoveryRecord } from "@shared/types/reclaimrx";
+import type {
+  FWAFlag,
+  Investigation,
+  RecoveryRecord,
+  GTNSummary,
+  GTNTrendPoint,
+  LeakageFlag,
+  LeakageCategory,
+  PharmacyRiskScore,
+} from "@shared/types/reclaimrx";
 
 const FLAG_DESCRIPTIONS = [
   "Excessive billing frequency",
@@ -237,5 +246,143 @@ export const FWA_DASHBOARD = {
   trend_90d: Array.from({ length: 90 }, (_, i) => ({
     date: isoDate(-(89 - i)).substring(0, 10),
     count: rngInt(0, 8),
+  })),
+};
+
+// ─── GTN / Leakage data ────────────────────────────────────────────────────
+
+const PROGRAM_NAMES = [
+  "Heliozar Copay Assist",
+  "Nuvectra Plus",
+  "OmniShield Benefits",
+  "Celtrion Support",
+  "TheraCure Connect",
+  "BioLink Patient Aid",
+];
+
+const LEAKAGE_CATEGORIES: LeakageCategory[] = [
+  "pharmacy_misuse",
+  "accumulator",
+  "maximizer",
+  "three_forty_b_overlap",
+  "alternative_funding",
+  "prescriber_anomaly",
+  "patient_anomaly",
+];
+
+export const GTN_TREND: GTNTrendPoint[] = Array.from({ length: 12 }, (_, i) => {
+  const monthIndex = 12 - i;
+  const date = new Date("2026-04-01");
+  date.setMonth(date.getMonth() - monthIndex + 1);
+  const yearMonth = date.toISOString().slice(0, 7);
+  // GTN ratio slowly improving month over month: from ~0.74 to ~0.82
+  const baseRatio = 0.74 + i * 0.007;
+  const noise = (rngInt(-5, 5)) / 1000;
+  return {
+    month: yearMonth,
+    gtn_ratio: (baseRatio + noise).toFixed(4),
+    leakage_amount: money(rngInt(180000, 420000)),
+  };
+});
+
+export const LEAKAGE_FLAGS: LeakageFlag[] = Array.from({ length: 40 }, (_, i) => {
+  const category = LEAKAGE_CATEGORIES[i % LEAKAGE_CATEGORIES.length];
+  const entityType = i % 3 === 0 ? "prescriber" : i % 5 === 0 ? "patient" : "pharmacy";
+  const entityNames =
+    entityType === "pharmacy"
+      ? ENTITY_NAMES_PHARMACY
+      : entityType === "prescriber"
+        ? ENTITY_NAMES_PRESCRIBER
+        : ENTITY_NAMES_MEMBER;
+  const statuses = ["new", "under_investigation", "confirmed", "dismissed"] as const;
+  const status = statuses[i % statuses.length];
+
+  return {
+    id: makeUUID(20000 + i),
+    tenant_id: PRIMARY_TENANT,
+    category,
+    entity_type: entityType,
+    entity_name: entityNames[i % entityNames.length],
+    entity_id: makeUUID(21000 + i),
+    estimated_leakage: money(rngInt(1200, 85000)),
+    status,
+    date_flagged: isoDate(-(i * 3)),
+    investigation_id: status !== "new" ? makeUUID(12000 + (i % 25)) : undefined,
+    program_name: PROGRAM_NAMES[i % PROGRAM_NAMES.length],
+  };
+});
+
+const PHARMACY_NAMES_RISK = [
+  ...ENTITY_NAMES_PHARMACY,
+  "ClearPath Pharmacy",
+  "ValueMed Dispensary",
+  "PrimeCare Rx",
+  "QuikDose Pharmacy",
+  "HealthHub Drugs",
+  "RxDirect Outlet",
+  "MedPoint Specialty",
+  "ScriptFill Pharmacy",
+];
+
+const RISK_FACTORS_POOL = [
+  { factor: "claim_volume_anomaly", description: "Claim volume 3.2x peer benchmark" },
+  { factor: "rejection_rate", description: "Payer claim rejection rate 28% (peer: 8%)" },
+  { factor: "override_frequency", description: "Override code used in 41% of claims" },
+  { factor: "fill_frequency", description: "Avg days between fills: 18 (expected: 30)" },
+  { factor: "copay_to_cost_ratio", description: "Copay exceeds ingredient cost in 12% of claims" },
+  { factor: "investigation_history", description: "2 prior confirmed investigations" },
+  { factor: "chain_independent", description: "Independent pharmacy — elevated baseline risk" },
+];
+
+export const PHARMACY_RISK_SCORES: PharmacyRiskScore[] = Array.from({ length: 20 }, (_, i) => {
+  const baseScore = i < 4 ? rngInt(75, 98) : i < 10 ? rngInt(45, 74) : rngInt(5, 44);
+  const riskTier =
+    baseScore >= 75 ? "critical" : baseScore >= 50 ? "high" : baseScore >= 25 ? "medium" : "low";
+  const factorCount = rngInt(2, 5);
+  const selectedFactors = RISK_FACTORS_POOL.slice(0, factorCount).map((f) => ({
+    ...f,
+    score: rngInt(10, 100),
+  }));
+
+  return {
+    npi: `108${String(i + 1).padStart(7, "0")}`,
+    pharmacy_name: PHARMACY_NAMES_RISK[i % PHARMACY_NAMES_RISK.length],
+    ncpdp: `42${String(i + 1).padStart(5, "0")}`,
+    chain_code: i % 4 === 0 ? "CVS" : i % 4 === 1 ? "WAL" : i % 4 === 2 ? "RIT" : "IND",
+    state: ["TX", "FL", "CA", "NY", "IL", "GA", "OH", "PA"][i % 8],
+    risk_score: baseScore,
+    risk_tier: riskTier,
+    factors: selectedFactors,
+    total_claims: rngInt(120, 4200),
+    total_copay_paid: money(rngInt(18000, 640000)),
+    reversal_rate: (rngInt(2, 30) / 100).toFixed(4),
+    active_investigations: i < 4 ? rngInt(1, 3) : 0,
+    last_updated: isoDate(-rngInt(0, 14)),
+  };
+});
+
+export const GTN_SUMMARY: GTNSummary = {
+  total_copay_spend: money(14_820_000),
+  identified_leakage: money(2_430_000),
+  gtn_ratio: "0.8361",
+  gtn_ratio_prev: "0.8124",
+  active_investigations: INVESTIGATIONS.filter((i) => i.status !== "resolved").length,
+  recovered: money(1_090_000),
+  recovery_rate: "0.4486",
+  leakage_by_category: LEAKAGE_CATEGORIES.map((cat) => ({
+    category: cat,
+    amount: money(rngInt(80000, 620000)),
+    count: rngInt(3, 22),
+  })),
+  leakage_by_program: PROGRAM_NAMES.map((name) => ({
+    program_name: name,
+    amount: money(rngInt(120000, 890000)),
+  })),
+  top_flagged_pharmacies: PHARMACY_RISK_SCORES.slice(0, 5).map((p) => ({
+    npi: p.npi,
+    pharmacy_name: p.pharmacy_name,
+    risk_score: p.risk_score,
+    total_leakage: money(rngInt(40000, 380000)),
+    active_investigations: p.active_investigations,
   })),
 };
