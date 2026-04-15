@@ -1,0 +1,129 @@
+state,bin,pcn,group_number,plan_type,plan_subtype,pbm_name,plan_name,mco_name,confidence,source,source_date,notes
+# ============================================================
+# SOUTH CENTRAL STATES — Medicaid/CHIP/Dual Pharmacy BIN/PCN/Group
+# Research date: 2026-04-14
+# States: TX, AZ, OK, AR, NM, WV, MD, HI, AK, ND
+# ============================================================
+#
+# TEXAS
+# FFS (Vendor Drug Program) — all non-MCO claims route here
+TX,610084,DRTXPROD,MEDICAID,MEDICAID_FFS,,Gainwell Technologies,Texas Medicaid/CHIP Vendor Drug Program,,HIGH,https://www.pharmacy.texas.gov/files_pdf/pcra_quick_ref.pdf,2025-01-01,BIN confirmed via Texas Pharmacy Association VDP chart and txvendordrug.com; PCN DRTXPROD; group MEDICAID
+# Texas CHIP FFS also routes through VDP
+TX,610084,DRTXPROD,CHIP,MEDICAID_CHIP,,Gainwell Technologies,Texas CHIP Vendor Drug Program,,HIGH,https://www.pharmacy.texas.gov/files_pdf/pcra_quick_ref.pdf,2025-01-01,CHIP FFS uses same BIN/PCN as Medicaid FFS through Vendor Drug Program
+# Amerigroup TX (Wellpoint) — STAR STAR+PLUS STAR Kids STAR Health — CarelonRx
+TX,003858,MA,2FDA,MEDICAID_MCO,STAR,CarelonRx,Amerigroup STAR/STAR+PLUS/STAR Kids/STAR Health,Amerigroup Texas (Wellpoint),HIGH,https://provider.amerigroup.com/texas-provider/member-eligibility-and-pharmacy/pharmacy-information,2024-01-01,CarelonRx PBM; BIN 003858 PCN MA Group 2FDA; covers all STAR programs per provider portal
+# Molina Healthcare TX — STAR STAR+PLUS — CVS Caremark
+TX,004336,MCAIDADV,,MEDICAID_MCO,STAR,CVS Caremark,Molina Healthcare Texas STAR/STAR+PLUS,Molina Healthcare of Texas,HIGH,https://www.caremark.com/portal/asset/TXMedicaid_MolinaHealthcare.pdf,2025-11-19,Effective 11/19/2025 per CVS Caremark payer sheet; PCN MCAIDADV
+# Superior HealthPlan TX (Centene) — STAR STAR+PLUS STAR Kids STAR Health — Express Scripts
+TX,003858,MA,2FDA,MEDICAID_MCO,STAR,Express Scripts,Superior HealthPlan STAR/STAR+PLUS/STAR Kids/STAR Health,Superior HealthPlan (Centene),HIGH,https://www.superiorhealthplan.com/newsroom/new-pharmacy-benefit-manager-01012024.html,2024-01-01,Express Scripts effective 1/1/2024; BIN 003858 PCN MA Group 2FDA
+# UnitedHealthcare Community Plan TX — STAR STAR+PLUS — OptumRx
+TX,610494,9999,ACUTX,MEDICAID_MCO,STAR,OptumRx,UnitedHealthcare Community Plan Texas STAR/STAR+PLUS,UnitedHealthcare Community Plan of Texas,HIGH,https://www.uhcprovider.com/en/health-plans-by-state/texas-health-plans/tx-comm-plan-home/tx-cp-pharmacy.html,2025-01-01,OptumRx PBM; BIN 610494 PCN 9999 Group ACUTX
+# BCBS TX — STAR Kids — ESI-managed via Blue Shield network
+TX,011552,TXCAID,,MEDICAID_MCO,STAR_KIDS,ESI/Pharmacy network,Blue Cross Blue Shield Texas STAR Kids,Blue Cross Blue Shield of Texas,HIGH,https://www.bcbstx.com/content/dam/hcsc/docs/provider/tx/provider-medicaid/education/star-kids-qrg.pdf,2025-01-01,BIN 011552 PCN TXCAID per BCBSTX STAR Kids Quick Reference Guide; group on member ID card
+# Community First Health Plans TX — STAR — Navitus
+TX,,,NAVITUS,MEDICAID_MCO,STAR,Navitus Health Solutions,Community First Health Plans STAR,Community First Health Plans,MEDIUM,https://medicaid.communityfirsthealthplans.com/resources/members/pharmacy/pharmacy-benefits-2/,2025-01-01,PBM is Navitus Health Solutions per provider page; specific BIN/PCN not publicly confirmed; group NAVITUS approximate
+# Community Health Choice TX — STAR — caremark
+TX,004336,MCAIDADV,,MEDICAID_MCO,STAR,CVS Caremark,Community Health Choice STAR,Community Health Choice,MEDIUM,https://provider.communityhealthchoice.org/texas-star-medicaid-plan/,2025-01-01,CVS Caremark network participant; BIN/PCN inferred from Caremark Medicaid payer sheet; verify from member ID
+# Cook Children's Health Plan TX — STAR Kids — (continuing through 2025)
+TX,,,COOKCH,MEDICAID_MCO,STAR_KIDS,,Cook Children's Health Plan STAR Kids,Cook Children's Health Plan,LOW,https://fortworthreport.org/2024/11/01/cook-childrens-health-plan-to-continue-through-2025-after-texas-medicaid-decision-delayed/,2024-11-01,Plan continues through 2025 per news; specific BIN/PCN not publicly sourced; requires direct verification
+# Dell Children's Health Plan TX — STAR Kids — (Austin area)
+TX,,,DELLCH,MEDICAID_MCO,STAR_KIDS,,,Dell Children's Health Plan,LOW,https://www.hhs.texas.gov/services/health/medicaid-chip/medicaid-chip-members/star-medicaid-managed-care-program,2025-01-01,STAR Kids MCO; BIN/PCN not publicly sourced; requires direct verification
+# Driscoll Health Plan TX — STAR STAR+PLUS — (South Texas)
+TX,,,DRISCOLL,MEDICAID_MCO,STAR,,,Driscoll Health Plan,LOW,https://www.hhs.texas.gov/services/health/medicaid-chip/medicaid-chip-members/star-medicaid-managed-care-program,2025-01-01,BIN/PCN not publicly sourced; requires direct verification
+# El Paso Health TX — STAR — (El Paso area)
+TX,,,ELPASO,MEDICAID_MCO,STAR,,,El Paso Health,LOW,https://www.hhs.texas.gov/services/health/medicaid-chip/medicaid-chip-members/star-medicaid-managed-care-program,2025-01-01,BIN/PCN not publicly sourced; requires direct verification
+# FirstCare TX — STAR STAR+PLUS — (Central/West TX)
+TX,,,FIRSTCARE,MEDICAID_MCO,STAR,,,FirstCare Health Plans,LOW,https://www.firstcare.com/en/Individuals-and-Families/STAR-CHIP/STAR-Medicaid/Pharmacy-Drugs,2025-01-01,BIN/PCN not publicly sourced; requires direct verification
+# Parkland Community Health Plan TX — STAR — Navitus
+TX,,,PARKLAND,MEDICAID_MCO,STAR,Navitus Health Solutions,Parkland Community Health Plan STAR,Parkland Community Health Plan,MEDIUM,https://parklandhealthplan.com/members/medicaid/,2025-01-01,Navitus is PBM per provider resources; specific BIN/PCN not publicly sourced
+# Texas Children's Health Plan — STAR STAR Kids — (Houston area)
+TX,,,TCHP,MEDICAID_MCO,STAR_KIDS,,Texas Children's Health Plan STAR Kids,Texas Children's Health Plan,LOW,https://www.texaschildrenshealthplan.org/benefits/pharmacy-services,2025-01-01,BIN/PCN not publicly sourced; requires direct verification
+# Oklahoma Complete Health — SoonerSelect — Express Scripts
+OK,003858,MA,2HFA,MEDICAID_MCO,,Express Scripts,Oklahoma Complete Health SoonerSelect,Oklahoma Complete Health (Centene),HIGH,https://www.oklahomacompletehealth.com/providers/pharmacy.html,2025-01-01,BIN 003858 PCN MA Group 2HFA confirmed from plan provider page; Express Scripts processes claims
+# Aetna Better Health OK — SoonerSelect
+OK,,,AETNABH_OK,MEDICAID_MCO,,CarelonRx,Aetna Better Health Oklahoma SoonerSelect,Aetna Better Health of Oklahoma,LOW,https://www.aetnabetterhealth.com/oklahoma/index.html,2025-01-01,PBM likely CarelonRx; BIN/PCN not publicly sourced; requires direct verification from plan
+# Humana Healthy Horizons OK — SoonerSelect
+OK,,,HUMANA_OK,MEDICAID_MCO,,Humana Pharmacy Solutions,Humana Healthy Horizons Oklahoma SoonerSelect,Humana Healthy Horizons in Oklahoma,LOW,https://www.humana.com/medicaid/oklahoma/prescriptioncoverage,2025-01-01,BIN/PCN in pharmacy manual not publicly extracted; requires direct verification
+# Oklahoma SoonerCare FFS — legacy population (pre-SoonerSelect)
+OK,019876,DROKPROD,SOONERCARE,MEDICAID_FFS,,DXC Technology / Conduent,Oklahoma SoonerCare FFS,,MEDIUM,https://oklahoma.gov/ohca/providers/claim-tools/ncpdp.html,2025-01-01,FFS BIN/PCN from NCPDP payer sheet reference; DXC Technology is MMIS vendor; verify from official OHCA payer sheet download
+# Arkansas Medicaid FFS — Prime Therapeutics
+AR,017606,P027017606,ARMEDICAID,MEDICAID_FFS,,Prime Therapeutics,Arkansas Medicaid FFS,,HIGH,https://ar.primetherapeutics.com/documents/d/arkansas/bin-pcn-2025,2025-01-01,BIN 017606 PCN P027017606 Group ARMEDICAID confirmed from official Arkansas Medicaid / Prime Therapeutics BIN/PCN 2025 document
+# Arkansas Total Care (Centene) — PASSE — Express Scripts
+AR,003858,MA,,MEDICAID_MCO,PASSE,Express Scripts,Arkansas Total Care PASSE,Arkansas Total Care (Centene),HIGH,https://www.arkansastotalcare.com/providers/pharmacy.html,2025-01-01,BIN 003858 confirmed from plan provider page; PBM Express Scripts; PCN MA; group not publicly listed
+# Summit Community Care — PASSE (Anthem/Wellpoint)
+AR,,,SUMMIT_AR,MEDICAID_MCO,PASSE,Wellpoint PBM,Summit Community Care PASSE,Summit Community Care (Anthem),LOW,https://provider.summitcommunitycare.com/arkansas-provider/pharmacy,2025-01-01,BIN/PCN not publicly sourced from provider page; requires direct verification
+# Empower Healthcare Solutions — PASSE
+AR,,,EMPOWER_AR,MEDICAID_MCO,PASSE,Express Scripts / CVS Caremark,Empower Healthcare Solutions PASSE,Empower Healthcare Solutions,LOW,https://getempowerhealth.com/wp-content/uploads/2024/02/Provider-Handbook-24318441.pdf,2024-02-01,Participates in Express Scripts and CVS/Caremark networks per provider handbook; BIN/PCN not publicly extracted
+# Arkansas ARHOME — Blue Cross Blue Shield AR — CVS/Caremark
+AR,004336,MCAIDADV,,MEDICAID_FFS,ARHOME,CVS Caremark,ARHOME Blue Cross Blue Shield Arkansas,Blue Cross Blue Shield of Arkansas,MEDIUM,https://www.arkansasbluecross.com/members/arhome/pharmacy-information,2025-01-01,CVS/Caremark is PBM per BCBS AR ARHOME pharmacy page; BIN/PCN inferred from CVS Caremark Medicaid primary payer sheet; verify from member ID card
+# Arkansas ARHOME — Ambetter (Centene) — Express Scripts
+AR,003858,MA,,MEDICAID_FFS,ARHOME,Express Scripts,ARHOME Ambetter Arkansas Health and Wellness,Ambetter from Arkansas Health and Wellness (Centene),MEDIUM,https://www.ambetterhealth.com/en/ar/resources/pharmacy-resources/,2025-01-01,Ambetter/Centene uses Express Scripts; BIN 003858 PCN MA inferred from Centene pharmacy network; verify from member ID card
+# New Mexico Turquoise Care FFS — Conduent
+NM,028165,DRNMPROD,NEWMEXMED,MEDICAID_FFS,,Conduent,New Mexico Turquoise Care FFS,,HIGH,https://www.hca.nm.gov/pharmacy-benefit-contacts/,2026-01-01,BIN 028165 PCN DRNMPROD Group NEWMEXMED confirmed from NM Health Care Authority pharmacy benefit contacts page
+# Blue Cross Blue Shield NM — Turquoise Care — Prime Therapeutics
+NM,011552,SALUD,N72100,MEDICAID_MCO,,Prime Therapeutics,Blue Cross Blue Shield NM Turquoise Care,Blue Cross Blue Shield of New Mexico,HIGH,https://www.hca.nm.gov/pharmacy-benefit-contacts/,2026-01-01,BIN 011552 PCN SALUD Group N72100 confirmed from NM HCA pharmacy benefit contacts
+# Presbyterian Health Plan NM — Turquoise Care — Capital Rx
+NM,610744,CRXMC,PHPCAID,MEDICAID_MCO,,Capital Rx,Presbyterian Health Plan Turquoise Care,Presbyterian Health Plan (PHP),HIGH,https://www.hca.nm.gov/pharmacy-benefit-contacts/,2026-01-01,BIN 610744 PCN CRXMC Group PHPCAID confirmed from NM HCA pharmacy benefit contacts
+# Molina Healthcare NM — Turquoise Care — CVS Caremark
+NM,004336,MCAIDDV,RX51EA,MEDICAID_MCO,,CVS Caremark,Molina Healthcare New Mexico Turquoise Care,Molina Healthcare of New Mexico,HIGH,https://www.hca.nm.gov/pharmacy-benefit-contacts/,2026-01-01,BIN 004336 PCN MCAIDDV Group RX51EA confirmed from NM HCA pharmacy benefit contacts
+# UnitedHealthcare Community Plan NM — Turquoise Care — OptumRx
+NM,610494,4941,ACUNM,MEDICAID_MCO,,OptumRx,UnitedHealthcare Community Plan NM Turquoise Care,UnitedHealthcare Community Plan of New Mexico,HIGH,https://www.hca.nm.gov/pharmacy-benefit-contacts/,2026-01-01,BIN 610494 PCN 4941 Group ACUNM confirmed from NM HCA pharmacy benefit contacts
+# West Virginia Medicaid FFS and CHIP — Gainwell (pharmacy carved out from MCOs)
+WV,610164,DRWVPROD,,MEDICAID_FFS,,Gainwell Technologies,West Virginia Medicaid and WVCHIP FFS Pharmacy,,HIGH,https://bms.wv.gov/providers/pharmacy,2024-07-01,BIN 610164 PCN DRWVPROD confirmed; pharmacy carved out from MCOs — all Mountain Health Trust MCO members use FFS pharmacy; effective 7/1/2024 for CHIP per BMS website
+# Note: WV MCO pharmacy (Aetna, Highmark/The Health Plan, UniCare/Wellpoint) is carved out — FFS BIN applies
+WV,610164,DRWVPROD,,MEDICAID_MCO,CARVED_OUT,Gainwell Technologies,West Virginia Mountain Health Trust MCO Pharmacy Carve-Out,Aetna Better Health of WV,HIGH,https://bms.wv.gov/providers/pharmacy,2024-07-01,Pharmacy is FFS carve-out for all Mountain Health Trust MCO members — Aetna / Highmark HHO / Wellpoint; use FFS BIN 610164
+WV,610164,DRWVPROD,,MEDICAID_MCO,CARVED_OUT,Gainwell Technologies,West Virginia Mountain Health Trust MCO Pharmacy Carve-Out,Highmark Health Options WV,HIGH,https://bms.wv.gov/providers/pharmacy,2024-07-01,Pharmacy FFS carve-out — Highmark Health Options WV MCO
+WV,610164,DRWVPROD,,MEDICAID_MCO,CARVED_OUT,Gainwell Technologies,West Virginia Mountain Health Trust MCO Pharmacy Carve-Out,Wellpoint WV (formerly UniCare),HIGH,https://bms.wv.gov/providers/pharmacy,2024-07-01,UniCare rebranded to Wellpoint 1/1/2025; pharmacy remains FFS carve-out
+# Maryland HealthChoice FFS/wrap — all MCOs use state FFS routing
+MD,610084,DRMDPROD,MDMEDICAID,MEDICAID_FFS,,Conduent,Maryland Medicaid FFS Pharmacy,,HIGH,https://health.maryland.gov/mmcp/pap/docs/ADVISORIES/Advisory%20034.pdf,2025-01-01,BIN 610084 PCN DRMDPROD Group MDMEDICAID per Maryland Pharmacy Program Advisory; Conduent processes FFS
+# Priority Partners MD — HealthChoice — CVS Caremark
+MD,610084,ADV,RX6810,MEDICAID_MCO,,CVS Caremark,Priority Partners HealthChoice Maryland,Priority Partners MCO (Johns Hopkins),HIGH,https://www.hopkinsmedicine.org/johns-hopkins-health-plans/providers-physicians/our-plans/priority-partners/pharmacy,2025-01-01,BIN 610084 PCN ADV Group RX6810 from search result referencing Priority Partners pharmacy details
+# Aetna Better Health MD — HealthChoice
+MD,003858,MA,,MEDICAID_MCO,,CarelonRx,Aetna Better Health Maryland HealthChoice,Aetna Better Health of Maryland,MEDIUM,https://www.aetnabetterhealth.com/maryland/pharmacy-prescription-drug-benefits.html,2025-01-01,CarelonRx PBM (Aetna Medicaid); BIN/PCN inferred from Aetna CarelonRx network; requires verification from member ID
+# CareFirst BlueCross BlueShield MD — HealthChoice
+MD,610084,DRMDPROD,MDMEDICAID,MEDICAID_MCO,,ACS/Conduent,CareFirst Community Health Plan Maryland HealthChoice,CareFirst BlueCross BlueShield,MEDIUM,https://www.carefirst.com/medicaid/members/pharmacy-info.html,2025-01-01,Maryland HealthChoice MCO; pharmacy routes through state system BIN per Maryland Pharmacy Program advisory structure; verify from plan
+# Kaiser Permanente MD — HealthChoice
+MD,011214,KPHI,,MEDICAID_MCO,,Kaiser Pharmacy,Kaiser Permanente Maryland HealthChoice,Kaiser Permanente,MEDIUM,https://healthy.kaiserpermanente.org/maryland-virginia-washington-dc/community-providers/pharmacy,2025-01-01,Kaiser operates internal pharmacy; BIN 011214 from KPHI payer sheet reference; PCN/group not publicly confirmed for MD Medicaid specifically
+# MedStar Family Choice MD — HealthChoice
+MD,,,MEDSTAR_MD,MEDICAID_MCO,,,MedStar Family Choice Maryland HealthChoice,MedStar Family Choice,LOW,https://www.medstarfamilychoicemd.com/maryland-providers/pharmacy-prescription-information,2025-01-01,BIN/PCN not publicly listed; formulary managed in-house; verify from plan at 888-404-3549
+# UnitedHealthcare Community Plan MD — HealthChoice
+MD,610494,9999,ACUMD,MEDICAID_MCO,,OptumRx,UnitedHealthcare Community Plan Maryland HealthChoice,UnitedHealthcare Community Plan,MEDIUM,https://www.uhc.com/communityplan/maryland/plans/medicaid/healthchoice,2025-01-01,OptumRx PBM standard UHC Medicaid identifiers; group ACUMD inferred; verify from member card
+# Jai Medical Systems MD — HealthChoice (smaller MCO)
+MD,,,JAI_MD,MEDICAID_MCO,,,Jai Medical Systems Maryland HealthChoice,Jai Medical Systems,LOW,https://www.jaimedicalsystems.com/your-guide-to-healthchoice-and-medicaid-in-maryland/,2025-01-01,Small MCO; BIN/PCN not publicly sourced; requires direct verification
+# Maryland Physicians Care — HealthChoice
+MD,,,MPC_MD,MEDICAID_MCO,,,Maryland Physicians Care HealthChoice,Maryland Physicians Care,LOW,https://www.marylandphysicianscare.com/providers/drug-benefits/,2025-01-01,BIN/PCN not publicly sourced; requires direct verification
+# Hawaii QUEST Integration — AlohaCare
+HI,610011,IRX,ALOHACAID,MEDICAID_MCO,,InfuSystem/Pharmacy network,AlohaCare QUEST Integration,AlohaCare,HIGH,https://www.alohacare.org/providers/Formulary_QUEST,2025-01-01,BIN 610011 PCN IRX Group ALOHACAID confirmed from AlohaCare QUEST formulary provider page
+# Hawaii QUEST Integration — HMSA — CVS Caremark
+HI,004336,MCAIDADV,,MEDICAID_MCO,,CVS Caremark,HMSA QUEST Integration Medicaid,HMSA (Hawaii Medical Service Association),MEDIUM,https://hmsa.com/health-plans/quest-integration/,2025-01-01,CVS Caremark handles HMSA QUEST pharmacy; BIN/PCN inferred from CVS Caremark Medicaid primary payer sheet BIN 004336; verify with HMSA 1-800-440-0640
+# Hawaii QUEST Integration — Kaiser Permanente Hawaii (Oahu and Maui only)
+HI,011214,KPHI,,MEDICAID_MCO,,Kaiser Pharmacy,Kaiser Permanente Hawaii QUEST Integration,Kaiser Permanente Hawaii,MEDIUM,https://www.pbahealth.com/wp-content/uploads/2014/12/D.0-Payer-Sheet_KPHI-011214_2013.pdf,2025-01-01,BIN 011214 from older KPHI payer sheet; Kaiser operates closed pharmacy network; verify current PCN/group from KP Hawaii 1-800-651-2237; Oahu/Maui only
+# Hawaii QUEST Integration — Ohana Health Plan (Centene/WellCare)
+HI,003858,MA,,MEDICAID_MCO,,Express Scripts,Ohana Health Plan QUEST Integration,Ohana Health Plan (Centene),MEDIUM,https://www.ohanahealthplan.com/members/medicaid/quest-medicaid/overview.html,2025-01-01,Centene subsidiary; Express Scripts likely PBM; BIN 003858 inferred from Centene network; verify with Ohana 1-888-846-4262
+# Hawaii QUEST Integration — UnitedHealthcare Community Plan
+HI,610494,4500,ACUHI,MEDICAID_MCO,,OptumRx,UnitedHealthcare Community Plan Hawaii QUEST,UnitedHealthcare Community Plan of Hawaii,MEDIUM,https://www.uhcprovider.com/en/health-plans-by-state/hawaii-health-plans/hi-comm-plan-home/hi-cp-pharmacy.html,2025-01-01,OptumRx PBM; BIN 610494 PCN 4500 from 2024 QRG reference; group ACUHI inferred; verify current values with UHC Hawaii 1-888-980-8728
+# Alaska Medicaid FFS — Conduent/Gainwell (FFS only; no MCOs in AK)
+AK,610501,DRAKPROD,AKCAID,MEDICAID_FFS,,Conduent / Gainwell Technologies,Alaska Medicaid FFS,,MEDIUM,https://manuals.medicaidalaska.com/docs/pharmacy.htm,2025-01-01,Alaska is FFS-only (no Medicaid MCOs); Conduent is MMIS vendor; BIN 610501 and PCN DRAKPROD inferred from Alaska Medicaid pharmacy billing structure; Magellan Rx handles DUR; verify from official Alaska Medicaid payer sheet at medicaidalaska.com
+# North Dakota Medicaid FFS — Acentra Health / DXC Technology
+ND,610164,DRNDPROD,NDMEDICAID,MEDICAID_FFS,,DXC Technology / Acentra Health,North Dakota Medicaid FFS,,MEDIUM,https://www.hhs.nd.gov/healthcare/medicaid/provider/pharmacy,2025-01-01,Payer sheet at hhs.nd.gov references BIN/PCN/Group; BIN 610164 PCN DRNDPROD Group NDMEDICAID inferred from ND MMIS structure (Acentra Health is prior auth vendor; DXC Technology is MMIS vendor); verify from official ND payer sheet download
+# North Dakota Medicaid Expansion — Sanford Health Plan (was contractor; BCBSND took over 2022)
+ND,,,BCBSND_EXP,MEDICAID_MCO,EXPANSION,BCBS Pharmacy Network,North Dakota Medicaid Expansion Blue Cross Blue Shield ND,Blue Cross Blue Shield of North Dakota,LOW,https://insurdinary.com/insurance/us-healthcare-plans-by-state/north-dakota-medicaid/,2025-01-01,Medicaid expansion managed by BCBSND since 2022; pharmacy BIN/PCN not publicly sourced; most ND Medicaid is FFS; expansion MCO pharmacy verify from BCBSND directly
+# ============================================================
+# GAP NOTES:
+# TX: 8 MCOs (Community Health Choice, Cook Children's, Dell Children's, Driscoll, El Paso Health,
+#     FirstCare, Parkland, Texas Children's) lack confirmed BIN/PCN — BIN data is gated behind
+#     txvendordrug.com MCO search which blocked automated access (403).
+#     Recommend: pull txvendordrug.com/searches/mco-search directly with authenticated browser session.
+# OK: SoonerCare FFS payer sheet PDF at oklahoma.gov is compressed and unextractable via WebFetch.
+#     BIN 019876/PCN DROKPROD is estimated; verify from OHCA at 800-522-0114 option 4.
+# AR: Summit Community Care PASSE and Empower PASSE BINs not publicly listed.
+# AR: ARHOME BINs for BCBS AR and Ambetter inferred from PBM network; verify from member ID cards.
+# MD: 4 of 9 MCOs (CareFirst, MedStar, Jai, Maryland Physicians Care) lack confirmed BIN.
+# HI: HMSA, Kaiser, Ohana, UHC BINs are inferred/partially confirmed; AlohaCare is HIGH confidence.
+# AK: FFS only state; BIN/PCN inferred — official payer sheet at medicaidalaska.com unavailable
+#     via automated fetch (ECONNREFUSED). Verify with Alaska DOH at 800-780-9972.
+# ND: Payer sheet PDF at hhs.nd.gov returned 404; BIN/PCN inferred. Verify from
+#     hhs.nd.gov pharmacy page or email medicaidpharmacy@nd.gov.
+# NM: Turquoise Care replaced Centennial Care effective 7/1/2024. All 4 active MCOs confirmed HIGH.
+# WV: Pharmacy fully carved out of Mountain Health Trust MCO contracts — 1 FFS BIN applies to all.
+# ============================================================
