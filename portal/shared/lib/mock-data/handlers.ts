@@ -54,6 +54,9 @@ import {
   AUDIT_ENTRIES,
   USERS,
   TENANTS,
+  CLAIMS_ENRICHED,
+  PA_OVERRIDES,
+  JOURNAL_ENTRIES,
   makeUUID,
   isoDate,
   money,
@@ -1369,6 +1372,64 @@ const ROUTES: RouteEntry[] = [
     handler: () => CERT_ALERTS,
   },
 
+  // ── Claims (Phase 1B — must precede the /api/v1/claims/:id catch-all) ─────────
+  {
+    pattern: /\/api\/v1\/claims\/pa-overrides\/summary$/,
+    methods: ["GET"],
+    handler: () => ({
+      pending: PA_OVERRIDES.filter((p) => p.status === "pending").length,
+      approved_today: PA_OVERRIDES.filter((p) => p.status === "approved").length,
+      denied_today: PA_OVERRIDES.filter((p) => p.status === "denied").length,
+      avg_turnaround_hours: 4,
+    }),
+  },
+  {
+    pattern: /\/api\/v1\/claims\/pa-overrides\/([^/?]+)\/(approve|deny)$/,
+    methods: ["POST"],
+    handler: (match, body) => {
+      const override = PA_OVERRIDES.find((p) => p.id === match[1]) ?? PA_OVERRIDES[0];
+      const action = match[2] as string;
+      const b = (body ?? {}) as { notes?: string };
+      return {
+        ...override,
+        status: action === "approve" ? "approved" : "denied",
+        approved_at: action === "approve" ? isoDate(0) : undefined,
+        approved_by: action === "approve" ? "Current User" : undefined,
+        denial_reason: action === "deny" ? (b.notes ?? "Denied") : undefined,
+      };
+    },
+  },
+  {
+    pattern: /\/api\/v1\/claims\/pa-overrides$/,
+    methods: ["GET"],
+    handler: () => ({
+      items: PA_OVERRIDES,
+      total: PA_OVERRIDES.length,
+      page: 1,
+      page_size: 25,
+    }),
+  },
+  {
+    // Enriched claim detail (served at /api/v1/claims/enriched/:id for lookup page)
+    pattern: /\/api\/v1\/claims\/enriched\/([^/?]+)$/,
+    methods: ["GET"],
+    handler: (match) => CLAIMS_ENRICHED.find((c) => c.id === match[1]) ?? CLAIMS_ENRICHED[0],
+  },
+  {
+    // Manual claim submission
+    pattern: /\/api\/v1\/claims\/manual$/,
+    methods: ["POST"],
+    handler: (_match, body) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      return {
+        id: makeUUID(Date.now() % 100000),
+        status: "pending",
+        created_at: isoDate(0),
+        ...b,
+      };
+    },
+  },
+
   // ── Medical claims ────────────────────────────────────────────────────────────
   {
     pattern: /\/api\/v1\/claims\/([^/?]+)$/,
@@ -1545,6 +1606,165 @@ const ROUTES: RouteEntry[] = [
       preview_url: "#",
       sample_rows: 25,
       estimated_file_size: "1.2 MB",
+    }),
+  },
+
+  // ── Accounting cycles (new API paths) ─────────────────────────────────────────
+  {
+    pattern: /\/api\/v1\/accounting\/cycles\/summary$/,
+    methods: ["GET"],
+    handler: async () => {
+      const [ov] = await Promise.all([getOverview()]);
+      const o = ov as Record<string, unknown>;
+      return {
+        active: 3,
+        pending_approval: 2,
+        total_ap: String(o.total_pharmacy_paid ?? "0.00"),
+        total_ar: String(o.total_client_billed ?? "0.00"),
+      };
+    },
+  },
+  {
+    pattern: /\/api\/v1\/accounting\/cycles\/([^/?]+)\/claims$/,
+    methods: ["GET"],
+    handler: (match) => {
+      const cycleId = match[1];
+      const cycleClaims = CLAIMS_ENRICHED.filter((c) => c.cycle_id === cycleId);
+      const result = cycleClaims.length > 0 ? cycleClaims : CLAIMS_ENRICHED.slice(0, 10);
+      return { items: result, total: result.length, page: 1, page_size: 25 };
+    },
+  },
+  {
+    pattern: /\/api\/v1\/accounting\/cycles\/([^/?]+)\/journal-entries$/,
+    methods: ["GET"],
+    handler: (match) => {
+      const cycleId = match[1];
+      const entries = JOURNAL_ENTRIES.filter((je) => je.cycle_id === cycleId);
+      const result = entries.length > 0 ? entries : JOURNAL_ENTRIES.slice(0, 6);
+      return { items: result, total: result.length, page: 1, page_size: 25 };
+    },
+  },
+  {
+    pattern: /\/api\/v1\/accounting\/cycles\/([^/?]+)\/ar-entries$/,
+    methods: ["GET"],
+    handler: async () => {
+      const ov = (await getOverview()) as Record<string, unknown>;
+      const ar = String(ov.total_client_billed ?? "0.00");
+      const entries = Array.from({ length: 5 }, (_, i) => ({
+        id: makeUUID(11000 + i),
+        date: isoDate(-i).substring(0, 10),
+        client_name: ["Acme Health Partners", "BlueStar Benefits Group", "ClearPath Managed Care"][i % 3],
+        description: `AR invoice — cycle claim batch ${i + 1}`,
+        amount: money(Number(ar) / 5),
+        status: i === 0 ? "pending" : "posted",
+      }));
+      return { items: entries, total: entries.length };
+    },
+  },
+  {
+    pattern: /\/api\/v1\/accounting\/cycles\/([^/?]+)\/ap-entries$/,
+    methods: ["GET"],
+    handler: async () => {
+      const ov = (await getOverview()) as Record<string, unknown>;
+      const ap = String(ov.total_pharmacy_paid ?? "0.00");
+      const entries = Array.from({ length: 8 }, (_, i) => ({
+        id: makeUUID(12000 + i),
+        date: isoDate(-i).substring(0, 10),
+        pharmacy_name: ["CVS Pharmacy #1047", "Walgreens #3821", "Rite Aid #0542", "Walmart Pharmacy"][i % 4],
+        pharmacy_npi: ["1234567890", "2345678901", "3456789012", "4567890123"][i % 4],
+        amount: money(Number(ap) / 8),
+        status: i === 0 ? "pending" : "posted",
+      }));
+      return { items: entries, total: entries.length };
+    },
+  },
+  {
+    pattern: /\/api\/v1\/accounting\/cycles\/([^/?]+)\/(approve|reject|generate|settle)$/,
+    methods: ["POST"],
+    handler: (match) => {
+      const action = match[2];
+      const cycle = BILLING_CYCLES.find((c) => c.id === match[1]) ?? BILLING_CYCLES[0];
+      const statusMap: Record<string, string> = {
+        approve: "approved",
+        reject: "draft",
+        generate: "completed",
+        settle: "settled",
+      };
+      return {
+        ...cycle,
+        status: statusMap[action] ?? cycle.status,
+        approved_at: action === "approve" ? isoDate(0) : cycle.approved_at,
+        approved_by: action === "approve" ? "Current User" : cycle.approved_by,
+        generated_at: action === "generate" ? isoDate(0) : cycle.generated_at,
+      };
+    },
+  },
+
+  // ── Accounting invoices (new API paths) ───────────────────────────────────────
+  {
+    pattern: /\/api\/v1\/accounting\/invoices\/summary$/,
+    methods: ["GET"],
+    handler: async () => {
+      const ov = (await getOverview()) as Record<string, unknown>;
+      return {
+        total: INVOICES.length,
+        outstanding: String(ov.total_client_billed ?? "0.00"),
+        overdue_count: INVOICES.filter((inv) => inv.status === "overdue").length,
+        paid_this_month: money(rngInt(50000, 500000)),
+      };
+    },
+  },
+  {
+    pattern: /\/api\/v1\/accounting\/invoices\/([^/?]+)\/mark-paid$/,
+    methods: ["POST"],
+    handler: (match) => {
+      const inv = INVOICES.find((i) => i.id === match[1]) ?? INVOICES[0];
+      return { ...inv, status: "paid", paid_at: isoDate(0) };
+    },
+  },
+
+  // ── Accounting payments (new API paths) ───────────────────────────────────────
+  {
+    pattern: /\/api\/v1\/accounting\/payments\/([^/?]+)\/payments$/,
+    methods: ["GET"],
+    handler: (match) => {
+      const batch = PAYMENT_BATCHES.find((b) => b.id === match[1]) ?? PAYMENT_BATCHES[0];
+      const pharmacyNames = ["CVS Pharmacy #1047", "Walgreens #3821", "Rite Aid #0542", "Walmart Pharmacy", "Costco Pharmacy"];
+      const pharmacyNPIs = ["1234567890", "2345678901", "3456789012", "4567890123", "5678901234"];
+      const payments = Array.from({ length: 5 }, (_, i) => ({
+        id: makeUUID(13000 + i),
+        pharmacy_npi: pharmacyNPIs[i % pharmacyNPIs.length],
+        pharmacy_name: pharmacyNames[i % pharmacyNames.length],
+        claim_count: rngInt(50, 300),
+        amount: money(Number(batch.total_amount) / 5),
+        payment_type: "ACH CCD",
+        routing_number: ["021000021", "026009593", "121000358", "081000210"][i % 4],
+        account_number: `****${String(1000 + i * 111)}`,
+        status: "pending",
+      }));
+      return { items: payments, total: payments.length };
+    },
+  },
+
+  // ── Accounting journal entries ─────────────────────────────────────────────────
+  {
+    pattern: /\/api\/v1\/accounting\/journal-entries\/summary$/,
+    methods: ["GET"],
+    handler: () => ({
+      total_entries: JOURNAL_ENTRIES.length,
+      total_ap: money(JOURNAL_ENTRIES.filter((je) => je.type === "AP").reduce((s, je) => s + Number(je.amount), 0)),
+      total_ar: money(JOURNAL_ENTRIES.filter((je) => je.type === "AR").reduce((s, je) => s + Number(je.amount), 0)),
+      total_fees: money(JOURNAL_ENTRIES.filter((je) => je.type === "Fee").reduce((s, je) => s + Number(je.amount), 0)),
+    }),
+  },
+  {
+    pattern: /\/api\/v1\/accounting\/journal-entries$/,
+    methods: ["GET"],
+    handler: () => ({
+      items: JOURNAL_ENTRIES,
+      total: JOURNAL_ENTRIES.length,
+      page: 1,
+      page_size: 50,
     }),
   },
 ];

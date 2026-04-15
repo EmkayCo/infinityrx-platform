@@ -520,6 +520,145 @@ describe("mock handler: /api/v1/members/:id — not-found (regression for MED-1 
   });
 });
 
+// ─── Claims module (Phase 1B additions) ─────────────────────────────────────
+describe("mock handler: /api/v1/claims/pa-overrides (PA Override)", () => {
+  it("returns items[] with required PA override fields", async () => {
+    const data = await mockResponse<{ items: unknown[]; total: number }>(
+      "GET",
+      "/api/v1/claims/pa-overrides"
+    );
+    expectShape(data, ["items", "total"]);
+    expect(Array.isArray(data.items)).toBe(true);
+    expect(data.items.length).toBeGreaterThan(0);
+
+    const first = data.items[0] as Record<string, unknown>;
+    expectShape(first, ["id", "member_id", "drug_name", "drug_ndc", "status", "requested_at"]);
+    expect(typeof first.status).toBe("string");
+    expect(["pending", "approved", "denied", "expired"]).toContain(first.status);
+  });
+});
+
+describe("mock handler: /api/v1/claims/pa-overrides/summary", () => {
+  it("returns numeric summary fields", async () => {
+    const data = await mockResponse<Record<string, unknown>>(
+      "GET",
+      "/api/v1/claims/pa-overrides/summary"
+    );
+    expectShape(data, ["pending", "approved_today", "denied_today"]);
+    expect(typeof data.pending).toBe("number");
+    expect(typeof data.approved_today).toBe("number");
+    expect(typeof data.denied_today).toBe("number");
+  });
+});
+
+// ─── Accounting module (Phase 1B additions) ──────────────────────────────────
+describe("mock handler: /api/v1/accounting/cycles/summary", () => {
+  it("returns cycle summary with AP/AR totals as decimal strings", async () => {
+    const data = await mockResponse<Record<string, unknown>>(
+      "GET",
+      "/api/v1/accounting/cycles/summary"
+    );
+    expectShape(data, ["active", "pending_approval", "total_ap", "total_ar"]);
+    expect(typeof data.active).toBe("number");
+    expect(typeof data.pending_approval).toBe("number");
+    expectValidMoney(data.total_ap as string, "cycles summary total_ap");
+    expectValidMoney(data.total_ar as string, "cycles summary total_ar");
+  });
+});
+
+describe("mock handler: /api/v1/accounting/invoices/summary", () => {
+  it("returns invoice summary with monetary totals", async () => {
+    const data = await mockResponse<Record<string, unknown>>(
+      "GET",
+      "/api/v1/accounting/invoices/summary"
+    );
+    expectShape(data, ["total", "outstanding", "overdue_count", "paid_this_month"]);
+    expect(typeof data.total).toBe("number");
+    expect(typeof data.overdue_count).toBe("number");
+    expectValidMoney(data.outstanding as string, "invoices outstanding");
+    expectValidMoney(data.paid_this_month as string, "invoices paid_this_month");
+  });
+});
+
+describe("mock handler: /api/v1/accounting/journal-entries", () => {
+  it("returns items[] with type, debit, credit, and decimal amount", async () => {
+    const data = await mockResponse<{ items: unknown[]; total: number }>(
+      "GET",
+      "/api/v1/accounting/journal-entries"
+    );
+    expectShape(data, ["items", "total"]);
+    expect(Array.isArray(data.items)).toBe(true);
+    expect(data.items.length).toBeGreaterThan(0);
+
+    for (const je of (data.items as Record<string, unknown>[]).slice(0, 5)) {
+      expectShape(je, ["id", "date", "type", "amount"]);
+      expectValidMoney(je.amount as string, `journal entry ${je.id as string} amount`);
+      expect(["AP", "AR", "Transfer", "Fee", "Adjustment"]).toContain(je.type);
+    }
+  });
+});
+
+describe("mock handler: /api/v1/accounting/journal-entries/summary", () => {
+  it("returns decimal-string monetary totals", async () => {
+    const data = await mockResponse<Record<string, unknown>>(
+      "GET",
+      "/api/v1/accounting/journal-entries/summary"
+    );
+    expectShape(data, ["total_entries", "total_ap", "total_ar", "total_fees"]);
+    expect(typeof data.total_entries).toBe("number");
+    expectValidMoney(data.total_ap as string, "journal summary total_ap");
+    expectValidMoney(data.total_ar as string, "journal summary total_ar");
+    expectValidMoney(data.total_fees as string, "journal summary total_fees");
+  });
+});
+
+describe("mock handler: /api/v1/accounting/cycles/:id/journal-entries", () => {
+  it("returns items[] with required journal entry fields for a cycle", async () => {
+    const data = await mockResponse<{ items: unknown[] }>(
+      "GET",
+      "/api/v1/accounting/cycles/a1b2c3d4-e5f6-7890-abcd-0000000003e8/journal-entries"
+    );
+    expectShape(data, ["items"]);
+    expect(Array.isArray(data.items)).toBe(true);
+    // Should return at least some entries (falls back to JOURNAL_ENTRIES slice)
+    expect(data.items.length).toBeGreaterThan(0);
+  });
+});
+
+describe("mock handler: /api/v1/accounting/cycles/:id/ar-entries", () => {
+  it("returns items[] with amount as decimal string", async () => {
+    const data = await mockResponse<{ items: unknown[] }>(
+      "GET",
+      "/api/v1/accounting/cycles/a1b2c3d4-e5f6-7890-abcd-0000000003e8/ar-entries"
+    );
+    expectShape(data, ["items"]);
+    expect(Array.isArray(data.items)).toBe(true);
+    expect(data.items.length).toBeGreaterThan(0);
+
+    for (const entry of (data.items as Record<string, unknown>[]).slice(0, 3)) {
+      expectShape(entry, ["id", "date", "amount"]);
+      expectValidMoney(entry.amount as string, `AR entry ${entry.id as string}`);
+    }
+  });
+});
+
+describe("mock handler: /api/v1/accounting/cycles/:id/ap-entries", () => {
+  it("returns items[] with amount as decimal string", async () => {
+    const data = await mockResponse<{ items: unknown[] }>(
+      "GET",
+      "/api/v1/accounting/cycles/a1b2c3d4-e5f6-7890-abcd-0000000003e8/ap-entries"
+    );
+    expectShape(data, ["items"]);
+    expect(Array.isArray(data.items)).toBe(true);
+    expect(data.items.length).toBeGreaterThan(0);
+
+    for (const entry of (data.items as Record<string, unknown>[]).slice(0, 3)) {
+      expectShape(entry, ["id", "date", "amount"]);
+      expectValidMoney(entry.amount as string, `AP entry ${entry.id as string}`);
+    }
+  });
+});
+
 // ─── Unmatched URL fallback ──────────────────────────────────────────────────
 describe("mock handler: unmatched URL fallback", () => {
   it("returns a fallback shape (shell object) for unknown paths", async () => {
