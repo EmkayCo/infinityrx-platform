@@ -106,14 +106,24 @@ class NDCIngestionService:
             records_errored += err
             error_samples.extend(smp)
 
+        # COMMIT after Phase 1 (drugs). BUG-01 fix: previously the whole
+        # run was a single transaction, so any failure in Phase 3
+        # (_insert_packages) called self._db.rollback() and torpedoed the
+        # drug rows from Phase 1 — leaving drug_database.drugs empty even
+        # when `records_inserted=25,000` was reported. Committing here
+        # guarantees the drugs table is durably populated before we
+        # attempt the dependent insertions in Phases 2 and 3.
+        self._db.commit()
+
         # --- Phase 2: Explode ingredients + pharm classes for upserted drugs ---
         # We reload drug rows via the session so we have all product_ids that
-        # were committed (SQLite safe — avoids RETURNING).
-        # Strategy: query the drugs table for all product_ids that have
-        # substance_name or pharm_classes set, then explode in batches.
+        # were committed. Now that Phase 1 is durable, any rollback inside
+        # this phase is scoped to children, not parents.
         self._reload_children_for_all_drugs(error_samples)
+        self._db.commit()
 
         # --- Phase 3: Upsert packages ---
+        # Also isolated from Phases 1 and 2 by the commits above.
         pkg_ins, pkg_err, pkg_smp = self._insert_packages(package_rows)
         records_inserted += pkg_ins
         records_errored += pkg_err
@@ -170,7 +180,12 @@ class NDCIngestionService:
         if not valid_rows:
             return inserted, updated, errored, error_samples
 
-        # Use SQLAlchemy Core insert for batch upsert (PostgreSQL ON CONFLICT)
+        # Use SQLAlchemy Core insert for batch upsert (PostgreSQL ON CONFLICT).
+        # BUG-01 fix (per-batch commit): we commit at the END of every drug
+        # batch, not at the end of Phase 1. If a LATER batch fails, its
+        # self._db.rollback() only affects the in-flight batch — not the
+        # already-committed rows from earlier batches. Without this, a single
+        # bad row in batch 6 would roll back 25,000 rows from batches 1-5.
         try:
             stmt = pg_insert(Drug.__table__).values(valid_rows)
             update_cols = {
@@ -183,7 +198,7 @@ class NDCIngestionService:
                 set_=update_cols,
             )
             result = self._db.execute(stmt)
-            self._db.flush()
+            self._db.commit()  # durable: this batch is safe from later rollbacks
             # rowcount reflects affected rows (inserted + updated)
             affected = result.rowcount if result.rowcount >= 0 else len(valid_rows)
             inserted += len(valid_rows)  # approximate; exact split not available from rowcount
@@ -358,7 +373,7 @@ class NDCIngestionService:
                     },
                 )
                 self._db.execute(stmt)
-                self._db.flush()
+                self._db.commit()  # per-batch durability (BUG-01)
                 inserted += len(enriched)
             except Exception as exc:
                 errored += len(enriched)
