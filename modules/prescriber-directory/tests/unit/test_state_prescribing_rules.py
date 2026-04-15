@@ -43,10 +43,15 @@ class TestStatePrescribingRuleService:
     def test_np_no_supervision_in_washington(self, service):
         assert service.requires_supervision("WA", "NP") is False
 
-    def test_get_rule_returns_default_for_unknown_state(self, service):
+    def test_get_rule_returns_safe_default_for_unknown_state(self, service):
+        # Wave 3C: unmodeled (state, provider) pairs MUST default to the
+        # restricted/manual-review rule per DEA compliance — never grant
+        # silent full authority.
         rule = service.get_rule("ZZ", "MD")
         assert rule.state_code == "DEFAULT"
-        assert rule.can_prescribe_independently is True
+        assert rule.can_prescribe_independently is False
+        assert rule.requires_manual_review is True
+        assert rule.controlled_substance_authority == "none"
 
     def test_list_rules_for_state(self, service):
         rules = service.list_rules_for_state("IL")
@@ -82,6 +87,14 @@ class TestStatePrescribingRuleService:
         finally:
             del _RULE_MAP[key]
 
-    def test_default_full_authority_can_prescribe_any_schedule(self, service):
-        # Unknown state, unknown type → defaults to full authority
-        assert service.can_prescribe_controlled("ZZ", "UNKNOWN", "2") is True
+    def test_default_unmodeled_state_denies_controlled_substance(self, service):
+        # Wave 3C: unknown state/provider must NOT silently authorize CS
+        # prescribing — adjudication must escalate via requires_manual_review.
+        assert service.can_prescribe_controlled("ZZ", "UNKNOWN", "2") is False
+        assert service.requires_manual_review("ZZ", "UNKNOWN") is True
+
+    def test_modeled_states_do_not_require_manual_review(self, service):
+        # Sanity: properly-modeled rules should NOT trigger manual review.
+        assert service.requires_manual_review("CA", "MD") is False
+        assert service.requires_manual_review("TX", "PA") is False
+        assert service.requires_manual_review("PA", "NP") is False
