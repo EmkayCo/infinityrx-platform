@@ -16,18 +16,106 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-async def run_due_scheduled_reports(db_session: Any) -> dict[str, int]:
+async def run_due_scheduled_reports(
+    db_session: Any,
+    tenant_id: str | None = None,
+) -> dict[str, int]:
     """Find and execute all scheduled reports that are due to run.
 
-    Runs every minute. Uses read replica for report queries.
-    Returns count of reports triggered.
+    Runs every minute. Queries report_schedules WHERE next_run_at <= now()
+    AND is_active = True, optionally filtered by tenant_id.
+
+    For each due schedule:
+      1. Build the report via ReportService.execute_report().
+      2. Log delivery intent (real SMTP/SFTP delivery is out of scope here —
+         plug in delivery adapters in the delivery layer).
+      3. Update next_run_at using calculate_next_run().
+
+    Returns count of reports triggered and skipped.
+
+    # TODO(adr-pending): Excel/PDF output requires WeasyPrint+openpyxl integration
     """
+    from sqlalchemy import select
+
+    from src.models.tables import ReportSchedule
+    from src.services.report_service import ReportService
+    from src.services.scheduler import calculate_next_run, is_report_due
+
     now = datetime.now(UTC)
 
     logger.info("scheduled_reports: checking for due reports", extra={"as_of": now.isoformat()})
     triggered = 0
     skipped = 0
 
+    stmt = select(ReportSchedule).where(
+        ReportSchedule.is_active.is_(True),
+        ReportSchedule.next_run_at <= now,
+    )
+    if tenant_id is not None:
+        stmt = stmt.where(ReportSchedule.tenant_id == tenant_id)
+
+    result = await db_session.execute(stmt)
+    schedules: list[ReportSchedule] = list(result.scalars().all())
+
+    svc = ReportService(db_session)
+
+    for schedule in schedules:
+        # Guard: double-check due condition (handles clock skew on replicas)
+        if schedule.next_run_at is None or not is_report_due(schedule.next_run_at, now):
+            skipped += 1
+            continue
+
+        try:
+            run = await svc.execute_report(
+                report_id=schedule.report_definition_id,
+                tenant_id=schedule.tenant_id,
+                filters=schedule.filters or {},
+                output_format=schedule.output_format,
+                schedule_id=schedule.id,
+            )
+
+            # Delivery stub: log intent, plug real adapter (SMTP/SFTP) here later
+            logger.info(
+                "scheduled_reports: would deliver report",
+                extra={
+                    "svc_report_id": run.id,
+                    "svc_schedule_id": schedule.id,
+                    "svc_tenant_id": schedule.tenant_id,
+                    "svc_delivery_method": schedule.delivery_method,
+                    "svc_output_format": schedule.output_format,
+                },
+            )
+
+            # Advance next_run_at based on frequency
+            schedule.next_run_at = calculate_next_run(
+                frequency=schedule.frequency,
+                last_run=now,
+                time_of_day=schedule.time_of_day,
+                day_of_week=schedule.day_of_week,
+                day_of_month=schedule.day_of_month,
+            )
+            schedule.last_run_at = now
+            schedule.last_run_status = "triggered"
+            await db_session.flush()
+
+            triggered += 1
+
+        except Exception:
+            logger.exception(
+                "scheduled_reports: failed to trigger report",
+                extra={
+                    "svc_schedule_id": schedule.id,
+                    "svc_tenant_id": schedule.tenant_id,
+                },
+            )
+            schedule.last_run_status = "error"
+            await db_session.flush()
+            skipped += 1
+
+    logger.info(
+        "scheduled_reports: run complete",
+        extra={"svc_triggered": triggered, "svc_skipped": skipped},
+    )
     return {"triggered": triggered, "skipped": skipped}
 
 

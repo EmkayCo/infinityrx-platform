@@ -698,6 +698,10 @@ class TestScheduledJobs:
     @pytest.mark.asyncio
     async def test_run_due_scheduled_reports(self) -> None:
         db = MagicMock()
+        # The job now awaits db.execute to query due schedules; return empty result set.
+        empty_result = MagicMock()
+        empty_result.scalars.return_value.all.return_value = []
+        db.execute = AsyncMock(return_value=empty_result)
         result = await run_due_scheduled_reports(db)
         assert "triggered" in result
         assert "skipped" in result

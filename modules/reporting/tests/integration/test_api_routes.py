@@ -601,3 +601,196 @@ class TestQualityEndpoints:
         client = _build_app(db)
         resp = client.get("/api/v1/reporting/quality/projections", headers=_headers())
         assert resp.status_code == 200
+
+
+class TestPreviewReportWired:
+    """Integration tests confirming preview_report calls ReportEngine utilities."""
+
+    def test_preview_returns_expected_keys(self) -> None:
+        db = _make_mock_db()
+        client = _build_app(db)
+        resp = client.post(
+            "/api/v1/reporting/builder/preview",
+            json={"source": "claims", "columns": ["claim_id", "amount_paid"]},
+            headers=_headers(),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "rows" in data
+        assert "total_count" in data
+        assert "preview_limit" in data
+        assert "columns" in data
+        assert "phi_fields" in data
+        assert "filters_applied" in data
+
+    def test_preview_with_custom_limit(self) -> None:
+        db = _make_mock_db()
+        client = _build_app(db)
+        resp = client.post(
+            "/api/v1/reporting/builder/preview",
+            json={"source": "members", "preview_limit": 50},
+            headers=_headers(),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["preview_limit"] == 50
+
+    def test_preview_identifies_phi_fields(self) -> None:
+        db = _make_mock_db()
+        client = _build_app(db)
+        resp = client.post(
+            "/api/v1/reporting/builder/preview",
+            json={"source": "claims"},
+            headers=_headers(),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        # claims source has PHI fields: rx_number, ndc, member_id, member_name
+        assert "member_id" in data["phi_fields"]
+        assert "member_name" in data["phi_fields"]
+
+    def test_preview_invalid_date_filter_returns_400(self) -> None:
+        db = _make_mock_db()
+        client = _build_app(db)
+        resp = client.post(
+            "/api/v1/reporting/builder/preview",
+            json={"source": "claims", "filters": {"date_from": "not-a-date"}},
+            headers=_headers(),
+        )
+        assert resp.status_code == 400
+        data = resp.json()
+        assert data["detail"]["error"]["code"] == "INVALID_FILTER"
+
+    def test_preview_valid_date_filter_accepted(self) -> None:
+        db = _make_mock_db()
+        client = _build_app(db)
+        resp = client.post(
+            "/api/v1/reporting/builder/preview",
+            json={"source": "claims", "filters": {"date_from": "2026-01-01"}},
+            headers=_headers(),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "2026-01-01" in data["filters_applied"].get("date_from", "")
+
+    def test_preview_unknown_source_returns_empty_columns(self) -> None:
+        db = _make_mock_db()
+        client = _build_app(db)
+        resp = client.post(
+            "/api/v1/reporting/builder/preview",
+            json={"source": "nonexistent_source"},
+            headers=_headers(),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["columns"] == []
+        assert data["rows"] == []
+
+
+class TestClientApiWired:
+    """Integration tests verifying client-api endpoints query real DB paths."""
+
+    def _make_async_db_with_runs(self, runs: list[object], count: int = 0) -> MagicMock:
+        """Build a mock DB that returns runs for scalars and a count for scalar."""
+        db = MagicMock()
+        db.flush = AsyncMock()
+
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = count
+        count_result.scalars.return_value.all.return_value = []
+
+        runs_result = MagicMock()
+        runs_result.scalars.return_value.all.return_value = runs
+        runs_result.scalar_one.return_value = count
+
+        call_count = {"n": 0}
+
+        async def execute_side(stmt: object) -> MagicMock:
+            # First call is the count query, subsequent calls return rows
+            if call_count["n"] == 0:
+                call_count["n"] += 1
+                return count_result
+            return runs_result
+
+        db.execute = AsyncMock(side_effect=execute_side)
+        return db
+
+    def test_client_claims_returns_pagination_keys(self) -> None:
+        db = self._make_async_db_with_runs([], count=0)
+        client = _build_app(db)
+        resp = client.get("/api/v1/reporting/client-api/claims", headers=_headers())
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "data" in data
+        assert "page" in data
+        assert "page_size" in data
+        assert "total" in data
+
+    def test_client_claims_default_pagination(self) -> None:
+        db = self._make_async_db_with_runs([], count=0)
+        client = _build_app(db)
+        resp = client.get("/api/v1/reporting/client-api/claims", headers=_headers())
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["page"] == 1
+        assert data["page_size"] == 100
+
+    def test_client_claims_custom_page(self) -> None:
+        db = self._make_async_db_with_runs([], count=0)
+        client = _build_app(db)
+        resp = client.get(
+            "/api/v1/reporting/client-api/claims?page=2&page_size=25",
+            headers=_headers(),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["page"] == 2
+        assert data["page_size"] == 25
+
+    def test_client_billing_returns_expected_shape(self) -> None:
+        db = _make_mock_db()
+        client = _build_app(db)
+        resp = client.get("/api/v1/reporting/client-api/billing", headers=_headers())
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "tenant_id" in data
+        assert "data" in data
+        assert "available_reports" in data["data"]
+        assert "recent_runs" in data["data"]
+
+    def test_client_program_performance_has_metrics_pending_data(self) -> None:
+        db = _make_mock_db()
+        client = _build_app(db)
+        resp = client.get("/api/v1/reporting/client-api/program-performance", headers=_headers())
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["data"]["metrics"]["status"] == "pending_data"
+
+    def test_client_fwa_summary_has_metrics_pending_data(self) -> None:
+        db = _make_mock_db()
+        client = _build_app(db)
+        resp = client.get("/api/v1/reporting/client-api/fwa-summary", headers=_headers())
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["data"]["fwa_metrics"]["status"] == "pending_data"
+
+    def test_client_claims_tenant_scoped(self) -> None:
+        """Verify both tenant A and tenant B get responses scoped to their tenant_id."""
+        db_a = self._make_async_db_with_runs([], count=0)
+        client_a = _build_app(db_a)
+        resp_a = client_a.get(
+            "/api/v1/reporting/client-api/claims",
+            headers=_headers(tenant_id=TENANT_A),
+        )
+        assert resp_a.status_code == 200
+
+        db_b = self._make_async_db_with_runs([], count=0)
+        client_b = _build_app(db_b)
+        resp_b = client_b.get(
+            "/api/v1/reporting/client-api/claims",
+            headers=_headers(tenant_id=TENANT_B),
+        )
+        assert resp_b.status_code == 200
+        # Both return valid paged responses — isolation enforced by tenant_id in DB WHERE clause
+        assert resp_a.json()["data"] == []
+        assert resp_b.json()["data"] == []

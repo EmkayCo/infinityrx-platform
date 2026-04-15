@@ -15,7 +15,19 @@ class QualityService:
         self._db = db
 
     async def get_star_ratings_dashboard(self, tenant_id: str) -> dict[str, Any]:
-        """Return current D-Star measure performance dashboard data."""
+        """Return current D-Star measure performance dashboard data.
+
+        PDC measures (D01–D03) require adjudication-engine claims with fill dates,
+        days supply, and NDC-to-drug-class mapping.
+        MTM completion (D04) requires mtm-clinical module data.
+        Medication safety measures (D05–D08) require drug-database interaction data.
+        All measures depend on member-management for enrollment denominators.
+
+        # TODO: depends on adjudication-engine — wire after adjudication-engine is built.
+        # TODO: depends on member-management — wire after member-management consent/COBRA CR-XX is fixed.
+        # TODO: depends on mtm-clinical — wire after mtm-clinical is built.
+        # TODO: depends on drug-database — wire after drug-database compound ingredients are complete.
+        """
         measures = []
         for measure_id, measure_name in DSTAR_MEASURES.items():
             measures.append(
@@ -39,7 +51,12 @@ class QualityService:
         }
 
     async def get_adherence_detail(self, tenant_id: str, measure: str) -> dict[str, Any]:
-        """Return member-level adherence detail for a specific measure."""
+        """Return member-level adherence detail for a specific measure.
+
+        # TODO: depends on adjudication-engine — PDC calculation requires fill history
+        # per member per drug class. Wire after adjudication-engine is built.
+        # TODO: depends on member-management — member roster for denominators.
+        """
         if measure not in DSTAR_MEASURES:
             raise ValueError(f"Invalid measure: {measure!r}")
 
@@ -59,7 +76,11 @@ class QualityService:
         }
 
     async def get_gap_members(self, tenant_id: str) -> dict[str, Any]:
-        """Return members below adherence threshold who need outreach."""
+        """Return members below adherence threshold who need outreach.
+
+        # TODO: depends on adjudication-engine — PDC per member required to identify gaps.
+        # TODO: depends on member-management — contact info for outreach targeting.
+        """
         return {
             "tenant_id": tenant_id,
             "members_below_threshold": [],
@@ -69,7 +90,11 @@ class QualityService:
         }
 
     async def get_year_end_projections(self, tenant_id: str) -> dict[str, Any]:
-        """Project year-end Star Ratings based on current trajectory."""
+        """Project year-end Star Ratings based on current trajectory.
+
+        # TODO: depends on adjudication-engine — current PDC trajectory per measure required.
+        # TODO: depends on member-management — eligible member count for denominator projection.
+        """
         projections = {}
         for measure_id, measure_name in DSTAR_MEASURES.items():
             projections[measure_id] = {
