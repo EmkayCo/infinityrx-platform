@@ -79,15 +79,15 @@ for module in "${MODULES[@]}"; do
   # its own per-dir env and can't find alembic since modules don't ship
   # individual pyproject.toml files.
   #
-  # prescriber-directory: BLOCKED on missing baseline migration (task #15).
-  # Migration 0004 ALTERs prescriber_dir.prescribers but no prior migration
-  # creates the table. Bootstrap the schema via metadata.create_all() until
-  # a real 0000_baseline.py is added.
+  # prescriber-directory's env.py uses a sync engine_from_config(), so it
+  # needs a sync-driver URL (psycopg2). The other modules use async_engine.
   if [ "$module" = "prescriber-directory" ]; then
-    DATABASE_URL="$DATABASE_URL" \
-      "$REPO_ROOT/.venv/bin/python" \
-      "$REPO_ROOT/infrastructure/scripts/_bootstrap_prescriber_dir.py" || {
-      echo "FAILED: $module (bootstrap)"; exit 1
+    SYNC_URL="${DATABASE_URL/+asyncpg/+psycopg2}"
+    ( cd "$module_dir" && \
+      DATABASE_URL="$SYNC_URL" \
+      DATABASE_URL_SYNC="$SYNC_URL" \
+      "$REPO_ROOT/.venv/bin/alembic" upgrade head ) || {
+      echo "FAILED: $module"; exit 1
     }
   else
     ( cd "$module_dir" && "$REPO_ROOT/.venv/bin/alembic" upgrade head ) || {
