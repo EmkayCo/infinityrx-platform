@@ -1,5 +1,16 @@
 import { rngInt, rngPick, money, isoDate, makeUUID, PRIMARY_TENANT } from "./prng";
-import type { Pharmacy, Prescriber, Drug, Member } from "@shared/types/directories";
+import type {
+  Pharmacy,
+  Prescriber,
+  Drug,
+  Member,
+  DispensingClass,
+  PharmacyLicense,
+  PharmacyAccreditation,
+  RiskScoreBreakdown,
+  CopayEnrollment,
+  EligibilityHistoryEntry,
+} from "@shared/types/directories";
 
 // NPI Luhn-valid generator helper (prefix 80840 for pharmacy NPIs)
 function makeNPI(index: number): string {
@@ -105,12 +116,66 @@ const CREDENTIALING_STATUSES: Pharmacy["credentialing_status"][] = [
   "expired",
 ];
 
+const CHAIN_CODES = ["CVS", "WAG", "RAD", "WMT", "CST", "KRG", "IND", "MPX", "ESX", "OCM"] as const;
+const RECONCILIATION_VENDORS = ["McKesson", "AmerisourceBergen", "Cardinal Health", "Optum Rx", "MedImpact"] as const;
+const DISPENSING_CLASSES: DispensingClass[] = ["retail", "retail", "retail", "mail", "specialty", "ltc", "340b"];
+const BILLING_TAXONOMIES = [
+  "3336C0003X", // Community Retail Pharmacy
+  "3336M0002X", // Mail Order Pharmacy
+  "3336S0011X", // Specialty Pharmacy
+  "3336L0003X", // Long-term Care Pharmacy
+  "3336H0001X", // Home Infusion Therapy
+];
+const CONTACT_PERSONS = [
+  "Rebecca Torres", "James Park", "Sandra Mitchell", "Kevin Huang",
+  "Laura Griffin", "Marcus Webb", "Diane Foster", "Anthony Ruiz",
+];
+const ACCREDITATION_BODIES = ["URAC", "ACHC", "NABP", "Joint Commission", "PCAB"] as const;
+
+const NETWORK_PARTICIPATIONS = [
+  ["InfinityRx Standard", "InfinityRx Preferred"],
+  ["InfinityRx Standard", "InfinityRx Mail Only"],
+  ["InfinityRx Specialty", "InfinityRx Preferred"],
+  ["InfinityRx Standard"],
+  ["InfinityRx Specialty", "InfinityRx 340B"],
+] as const;
+
 export const PHARMACIES: Pharmacy[] = Array.from({ length: 40 }, (_, i) => {
   const loc = CITIES_STATES[i % CITIES_STATES.length];
   const chainName = PHARMACY_CHAIN_NAMES[i % PHARMACY_CHAIN_NAMES.length];
   const number = rngInt(100, 9999);
   const isChain = i < 30;
   const name = isChain ? `${chainName} #${number}` : `${loc.city} Independent Pharmacy`;
+  const dispensingClass = DISPENSING_CLASSES[i % DISPENSING_CLASSES.length];
+  const chainCode = CHAIN_CODES[i % CHAIN_CODES.length];
+
+  const riskOverall = rngInt(5, 95);
+  const riskBreakdown: RiskScoreBreakdown = {
+    overall: riskOverall,
+    billing_anomaly: rngInt(0, 100),
+    network_leakage: rngInt(0, 100),
+    dispensing_pattern: rngInt(0, 100),
+    geographic_outlier: rngInt(0, 100),
+  };
+
+  const licenses: PharmacyLicense[] = [
+    {
+      state: loc.state,
+      license_number: `${loc.state}${rngInt(10000, 99999)}`,
+      expiry: isoDate(180 + rngInt(0, 365)).substring(0, 10),
+      status: i % 8 === 0 ? "expired" : "active",
+    },
+  ];
+
+  const accreditations: PharmacyAccreditation[] = i % 3 !== 0
+    ? [
+        {
+          body: ACCREDITATION_BODIES[i % ACCREDITATION_BODIES.length],
+          type: dispensingClass === "specialty" ? "Specialty Pharmacy" : "Community Pharmacy",
+          expiry: isoDate(240 + rngInt(0, 365)).substring(0, 10),
+        },
+      ]
+    : [];
 
   return {
     id: makeUUID(20000 + i),
@@ -123,15 +188,40 @@ export const PHARMACIES: Pharmacy[] = Array.from({ length: 40 }, (_, i) => {
     zip: loc.zip,
     phone: `+1${String(rngInt(2000000000, 9999999999))}`,
     fax: `+1${String(rngInt(2000000000, 9999999999))}`,
+    email: `pharmacy${i + 1}@${chainCode.toLowerCase()}-rx.com`,
+    contact_person: CONTACT_PERSONS[i % CONTACT_PERSONS.length],
     pharmacy_type: PHARMACY_TYPES[i % PHARMACY_TYPES.length],
     network_status: NETWORK_STATUSES[i % NETWORK_STATUSES.length],
     credentialing_status: CREDENTIALING_STATUSES[i % CREDENTIALING_STATUSES.length],
     ncpdp_id: String(rngInt(1000000, 9999999)),
     dea_number: `AB${rngInt(1000000, 9999999)}`,
     nabp: String(rngInt(1000000, 9999999)),
+    store_number: isChain ? String(number) : undefined,
+    tax_id: `${rngInt(10, 99)}-${rngInt(1000000, 9999999)}`,
+    // Chain & Network
+    chain_code: isChain ? chainCode : undefined,
+    pay_to_provider_name: isChain ? `${chainName} Central Pharmacy Services` : name,
+    pay_to_provider_id: `PAYTO-${rngInt(10000, 99999)}`,
+    reconciliation_vendor: RECONCILIATION_VENDORS[i % RECONCILIATION_VENDORS.length],
+    network_participation: [...NETWORK_PARTICIPATIONS[i % NETWORK_PARTICIPATIONS.length]],
+    contract_effective_date: isoDate(-(365 + rngInt(0, 365))).substring(0, 10),
+    contract_term_date: i % 7 === 0 ? isoDate(90 + rngInt(0, 365)).substring(0, 10) : undefined,
+    // Classification
+    dispensing_class: dispensingClass,
+    billing_taxonomy: BILLING_TAXONOMIES[i % BILLING_TAXONOMIES.length],
+    is_340b: dispensingClass === "340b",
+    specialty_designations: dispensingClass === "specialty"
+      ? [rngPick(["Oncology", "Rare Disease", "Immunology", "Neurology"])]
+      : undefined,
+    // Operational
+    licenses,
+    accreditations,
+    hours: "Mon-Fri 8am-8pm, Sat 9am-6pm, Sun 10am-4pm",
+    // Risk
+    risk_score: riskBreakdown,
+    // Legacy
     accepts_medicaid: i % 5 !== 0,
     accepts_medicare: i % 4 !== 0,
-    hours: "Mon-Fri 8am-8pm, Sat 9am-6pm, Sun 10am-4pm",
     latitude: 30 + rngInt(0, 20) + rngInt(0, 100) / 100,
     longitude: -(80 + rngInt(0, 40) + rngInt(0, 100) / 100),
     created_at: isoDate(-(365 + i * 10)),
@@ -276,12 +366,62 @@ const MANUFACTURERS = [
   "Bristol-Myers Squibb", "AbbVie Inc", "Amgen Inc", "Novo Nordisk", "Regeneron",
 ];
 
+// GPI prefixes by therapeutic class (first 8 digits)
+const GPI_PREFIXES: Record<string, string> = {
+  Statins: "39400010",
+  "ACE Inhibitors": "36200010",
+  Biguanides: "27600030",
+  "Thyroid Agents": "31300010",
+  "Calcium Channel Blockers": "34000010",
+  "Proton Pump Inhibitors": "49270010",
+  "Beta-2 Agonists": "44200010",
+  Anticonvulsants: "72600010",
+  "Thiazide Diuretics": "37000010",
+  SSRIs: "58160010",
+  ARBs: "36150010",
+  "Loop Diuretics": "37200010",
+  NDRIs: "58160040",
+  "Muscle Relaxants": "67200010",
+  Opioids: "65100010",
+  NSAIDs: "66000010",
+  Analgesics: "66100010",
+  "CNS Stimulants": "75200010",
+  "TNF Blockers": "87290010",
+  Anticoagulants: "83400010",
+  "SGLT2 Inhibitors": "27600050",
+  "GLP-1 Agonists": "27600060",
+  "GLP-1 Agonists (Anti-Obesity)": "27600061",
+  "GLP-1/GIP Agonists": "27600062",
+  "PCSK9 Inhibitors": "39400050",
+  "IL-4/IL-13 Blockers": "87290020",
+  "IL-12/23 Blockers": "87290030",
+  "Alpha Blockers": "86200010",
+  Antidepressants: "58200010",
+  "Beta Blockers": "33400010",
+};
+
+const BRAND_DRUGS = new Set([
+  "Humira", "Eliquis", "Xarelto", "Jardiance", "Trulicity",
+  "Ozempic", "Wegovy", "Mounjaro", "Repatha", "Dupixent", "Stelara",
+]);
+
+const SPECIALTY_DRUGS = new Set([
+  "Humira", "Repatha", "Dupixent", "Stelara", "Trulicity",
+  "Ozempic", "Wegovy", "Mounjaro", "Eliquis", "Xarelto",
+]);
+
 export const DRUGS: Drug[] = DRUG_LIST.slice(0, 40).map((d, i) => {
   const ndcPrefix = String(rngInt(10000, 99999)).substring(0, 5);
   const ndc = `${ndcPrefix}-${d.ndc_suffix}`;
   const awp = money(rngInt(10, 5000));
   const wac = money(Number(awp) * 0.85);
   const nadac = money(Number(awp) * 0.15);
+  const mac = money(Number(awp) * 0.70);
+  const isBrand = BRAND_DRUGS.has(d.brand);
+  // Build a 14-digit GPI: 8-char class prefix + 2-digit form code + 4-digit seq
+  const gpiPrefix = GPI_PREFIXES[d.class] ?? "99999999";
+  const gpiFormCode = d.form === "tablet" ? "05" : d.form === "capsule" ? "30" : d.form === "injection" ? "15" : "20";
+  const gpi = `${gpiPrefix}${gpiFormCode}${String(i + 1).padStart(4, "0")}`;
 
   return {
     id: makeUUID(22000 + i),
@@ -293,12 +433,15 @@ export const DRUGS: Drug[] = DRUG_LIST.slice(0, 40).map((d, i) => {
     strength: d.strength,
     dosage_form: d.form,
     route: d.form === "injection" ? "Subcutaneous" : d.form === "inhaler" ? "Inhalation" : "Oral",
+    gpi,
     therapeutic_class: d.class,
     drug_category: ["Adderall XR", "Vyvanse", "Hydrocodone/APAP", "Tramadol"].includes(d.brand)
       ? "Controlled"
       : "Standard",
-    is_generic: !["Humira", "Eliquis", "Xarelto", "Jardiance", "Trulicity", "Ozempic", "Wegovy", "Mounjaro", "Repatha", "Dupixent", "Stelara"].includes(d.brand),
-    is_brand: ["Humira", "Eliquis", "Xarelto", "Jardiance", "Trulicity", "Ozempic", "Wegovy", "Mounjaro", "Repatha", "Dupixent", "Stelara"].includes(d.brand),
+    brand_generic: isBrand ? "brand" : "generic",
+    is_generic: !isBrand,
+    is_brand: isBrand,
+    is_specialty: SPECIALTY_DRUGS.has(d.brand),
     is_controlled: ["Adderall XR", "Vyvanse", "Hydrocodone/APAP", "Tramadol"].includes(d.brand),
     schedule: ["Adderall XR", "Vyvanse"].includes(d.brand) ? "II" : ["Hydrocodone/APAP"].includes(d.brand) ? "II" : ["Tramadol"].includes(d.brand) ? "IV" : undefined,
     rems_required: ["Humira", "Dupixent", "Stelara"].includes(d.brand),
@@ -307,6 +450,7 @@ export const DRUGS: Drug[] = DRUG_LIST.slice(0, 40).map((d, i) => {
       awp,
       wac,
       nadac,
+      mac: !isBrand ? mac : undefined,
       effective_date: isoDate(-30).substring(0, 10),
     },
     pricing_history: [
@@ -314,6 +458,7 @@ export const DRUGS: Drug[] = DRUG_LIST.slice(0, 40).map((d, i) => {
         awp: money(Number(awp) * 0.95),
         wac: money(Number(wac) * 0.95),
         nadac,
+        mac: !isBrand ? money(Number(mac) * 0.95) : undefined,
         effective_date: isoDate(-365).substring(0, 10),
         recorded_at: isoDate(-365),
       },
@@ -324,7 +469,7 @@ export const DRUGS: Drug[] = DRUG_LIST.slice(0, 40).map((d, i) => {
             {
               interacting_ndc: "00093-7230-56",
               interacting_drug_name: "Sertraline 50mg",
-              severity: "moderate",
+              severity: "moderate" as const,
               description: "Monitor for increased bleeding risk when combined with anticoagulants.",
             },
           ]
@@ -346,30 +491,85 @@ const COVERAGE_STATUSES: Member["coverage_status"][] = [
   "pending",
 ];
 
+const COPAY_PROGRAMS = [
+  { program_id: "PROG-001", program_name: "CardioMax Copay Assist", bin: "610020", pcn: "CFXP", group_code: "CARD01" },
+  { program_id: "PROG-002", program_name: "DiabetesCare Copay Card", bin: "610099", pcn: "DCCP", group_code: "DIAB02" },
+  { program_id: "PROG-003", program_name: "OncoAssist Patient Program", bin: "610415", pcn: "ONCP", group_code: "ONCO03" },
+  { program_id: "PROG-004", program_name: "RheumaRelief Copay Card", bin: "610512", pcn: "RRCP", group_code: "RHEU04" },
+  { program_id: "PROG-005", program_name: "NeuroCare Copay Program", bin: "610777", pcn: "NCCP", group_code: "NEUR05" },
+] as const;
+
+const ELIGIBILITY_EVENTS = [
+  "Enrolled", "Plan Change", "Terminated", "COBRA Initiated", "Reinstated", "Group Transfer",
+] as const;
+
+const COVERAGE_TYPES = ["Employee", "Spouse", "Child Dependent", "Domestic Partner"] as const;
+
 export const MEMBERS: Member[] = Array.from({ length: 30 }, (_, i) => {
   const coverageStatus = COVERAGE_STATUSES[i % COVERAGE_STATUSES.length];
   const deductibleApplied = money(rngInt(0, 1500));
   const oopApplied = money(rngInt(0, 4000));
+  const eligibilityStatus =
+    coverageStatus === "active" ? "eligible" :
+    coverageStatus === "pending" ? "pending_verification" : "ineligible";
+
+  const planName = rngPick(["Standard PPO", "HMO Gold", "Medicare Advantage", "Medicaid MCO", "High Deductible HSA"]);
+  const groupId = `GRP-${String(rngInt(1000, 9999))}`;
+  const effectiveDate = isoDate(-(rngInt(90, 730))).substring(0, 10);
+
+  // Copay enrollment — 0, 1, or 2 programs
+  const enrollmentCount = i % 3;
+  const copayEnrollment: CopayEnrollment[] = Array.from({ length: enrollmentCount }, (_, j) => {
+    const prog = COPAY_PROGRAMS[(i + j) % COPAY_PROGRAMS.length];
+    const limit = money(rngInt(500, 5000));
+    const remaining = money(rngInt(0, Number(limit)));
+    return {
+      program_id: prog.program_id,
+      program_name: prog.program_name,
+      card_status: coverageStatus === "active" ? "active" : "inactive",
+      enrolled_at: isoDate(-(rngInt(30, 365))).substring(0, 10),
+      remaining_benefit: remaining,
+      benefit_limit: limit,
+      bin: prog.bin,
+      pcn: prog.pcn,
+      group_code: prog.group_code,
+    };
+  });
+
+  // Eligibility history — 1–3 events
+  const historyCount = rngInt(1, 3);
+  const eligibilityHistory: EligibilityHistoryEntry[] = Array.from({ length: historyCount }, (_, j) => ({
+    event: ELIGIBILITY_EVENTS[(i + j) % ELIGIBILITY_EVENTS.length],
+    effective_date: isoDate(-(rngInt(30, 730) + j * 90)).substring(0, 10),
+    plan_name: planName,
+    group_id: groupId,
+    changed_by: "834 EDI Batch",
+    recorded_at: isoDate(-(rngInt(1, 730) + j * 90)),
+  }));
 
   return {
     id: makeUUID(23000 + i),
     tenant_id: PRIMARY_TENANT,
     member_id: `MBR-2026-${String(1000 + i).padStart(4, "0")}`,
-    full_name: null, // redacted per PHI rules
+    full_name: null, // redacted per PHI rules — never log or expose
     masked_name: `${rngPick(["A", "B", "C", "D", "E", "J", "K", "L", "M", "R", "S", "T"])}*** ${rngPick(["B", "C", "D", "G", "H", "J", "K", "L", "M", "N", "P", "R", "S", "T", "W"])}***`,
-    date_of_birth: null,
+    date_of_birth: null, // PHI — redacted
     masked_dob: `${1945 + rngInt(0, 55)}-XX-XX`,
     gender: rngPick(["M", "F", "U"]),
-    address: null,
-    phone: null,
-    email: null,
+    address: null, // PHI
+    phone: null, // PHI
+    email: null, // PHI
     coverage_status: coverageStatus,
-    coverage_effective_date: isoDate(-(rngInt(90, 730))).substring(0, 10),
+    eligibility_status: eligibilityStatus,
+    coverage_effective_date: effectiveDate,
     coverage_term_date:
       coverageStatus === "terminated" ? isoDate(-(rngInt(1, 90))).substring(0, 10) : undefined,
     plan_id: makeUUID(24000 + (i % 5)),
-    plan_name: rngPick(["Standard PPO", "HMO Gold", "Medicare Advantage", "Medicaid MCO", "High Deductible HSA"]),
-    group_id: `GRP-${String(rngInt(1000, 9999))}`,
+    plan_name: planName,
+    group_id: groupId,
+    coverage_type: COVERAGE_TYPES[i % COVERAGE_TYPES.length],
+    copay_enrollment: copayEnrollment,
+    eligibility_history: eligibilityHistory,
     accumulator: {
       benefit_year: 2026,
       deductible_applied: deductibleApplied,

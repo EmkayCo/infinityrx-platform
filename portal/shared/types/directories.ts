@@ -6,6 +6,29 @@ export type NetworkStatus = "in_network" | "out_of_network" | "preferred" | "pen
 export type CredentialingStatus = "credentialed" | "pending" | "suspended" | "revoked" | "expired";
 export type PharmacyType = "retail" | "mail_order" | "specialty" | "long_term_care" | "compound" | "hospital";
 
+export type DispensingClass = "retail" | "mail" | "specialty" | "ltc" | "340b";
+
+export interface PharmacyLicense {
+  state: string;
+  license_number: string;
+  expiry: string;
+  status: "active" | "expired" | "suspended";
+}
+
+export interface PharmacyAccreditation {
+  body: string; // e.g. "URAC", "ACHC", "NABP"
+  type: string;
+  expiry: string;
+}
+
+export interface RiskScoreBreakdown {
+  overall: number; // 0–100
+  billing_anomaly: number;
+  network_leakage: number;
+  dispensing_pattern: number;
+  geographic_outlier: number;
+}
+
 export interface Pharmacy {
   id: UUID;
   tenant_id: UUID;
@@ -18,15 +41,38 @@ export interface Pharmacy {
   zip: string;
   phone?: string;
   fax?: string;
+  email?: string;
+  contact_person?: string;
   pharmacy_type: PharmacyType;
   network_status: NetworkStatus;
   credentialing_status: CredentialingStatus;
   ncpdp_id?: string;
   dea_number?: string;
   nabp?: string;
+  store_number?: string;
+  tax_id?: string;
+  // Chain & Network fields
+  chain_code?: string;
+  pay_to_provider_name?: string;
+  pay_to_provider_id?: string;
+  reconciliation_vendor?: string;
+  network_participation?: string[];
+  contract_effective_date?: string;
+  contract_term_date?: string;
+  // Classification fields
+  dispensing_class?: DispensingClass;
+  billing_taxonomy?: string;
+  is_340b?: boolean;
+  specialty_designations?: string[];
+  // Operational
+  licenses?: PharmacyLicense[];
+  accreditations?: PharmacyAccreditation[];
+  hours?: string;
+  // Risk
+  risk_score?: RiskScoreBreakdown;
+  // Legacy
   accepts_medicaid: boolean;
   accepts_medicare: boolean;
-  hours?: string;
   latitude?: number;
   longitude?: number;
   created_at: ISODateTimeString;
@@ -102,11 +148,14 @@ export interface Drug {
   strength: string;
   dosage_form: string;
   route: string;
+  gpi?: string; // Generic Product Identifier (14-digit)
   therapeutic_class: string;
   drug_category: string;
+  brand_generic: "brand" | "generic"; // explicit classification badge
   is_generic: boolean;
   is_brand: boolean;
   is_controlled: boolean;
+  is_specialty?: boolean;
   schedule?: string;
   rems_required: boolean;
   rems_program?: string;
@@ -134,6 +183,27 @@ export interface MemberAccumulator {
   updated_at: ISODateTimeString;
 }
 
+export interface CopayEnrollment {
+  program_id: string;
+  program_name: string;
+  card_status: "active" | "inactive" | "pending";
+  enrolled_at: string;
+  remaining_benefit: Money;
+  benefit_limit: Money;
+  bin: string;
+  pcn: string;
+  group_code: string;
+}
+
+export interface EligibilityHistoryEntry {
+  event: string; // e.g. "Enrolled", "Terminated", "Plan Change", "COBRA Initiated"
+  effective_date: string;
+  plan_name?: string;
+  group_id?: string;
+  changed_by?: string;
+  recorded_at: ISODateTimeString;
+}
+
 export interface Member {
   id: UUID;
   tenant_id: UUID;
@@ -149,11 +219,16 @@ export interface Member {
   email?: string | null;
   // Coverage
   coverage_status: CoverageStatus;
+  eligibility_status?: "eligible" | "ineligible" | "pending_verification";
   coverage_effective_date?: string;
   coverage_term_date?: string;
   plan_id?: UUID;
   plan_name?: string;
   group_id?: string;
+  coverage_type?: string; // e.g. "Employee", "Spouse", "Dependent"
+  // Copay programs
+  copay_enrollment?: CopayEnrollment[];
+  eligibility_history?: EligibilityHistoryEntry[];
   // Accumulators
   accumulator?: MemberAccumulator;
   // Meta

@@ -1202,6 +1202,12 @@ const ROUTES: RouteEntry[] = [
 
   // ── Prescriber directory ──────────────────────────────────────────────────────
   {
+    // Synthetic claims for prescriber detail page
+    pattern: /\/api\/v1\/prescribers\/([^/?]+)\/claims$/,
+    methods: ["GET"],
+    handler: (match) => buildClaimRecordSample(`presc-${match[1]}`),
+  },
+  {
     pattern: /\/api\/v1\/prescribers\/([^/?]+)$/,
     methods: ["GET"],
     handler: (match) => PRESCRIBERS.find((p) => p.npi === match[1]) ?? PRESCRIBERS[0],
