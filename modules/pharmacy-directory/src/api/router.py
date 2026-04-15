@@ -1,12 +1,14 @@
 """FastAPI router for pharmacy-directory module."""
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import date
 from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
+from fastapi.security import OAuth2PasswordBearer
 from shared.db.session import get_session
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +42,62 @@ from src.services.network import NetworkService
 from src.utils.validation import InvalidNpiNumberError, validate_npi
 
 router = APIRouter(prefix="/api/v1/pharmacies", tags=["pharmacy-directory"])
+
+_log = logging.getLogger(__name__)
+_oauth_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
+
+# Sentinel used when the JWT pipeline is not configured (e.g. unit tests, dev
+# environments before configure_auth() has run). This UUID is reserved and MUST
+# NOT collide with any real user — it is safe to attribute audit/credentialing
+# decisions to it because downstream forensics will see the synthetic value
+# and know the request was unauthenticated.
+SYSTEM_REVIEWER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
+def get_reviewer_id(token: str | None = Depends(_oauth_scheme)) -> uuid.UUID:
+    """Return the user_id from the JWT bearer token, or the system sentinel.
+
+    Wave 3D safety wiring: the previous code generated a fresh ``uuid.uuid4()``
+    for every credentialing decision, so the audit trail attributed each
+    approve/deny to a non-existent user. With this dependency:
+
+    * If a valid bearer token is present and shared.auth is configured, the
+      caller's ``CurrentUser.id`` is returned.
+    * If auth is not yet configured (unit tests, dev), we fall back to the
+      ``SYSTEM_REVIEWER_ID`` sentinel and log a WARNING so the gap is visible.
+    * If a token is present but invalid/expired, we still raise 401 — we never
+      silently accept bad tokens.
+    """
+    if not token:
+        _log.warning(
+            "credentialing decision recorded without authenticated user — "
+            "attributing to system sentinel",
+            extra={"svc_name": "pharmacy-directory", "reviewer_fallback": True},
+        )
+        return SYSTEM_REVIEWER_ID
+
+    # Lazy import — shared.auth.dependencies raises if not configured at import
+    # time would crash modules that have never wired auth.
+    try:
+        from shared.auth.dependencies import _resolve_claims, _get_user_loader
+
+        claims = _resolve_claims(token)
+        loader = _get_user_loader()
+        user = loader(claims.user_id)
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"error": "unauthorized", "message": "user not found"},
+            )
+        return user.id
+    except RuntimeError:
+        # auth not configured — fall back to sentinel with a warning
+        _log.warning(
+            "shared.auth not configured; attributing credentialing decision "
+            "to system sentinel reviewer",
+            extra={"svc_name": "pharmacy-directory"},
+        )
+        return SYSTEM_REVIEWER_ID
 
 
 def _correlation_id() -> str:
@@ -309,10 +367,10 @@ async def approve_credentialing(
     application_id: uuid.UUID,
     body: CredentialingDecisionRequest,
     tenant_id: Annotated[uuid.UUID, Query(alias="x-tenant-id")],
+    reviewer_id: Annotated[uuid.UUID, Depends(get_reviewer_id)],
     db: AsyncSession = Depends(get_session),
 ) -> Any:
     svc = CredentialingService(db)
-    reviewer_id = uuid.uuid4()  # In prod: extracted from JWT
     app = await svc.approve(application_id, reviewer_id, body.review_notes)
     await db.flush()
     return _app_to_schema(app)
@@ -323,12 +381,12 @@ async def deny_credentialing(
     application_id: uuid.UUID,
     body: CredentialingDecisionRequest,
     tenant_id: Annotated[uuid.UUID, Query(alias="x-tenant-id")],
+    reviewer_id: Annotated[uuid.UUID, Depends(get_reviewer_id)],
     db: AsyncSession = Depends(get_session),
 ) -> Any:
     if not body.denial_reason:
         raise _error("MISSING_DENIAL_REASON", "denial_reason is required", status.HTTP_422_UNPROCESSABLE_ENTITY, "denial_reason")
     svc = CredentialingService(db)
-    reviewer_id = uuid.uuid4()
     app = await svc.deny(application_id, reviewer_id, body.denial_reason, body.review_notes)
     await db.flush()
     return _app_to_schema(app)
