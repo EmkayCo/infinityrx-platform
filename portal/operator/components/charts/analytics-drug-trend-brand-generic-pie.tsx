@@ -37,8 +37,8 @@ export function AnalyticsDrugTrendBrandGenericPie({ breakdown }: Props) {
         <Tooltip
           formatter={(v) => [`${Number(v).toFixed(1)}%`]}
           contentStyle={{
-            background: "#1E293B",
-            border: "1px solid #334155",
+            background: "var(--bg-card-alt)", color: "var(--fg)",
+            border: "1px solid var(--border)",
             borderRadius: 8,
           }}
         />

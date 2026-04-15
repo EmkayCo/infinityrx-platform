@@ -1,32 +1,31 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Lato, IBM_Plex_Mono } from "next/font/google";
 import { Providers } from "@/components/providers";
 import { AppShell } from "@/components/layout/app-shell";
 import { themeInitScript } from "@shared/components/theme-toggle";
 import "./globals.css";
 
-const inter = Inter({
+const lato = Lato({
   subsets: ["latin"],
-  variable: "--font-inter",
+  weight: ["300", "400", "700", "900"],
+  variable: "--font-lato",
   display: "swap",
-  axes: ["opsz"],
-  style: ["normal", "italic"],
 });
 
-const jetbrainsMono = JetBrains_Mono({
+const ibmPlexMono = IBM_Plex_Mono({
   subsets: ["latin"],
-  variable: "--font-jetbrains-mono",
+  weight: ["400", "500"],
+  variable: "--font-ibm-mono",
   display: "swap",
-  style: ["normal", "italic"],
 });
 
 export const metadata: Metadata = {
   title: {
-    default: "InfinityRx Operator Portal",
-    template: "%s | InfinityRx",
+    default: "InfinityRx ICP",
+    template: "%s | InfinityRx ICP",
   },
-  description: "InfinityRx internal operations portal",
+  description: "InfinityRx ICP Operator Portal",
   robots: { index: false, follow: false },
 };
 
@@ -35,27 +34,19 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // Middleware (proxy.ts) already verified the JWT and set this header.
-  // Reading it here is free — no second JWT parse on the critical render path.
   const h = await headers();
   const isAuthenticated = h.get("x-ifx-authenticated") === "1";
 
   return (
-    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
+    <html lang="en" className={`${lato.variable} ${ibmPlexMono.variable}`} suppressHydrationWarning>
       <head>
-        {/* Prevent theme flash */}
-        <script
-          dangerouslySetInnerHTML={{ __html: themeInitScript }}
-        />
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="min-h-screen bg-[var(--ifx-bg)] font-sans antialiased">
-        {/* Skip navigation for screen readers */}
         <a href="#main-content" className="skip-nav">
           Skip to main content
         </a>
 
-        {/* SessionProvider with no initial session lazy-fetches /api/auth/session
-            on mount — only if a component actually calls useSession()/useAuth(). */}
         <Providers>
           <AppShell isAuthenticated={isAuthenticated}>
             {children}

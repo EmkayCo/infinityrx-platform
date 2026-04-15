@@ -40,17 +40,17 @@ export function DollarDisplay({
     <span className={cn("inline-flex flex-col gap-0.5", className)}>
       <span
         className={cn(
-          "font-mono tabular-nums",
+          "font-mono tabular-nums text-fg",
           sizeClasses[size],
-          showScale && scale === "bold" && "font-bold text-yellow-300",
-          showScale && scale === "highlight" && "font-bold text-teal-400 bg-teal-900/20 px-1 rounded"
+          showScale && scale === "bold" && "font-bold",
+          showScale && scale === "highlight" && "font-bold text-interactive bg-interactive-bg px-1 rounded"
         )}
         aria-label={verbal ?? formatted}
       >
         {prefix}{formatted}
       </span>
       {showVerbal && verbal && (
-        <span className="text-xs text-slate-500 dark:text-slate-400 italic leading-tight">
+        <span className="text-xs text-fg-muted italic leading-tight">
           {verbal}
         </span>
       )}
@@ -82,9 +82,9 @@ export function DollarDelta({
     <span
       className={cn(
         "inline-flex items-center text-sm font-medium tabular-nums font-mono",
-        numeric > 0 && "text-green-600 dark:text-green-400",
-        numeric < 0 && "text-red-600 dark:text-red-400",
-        numeric === 0 && "text-slate-500",
+        numeric > 0 && "text-success",
+        numeric < 0 && "text-error",
+        numeric === 0 && "text-fg-muted",
         className
       )}
     >
@@ -112,7 +112,7 @@ export function DollarInput({
 }: DollarInputProps) {
   return (
     <div className={cn("relative", className)}>
-      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted pointer-events-none">
         $
       </span>
       <input
@@ -127,9 +127,9 @@ export function DollarInput({
         placeholder={placeholder}
         disabled={disabled}
         className={cn(
-          "w-full pl-7 pr-3 py-2 rounded-md border border-ifx-border-dark bg-ifx-surface-dark text-white",
-          "font-mono text-sm placeholder:text-slate-500",
-          "focus:outline-none focus:ring-2 focus:ring-teal-500/40 focus:border-teal-500",
+          "w-full pl-7 pr-3 py-2 rounded-md border border-border-default bg-card text-fg",
+          "font-mono text-sm placeholder:text-fg-placeholder",
+          "focus:outline-none focus:ring-2 focus:ring-interactive/40 focus:border-interactive",
           disabled && "opacity-50 cursor-not-allowed"
         )}
       />

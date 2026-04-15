@@ -75,7 +75,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
 
         try {
-          const response = await fetch(`${API_URLS.corePlatform}/auth/login`, {
+          // Backend mounts auth routes under /api/v1 (see
+          // modules/core-platform/src/auth/api/__init__.py:13). Without
+          // the prefix this 404s against the real app — it only worked
+          // previously because auth was never live in prod.
+          const response = await fetch(`${API_URLS.corePlatform}/api/v1/auth/login`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -131,7 +135,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         try {
           const response = await fetch(
-            `${API_URLS.corePlatform}/auth/mfa/verify`,
+            `${API_URLS.corePlatform}/api/v1/auth/mfa/verify`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -196,7 +200,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (expiresAt && expiresAt - now < 60 && token.refresh_token) {
         try {
           const response = await fetch(
-            `${API_URLS.corePlatform}/auth/token/refresh`,
+            `${API_URLS.corePlatform}/api/v1/auth/token/refresh`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },

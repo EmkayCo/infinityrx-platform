@@ -268,6 +268,95 @@ const ROUTES: RouteEntry[] = [
     methods: ["GET"],
     handler: () => ({ tenants: TENANTS }),
   },
+  // ── Users (real backend paths: /api/v1/users*) ──────────────────────────
+  // USERS seed is in the legacy portal-side shape (name, role, active,
+  // mfa_enrolled, last_login). The backend's `UserResponse` uses
+  // display_name, roles[], status, mfa_enabled, last_login_at — so we map
+  // on the fly. This keeps the seed file stable while the portal pages
+  // consume the canonical backend shape.
+  ...((): RouteEntry[] => {
+    const toBackendUser = (u: (typeof USERS)[number]) => ({
+      id: u.id,
+      tenant_id: u.tenant_id,
+      email: u.email,
+      display_name: u.name,
+      status: u.active ? "active" : "inactive",
+      last_login_at: u.last_login,
+      failed_login_count: 0,
+      mfa_enabled: u.mfa_enrolled,
+      created_at: u.created_at,
+      roles: [u.role],
+    });
+    return [
+      {
+        // List. Backend returns a bare array at the top level — no wrapper.
+        pattern: /\/api\/v1\/users$/,
+        methods: ["GET"],
+        handler: () => USERS.map(toBackendUser),
+      },
+      {
+        // Create. Matches `UserCreate`: { email, display_name, password,
+        // role_names[] }. Password is discarded; response mirrors the
+        // backend's `UserResponse`.
+        pattern: /\/api\/v1\/users$/,
+        methods: ["POST"],
+        handler: (_match: RegExpMatchArray, body: unknown) => {
+          const b = (body ?? {}) as {
+            email?: string;
+            display_name?: string;
+            role_names?: string[];
+          };
+          return {
+            id: `mock-${Date.now()}`,
+            tenant_id: USERS[0]?.tenant_id ?? "mock-tenant",
+            email: b.email ?? "",
+            display_name: b.display_name ?? "",
+            status: "active",
+            last_login_at: null,
+            failed_login_count: 0,
+            mfa_enabled: false,
+            created_at: new Date().toISOString(),
+            roles: b.role_names ?? [],
+          };
+        },
+      },
+      {
+        // Update (display_name and/or status). Returns the updated user.
+        pattern: /\/api\/v1\/users\/([^/]+)$/,
+        methods: ["PUT"],
+        handler: (match: RegExpMatchArray, body: unknown) => {
+          const src = USERS.find((u) => u.id === match[1]) ?? USERS[0];
+          const patch = (body ?? {}) as { display_name?: string; status?: string };
+          const base = toBackendUser(src);
+          return {
+            ...base,
+            display_name: patch.display_name ?? base.display_name,
+            status: patch.status ?? base.status,
+          };
+        },
+      },
+      {
+        // Lock account — bumps status to "locked".
+        pattern: /\/api\/v1\/users\/([^/]+)\/lock$/,
+        methods: ["POST"],
+        handler: (match: RegExpMatchArray) => {
+          const src = USERS.find((u) => u.id === match[1]) ?? USERS[0];
+          return { ...toBackendUser(src), status: "locked" };
+        },
+      },
+      {
+        // Unlock account — resets status to "active" and clears failures.
+        pattern: /\/api\/v1\/users\/([^/]+)\/unlock$/,
+        methods: ["POST"],
+        handler: (match: RegExpMatchArray) => {
+          const src = USERS.find((u) => u.id === match[1]) ?? USERS[0];
+          return { ...toBackendUser(src), status: "active", failed_login_count: 0 };
+        },
+      },
+    ];
+  })(),
+  // ── Legacy /admin/users shims (kept for tests / callers not yet
+  //    migrated to the /api/v1/users paths above) ─────────────────────────
   {
     pattern: /\/admin\/users\/([^/]+)\/force-logout$/,
     methods: ["POST"],
@@ -333,11 +422,6 @@ const ROUTES: RouteEntry[] = [
     pattern: /\/users\/me$/,
     methods: ["PATCH"],
     handler: (_, body) => ({ ...USERS[0], ...(body as Record<string, unknown>) }),
-  },
-  {
-    pattern: /\/api\/v1\/users$/,
-    methods: ["GET"],
-    handler: () => ({ users: USERS }),
   },
 
   // ── Onboarding ───────────────────────────────────────────────────────────────

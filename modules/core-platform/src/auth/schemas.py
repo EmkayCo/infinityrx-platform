@@ -65,6 +65,11 @@ class UserResponse(BaseModel):
     status: str
     last_login_at: datetime | None
     failed_login_count: int
+    # Present on the ORM model but omitted from the prior response shape.
+    # Surfaced here so the operator portal's user list can render MFA
+    # enrollment and creation date without a second round-trip.
+    mfa_enabled: bool = False
+    created_at: datetime | None = None
     roles: list[str] = Field(default_factory=list)
 
 

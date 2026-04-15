@@ -25,10 +25,10 @@ export function MedicalClaimsUnifiedSpendBar({ data }: Props) {
   return (
     <ResponsiveContainer width="100%" height={260}>
       <ComposedChart data={data}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-        <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#94A3B8" }} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+        <XAxis dataKey="month" tick={{ fontSize: 11, fill: "var(--fg-muted)" }} />
         <YAxis
-          tick={{ fontSize: 11, fill: "#94A3B8" }}
+          tick={{ fontSize: 11, fill: "var(--fg-muted)" }}
           tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}K`}
         />
         <Tooltip
@@ -36,8 +36,8 @@ export function MedicalClaimsUnifiedSpendBar({ data }: Props) {
             `$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2 })}`,
           ]}
           contentStyle={{
-            background: "#1E293B",
-            border: "1px solid #334155",
+            background: "var(--bg-card-alt)", color: "var(--fg)",
+            border: "1px solid var(--border)",
             borderRadius: 8,
           }}
         />

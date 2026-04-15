@@ -39,8 +39,12 @@ from shared.events.factory import get_event_bus, reset_event_bus
 from shared.observability import configure_logging
 from shared.observability.slow_query import install_slow_query_logger
 
+from ._shim import db as db_shim
 from .api import router as api_router
 from .audit.middleware import AuditContext, AuditMiddleware
+from .auth import auth_api_router, configure_core_auth
+from .auth._db import get_session as auth_get_session
+from .auth.deps import configure_audit_sink
 from .infrastructure.rate_limiter import RateLimitConfig, RateLimitMiddleware
 from .infrastructure.security_headers import SecurityHeadersMiddleware
 from .infrastructure.tenant_middleware import AuthContext, AuthResolver, TenantIsolationMiddleware
@@ -257,17 +261,60 @@ def create_app() -> FastAPI:
         user_resolver=_audit_user_resolver,
         event_bus=get_event_bus(),
     )
-    app.add_middleware(TenantIsolationMiddleware, resolver=_TenantResolver())
+    # Allowlist of anonymous endpoints that must bypass the tenant auth
+    # check. Login, refresh, and MFA verify all run without a caller token
+    # (that's the whole point); health probes come from Kubernetes which
+    # never carries an auth header. Everything else still requires a valid
+    # JWT. Paths must match `scope["path"]` exactly.
+    _UNAUTH_PATHS: frozenset[str] = frozenset(
+        {
+            "/api/v1/auth/login",
+            "/api/v1/auth/token/refresh",
+            "/api/v1/auth/mfa/verify",
+            "/health",
+        }
+    )
+    app.add_middleware(
+        TenantIsolationMiddleware,
+        resolver=_TenantResolver(),
+        unauthenticated_paths=_UNAUTH_PATHS,
+    )
     app.add_middleware(RateLimitMiddleware, config=RateLimitConfig())
     app.add_middleware(SecurityHeadersMiddleware)
 
     app.include_router(api_router)
+    app.include_router(auth_api_router)
     app.include_router(
         build_dlq_router(
             get_service=_get_dlq_service,
             get_permissions=_get_dlq_permissions,
         )
     )
+
+    # Wire auth session + user loader + audit sink against the shim's
+    # sessionmaker. The auth routers declare `Depends(auth_get_session)`
+    # which resolves to the placeholder in `src.auth._db`; without this
+    # override the first live request 500s with "must be overridden".
+    # `configure_core_auth` installs the shared `CurrentUser` loader so
+    # `tenant_admin_only` and peers can resolve roles/permissions from
+    # the real ORM. `configure_audit_sink` swaps the process-wide
+    # InMemoryAuditSink fallback for a DB-backed sink. LESSON-006 applies:
+    # the integration test in tests/test_main_auth_wired.py hits a real
+    # HTTP request through this wiring — unit tests on the router alone
+    # do not prove it's mounted.
+    SessionLocal = db_shim.get_sessionmaker()
+
+    def _auth_session_dep():
+        session = SessionLocal()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    app.dependency_overrides[auth_get_session] = _auth_session_dep
+    configure_core_auth(SessionLocal)
+    configure_audit_sink(SessionLocal)
+
     return app
 
 

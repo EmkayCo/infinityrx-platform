@@ -41,16 +41,16 @@ export function AnalyticsDrugTrendTopDrugsBar({ data }: Props) {
         data={data.map((d) => ({ ...d, spend_num: parseFloat(d.total_spend) }))}
         layout="vertical"
       >
-        <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
         <XAxis
           type="number"
-          tick={{ fontSize: 10, fill: "#94A3B8" }}
+          tick={{ fontSize: 10, fill: "var(--fg-muted)" }}
           tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}K`}
         />
         <YAxis
           type="category"
           dataKey="drug_name"
-          tick={{ fontSize: 10, fill: "#94A3B8" }}
+          tick={{ fontSize: 10, fill: "var(--fg-muted)" }}
           width={160}
         />
         <Tooltip
@@ -58,8 +58,8 @@ export function AnalyticsDrugTrendTopDrugsBar({ data }: Props) {
             `$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2 })}`,
           ]}
           contentStyle={{
-            background: "#1E293B",
-            border: "1px solid #334155",
+            background: "var(--bg-card-alt)", color: "var(--fg)",
+            border: "1px solid var(--border)",
             borderRadius: 8,
           }}
         />

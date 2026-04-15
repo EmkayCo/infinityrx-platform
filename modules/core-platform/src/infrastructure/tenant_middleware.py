@@ -34,7 +34,7 @@ Public API for other teammates
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Iterable, Protocol, runtime_checkable
 from uuid import UUID
 
 from starlette.requests import Request
@@ -121,14 +121,38 @@ def _route_is_exempt(scope: Scope) -> bool:
 
 
 class TenantIsolationMiddleware:
-    """Pure ASGI middleware — no framework coupling beyond Starlette types."""
+    """Pure ASGI middleware — no framework coupling beyond Starlette types.
 
-    def __init__(self, app: ASGIApp, resolver: AuthResolver) -> None:
+    The optional ``unauthenticated_paths`` argument lists endpoint paths that
+    may be reached without an auth context. These are paths where anonymous
+    access is the whole point (``/auth/login``, ``/auth/token/refresh``,
+    ``/health`` probes) — without this allowlist the middleware would 401
+    every login attempt because the caller has no token yet. Matches are
+    exact ``scope['path']`` comparisons; any request under an allowlisted
+    path runs with no tenant context set. Wildcards are deliberately not
+    supported so each exemption is explicit and audited by file review.
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        resolver: AuthResolver,
+        *,
+        unauthenticated_paths: Iterable[str] = (),
+    ) -> None:
         self.app = app
         self.resolver = resolver
+        self.unauthenticated_paths: frozenset[str] = frozenset(unauthenticated_paths)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Anonymous-path bypass: run the endpoint directly with no tenant
+        # context. Used by /auth/login, /auth/token/refresh, /auth/mfa/verify,
+        # and /health so unauthenticated callers can reach them.
+        if scope.get("path") in self.unauthenticated_paths:
             await self.app(scope, receive, send)
             return
 

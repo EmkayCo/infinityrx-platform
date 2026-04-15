@@ -23,19 +23,19 @@ export function EdiMonitorRejectionBar({ data }: Props) {
   return (
     <ResponsiveContainer width="100%" height={220}>
       <BarChart data={data.slice(0, 10)} layout="vertical">
-        <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-        <XAxis type="number" tick={{ fontSize: 11, fill: "#94A3B8" }} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+        <XAxis type="number" tick={{ fontSize: 11, fill: "var(--fg-muted)" }} />
         <YAxis
           type="category"
           dataKey="code"
-          tick={{ fontSize: 10, fill: "#94A3B8" }}
+          tick={{ fontSize: 10, fill: "var(--fg-muted)" }}
           width={60}
         />
         <Tooltip
           formatter={(v) => [`${Number(v)} transactions`]}
           contentStyle={{
-            background: "#1E293B",
-            border: "1px solid #334155",
+            background: "var(--bg-card-alt)", color: "var(--fg)",
+            border: "1px solid var(--border)",
             borderRadius: 8,
           }}
         />

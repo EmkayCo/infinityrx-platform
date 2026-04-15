@@ -22,7 +22,6 @@ CREATE SCHEMA IF NOT EXISTS drug_db;                   -- modules/drug-database/
 CREATE SCHEMA IF NOT EXISTS drug_database;             -- modules/drug-database/src/models/{ndc,pricing,orange_book}_tables.py
 CREATE SCHEMA IF NOT EXISTS pharmacy_dir;              -- modules/pharmacy-directory/src/models/*.py
 CREATE SCHEMA IF NOT EXISTS prescriber_dir;            -- modules/prescriber-directory/src/models/*.py
-CREATE SCHEMA IF NOT EXISTS med_prescriber_dir;        -- modules/medical-prescriber-directory (placeholder)
 CREATE SCHEMA IF NOT EXISTS member_mgmt;
 
 -- Phase 4

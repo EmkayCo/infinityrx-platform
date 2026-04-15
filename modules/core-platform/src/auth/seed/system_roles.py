@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from src.auth._models import Permission, Role, RolePermission
 
 SYSTEM_ROLE_NAMES: tuple[str, ...] = (
+    # --- Original 10 (PRD §2.2) ----------------------------------------
     "platform_admin",
     "tenant_admin",
     "tenant_operator",
@@ -33,6 +34,17 @@ SYSTEM_ROLE_NAMES: tuple[str, ...] = (
     "pharmacy_viewer",
     "provider_admin",
     "member",
+    # --- Operator-portal functional roles ------------------------------
+    # Sidebar visibility and permission gating in portal/operator/
+    # reference these role names. Added so the bootstrap CLI and the
+    # New User modal can assign them without a second seeding step.
+    "billing_operator",
+    "fwa_investigator",
+    "viewer",
+    "report_viewer",
+    "directory_admin",
+    "edi_operator",
+    "clinical_reviewer",
 )
 
 ROLE_DESCRIPTIONS: dict[str, str] = {
@@ -46,6 +58,13 @@ ROLE_DESCRIPTIONS: dict[str, str] = {
     "pharmacy_viewer": "Pharmacy read-only",
     "provider_admin": "Medical provider — their claims",
     "member": "Patient/member — their own data only",
+    "billing_operator": "Runs billing cycles, claim review, and invoicing",
+    "fwa_investigator": "Investigates FWA flags, runs recoveries, reviews exclusions",
+    "viewer": "Read-only operator — all portal surfaces, no writes",
+    "report_viewer": "Read-only access to reports and report downloads",
+    "directory_admin": "Manages pharmacy, prescriber, drug, and member directories",
+    "edi_operator": "Operates EDI transmissions, trading partners, and certs",
+    "clinical_reviewer": "Reviews clinical workflows (DUR, MTM, prior auth)",
 }
 
 # (module, action, description)
@@ -114,6 +133,62 @@ ROLE_PERMISSION_MATRIX: dict[str, frozenset[str]] = {
         {"core:read", "users:read", "files:read", "files:write"}
     ),
     "member": frozenset({"core:read"}),
+    # --- Operator-portal functional roles ------------------------------
+    # Mapped onto the existing coarse permission codes. When finer-grained
+    # permissions land (billing:full, reclaimrx:view, etc.) these sets
+    # should be tightened per role — today they approximate job function
+    # using the union of data access + write surfaces each role touches.
+    "billing_operator": frozenset(
+        {
+            "core:read",
+            "core:write",
+            "files:read",
+            "files:write",
+            "jobs:read",
+            "jobs:run",
+            "audit:read",
+        }
+    ),
+    "fwa_investigator": frozenset(
+        {
+            "core:read",
+            "core:write",
+            "files:read",
+            "audit:read",
+            "audit:export",
+            "exclusions:read",
+            "exclusions:review",
+        }
+    ),
+    "viewer": frozenset(
+        {"core:read", "files:read", "audit:read"}
+    ),
+    "report_viewer": frozenset(
+        {"core:read", "files:read"}
+    ),
+    "directory_admin": frozenset(
+        {
+            "core:read",
+            "core:write",
+            "users:read",
+            "files:read",
+            "files:write",
+            "audit:read",
+        }
+    ),
+    "edi_operator": frozenset(
+        {
+            "core:read",
+            "files:read",
+            "files:write",
+            "jobs:read",
+            "jobs:run",
+            "audit:read",
+        }
+    ),
+    "clinical_reviewer": frozenset(
+        {"core:read", "files:read", "audit:read"}
+    ),
 }
 
 

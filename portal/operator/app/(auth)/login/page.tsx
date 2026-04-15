@@ -8,6 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Eye, EyeOff, ShieldCheck, FlaskConical } from "lucide-react";
 import { cn } from "@shared/lib/format";
+import { IfxLogo } from "@/components/ui/ifx-logo";
 
 const DEV_BYPASS_VISIBLE =
   process.env.NODE_ENV !== "production" &&
@@ -52,7 +53,6 @@ export default function LoginPage() {
         return;
       }
 
-      // Check if MFA is required
       if (result?.url?.includes("mfa_required")) {
         router.push("/mfa");
         return;
@@ -67,22 +67,29 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-navy-900 px-4">
-      <div className="w-full max-w-sm">
+    <div className="flex min-h-screen items-center justify-center bg-ifx-gray-50 px-4">
+      {/* Subtle wave pattern background */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 opacity-[0.04]"
+        style={{
+          backgroundImage:
+            "radial-gradient(circle at 20% 30%, var(--ifx-navy) 0%, transparent 40%), radial-gradient(circle at 80% 70%, var(--ifx-blue) 0%, transparent 40%)",
+        }}
+      />
+
+      <div className="relative w-full max-w-sm">
         {/* Logo */}
-        <div className="mb-8 flex flex-col items-center gap-3">
-          <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-teal-500 shadow-lg">
-            <span className="text-2xl font-bold text-white">IFX</span>
-          </div>
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-white">InfinityRx</h1>
-            <p className="mt-1 text-sm text-slate-400">Operator Portal</p>
-          </div>
+        <div className="mb-8 flex flex-col items-center gap-4">
+          <IfxLogo variant="navy" size="xl" showWordmark />
+          <p className="text-xs font-medium tracking-[0.2em] text-ifx-gray-500 uppercase">
+            ICP Portal
+          </p>
         </div>
 
         {/* Card */}
-        <div className="rounded-xl border border-navy-700 bg-navy-800/50 p-8 shadow-xl backdrop-blur-sm">
-          <h2 className="mb-6 text-center text-lg font-semibold text-white">
+        <div className="rounded-xl border border-ifx-gray-100 bg-white p-8 shadow-[0_4px_24px_rgba(13,9,54,0.08)]">
+          <h2 className="mb-6 text-center text-lg font-bold text-ifx-gray-900">
             Sign in to your account
           </h2>
 
@@ -91,7 +98,7 @@ export default function LoginPage() {
             <div>
               <label
                 htmlFor="email"
-                className="mb-1.5 block text-sm font-medium text-slate-300"
+                className="mb-1.5 block text-sm font-medium text-ifx-gray-700"
               >
                 Email address
               </label>
@@ -101,16 +108,16 @@ export default function LoginPage() {
                 autoComplete="email"
                 {...register("email")}
                 className={cn(
-                  "w-full rounded-md border bg-navy-900 px-3 py-2.5 text-sm text-white placeholder:text-slate-500",
-                  "focus:outline-none focus:ring-2 focus:ring-teal-500/40 focus:border-teal-500 transition-colors",
-                  errors.email ? "border-red-500" : "border-navy-600"
+                  "w-full rounded-md border bg-white px-3 py-2.5 text-sm text-ifx-gray-900 placeholder:text-ifx-gray-400",
+                  "focus:outline-none focus:ring-2 focus:ring-ifx-blue/40 focus:border-ifx-blue transition-colors",
+                  errors.email ? "border-ifx-error" : "border-ifx-gray-100"
                 )}
                 placeholder="operator@infinityrx.com"
                 aria-describedby={errors.email ? "email-error" : undefined}
                 aria-invalid={!!errors.email}
               />
               {errors.email && (
-                <p id="email-error" className="mt-1 text-xs text-red-400" role="alert">
+                <p id="email-error" className="mt-1 text-xs text-ifx-error" role="alert">
                   {errors.email.message}
                 </p>
               )}
@@ -120,7 +127,7 @@ export default function LoginPage() {
             <div>
               <label
                 htmlFor="password"
-                className="mb-1.5 block text-sm font-medium text-slate-300"
+                className="mb-1.5 block text-sm font-medium text-ifx-gray-700"
               >
                 Password
               </label>
@@ -131,9 +138,9 @@ export default function LoginPage() {
                   autoComplete="current-password"
                   {...register("password")}
                   className={cn(
-                    "w-full rounded-md border bg-navy-900 px-3 py-2.5 pr-10 text-sm text-white",
-                    "focus:outline-none focus:ring-2 focus:ring-teal-500/40 focus:border-teal-500 transition-colors",
-                    errors.password ? "border-red-500" : "border-navy-600"
+                    "w-full rounded-md border bg-white px-3 py-2.5 pr-10 text-sm text-ifx-gray-900",
+                    "focus:outline-none focus:ring-2 focus:ring-ifx-blue/40 focus:border-ifx-blue transition-colors",
+                    errors.password ? "border-ifx-error" : "border-ifx-gray-100"
                   )}
                   placeholder="Enter your password"
                   aria-describedby={errors.password ? "password-error" : undefined}
@@ -142,37 +149,35 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword((s) => !s)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-ifx-gray-400 hover:text-ifx-gray-700 transition-colors"
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
               {errors.password && (
-                <p id="password-error" className="mt-1 text-xs text-red-400" role="alert">
+                <p id="password-error" className="mt-1 text-xs text-ifx-error" role="alert">
                   {errors.password.message}
                 </p>
               )}
             </div>
 
-            {/* Auth error */}
             {authError && (
               <div
-                className="flex items-center gap-2 rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2.5"
+                className="flex items-center gap-2 rounded-md border border-ifx-error/20 bg-ifx-error-light px-3 py-2.5"
                 role="alert"
               >
-                <ShieldCheck className="h-4 w-4 text-red-400 shrink-0" />
-                <p className="text-sm text-red-400">{authError}</p>
+                <ShieldCheck className="h-4 w-4 text-ifx-error shrink-0" />
+                <p className="text-sm text-ifx-error">{authError}</p>
               </div>
             )}
 
-            {/* Submit */}
             <button
               type="submit"
               disabled={isLoading}
               className={cn(
-                "mt-2 w-full rounded-md bg-teal-500 px-4 py-2.5 text-sm font-semibold text-white",
-                "hover:bg-teal-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500",
+                "ifx-on-dark mt-2 w-full rounded-md bg-ifx-navy px-4 py-2.5 text-sm font-semibold text-white",
+                "hover:bg-ifx-navy-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ifx-blue",
                 "disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               )}
             >
@@ -181,7 +186,7 @@ export default function LoginPage() {
           </form>
 
           {DEV_BYPASS_VISIBLE && (
-            <div className="mt-6 border-t border-navy-700 pt-4">
+            <div className="mt-6 border-t border-ifx-gray-100 pt-4">
               <button
                 type="button"
                 onClick={async () => {
@@ -204,23 +209,23 @@ export default function LoginPage() {
                 }}
                 disabled={isLoading}
                 className={cn(
-                  "flex w-full items-center justify-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-2.5",
-                  "text-sm font-medium text-amber-300 hover:bg-amber-500/20",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500",
+                  "flex w-full items-center justify-center gap-2 rounded-md border border-ifx-warning/40 bg-ifx-warning-light px-4 py-2.5",
+                  "text-sm font-medium text-ifx-warning hover:bg-ifx-warning-light/70",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ifx-warning",
                   "disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 )}
               >
                 <FlaskConical className="h-4 w-4" />
                 Sign in as Dev Admin (mock)
               </button>
-              <p className="mt-2 text-center text-[11px] text-amber-400/70">
+              <p className="mt-2 text-center text-[11px] text-ifx-warning/70">
                 Dev-only bypass. Disabled in production builds.
               </p>
             </div>
           )}
         </div>
 
-        <p className="mt-6 text-center text-xs text-slate-500">
+        <p className="mt-6 text-center text-xs text-ifx-gray-500">
           Having trouble? Contact your system administrator.
         </p>
       </div>

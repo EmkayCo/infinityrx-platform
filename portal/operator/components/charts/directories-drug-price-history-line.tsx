@@ -26,17 +26,17 @@ export function DirectoriesDrugPriceHistoryLine({ data }: Props) {
   return (
     <ResponsiveContainer width="100%" height={220}>
       <LineChart data={data}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-        <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#94A3B8" }} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+        <XAxis dataKey="date" tick={{ fontSize: 11, fill: "var(--fg-muted)" }} />
         <YAxis
-          tick={{ fontSize: 11, fill: "#94A3B8" }}
+          tick={{ fontSize: 11, fill: "var(--fg-muted)" }}
           tickFormatter={(v: number) => `$${Number(v)}`}
         />
         <Tooltip
           formatter={(v) => [`$${Number(v).toFixed(2)}`]}
           contentStyle={{
-            background: "#1E293B",
-            border: "1px solid #334155",
+            background: "var(--bg-card-alt)", color: "var(--fg)",
+            border: "1px solid var(--border)",
             borderRadius: 8,
           }}
         />

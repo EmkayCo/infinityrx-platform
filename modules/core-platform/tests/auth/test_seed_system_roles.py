@@ -13,11 +13,13 @@ from src.auth.seed.system_roles import (
 )
 
 
-def test_creates_all_10_system_roles(db) -> None:
+def test_creates_all_system_roles(db) -> None:
     seed_system_roles(db)
     names = [r.name for r in db.scalars(select(Role).where(Role.is_system.is_(True))).all()]
     assert sorted(names) == sorted(SYSTEM_ROLE_NAMES)
-    assert len(names) == 10
+    # Count tracks SYSTEM_ROLE_NAMES so the assertion does not have to be
+    # bumped every time a new operator-portal role is added.
+    assert len(names) == len(SYSTEM_ROLE_NAMES)
 
 
 def test_creates_all_default_permissions(db) -> None:

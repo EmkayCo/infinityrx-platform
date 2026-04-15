@@ -4,115 +4,358 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ============================================================
+ * InfinityRx Design System — Tokens
+ *
+ * Single source of truth. Every Tailwind color token in @theme
+ * resolves to a CSS custom property defined in :root / .dark, so
+ * `bg-card`, `text-fg`, `border-default`, etc. auto-swap with the
+ * `.dark` class on <html>.
+ *
+ * Naming: SEMANTIC, not visual. Use `bg-card`, not `bg-white`.
+ * Use `text-fg-muted`, not `text-slate-500`.
+ *
+ * Legacy aliases at the bottom keep older class names working
+ * (ifx-gray-*, ifx-blue, ifx-surface-dark, etc.) — DO NOT use them
+ * in new code.
+ * ============================================================ */
 @theme {
-  /* Brand — navy */
-  --color-navy-900: #0B1D3A;
-  --color-navy-700: #1B3A5C;
-  --color-navy-500: #2D5F8A;
+  /* Brand chrome — sidebar + accents. Same in both modes. */
+  --color-brand-navy: var(--brand-navy);
+  --color-brand-primary: var(--brand-primary);
+  --color-brand-primary-hover: var(--brand-primary-hover);
 
-  /* Brand — teal (overrides Tailwind default teal) */
-  --color-teal-600: #0891B2;
-  --color-teal-500: #00B4D8;
-  --color-teal-400: #22D3EE;
+  /* Surfaces — swap with mode */
+  --color-page: var(--bg-page);
+  --color-card: var(--bg-card);
+  --color-card-alt: var(--bg-card-alt);
+  --color-sidebar: var(--bg-sidebar);
+  --color-sidebar-hover: var(--bg-sidebar-hover);
 
-  /* IFX semantic + surface */
+  /* Foreground (text) — swap with mode */
+  --color-fg: var(--fg);
+  --color-fg-secondary: var(--fg-secondary);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-placeholder: var(--fg-placeholder);
+  --color-fg-on-brand: #FFFFFF;
+
+  /* Borders */
+  --color-border-default: var(--border);
+  --color-border-strong: var(--border-strong);
+
+  /* Interactive */
+  --color-interactive: var(--interactive);
+  --color-interactive-hover: var(--interactive-hover);
+  --color-interactive-bg: var(--interactive-bg);
+
+  /* Semantic — each pair swaps with mode */
+  --color-success: #10B981;
+  --color-success-bg: var(--success-bg);
+  --color-success-fg: var(--success-fg);
+
+  --color-warning: #F59E0B;
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-fg: var(--warning-fg);
+
+  --color-error: #EF4444;
+  --color-error-bg: var(--error-bg);
+  --color-error-fg: var(--error-fg);
+
+  --color-info: #3B82F6;
+  --color-info-bg: var(--info-bg);
+  --color-info-fg: var(--info-fg);
+
+  --color-investigation: #8B5CF6;
+  --color-investigation-bg: var(--investigation-bg);
+  --color-investigation-fg: var(--investigation-fg);
+
+  /* ----------------------------------------------------------
+   * Legacy aliases — old class names map onto the new tokens
+   * so 60+ existing pages render correctly without per-file
+   * edits. DO NOT use these in new code.
+   * ---------------------------------------------------------- */
+  /* IFX gray ramp */
+  --color-ifx-white: var(--bg-card);
+  --color-ifx-gray-50: var(--bg-page);
+  --color-ifx-gray-100: var(--bg-card-alt);
+  --color-ifx-gray-200: var(--border);
+  --color-ifx-gray-300: var(--border-strong);
+  --color-ifx-gray-400: var(--fg-muted);
+  --color-ifx-gray-500: var(--fg-muted);
+  --color-ifx-gray-700: var(--fg-secondary);
+  --color-ifx-gray-900: var(--fg);
+  --color-ifx-placeholder: var(--fg-placeholder);
+
+  /* IFX brand legacy */
+  --color-ifx-navy: var(--brand-navy);
+  --color-ifx-navy-light: var(--bg-sidebar-hover);
+  --color-ifx-navy-dark: #060D1F;
+  --color-ifx-primary: var(--interactive);
+  --color-ifx-primary-hover: var(--interactive-hover);
+  --color-ifx-primary-light: var(--interactive);
+  --color-ifx-primary-bg: var(--interactive-bg);
+  --color-ifx-blue: var(--interactive);
+  --color-ifx-blue-light: var(--interactive);
+  --color-ifx-lavender: var(--interactive-bg);
+  --color-ifx-lavender-dark: var(--interactive-bg);
+
+  /* Tailwind navy/teal aliases (from earlier brand swap) */
+  --color-navy-900: #060D1F;
+  --color-navy-700: var(--brand-navy);
+  --color-navy-500: var(--interactive);
+  --color-teal-400: var(--interactive);
+  --color-teal-500: var(--interactive);
+  --color-teal-600: var(--interactive-hover);
+
+  /* IFX semantic legacy → new pairs */
   --color-ifx-success: #10B981;
+  --color-ifx-success-light: var(--success-bg);
+  --color-ifx-success-text: var(--success-fg);
   --color-ifx-warning: #F59E0B;
+  --color-ifx-warning-light: var(--warning-bg);
+  --color-ifx-warning-text: var(--warning-fg);
   --color-ifx-error: #EF4444;
+  --color-ifx-error-light: var(--error-bg);
+  --color-ifx-error-text: var(--error-fg);
   --color-ifx-info: #3B82F6;
-  --color-ifx-bg-light: #F8FAFC;
-  --color-ifx-bg-dark: #0F172A;
-  --color-ifx-surface-light: #FFFFFF;
-  --color-ifx-surface-dark: #1E293B;
-  --color-ifx-border-light: #E2E8F0;
-  --color-ifx-border-dark: #334155;
+  --color-ifx-info-light: var(--info-bg);
+  --color-ifx-info-text: var(--info-fg);
+  --color-ifx-investigation: #8B5CF6;
+  --color-ifx-investigation-light: var(--investigation-bg);
+  --color-ifx-investigation-text: var(--investigation-fg);
 
-  /* Font families (driven by next/font variables from layout.tsx) */
-  --font-sans: var(--font-inter), system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains-mono), "Fira Code", monospace;
+  /* Legacy *-dark surface tokens — now flip with mode (cards become
+     light in light mode, dark in dark mode) so legacy pages adopt
+     the standard enterprise pattern automatically. */
+  --color-ifx-surface-dark: var(--bg-card);
+  --color-ifx-surface-darker: var(--bg-page);
+  --color-ifx-border-dark: var(--border);
+  --color-ifx-border-dark-strong: var(--border-strong);
+  --color-ifx-bg-dark: var(--bg-page);
+
+  /* Fonts */
+  --font-sans: var(--font-lato), system-ui, sans-serif;
+  --font-mono: var(--font-ibm-mono), "IBM Plex Mono", monospace;
 
   /* Border radius */
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
 }
 
+/* ============================================================
+ * Light mode (default)
+ * ============================================================ */
 :root {
-  /* Primary palette */
-  --ifx-navy-900: #0b1d3a;
-  --ifx-navy-700: #1b3a5c;
-  --ifx-navy-500: #2d5f8a;
+  /* Brand */
+  --brand-navy: #0F1A3E;
+  --brand-primary: #2563EB;
+  --brand-primary-hover: #1D4ED8;
 
-  /* Accent */
-  --ifx-teal-600: #0891b2;
-  --ifx-teal-500: #00b4d8;
-  --ifx-teal-400: #22d3ee;
+  /* Surfaces */
+  --bg-page: #F8FAFC;
+  --bg-card: #FFFFFF;
+  --bg-card-alt: #F1F5F9;
+  --bg-sidebar: #0B1120;          /* dark slate — matches dark-mode page bg */
+  --bg-sidebar-hover: #1E293B;
+  --bg-input: #FFFFFF;
 
-  /* Semantic */
-  --ifx-success: #10b981;
-  --ifx-warning: #f59e0b;
-  --ifx-error: #ef4444;
-  --ifx-info: #3b82f6;
+  /* Foreground (text) */
+  --fg: #0F172A;
+  --fg-secondary: #334155;
+  --fg-muted: #64748B;
+  --fg-placeholder: #94A3B8;
 
-  /* Surfaces — light mode */
-  --ifx-bg: #f8fafc;
-  --ifx-surface: #ffffff;
-  --ifx-border: #e2e8f0;
+  /* Borders */
+  --border: #E2E8F0;
+  --border-strong: #CBD5E1;
 
-  /* Text — light mode */
-  --ifx-text-primary: #1e293b;
-  --ifx-text-secondary: #64748b;
+  /* Interactive */
+  --interactive: #2563EB;
+  --interactive-hover: #1D4ED8;
+  --interactive-bg: #DBEAFE;
+
+  /* Semantic — light pairs */
+  --success-bg: #D1FAE5;  --success-fg: #065F46;
+  --warning-bg: #FEF3C7;  --warning-fg: #92400E;
+  --error-bg:   #FEE2E2;  --error-fg:   #991B1B;
+  --info-bg:    #DBEAFE;  --info-fg:    #1E40AF;
+  --investigation-bg: #EDE9FE; --investigation-fg: #5B21B6;
+
+  /* Legacy CSS-var aliases (for inline-style consumers) */
+  --ifx-bg: var(--bg-page);
+  --ifx-surface: var(--bg-card);
+  --ifx-border: var(--border);
+  --ifx-text-primary: var(--fg);
+  --ifx-text-secondary: var(--fg-secondary);
+  --ifx-success: #10B981;
+  --ifx-warning: #F59E0B;
+  --ifx-error: #EF4444;
+  --ifx-info: #3B82F6;
+  --ifx-navy: var(--brand-navy);
+  --ifx-navy-light: var(--bg-sidebar-hover);
+  --ifx-navy-dark: #060D1F;
+  --ifx-primary: var(--interactive);
+  --ifx-primary-hover: var(--interactive-hover);
+  --ifx-primary-light: var(--interactive);
+  --ifx-primary-bg: var(--interactive-bg);
+  --ifx-blue: var(--interactive);
+  --ifx-blue-light: var(--interactive);
+  --ifx-lavender: var(--interactive-bg);
+  --ifx-lavender-dark: var(--interactive-bg);
 
   /* shadcn/ui compatibility */
   --background: 248 250 252;
-  --foreground: 30 41 59;
-  --card: #ffffff;
-  --card-foreground: #1e293b;
-  --popover: #ffffff;
-  --popover-foreground: #1e293b;
-  --primary: #00b4d8;
-  --primary-foreground: #ffffff;
-  --secondary: #f1f5f9;
-  --secondary-foreground: #1e293b;
-  --muted: #f1f5f9;
-  --muted-foreground: #64748b;
-  --accent: #22d3ee;
-  --accent-foreground: #0f172a;
-  --destructive: #ef4444;
-  --destructive-foreground: #ffffff;
-  --border: #e2e8f0;
-  --input: #e2e8f0;
-  --ring: #00b4d8;
-  --radius: 8px;
+  --foreground: 15 23 42;
+  --card: #FFFFFF;
+  --card-foreground: #0F172A;
+  --popover: #FFFFFF;
+  --popover-foreground: #0F172A;
+  --primary: #2563EB;
+  --primary-foreground: #FFFFFF;
+  --secondary: #DBEAFE;
+  --secondary-foreground: #0F1A3E;
+  --muted: #F1F5F9;
+  --muted-foreground: #64748B;
+  --accent: #2563EB;
+  --accent-foreground: #FFFFFF;
+  --destructive: #EF4444;
+  --destructive-foreground: #FFFFFF;
+  --border-rgb: 226 232 240;
+  --border: #E2E8F0;
+  --input: #E2E8F0;
+  --ring: #2563EB;
+  --radius: 6px;
 }
 
+/* ============================================================
+ * Dark mode
+ * Sidebar merges with the page bg; subtle right border in CSS.
+ * ============================================================ */
 .dark {
-  --ifx-bg: #0f172a;
-  --ifx-surface: #1e293b;
-  --ifx-border: #334155;
-  --ifx-text-primary: #f1f5f9;
-  --ifx-text-secondary: #94a3b8;
+  /* Brand stays (sidebar uses different bg in dark — see below) */
+  --brand-navy: #0F1A3E;
+  --brand-primary: #3B82F6;
+  --brand-primary-hover: #60A5FA;
 
-  --card: #1e293b;
-  --card-foreground: #f1f5f9;
-  --popover: #1e293b;
-  --popover-foreground: #f1f5f9;
-  --secondary: #1e293b;
-  --secondary-foreground: #f1f5f9;
-  --muted: #1e293b;
-  --muted-foreground: #94a3b8;
-  --accent-foreground: #0f172a;
-  --border: #334155;
-  --input: #334155;
-  --background: 15 23 42;
+  /* Surfaces — sidebar + page share the same dark slate */
+  --bg-page: #0B1120;
+  --bg-card: #111827;
+  --bg-card-alt: #1E293B;
+  --bg-sidebar: #0B1120;
+  --bg-sidebar-hover: #1E293B;
+  --bg-input: #1E293B;
+
+  /* Foreground — light on dark, WCAG AAA */
+  --fg: #F1F5F9;
+  --fg-secondary: #CBD5E1;
+  --fg-muted: #94A3B8;
+  --fg-placeholder: #64748B;
+
+  /* Borders */
+  --border: #1E293B;
+  --border-strong: #334155;
+
+  /* Interactive — brighter in dark */
+  --interactive: #3B82F6;
+  --interactive-hover: #60A5FA;
+  --interactive-bg: #1E3A5F;
+
+  /* Semantic — dark pairs */
+  --success-bg: #064E3B;  --success-fg: #6EE7B7;
+  --warning-bg: #78350F;  --warning-fg: #FCD34D;
+  --error-bg:   #7F1D1D;  --error-fg:   #FCA5A5;
+  --info-bg:    #1E3A5F;  --info-fg:    #93C5FD;
+  --investigation-bg: #4C1D95; --investigation-fg: #C4B5FD;
+
+  /* shadcn dark */
+  --background: 11 17 32;
   --foreground: 241 245 249;
+  --card: #111827;
+  --card-foreground: #F1F5F9;
+  --popover: #111827;
+  --popover-foreground: #F1F5F9;
+  --primary: #3B82F6;
+  --primary-foreground: #FFFFFF;
+  --secondary: #1E293B;
+  --secondary-foreground: #F1F5F9;
+  --muted: #1E293B;
+  --muted-foreground: #94A3B8;
+  --accent: #3B82F6;
+  --accent-foreground: #FFFFFF;
+  --destructive: #EF4444;
+  --destructive-foreground: #FFFFFF;
+  --border-rgb: 30 41 59;
+  --border: #1E293B;
+  --input: #1E293B;
+  --ring: #3B82F6;
 }
 
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
+/* ============================================================
+ * Tailwind built-in white literals — flip in dark mode so
+ * `bg-white` cards, dropdowns, popovers adopt the dark surface.
+ * Sidebar's literal white text uses `.ifx-on-dark` to opt out.
+ * ============================================================ */
+.dark .bg-white { background-color: var(--bg-card); }
+.dark .border-white { border-color: var(--border); }
+.dark .text-black { color: var(--fg); }
+
+/* ============================================================
+ * Light-mode rescue: legacy pages used `text-white` and
+ * `text-slate-{200..500}` for primary/secondary text on what
+ * are now light cards. Map those to the theme-aware foreground
+ * vars so they invert correctly. The `.ifx-on-dark` opt-out
+ * keeps literal white where elements truly sit on a dark
+ * surface (sidebar, navy avatar circle).
+ * ============================================================ */
+.text-slate-200 { color: var(--fg); }
+.text-slate-300 { color: var(--fg-secondary); }
+.text-slate-400 { color: var(--fg-muted); }
+.text-slate-500 { color: var(--fg-muted); }
+:root:not(.dark) .text-white { color: var(--fg); }
+.ifx-on-dark .text-white,
+.ifx-on-dark.text-white,
+.ifx-on-dark { color: #FFFFFF; }
+.ifx-on-dark .text-white,
+.ifx-on-dark.text-white { color: #FFFFFF !important; }
+
+/* Legacy semantic-text Tailwind built-ins: light-mode rescue.
+   In dark mode they keep their bright Tailwind defaults (correct
+   on dark cards). In light mode they swap to readable semantic
+   foreground tokens. */
+:root:not(.dark) .text-yellow-300,
+:root:not(.dark) .text-yellow-400 { color: var(--warning-fg); }
+:root:not(.dark) .text-orange-300,
+:root:not(.dark) .text-orange-400 { color: var(--warning-fg); }
+:root:not(.dark) .text-red-300,
+:root:not(.dark) .text-red-400 { color: var(--error-fg); }
+:root:not(.dark) .text-green-300,
+:root:not(.dark) .text-green-400 { color: var(--success-fg); }
+:root:not(.dark) .text-blue-300,
+:root:not(.dark) .text-blue-400 { color: var(--info-fg); }
+:root:not(.dark) .text-teal-300,
+:root:not(.dark) .text-teal-400 { color: var(--interactive); }
+
+/* Legacy semantic-bg Tailwind dark badges — flip to semantic light
+   pairs in light mode so the dark-on-dark badge style becomes
+   readable. Dark mode keeps Tailwind defaults. */
+:root:not(.dark) .bg-yellow-900\/40 { background-color: var(--warning-bg); }
+:root:not(.dark) .bg-orange-900\/40 { background-color: var(--warning-bg); }
+:root:not(.dark) .bg-red-900\/40    { background-color: var(--error-bg); }
+:root:not(.dark) .bg-green-900\/40  { background-color: var(--success-bg); }
+:root:not(.dark) .bg-blue-900\/40   { background-color: var(--info-bg); }
+:root:not(.dark) .bg-teal-900\/40   { background-color: var(--interactive-bg); }
+:root:not(.dark) .bg-purple-900\/40 { background-color: var(--investigation-bg); }
+:root:not(.dark) .bg-slate-700      { background-color: var(--bg-card-alt); }
+:root:not(.dark) .bg-slate-800      { background-color: var(--bg-card-alt); }
+:root:not(.dark) .bg-navy-700\/30   { background-color: var(--bg-card-alt); }
+:root:not(.dark) .bg-navy-700       { background-color: var(--bg-card-alt); }
+
+/* ============================================================
+ * Base resets & typography
+ * ============================================================ */
+*, *::before, *::after { box-sizing: border-box; }
 
 html {
   scroll-behavior: smooth;
@@ -121,25 +364,30 @@ html {
 }
 
 body {
-  background-color: var(--ifx-bg);
-  color: var(--ifx-text-primary);
-  font-family: var(--font-inter), system-ui, sans-serif;
+  background-color: var(--bg-page);
+  color: var(--fg);
+  font-family: var(--font-lato), system-ui, sans-serif;
   font-size: 14px;
   line-height: 1.5;
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-inter), system-ui, sans-serif;
-  font-weight: 600;
+  font-family: var(--font-lato), system-ui, sans-serif;
+  font-weight: 700;
   line-height: 1.25;
+  color: var(--fg);
 }
 
 code, pre, kbd, samp {
-  font-family: var(--font-jetbrains-mono), "Fira Code", monospace;
+  font-family: var(--font-ibm-mono), "IBM Plex Mono", monospace;
+}
+
+.font-mono, .ifx-mono {
+  font-family: var(--font-ibm-mono), "IBM Plex Mono", monospace;
 }
 
 *:focus-visible {
-  outline: 2px solid var(--ifx-teal-500);
+  outline: 2px solid var(--interactive);
   outline-offset: 2px;
 }
 
@@ -157,23 +405,21 @@ code, pre, kbd, samp {
   top: -9999px;
   left: 1rem;
   z-index: 50;
-  background: var(--ifx-teal-500);
-  color: white;
+  background: var(--brand-navy);
+  color: #FFFFFF;
   padding: 0.5rem 1rem;
   border-radius: 0.375rem;
   text-decoration: none;
   font-size: 0.875rem;
+  font-weight: 600;
 }
-.skip-nav:focus {
-  top: 1rem;
-}
+.skip-nav:focus { top: 1rem; }
 
-/* Shimmer animation for skeleton loaders */
+/* Skeleton shimmer */
 @keyframes shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
-
 .shimmer {
   background: linear-gradient(
     90deg,
@@ -183,4 +429,29 @@ code, pre, kbd, samp {
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
+}
+
+/* Sliding panel */
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+.slide-in-right { animation: slideInRight 200ms ease-out; }
+
+/* Card surface — utility class for non-Tailwind consumers */
+.ifx-card-shadow {
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+.dark .ifx-card-shadow {
+  box-shadow: none;
+  border: 1px solid var(--border);
+}
+.ifx-card-shadow-lift:hover {
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+  transition: box-shadow 150ms ease;
+}
+.dark .ifx-card-shadow-lift:hover {
+  box-shadow: none;
+  border-color: var(--border-strong);
+  transition: border-color 150ms ease;
 }

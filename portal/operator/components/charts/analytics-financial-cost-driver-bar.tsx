@@ -27,10 +27,10 @@ export function AnalyticsFinancialCostDriverBar({ data }: Props) {
           pct: d.pct_of_total,
         }))}
       >
-        <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-        <XAxis dataKey="category" tick={{ fontSize: 10, fill: "#94A3B8" }} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+        <XAxis dataKey="category" tick={{ fontSize: 10, fill: "var(--fg-muted)" }} />
         <YAxis
-          tick={{ fontSize: 10, fill: "#94A3B8" }}
+          tick={{ fontSize: 10, fill: "var(--fg-muted)" }}
           tickFormatter={(v: number) => `$${(v / 1000000).toFixed(1)}M`}
         />
         <Tooltip
@@ -38,8 +38,8 @@ export function AnalyticsFinancialCostDriverBar({ data }: Props) {
             `$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2 })}`,
           ]}
           contentStyle={{
-            background: "#1E293B",
-            border: "1px solid #334155",
+            background: "var(--bg-card-alt)", color: "var(--fg)",
+            border: "1px solid var(--border)",
             borderRadius: 8,
           }}
         />

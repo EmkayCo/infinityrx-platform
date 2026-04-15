@@ -14,7 +14,7 @@ import { useRouter } from "next/navigation";
 
 const NETWORK_BADGE: Record<NetworkStatus, string> = {
   in_network: "bg-green-900/40 text-green-300",
-  preferred: "bg-teal-900/40 text-teal-300",
+  preferred: "bg-blue-900/40 text-blue-300",
   out_of_network: "bg-slate-700 text-slate-400",
   pending: "bg-yellow-900/40 text-yellow-300",
   terminated: "bg-red-900/40 text-red-300",

@@ -45,6 +45,8 @@ def _to_response(session: Session, user_id: uuid.UUID) -> UserResponse:
         status=u.status,
         last_login_at=u.last_login_at,
         failed_login_count=u.failed_login_count,
+        mfa_enabled=bool(getattr(u, "mfa_enabled", False)),
+        created_at=getattr(u, "created_at", None),
         roles=auth.roles,
     )
 

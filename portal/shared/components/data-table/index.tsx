@@ -87,7 +87,7 @@ export function DataTable<TData>({
 
   if (isLoading) {
     return (
-      <div className={cn("rounded-lg border border-ifx-border-dark overflow-hidden", className)}>
+      <div className={cn("rounded-lg border border-border-default bg-card overflow-hidden", className)}>
         <div className="p-4">
           <Skeleton className="h-8 w-64 mb-4" />
           <div className="space-y-3">
@@ -114,11 +114,11 @@ export function DataTable<TData>({
           placeholder="Search..."
           value={globalFilter}
           onChange={(e) => setGlobalFilter(e.target.value)}
-          className="flex-1 max-w-xs px-3 py-1.5 text-sm rounded-md border border-ifx-border-dark bg-ifx-surface-dark text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
+          className="flex-1 max-w-xs px-3 py-1.5 text-sm rounded-md border border-border-default bg-card text-fg placeholder:text-fg-placeholder focus:outline-none focus:ring-2 focus:ring-interactive/40"
         />
         {enableRowSelection && selectedCount > 0 && bulkActions && (
-          <div className="flex items-center gap-3 px-4 py-2 rounded-lg bg-teal-900/30 border border-teal-600/30">
-            <span className="text-sm text-teal-300 font-medium">
+          <div className="flex items-center gap-3 px-4 py-2 rounded-lg bg-interactive-bg border border-interactive/30">
+            <span className="text-sm text-interactive font-medium">
               {selectedCount} selected
             </span>
             {bulkActions}
@@ -126,10 +126,10 @@ export function DataTable<TData>({
         )}
       </div>
 
-      <div className="rounded-lg border border-ifx-border-dark overflow-auto">
+      <div className="rounded-lg border border-border-default bg-card overflow-auto">
         <table className="w-full text-sm">
           <thead className={cn(
-            "bg-navy-900/80 border-b border-ifx-border-dark",
+            "bg-card-alt border-b border-border-default",
             stickyHeader && "sticky top-0 z-10"
           )}>
             {table.getHeaderGroups().map((hg) => (
@@ -137,7 +137,7 @@ export function DataTable<TData>({
                 {hg.headers.map((header) => (
                   <th
                     key={header.id}
-                    className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide select-none"
+                    className="px-4 py-3 text-left text-xs font-semibold text-fg-muted uppercase tracking-wide select-none"
                     onClick={header.column.getToggleSortingHandler()}
                     style={{ cursor: header.column.getCanSort() ? "pointer" : undefined }}
                   >
@@ -156,7 +156,7 @@ export function DataTable<TData>({
           <tbody>
             {table.getRowModel().rows.length === 0 ? (
               <tr>
-                <td colSpan={columns.length} className="text-center py-12 text-slate-500">
+                <td colSpan={columns.length} className="text-center py-12 text-fg-muted">
                   <EmptyState title={emptyTitle} description={emptyDescription} />
                 </td>
               </tr>
@@ -166,13 +166,13 @@ export function DataTable<TData>({
                   key={row.id}
                   onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                   className={cn(
-                    "border-b border-ifx-border-dark/50 hover:bg-navy-700/30 transition-colors",
+                    "border-b border-border-default hover:bg-card-alt transition-colors",
                     onRowClick && "cursor-pointer",
-                    row.getIsSelected() && "bg-teal-900/10"
+                    row.getIsSelected() && "bg-interactive-bg"
                   )}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-4 py-3 text-slate-200">
+                    <td key={cell.id} className="px-4 py-3 text-fg">
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}
