@@ -391,12 +391,14 @@ def main() -> int:
         for d in DRUGS:
             f.write(f"    ({d[2]!r}, {d[3]!r}),\n")
         f.write("]\n\n")
-        f.write("# (ncpdp_provider_id, dba_name)\n")
-        f.write("PHARMACY_IDS = [\n")
+        f.write("# (ncpdp_provider_id, dba_name, pharmacy_npi)\n")
+        f.write("PHARMACIES = [\n")
         for p in pharmacies:
-            f.write(f"    ({p['ncpdp_provider_id']!r}, {p['dba_name']!r}),\n")
+            f.write(f"    ({p['ncpdp_provider_id']!r}, {p['dba_name']!r}, {p['npi']!r}),\n")
         f.write("]\n\n")
-        f.write("# NPI strings — Luhn-valid synthetic\n")
+        f.write("# Convenience: just the pharmacy NPIs, in the same order.\n")
+        f.write("PHARMACY_NPIS = [p[2] for p in PHARMACIES]\n\n")
+        f.write("# Prescriber NPIs — Luhn-valid synthetic, 10 chars\n")
         f.write("PRESCRIBER_NPIS = [\n")
         for r in prescribers:
             f.write(f"    {r['npi']!r},\n")

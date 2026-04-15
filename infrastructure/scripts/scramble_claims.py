@@ -90,19 +90,30 @@ FAKE_CLIENTS: list[tuple[str, str]] = [
     ("DEMO02", "Demo Card Program"),
 ]
 
-# ── Public-knowledge NDC pool — small fixed list of known real drugs ──────
-# These are the 11-digit NDCs visible on any pharmacy receipt; including them
-# lets the demo show realistic drug names from the loaded reference data.
-PUBLIC_NDCS = [
-    "00310053930", "00310053990", "00006505101", "00006505106",
-    "00310005230", "00310026160", "59651021906", "65862036701",
-    "16729028505", "00591057701", "00378395401", "00781511031",
-    "00378511093", "55111057801", "65862004299", "16714019903",
-    "00378015101", "62756045283", "70710107301", "59746020101",
-    "57237001999", "00781708201", "00378411301", "27241007001",
-    "65862036301", "00781181201", "00378026605", "60505082305",
-    "65862099799", "16729000910", "00006027761", "00310050530",
-]
+# ── Reference-shim pools ──────────────────────────────────────────────────
+# NDCs, NCPDP pharmacy IDs, and prescriber NPIs all come from the
+# data/mock/_reference_shim.py file written by seed_reference_shim.py.
+# Importing the frozen file ensures the generator and the seeded reference
+# tables stay in lockstep — every claim joins to a real shim row.
+#
+# Falls back to a tiny public-NDC list if the shim file does not exist yet
+# (so the script is still runnable before the seed has been loaded once).
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from data.mock._reference_shim import (  # type: ignore
+        DRUG_NDCS as _SHIM_DRUG_NDCS,
+        PHARMACY_NPIS as _SHIM_PHARMACY_NPIS,
+        PRESCRIBER_NPIS as _SHIM_PRESCRIBER_NPIS,
+    )
+    PUBLIC_NDCS = [ndc for ndc, _name in _SHIM_DRUG_NDCS]
+    SHIM_PHARMACY_NPIS = list(_SHIM_PHARMACY_NPIS)
+    SHIM_PRESCRIBER_NPIS = list(_SHIM_PRESCRIBER_NPIS)
+    SHIM_LOADED = True
+except ImportError:
+    PUBLIC_NDCS = ["00071015523", "00310075190", "00006027761", "50580046601"]
+    SHIM_PHARMACY_NPIS = []
+    SHIM_PRESCRIBER_NPIS = []
+    SHIM_LOADED = False
 
 # ── BIN / PCN / SenderID pools (all fictional) ────────────────────────────
 DEMO_BINS = ["888001", "888002", "888003", "888004", "999001", "999002"]
@@ -303,11 +314,20 @@ def generate_row(
 
 # ── Pool builders (run once before generation) ────────────────────────────
 def build_pools(rng: random.Random) -> dict:
-    """Pre-generate fixed pools so the same demo cardholder maps consistently."""
+    """Pre-generate fixed pools.
+
+    NPI and pharmacy pools come from the reference shim if it has been
+    loaded — that's how the generated claims join cleanly to the seeded
+    drug_database.drugs / pharmacy_dir.ncpdp_pharmacies / prescriber_dir
+    .prescribers tables. Falls back to Luhn-valid synthetic identifiers
+    when the shim isn't available (e.g. first-time scaffold).
+    """
+    npis = SHIM_PRESCRIBER_NPIS if SHIM_PRESCRIBER_NPIS else [synthetic_npi(rng) for _ in range(5_000)]
+    pharmacies = SHIM_PHARMACY_NPIS if SHIM_PHARMACY_NPIS else [synthetic_npi(rng) for _ in range(800)]
     return {
         "cardholders": [fake_cardholder(rng) for _ in range(2_000)],
-        "npis": [synthetic_npi(rng) for _ in range(5_000)],
-        "pharmacies": [synthetic_npi(rng) for _ in range(800)],
+        "npis": npis,
+        "pharmacies": pharmacies,
         "routings": [fake_routing(rng) for _ in range(40)],
         "accounts": [fake_account(rng) for _ in range(40)],
     }
