@@ -101,6 +101,30 @@ No cross-schema direct queries. Use API calls between modules.
 Main branch protected. Module branches: `module/{name}`. Feature branches: `module/{name}/{feature}`.
 Worktrees for parallel agents. Integration Coordinator merges at gates.
 
+## Environment Architecture
+
+Three environments, one codebase. Code never changes between environments — only config changes.
+
+| Env | INFINITYRX_ENV | Database | Branch |
+|-----|---------------|----------|--------|
+| dev | development | infinityrx_dev | develop |
+| mock | mock | infinityrx_mock | main |
+| prod | production | infinityrx_prod | main |
+
+### Data Tiers
+1. **Reference data** (drug, CMS, prescriber, pharmacy): shared read-only across all environments. Public data.
+2. **Operational/PHI data** (claims, members, clients, payments): isolated per environment. NEVER copy prod to dev.
+3. **Tenant config** (client configs, fee schedules, routing rules): isolated per environment.
+
+### Rules
+- All development happens on `develop` branch in dev environment
+- Feature branches fork from `develop`, merge back to `develop`
+- `main` only updated by merging `develop` after all gate tests pass
+- Mock and prod both deploy `main` branch code
+- Mock gets sanitized data from `infrastructure/scripts/scramble_claims.py`
+- Real PHI never leaves production database — no exceptions
+- Switching environments: `source infrastructure/scripts/switch_env.sh {dev|mock|prod}`
+
 ## References
 `docs/glossary.md` | `docs/negative-constraints.md` | `docs/api-contracts/` | `docs/prd/` | `docs/anti-patterns.md`
 
