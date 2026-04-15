@@ -34,6 +34,7 @@ yarn-error.log*
 # Claude
 .claude/worktrees/
 .claude/skills/
+.worktrees/
 
 # Test artifacts
 portal/operator/playwright-report/
