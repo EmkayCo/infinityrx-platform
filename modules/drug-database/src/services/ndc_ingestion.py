@@ -167,15 +167,42 @@ class NDCIngestionService:
         errored = 0
         error_samples: list[dict[str, Any]] = []
 
-        valid_rows: list[dict[str, Any]] = []
+        # BUG-01a fix: dedup BOTH by product_id AND by ndc_11 within a
+        # single batch.
+        # Why product_id dedup: PG `INSERT ... ON CONFLICT` doesn't allow
+        # duplicate conflict targets in a single batch (CardinalityViolation).
+        # Why ndc_11 dedup: the FDA NDC source file legitimately contains
+        # multiple product_ids that share the same ndc_11 (relabeled or
+        # reformulated products). The DB has a UNIQUE constraint
+        # uq_drugs_ndc_11 that fires when two different product_ids try to
+        # claim the same ndc_11 in one batch — and ON CONFLICT on
+        # product_id can't resolve a collision on a different unique index.
+        # Strategy: keep the LAST occurrence of each (product_id, ndc_11)
+        # — last-seen wins because the parser typically yields newer
+        # versions later in the stream.
+        by_product_id: dict[str, dict[str, Any]] = {}
+        by_ndc_11: dict[str, str] = {}  # ndc_11 -> product_id (last seen)
         for row in rows:
             try:
-                valid_rows.append({**row, "updated_at": now})
+                pid = row.get("product_id")
+                ndc_11 = row.get("ndc_11")
+                if not pid:
+                    continue
+                # If this ndc_11 was previously claimed by a different
+                # product_id, evict the older claimant from the batch.
+                if ndc_11:
+                    prior_pid = by_ndc_11.get(ndc_11)
+                    if prior_pid and prior_pid != pid:
+                        by_product_id.pop(prior_pid, None)
+                    by_ndc_11[ndc_11] = pid
+                by_product_id[pid] = {**row, "updated_at": now}
             except Exception as exc:
                 errored += 1
                 if len(error_samples) < 10:
                     error_samples.append({"field": "drug_row", "raw_row": str(row)[:500],
                                           "error": str(exc)[:500]})
+
+        valid_rows = list(by_product_id.values())
 
         if not valid_rows:
             return inserted, updated, errored, error_samples
@@ -316,19 +343,44 @@ class NDCIngestionService:
                             "created_at": now,
                         })
 
-            # Batch insert ingredients
+            # Commit the deletes before the inserts so a later insert
+            # failure can't undo them.
+            self._db.commit()
+
+            # Batch insert ingredients (per-batch try/commit to isolate failures)
             for i in range(0, len(ingredient_rows), _BATCH_SIZE):
                 chunk = ingredient_rows[i : i + _BATCH_SIZE]
-                if chunk:
+                if not chunk:
+                    continue
+                try:
                     self._db.execute(DrugActiveIngredient.__table__.insert(), chunk)
+                    self._db.commit()
+                except Exception as exc:
+                    logger.warning(
+                        "Active ingredient batch failed",
+                        extra={"ingest_source": "fda_ndc",
+                               "ingest_batch_size": len(chunk),
+                               "ingest_error": str(exc)[:300]},
+                    )
+                    self._db.rollback()
 
             # Batch insert pharm classes
             for i in range(0, len(pharm_class_rows), _BATCH_SIZE):
                 chunk = pharm_class_rows[i : i + _BATCH_SIZE]
-                if chunk:
+                if not chunk:
+                    continue
+                try:
                     self._db.execute(DrugPharmClass.__table__.insert(), chunk)
+                    self._db.commit()
+                except Exception as exc:
+                    logger.warning(
+                        "Pharm class batch failed",
+                        extra={"ingest_source": "fda_ndc",
+                               "ingest_batch_size": len(chunk),
+                               "ingest_error": str(exc)[:300]},
+                    )
+                    self._db.rollback()
 
-            self._db.flush()
             offset += _BATCH_SIZE
 
     # ------------------------------------------------------------------
