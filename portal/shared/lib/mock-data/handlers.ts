@@ -59,6 +59,19 @@ import {
   money,
   rngInt,
   PRIMARY_TENANT,
+  // Programs + Client Management seed data
+  PROGRAMS,
+  PROGRAM_ENROLLMENTS,
+  BUDGET_MONTHLY,
+  DASHBOARD_KPI,
+  DASHBOARD_ACTIVITY,
+  DASHBOARD_ALERTS,
+  PROGRAM_HEALTH_CARDS,
+  CLIENTS,
+  CLIENT_FEES,
+  MASTER_FEE_SCHEDULE,
+  STATEMENT_PROVIDERS,
+  BLOCKED_PROVIDERS,
 } from "./seed";
 
 // ── Real-data helpers ─────────────────────────────────────────────────────────
@@ -1546,6 +1559,231 @@ const ROUTES: RouteEntry[] = [
       sample_rows: 25,
       estimated_file_size: "1.2 MB",
     }),
+  },
+
+  // ── Dashboard KPI / activity / alerts ────────────────────────────────────────
+  {
+    pattern: /\/api\/v1\/dashboard\/kpi$/,
+    methods: ["GET"],
+    handler: () => DASHBOARD_KPI,
+  },
+  {
+    pattern: /\/api\/v1\/dashboard\/activity$/,
+    methods: ["GET"],
+    handler: () => ({ events: DASHBOARD_ACTIVITY }),
+  },
+  {
+    pattern: /\/api\/v1\/dashboard\/alerts$/,
+    methods: ["GET"],
+    handler: () => ({ alerts: DASHBOARD_ALERTS }),
+  },
+  {
+    pattern: /\/api\/v1\/dashboard\/program-health$/,
+    methods: ["GET"],
+    handler: () => ({ programs: PROGRAM_HEALTH_CARDS }),
+  },
+
+  // ── Programs ──────────────────────────────────────────────────────────────────
+  {
+    // GET /api/v1/programs — list all programs
+    // POST /api/v1/programs — create program (returns first program as stub)
+    pattern: /\/api\/v1\/programs$/,
+    methods: ["GET", "POST"],
+    handler: (_, body) => {
+      if (body) {
+        const b = body as Record<string, unknown>;
+        return {
+          ...PROGRAMS[0],
+          id: makeUUID(79999),
+          name: String(b.name ?? "New Program"),
+          manufacturer: String(b.manufacturer ?? "Unknown"),
+          status: "active",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+      }
+      return { programs: PROGRAMS, total: PROGRAMS.length };
+    },
+  },
+  {
+    // GET /api/v1/programs/:id — program detail
+    // PATCH /api/v1/programs/:id — update program
+    // DELETE /api/v1/programs/:id — archive program
+    pattern: /\/api\/v1\/programs\/([^/?]+)$/,
+    methods: ["GET", "PATCH", "DELETE"],
+    handler: (match, body) => {
+      const prog = PROGRAMS.find((p) => p.id === match[1]) ?? PROGRAMS[0];
+      if (body) return { ...prog, ...(body as Record<string, unknown>), updated_at: new Date().toISOString() };
+      return prog;
+    },
+  },
+  {
+    // GET /api/v1/programs/:id/enrollments
+    pattern: /\/api\/v1\/programs\/([^/?]+)\/enrollments$/,
+    methods: ["GET"],
+    handler: (match) => {
+      const rows = PROGRAM_ENROLLMENTS.filter((e) => e.program_id === match[1]);
+      return { enrollments: rows.length > 0 ? rows : PROGRAM_ENROLLMENTS.slice(0, 10), total: rows.length || 10 };
+    },
+  },
+  {
+    // GET /api/v1/programs/:id/budget
+    pattern: /\/api\/v1\/programs\/([^/?]+)\/budget$/,
+    methods: ["GET"],
+    handler: (match) => {
+      const prog = PROGRAMS.find((p) => p.id === match[1]) ?? PROGRAMS[0];
+      const monthly = BUDGET_MONTHLY.filter((b) => b.program_id === prog.id);
+      return {
+        program_id: prog.id,
+        annual_budget: prog.budget_annual,
+        spent: prog.budget_spent,
+        remaining: prog.budget_remaining,
+        projected_annual: prog.projected_annual,
+        monthly,
+      };
+    },
+  },
+  {
+    // GET /api/v1/programs/:id/claims
+    pattern: /\/api\/v1\/programs\/([^/?]+)\/claims$/,
+    methods: ["GET"],
+    handler: () => ({ claims: CLAIMS.slice(0, 20), total: CLAIMS.length }),
+  },
+  {
+    // GET /api/v1/programs/:id/leakage
+    pattern: /\/api\/v1\/programs\/([^/?]+)\/leakage$/,
+    methods: ["GET"],
+    handler: () => ({ flags: FWA_FLAGS.slice(0, 10), total: FWA_FLAGS.length }),
+  },
+  {
+    // GET /api/v1/programs/enrollment/analytics — cross-program enrollment view
+    pattern: /\/api\/v1\/programs\/enrollment\/analytics$/,
+    methods: ["GET"],
+    handler: () => ({
+      enrollments: PROGRAM_ENROLLMENTS,
+      total: PROGRAM_ENROLLMENTS.length,
+      by_program: PROGRAMS.map((p) => ({
+        program_id: p.id,
+        program_name: p.name,
+        active: p.active_enrollments,
+        inactive: Math.floor(p.active_enrollments * 0.12),
+      })),
+    }),
+  },
+  {
+    // GET /api/v1/programs/budget/summary — cross-program budget view
+    pattern: /\/api\/v1\/programs\/budget\/summary$/,
+    methods: ["GET"],
+    handler: () => ({
+      programs: PROGRAMS.map((p) => ({
+        program_id: p.id,
+        program_name: p.name,
+        manufacturer: p.manufacturer,
+        annual_budget: p.budget_annual,
+        spent: p.budget_spent,
+        remaining: p.budget_remaining,
+        projected_annual: p.projected_annual,
+        variance: money(parseFloat(p.budget_annual) - parseFloat(p.projected_annual)),
+      })),
+      monthly: BUDGET_MONTHLY,
+    }),
+  },
+
+  // ── Client Management (Companies) ─────────────────────────────────────────────
+  {
+    // GET /api/v1/clients — list all clients
+    // POST /api/v1/clients — create client
+    pattern: /\/api\/v1\/clients$/,
+    methods: ["GET", "POST"],
+    handler: (_, body) => {
+      if (body) {
+        const b = body as Record<string, unknown>;
+        return {
+          ...CLIENTS[0],
+          id: makeUUID(79998),
+          company_name: String(b.company_name ?? "New Client"),
+          status: "enabled",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+      }
+      return { clients: CLIENTS, total: CLIENTS.length };
+    },
+  },
+  {
+    // GET /api/v1/clients/:id — client detail
+    // PATCH /api/v1/clients/:id — update client
+    // DELETE /api/v1/clients/:id — delete client
+    pattern: /\/api\/v1\/clients\/([^/?]+)$/,
+    methods: ["GET", "PATCH", "DELETE"],
+    handler: (match, body) => {
+      const client = CLIENTS.find((c) => c.id === match[1]) ?? CLIENTS[0];
+      if (body) return { ...client, ...(body as Record<string, unknown>), updated_at: new Date().toISOString() };
+      return client;
+    },
+  },
+  {
+    // GET /api/v1/clients/:id/fees — client fee config
+    // PATCH /api/v1/clients/:id/fees — update fee config
+    pattern: /\/api\/v1\/clients\/([^/?]+)\/fees$/,
+    methods: ["GET", "PATCH"],
+    handler: (match, body) => {
+      const fees = CLIENT_FEES.find((f) => f.client_id === match[1]) ?? CLIENT_FEES[0];
+      if (body) return { ...fees, ...(body as Record<string, unknown>), updated_at: new Date().toISOString() };
+      return fees;
+    },
+  },
+  {
+    // GET /api/v1/clients/:id/programs — client's programs
+    pattern: /\/api\/v1\/clients\/([^/?]+)\/programs$/,
+    methods: ["GET"],
+    handler: (match) => {
+      const client = CLIENTS.find((c) => c.id === match[1]) ?? CLIENTS[0];
+      const progs = PROGRAMS.filter((p) => p.manufacturer_id === client.id);
+      return { programs: progs.length > 0 ? progs : [PROGRAMS[0]], total: progs.length || 1 };
+    },
+  },
+  {
+    // GET /api/v1/clients/:id/statement-providers
+    // POST /api/v1/clients/:id/statement-providers
+    pattern: /\/api\/v1\/clients\/([^/?]+)\/statement-providers$/,
+    methods: ["GET", "POST"],
+    handler: (match, body) => {
+      const rows = STATEMENT_PROVIDERS.filter((s) => s.client_id === match[1]);
+      if (body) {
+        return { ...STATEMENT_PROVIDERS[0], id: makeUUID(79997), client_id: match[1], ...(body as Record<string, unknown>) };
+      }
+      return { providers: rows.length > 0 ? rows : STATEMENT_PROVIDERS.slice(0, 2), total: rows.length || 2 };
+    },
+  },
+  {
+    // GET /api/v1/clients/:id/blocked-providers
+    // POST /api/v1/clients/:id/blocked-providers
+    pattern: /\/api\/v1\/clients\/([^/?]+)\/blocked-providers$/,
+    methods: ["GET", "POST"],
+    handler: (match, body) => {
+      const rows = BLOCKED_PROVIDERS.filter((b) => b.client_id === match[1]);
+      if (body) {
+        return { ...BLOCKED_PROVIDERS[0], id: makeUUID(79996), client_id: match[1], ...(body as Record<string, unknown>) };
+      }
+      return { blocked: rows.length > 0 ? rows : [], total: rows.length };
+    },
+  },
+
+  // ── Fee Master Schedule ────────────────────────────────────────────────────────
+  {
+    pattern: /\/api\/v1\/clients\/fees\/master$/,
+    methods: ["GET"],
+    handler: () => ({ fees: MASTER_FEE_SCHEDULE, total: MASTER_FEE_SCHEDULE.length }),
+  },
+  {
+    pattern: /\/api\/v1\/clients\/fees\/master\/([^/?]+)$/,
+    methods: ["GET", "PATCH"],
+    handler: (match, body) => {
+      const fee = MASTER_FEE_SCHEDULE.find((f) => f.id === match[1]) ?? MASTER_FEE_SCHEDULE[0];
+      if (body) return { ...fee, ...(body as Record<string, unknown>) };
+      return fee;
+    },
   },
 ];
 
