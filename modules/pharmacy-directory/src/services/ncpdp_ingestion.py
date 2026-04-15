@@ -229,6 +229,22 @@ class NCPDPIngestionService:
             )
             deleted_ids[table_name].update(ids_to_delete)
 
+        # BUG-02a fix: dedup within the batch for tables whose unique
+        # constraint spans more than just ncpdp_provider_id. The NCPDP
+        # source file legitimately yields multiple rows for the same
+        # (ncpdp_provider_id, state) tuple in ncpdp_pharmacy_medicaid
+        # (e.g. a pharmacy with two different medicaid provider ids in
+        # the same state over time). The delete-by-ncpdp_provider_id
+        # phase above clears the DB, but the batch itself still has
+        # duplicates that trip uq_ncpdp_md_ncpdp_state on INSERT.
+        # Keep the LAST occurrence per tuple.
+        if table_name == "ncpdp_pharmacy_medicaid":
+            deduped: dict[tuple[str, str], dict[str, Any]] = {}
+            for r in rows:
+                key = (r.get("ncpdp_provider_id", ""), r.get("state", ""))
+                deduped[key] = r
+            rows = list(deduped.values())
+
         self._db.execute(insert(model), rows)
         self._db.commit()  # per-batch durability
         logger.debug(
