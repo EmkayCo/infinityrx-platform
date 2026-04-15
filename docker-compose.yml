@@ -78,6 +78,20 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── Reference-data loader (placeholder) ────────────────────────────────
+  # The reference schemas (drug NDC, NPPES prescribers, NCPDP pharmacies,
+  # CMS rates, FDA Orange Book, etc.) are populated by ETL scripts under
+  # shared/data_ingestion/. They run on the host (not in a container) so
+  # they can read source files from data/raw/. Wire a service here later
+  # if/when the ETL is dockerized.
+  #
+  # Manual ETL invocation (run for each environment):
+  #   source infrastructure/scripts/switch_env.sh dev
+  #   uv run python shared/data_ingestion/scripts/load_fda_ndc.py
+  #   uv run python shared/data_ingestion/scripts/load_ncpdp.py
+  #   uv run python shared/data_ingestion/scripts/load_nppes.py
+  #   ... (etc — see CLAUDE.md → Reference data)
+
 volumes:
   postgres_data:
   redis_data:
