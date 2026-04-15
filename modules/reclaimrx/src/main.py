@@ -8,6 +8,8 @@ so integration tests through create_app() catch regressions.
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +20,27 @@ from shared.middleware import RateLimitConfig, RateLimitMiddleware, SecurityHead
 from .api.router import router
 
 logger = logging.getLogger("reclaimrx.main")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Startup: wire event-bus consumers (CR-01).
+
+    Loads all 8 reclaimrx CONSUMER_ROUTING handlers and subscribes them to
+    the shared EventBus so the FWA pipeline actually receives live events.
+    Best-effort — a missing broker is fine in tests.
+    """
+    try:
+        from shared.events.factory import get_event_bus  # noqa: PLC0415
+        from .events import wire_consumers  # noqa: PLC0415
+
+        bus = get_event_bus()
+        await bus.start()
+        await wire_consumers(bus)
+        app.state.event_bus = bus
+    except Exception:  # pragma: no cover — best-effort
+        logger.exception("reclaimrx.consumer_wiring_failed")
+    yield
 
 
 class _EmptyDLQRepository:
@@ -48,6 +71,7 @@ def create_app() -> FastAPI:
     cors_origins = getattr(settings, "CORS_ALLOW_ORIGINS", [])
 
     app = FastAPI(
+        lifespan=lifespan,
         title="InfinityRx ReclaimRx",
         version="1.0.0",
         description="FWA detection, ML scoring, graph analysis, and recovery estimation.",
