@@ -275,6 +275,20 @@ class OrangeBookIngestionService:
 
         self._db.commit()  # commit the deletes before any inserts
 
+        # BUG-05a fix: dedup by the unique constraint tuple
+        # (appl_type, appl_no, product_no, patent_no) before batching.
+        # Same pattern as drug_exclusivity. Keep last-seen.
+        deduped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+        for r in rows:
+            key = (
+                r.get("appl_type") or "",
+                r.get("appl_no") or "",
+                r.get("product_no") or "",
+                r.get("patent_no") or "",
+            )
+            deduped[key] = r
+        rows = list(deduped.values())
+
         # Insert in batches
         for i in range(0, len(rows), _BATCH_SIZE):
             chunk = rows[i : i + _BATCH_SIZE]
@@ -354,6 +368,24 @@ class OrangeBookIngestionService:
                 )
 
         self._db.commit()  # commit the deletes before any inserts
+
+        # BUG-05a fix: dedup the entire incoming list by the unique
+        # constraint tuple (appl_type, appl_no, product_no,
+        # exclusivity_code, exclusivity_date) BEFORE batching. The FDA
+        # Orange Book exclusivity file legitimately yields multiple
+        # rows with the same key when an exclusivity spans multiple
+        # product codes or lists. Keep the last occurrence.
+        deduped: dict[tuple[str, str, str, str, Any], dict[str, Any]] = {}
+        for r in rows:
+            key = (
+                r.get("appl_type") or "",
+                r.get("appl_no") or "",
+                r.get("product_no") or "",
+                r.get("exclusivity_code") or "",
+                r.get("exclusivity_date"),
+            )
+            deduped[key] = r
+        rows = list(deduped.values())
 
         # Insert in batches
         for i in range(0, len(rows), _BATCH_SIZE):
