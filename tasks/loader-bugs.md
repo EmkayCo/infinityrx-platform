@@ -171,7 +171,18 @@ Convention:
 
 ## MISSING-MIGRATIONS-01 — modules/billing/ has no alembic history
 - **Status**: open (worked around)
-- **Priority**: P1 for production, P3 for demo (workaround in place)
+- **Priority**: **P1** — must be resolved before any feature work touches
+  the billing schema. The `_bootstrap_billing.py` workaround is acceptable
+  for environment scaffolding but NOT for ongoing development:
+    * `metadata.create_all()` cannot evolve the schema — every column
+      addition has to be hand-applied to dev, mock, and prod
+    * No rollback path
+    * No version stamping → can't tell which environments are at which
+      schema state
+    * Feature branches that touch billing models will silently diverge
+- **Gate**: any PR that adds, removes, or modifies a column in
+  `modules/billing/src/models/tables.py` MUST be blocked until a proper
+  `0001_billing_baseline.py` exists.
 - **Module**: billing
 - **Symptom**: `modules/billing/src/models/tables.py` defines ~30 ORM
   models (ClaimRecord, RoutingRule, PaymentBatch, Payment, Invoice,
@@ -183,13 +194,19 @@ Convention:
   `infrastructure/scripts/_bootstrap_billing.py` calls `create_all()` on
   the BillingBase metadata. Same pattern as the prescriber-directory
   bootstrap that was needed before its baseline migration was written.
-- **Suggested fix**: write a proper `0001_billing_baseline.py` alembic
-  migration under `modules/billing/alembic/versions/` that mirrors every
-  table in `src/models/tables.py`. This is mechanical — same approach as
+- **Required fix**: create `modules/billing/alembic.ini` (use the
+  `script_location = alembic` convention from the other modules), an
+  `alembic/env.py` that loads `BillingBase.metadata`, and an
+  `alembic/versions/0001_billing_baseline.py` that mirrors every table
+  in `src/models/tables.py`. Same approach as
   `modules/prescriber-directory/alembic/versions/0000_prescriber_baseline.py`
-  (~250 lines for the prescriber baseline; billing is bigger so probably
-  600+ lines).
+  (~250 lines for the prescriber baseline; billing is bigger — probably
+  600+ lines and 30 `op.create_table` calls). After landing the baseline,
+  add `billing` to the `MODULES` list in
+  `infrastructure/scripts/run_migrations.sh` and remove
+  `infrastructure/scripts/_bootstrap_billing.py`.
 - **Likely sibling bugs**: every other module that has `src/models/tables.py`
   but no `alembic/`. Spot check needed for: payment-processing, reclaimrx,
   reporting, ai-nlp, dataiq, member-management, edi-compliance,
-  medical-claims, ai-nlp. Same root cause pattern.
+  medical-claims. Same root cause pattern — these will need MISSING-
+  MIGRATIONS-02..09 entries when each is touched by feature work.
