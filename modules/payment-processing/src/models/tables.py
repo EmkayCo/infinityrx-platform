@@ -209,6 +209,57 @@ class VendorHealthLog(Base):
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class OfacSdnEntry(Base):
+    """OFAC Specially Designated Nationals entry — a blocked entity.
+
+    Seeded from https://sanctionssearch.ofac.treas.gov/ SDN CSV (or an API
+    integration when credentials are available). Tenant-agnostic reference
+    data: the SDN list is shared across all tenants.
+    """
+
+    __tablename__ = "payment_proc_ofac_sdn"
+    __table_args__ = (
+        Index("idx_ofac_sdn_type", "sdn_type"),
+        Index("idx_ofac_sdn_name", "canonical_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    sdn_uid: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    sdn_type: Mapped[str] = mapped_column(String(20), nullable=False)  # "individual" | "entity" | "vessel"
+    program: Mapped[str | None] = mapped_column(String(50), nullable=True)  # SDN program code (e.g. SDGT, CYBER2)
+    canonical_name: Mapped[str] = mapped_column(String(500), nullable=False)  # lowercased, stripped
+    aliases: Mapped[str | None] = mapped_column(Text, nullable=True)  # newline-separated AKA names
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    country: Mapped[str | None] = mapped_column(String(3), nullable=True)  # ISO 3166-1 alpha-3
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="SDN")  # SDN | CONS | NS-PLC
+    source_list_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class OfacScreeningAlert(Base):
+    """Audit record of every OFAC hit — payment blocked, investigation opened."""
+
+    __tablename__ = "payment_proc_ofac_alerts"
+    __table_args__ = (
+        Index("idx_ofac_alert_tenant", "tenant_id", "created_at"),
+        Index("idx_ofac_alert_entity", "tenant_id", "entity_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    entity_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    entity_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    sdn_uid: Mapped[str] = mapped_column(String(50), nullable=False)
+    sdn_canonical_name: Mapped[str] = mapped_column(String(500), nullable=False)
+    match_confidence: Mapped[str] = mapped_column(String(20), nullable=False)  # exact | probable | possible
+    match_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    match_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    blocked_payment_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    resolution_status: Mapped[str] = mapped_column(String(30), default="open", nullable=False)  # open | cleared | confirmed
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class PayeeEnrollment(Base):
     """payment_proc.payee_enrollments — enrollment status per pharmacy per vendor."""
 
