@@ -7,11 +7,19 @@ from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, status
 
+from shared.db.tenant_context import set_tenant_context
 
-def get_tenant_id(x_tenant_id: str = Header(...)) -> uuid.UUID:
-    """Extract and validate tenant ID from X-Tenant-Id request header."""
+
+async def get_tenant_id(x_tenant_id: str = Header(...)) -> uuid.UUID:
+    """Extract and validate tenant ID from X-Tenant-Id request header.
+
+    Also sets the shared tenant context so ORM tenant-isolation middleware
+    applies the correct WHERE tenant_id = :tid filter on all queries.
+    Must be async so the ContextVar is set in the same async task context
+    as the route handler and DB session execution.
+    """
     try:
-        return uuid.UUID(x_tenant_id)
+        tenant_uuid = uuid.UUID(x_tenant_id)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -24,6 +32,9 @@ def get_tenant_id(x_tenant_id: str = Header(...)) -> uuid.UUID:
                 }
             },
         ) from exc
+
+    set_tenant_context(tenant_uuid)
+    return tenant_uuid
 
 
 TenantId = Annotated[uuid.UUID, Depends(get_tenant_id)]

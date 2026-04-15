@@ -2,20 +2,45 @@
 
 LESSON-006: integration tests through create_app() to verify middleware
 and routers are mounted.
+
+DB sessions are mocked so tests run without a live database.
 """
 
 from __future__ import annotations
 
 import uuid
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 from src.main import create_app
 
 
+def _mock_result():
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = []
+    mock_result.scalar_one_or_none.return_value = None
+    mock_result.all.return_value = []
+    return mock_result
+
+
 @pytest.fixture()
 def client() -> TestClient:
-    return TestClient(create_app(), raise_server_exceptions=False)
+    from shared.db.session import get_session  # noqa: PLC0415
+
+    app = create_app()
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=_mock_result())
+    mock_session.add = MagicMock()
+    mock_session.flush = AsyncMock()
+    mock_session.commit = AsyncMock()
+
+    async def _override_get_session():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = _override_get_session
+    return TestClient(app, raise_server_exceptions=False)
 
 
 TENANT_ID = str(uuid.UUID("00000000-0000-0000-0000-000000000001"))
@@ -46,7 +71,8 @@ class TestCreateApp:
         )
         assert response.status_code == 200
 
-    def test_generic_exception_handler_returns_500(self, client: TestClient) -> None:
+    def test_generic_exception_handler_returns_500(self) -> None:
+        from shared.db.session import get_session  # noqa: PLC0415
 
         app = create_app()
 
