@@ -30,6 +30,9 @@ yarn-error.log*
 .env
 .env.local
 .env.*.local
+.env.dev
+.env.mock
+.env.prod
 
 # Claude
 .claude/worktrees/
@@ -52,11 +55,11 @@ Thumbs.db
 *.swo
 coverage.json
 
-# Portal: large source data files (kept locally for dev, regen aggregations via npm run prepare-data)
-# Raw files live outside /public so they are not publicly served by Next.js.
-portal/operator/lib/data/sources/*.txt
-portal/operator/lib/data/sources/*.xlsx
+# Raw IFX exports — real PHI / client identifiers, NEVER commit
+data/raw/
 
+# Mock/scrambled outputs derived from raw exports — local-only
+data/mock/
 
 # Reference data (large files — kept out of git except whitelisted)
 data/reference/

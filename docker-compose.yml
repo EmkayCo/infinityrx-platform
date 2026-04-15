@@ -5,8 +5,12 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: infinityrx
-      POSTGRES_PASSWORD: infinityrx_dev
-      POSTGRES_DB: infinityrx
+      # Bootstrap superuser password — the per-environment .env.{dev,mock,prod}
+      # files set their own connection strings; this is just the Docker init
+      # password used while the cluster boots and runs init-multi-db.sql.
+      POSTGRES_PASSWORD: infinityrx_bootstrap
+      # init-multi-db.sql creates infinityrx_{prod,dev,mock} explicitly,
+      # so no POSTGRES_DB is needed.
     # log_min_duration_statement=1000 → any query running >1s is logged
     # with its text + parameters. Essential for catching N+1 queries,
     # missing indexes, and long-running audit exports before they
@@ -35,7 +39,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./infrastructure/scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./infrastructure/scripts/init-multi-db.sql:/docker-entrypoint-initdb.d/01-init-multi-db.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U infinityrx"]
       interval: 5s

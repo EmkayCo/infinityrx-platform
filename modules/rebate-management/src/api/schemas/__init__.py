@@ -1,0 +1,1 @@
+"""Rebate management API schemas."""

@@ -40,7 +40,9 @@ class Settings(BaseSettings):
     # Controls /docs visibility, CORS strictness, and future Key Vault routing.
     # Default is "development" so local dev works without configuration.
     # Production deployments MUST set ENVIRONMENT=production.
-    ENVIRONMENT: Literal["development", "staging", "production"] = "development"
+    # "mock" is the demo environment — scrambled data, isolated DB/Redis/queue,
+    # OPENAPI_DOCS enabled, never serves real PHI. See .env.mock + .claude/rules.
+    ENVIRONMENT: Literal["development", "staging", "production", "mock"] = "development"
 
     DATABASE_URL: str
     DATABASE_URL_SYNC: str

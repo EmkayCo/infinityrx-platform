@@ -12,10 +12,14 @@ import type { ParsedClaim, Aggregations } from "./types";
 import { parseFile } from "./parser";
 
 // ── Paths ─────────────────────────────────────────────────────────────────────
-// Raw source files (.txt, .xlsx) live outside /public so they are NOT
-// served as static assets. Aggregated JSON outputs stay in /public so the
-// browser-side mock layer (loadAgg) can still fetch them over HTTP.
-const SOURCE_DIR = path.join(process.cwd(), "lib", "data", "sources");
+// Raw source files (.txt, .xlsx) contain real client/PHI identifiers and live
+// OUTSIDE the repo at <repo>/data/raw/ifx-exports/ — gitignored, dev-only.
+// Aggregated JSON outputs stay in /public so the browser-side mock layer
+// (loadAgg) can still fetch them over HTTP.
+// Override with IFX_RAW_DIR env var if running from a different cwd.
+const SOURCE_DIR =
+  process.env.IFX_RAW_DIR ??
+  path.resolve(process.cwd(), "..", "..", "data", "raw", "ifx-exports");
 const AGG_DIR = path.join(process.cwd(), "public", "data", "aggregated");
 
 // ── Module-level cache ────────────────────────────────────────────────────────
