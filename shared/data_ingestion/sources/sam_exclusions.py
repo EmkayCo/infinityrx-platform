@@ -6,7 +6,15 @@ into shared.sam_exclusions. Cross-references prescribers and pharmacies by NPI.
 Requires SAM_API_KEY environment variable. If not configured, returns status=failed
 with a clear error message.
 
-API: https://api.sam.gov/exclusions/v1/?api_key={SAM_API_KEY}
+API: https://api.sam.gov/entity-information/v3/exclusions?api_key={SAM_API_KEY}
+
+LOADER-BUG-07a (2026-04-15): the hardcoded v1 endpoint
+https://api.sam.gov/exclusions/v1/ returned 404 — SAM.gov deprecated
+v1 and moved to the versioned /entity-information/v3/exclusions
+endpoint. The API key itself is valid; only the URL path needed
+updating. The v3 response JSON shape may differ from v1 — if field
+names no longer line up with the field_registry entries below, a
+follow-up fix will be needed to the response parser.
 
 LESSON-004: \\A...\\Z anchors on all regex.
 LESSON-005: log extra keys prefixed with sam_ or ingest_.
@@ -32,7 +40,7 @@ from shared.data_ingestion.field_registry import register_field
 logger = logging.getLogger(__name__)
 
 _SAM_API_KEY_ENV = "SAM_API_KEY"
-_SAM_API_BASE_URL = "https://api.sam.gov/exclusions/v1/"
+_SAM_API_BASE_URL = "https://api.sam.gov/entity-information/v3/exclusions"
 _SAM_PAGE_SIZE = 100
 _MAX_PAGES = 10_000  # safety cap
 
