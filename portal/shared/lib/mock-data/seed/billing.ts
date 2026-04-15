@@ -343,6 +343,178 @@ export const INVOICES: Invoice[] = Array.from({ length: 30 }, (_, i) => {
   };
 });
 
+// ── Claims: enriched with full fields for the Claims Explorer ────────────────
+export const CLAIMS_ENRICHED = CLAIMS.map((c, i) => ({
+  ...c,
+  type: i % 8 === 7 ? "Reversal" : "Claim",
+  rx_number: `RX-${String(7890000 + i).slice(-7)}`,
+  auth_number: `AUTH-${String(20260000 + i).padStart(8, "0")}`,
+  fill_number: (i % 5) + 1,
+  occ: ["00", "01", "02", "03"][i % 4],
+  network: ["IFX-PREFERRED", "IFX-STANDARD", "IFX-SPECIALTY"][i % 3],
+  chain_code: ["CVS", "WAG", "RAD", "WMT", "IND"][i % 5],
+  statement_account: `SA-${String(1000 + (i % 8)).padStart(4, "0")}`,
+  prescriber_id: `PRE-${String(1000000 + i).slice(-7)}`,
+  prescriber_name: ["Dr. Sarah Chen", "Dr. Mark Rivera", "Dr. Amy Park", "Dr. James O'Brien"][i % 4],
+  patient_name: ["John Smith", "Maria Garcia", "Robert Johnson", "Linda Williams"][i % 4],
+  gpi: `${String(20000000 + i * 111).slice(0, 8)}00`,
+  therapeutic_class: ["Cardiovascular", "Endocrine", "CNS", "Respiratory", "GI"][i % 5],
+  rejection_code: c.status === "rejected" ? ["70", "75", "88", "76"][i % 4] : null,
+  date_of_service: c.fill_date,
+  sales_tax: "0.00",
+  patient_paid: c.copay,
+  total_paid: money(Number(c.plan_paid) + Number(c.copay)),
+  pos_adjustment: "0.00",
+  debit_card_amount: "0.00",
+  transaction_fee: money(rngInt(100, 300) / 100),
+  incentive_fee: "0.00",
+  copay_assistance_amount: c.copay,
+  card_bin: "610415",
+  card_pcn: "IFX001",
+  card_group: BILLING_CYCLES[i % BILLING_CYCLES.length].client_name?.slice(0, 6).replace(/\s/g, "").toUpperCase() ?? "GRPCO",
+  remaining_benefit: money(rngInt(0, 5000)),
+  enrollment_date: isoDate(-(i * 14 + 365)).substring(0, 10),
+  patient: {
+    cardholder_id: `CHD-${String(10000 + i).padStart(5, "0")}`,
+    first_name: ["John", "Maria", "Robert", "Linda"][i % 4],
+    last_name: ["Smith", "Garcia", "Johnson", "Williams"][i % 4],
+    dob: `${1960 + (i % 40)}-${String((i % 12) + 1).padStart(2, "0")}-${String((i % 28) + 1).padStart(2, "0")}`,
+    sex: i % 3 === 0 ? "F" : "M",
+    address: `${100 + i} Main St`,
+    city: ["Austin", "Dallas", "Houston", "San Antonio"][i % 4],
+    state: "TX",
+    zip: `787${String(i % 100).padStart(2, "0")}`,
+    phone: `512555${String(1000 + i).slice(-4)}`,
+    email: `patient${i}@example.com`,
+    mrn: `MRN-${String(100000 + i)}`,
+  },
+  billing_provider: {
+    npi: PHARMACY_NPIS[i % PHARMACY_NPIS.length],
+    tax_id: `${String(80 + i % 19)}-${String(1000000 + i).slice(-7)}`,
+    name: PHARMACY_NAMES[i % PHARMACY_NAMES.length],
+    address: `${200 + i} Commerce Blvd, ${["Austin", "Dallas", "Houston"][i % 3]}, TX`,
+    phone: `512444${String(1000 + i).slice(-4)}`,
+    fax: `512444${String(2000 + i).slice(-4)}`,
+    email: `pharmacy${i % 10}@ifxrx.example`,
+  },
+  service_provider: {
+    npi: PHARMACY_NPIS[(i + 1) % PHARMACY_NPIS.length],
+    name: PHARMACY_NAMES[(i + 1) % PHARMACY_NAMES.length],
+    address: `${300 + i} Service Blvd, ${["Austin", "Dallas", "Houston"][i % 3]}, TX`,
+  },
+  other_coverage_code: ["00", "01"][i % 2],
+  bin: "610415",
+  insurance_type: ["Commercial", "Medicare", "Medicaid", "Self-Pay"][i % 4],
+  insured_id: `INS-${String(90000 + i)}`,
+  policy_group: `POL-${String(1000 + (i % 12))}`,
+  plan_name: BILLING_CYCLES[i % BILLING_CYCLES.length].program_name ?? "Standard PPO",
+  group_id: `GRP-${String(4800 + (i % 8))}`,
+  place_of_service: "01",
+  emergency_indicator: false,
+  cpt_code: null,
+  diagnosis_codes: ["Z79.899", "E11.9"][i % 2] ? [`Z79.899`, `E11.${i % 10}`] : undefined,
+  units: 1,
+  investigation_id: i % 17 === 0 ? `INV-2026-${String(i).padStart(4, "0")}` : undefined,
+  reversal_chain: i % 8 === 7
+    ? [
+        { id: makeUUID(7000 + i), type: "original", date: isoDate(-(i * 3 + 5)).substring(0, 10) },
+        { id: makeUUID(7100 + i), type: "reversed", date: isoDate(-(i * 3 + 2)).substring(0, 10) },
+      ]
+    : [],
+  attachments: i % 11 === 0
+    ? [{ id: makeUUID(8000 + i), name: `claim_${i}_attachment.pdf`, uploaded_at: isoDate(-(i * 3)).substring(0, 10) }]
+    : [],
+}));
+
+// ── PA Override mock data ─────────────────────────────────────────────────────
+const PA_STATUSES = ["pending", "pending", "pending", "approved", "approved", "denied", "expired"] as const;
+const DRUG_PAIRS = [
+  { name: "Humira 40mg/0.8mL Pen", ndc: "00074-9374-02" },
+  { name: "Eliquis 5mg", ndc: "00069-4280-30" },
+  { name: "Dupixent 300mg/2mL", ndc: "66582-0501-02" },
+  { name: "Stelara 45mg/0.5mL", ndc: "57894-0402-01" },
+  { name: "Repatha 140mg/mL", ndc: "55513-0730-01" },
+];
+
+export const PA_OVERRIDES = Array.from({ length: 25 }, (_, i) => {
+  const drug = DRUG_PAIRS[i % DRUG_PAIRS.length];
+  const status = PA_STATUSES[i % PA_STATUSES.length];
+  const requestedAt = isoDate(-(i * 2));
+  return {
+    id: makeUUID(9000 + i),
+    claim_id: makeUUID(3000 + i),
+    member_id: `MBR-2026-${String(1000 + i).padStart(4, "0")}`,
+    drug_name: drug.name,
+    drug_ndc: drug.ndc,
+    prescriber_npi: `${String(1000000000 + i * 7).slice(0, 10)}`,
+    prescriber_name: ["Dr. Sarah Chen", "Dr. Mark Rivera", "Dr. Amy Park", "Dr. James O'Brien"][i % 4],
+    diagnosis_code: ["Z79.899", "E11.9", "I10", "M79.3"][i % 4],
+    requested_by: ["Sarah Chen", "Mike Lopez", "Priya Nair"][i % 3],
+    requested_at: requestedAt,
+    status,
+    denial_reason: status === "denied" ? "Drug not covered under patient's current benefit plan — patient must complete step therapy first." : undefined,
+    approved_at: status === "approved" ? isoDate(-(i * 2) + 1) : undefined,
+    approved_by: status === "approved" ? "Sarah Chen" : undefined,
+    days_supply: [30, 60, 90][i % 3],
+    quantity: [1, 2, 4][i % 3],
+    program_name: BILLING_CYCLES[i % BILLING_CYCLES.length].program_name,
+  };
+});
+
+// ── Journal entries mock data ─────────────────────────────────────────────────
+const JE_TYPES = ["AP", "AR", "Transfer", "Fee", "Adjustment"] as const;
+const ACCOUNTS_DEBIT = [
+  "Accounts Payable — Pharmacy",
+  "Accounts Receivable — Client",
+  "Revenue — Processing Fees",
+  "Clearing Account",
+  "Program Liability",
+];
+const ACCOUNTS_CREDIT = [
+  "Cash — Operating",
+  "Cash — Pharmacy ACH",
+  "Revenue — Transaction Fees",
+  "Program Fund",
+  "Adjustments",
+];
+const QB_CLASSES = [
+  "Commercial PPO",
+  "Medicare Part D",
+  "Self-Funded Employer",
+  "Specialty Tier",
+  "Exchange Plan",
+];
+
+export const JOURNAL_ENTRIES = Array.from({ length: 40 }, (_, i) => {
+  const type = JE_TYPES[i % JE_TYPES.length];
+  const amount = money(rngInt(500, 150000));
+  const cycle = BILLING_CYCLES[i % BILLING_CYCLES.length];
+  return {
+    id: makeUUID(10000 + i),
+    date: isoDate(-(i * 7)).substring(0, 10),
+    type,
+    description: type === "AP"
+      ? `Pharmacy dispensing — ${cycle.program_name}`
+      : type === "AR"
+        ? `Client invoice — ${cycle.client_name}`
+        : type === "Fee"
+          ? `Processing fee — ${cycle.cycle_period}`
+          : type === "Transfer"
+            ? `Settlement transfer — ${cycle.cycle_period}`
+            : `Adjustment — ${cycle.program_name}`,
+    debit_account: ACCOUNTS_DEBIT[i % ACCOUNTS_DEBIT.length],
+    credit_account: ACCOUNTS_CREDIT[i % ACCOUNTS_CREDIT.length],
+    amount,
+    qb_class: QB_CLASSES[i % QB_CLASSES.length],
+    cycle_id: cycle.id,
+    cycle_period: cycle.cycle_period,
+    status: i % 5 === 0 ? "draft" : "posted",
+    reference: `JE-2026-${String(1000 + i).padStart(5, "0")}`,
+    created_by: ["Sarah Chen", "Mike Lopez", "System"][i % 3],
+    created_at: isoDate(-(i * 7)),
+  };
+});
+
 export const MAPPING_TEMPLATES: MappingTemplate[] = Array.from({ length: 6 }, (_, i) => ({
   id: makeUUID(6000 + i),
   name: `${CLIENT_NAMES[i % CLIENT_NAMES.length]} Standard Mapping`,
