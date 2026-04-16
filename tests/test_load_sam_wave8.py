@@ -13,8 +13,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -105,28 +104,8 @@ def test_extract_token_missing_returns_none():
     assert loader._extract_token({"foo": "bar"}) is None
 
 
-# ---------------------------------------------------------------------------
-# _parse_retry_after: both formats per RFC 7231
-# ---------------------------------------------------------------------------
-
-
-def test_retry_after_seconds_integer():
-    assert loader._parse_retry_after("120") == 120
-
-
-def test_retry_after_http_date(monkeypatch):
-    # Freeze utcnow at 2026-04-16 00:00:00.
-    class FrozenDT(datetime):
-        @classmethod
-        def utcnow(cls):
-            return datetime(2026, 4, 16, 0, 0, 0)
-    monkeypatch.setattr(loader, "datetime", FrozenDT)
-    result = loader._parse_retry_after("Fri, 17 Apr 2026 00:00:00 GMT")
-    assert result == 86400  # 24h
-
-
-def test_retry_after_empty_returns_none():
-    assert loader._parse_retry_after("") is None
+# parse_retry_after tests moved to tests/test_common.py in Wave 9 when the
+# retry helper was extracted to shared.data_ingestion.common.
 
 
 # ---------------------------------------------------------------------------
@@ -162,21 +141,9 @@ def test_iter_records_unknown_shape_raises():
         list(loader._iter_records({"foo": "bar"}))
 
 
-# ---------------------------------------------------------------------------
-# State file: read/write roundtrip, graceful missing-file handling
-# ---------------------------------------------------------------------------
-
-
-def test_state_roundtrip(tmp_state):
-    assert loader._read_state() is None  # absent
-    loader._write_state(date(2026, 4, 15))
-    assert loader._read_state() == date(2026, 4, 15)
-
-
-def test_state_corrupt_file_returns_none(tmp_state):
-    tmp_state.parent.mkdir(parents=True, exist_ok=True)
-    tmp_state.write_text("not-a-date")
-    assert loader._read_state() is None
+# State-file read/write/corrupt tests moved to tests/test_common.py
+# (StateFile class coverage). The _resolve_since tests below still
+# exercise the wrapper path through load_sam._read_state / _write_state.
 
 
 # ---------------------------------------------------------------------------

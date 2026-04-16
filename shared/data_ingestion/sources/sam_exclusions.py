@@ -200,23 +200,9 @@ def _flatten_v4_record(entity: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def get_db_connection():
-    """Return a new psycopg2 connection using DATABASE_URL_SYNC.
-
-    Caller is responsible for commit/close (the Wave 8 load() uses it as a
-    context manager, which psycopg2 Connection already supports).
-    """
-    import psycopg2  # local import so this module doesn't hard-depend on it
-
-    url = os.environ.get("DATABASE_URL_SYNC") or os.environ.get("DATABASE_URL")
-    if not url:
-        raise RuntimeError(
-            "DATABASE_URL_SYNC / DATABASE_URL not set — cannot connect to Postgres."
-        )
-    # psycopg2 doesn't understand SQLAlchemy-style driver prefixes.
-    url = url.replace("postgresql+psycopg2://", "postgresql://")
-    url = url.replace("postgresql+asyncpg://", "postgresql://")
-    return psycopg2.connect(url)
+# get_db_connection moved to shared.data_ingestion.common in Wave 9.
+# Re-exported here for backward compatibility with existing importers.
+from shared.data_ingestion.common import get_db_connection  # noqa: E402, F401
 
 
 _UPSERT_COLUMNS = (

@@ -48,10 +48,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator
 
-import requests
-
 # The script is executed directly from the repo, so wire sys.path
-# the same way every other loader script does before we hit the Wave 7 module.
+# the same way every other loader script does before we hit the shared modules.
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 for _p in (_REPO_ROOT, _REPO_ROOT / "modules" / "prescriber-directory",
            _REPO_ROOT / "modules" / "pharmacy-directory"):
@@ -59,12 +57,16 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "modules" / "prescriber-directory",
     if sp not in sys.path:
         sys.path.insert(0, sp)
 
-# Existing Wave 7 machinery — reused unchanged.
+# Shared primitives (Wave 9 extraction) and SAM-specific helpers (Wave 7).
+from shared.data_ingestion.common import (  # noqa: E402
+    StateFile,
+    get_db_connection,
+    get_with_retry as _get_with_retry,
+)
 from shared.data_ingestion.sources.sam_exclusions import (  # noqa: E402
     _flatten_v4_record,
     _parse_sam_date,
     _upsert_row,
-    get_db_connection,
 )
 
 log = logging.getLogger("load_sam")
@@ -90,9 +92,8 @@ SUBMIT_TIMEOUT_SEC = 60
 # Download request: longer timeout since this streams the generated file.
 DOWNLOAD_TIMEOUT_SEC = 300
 
-# Backoff for transient 5xx / 429 on submit or download.
-MAX_RETRIES = 5
-BACKOFF_BASE_SEC = 2
+# Retry/backoff for transient 5xx / 429 lives in shared.data_ingestion.common.
+# Override by passing max_retries / backoff_base_sec to get_with_retry if needed.
 
 TABLE = "shared.sam_exclusions"
 
@@ -109,76 +110,6 @@ class LoadResult:
     records_upserted: int
     max_update_date: date | None
     since: date | None  # window lower bound (None for seed)
-
-
-# ---------------------------------------------------------------------------
-# HTTP with retry/backoff (honours Retry-After, same behaviour as Wave 7)
-# ---------------------------------------------------------------------------
-
-
-def _get_with_retry(
-    url: str,
-    params: dict[str, Any],
-    *,
-    timeout: int,
-    accept_202: bool = False,
-) -> requests.Response:
-    """GET with exponential backoff. Honours Retry-After on 429.
-
-    If accept_202 is True, a 202 response is returned as-is (used by the
-    download poller to detect "file not ready yet").
-    """
-    last_exc: Exception | None = None
-    for attempt in range(MAX_RETRIES):
-        try:
-            resp = requests.get(url, params=params, timeout=timeout)
-        except requests.RequestException as e:
-            last_exc = e
-            wait = BACKOFF_BASE_SEC * (2**attempt)
-            log.warning("request error (attempt %d): %s; sleeping %ds", attempt + 1, e, wait)
-            time.sleep(wait)
-            continue
-
-        if resp.status_code == 200:
-            return resp
-        if resp.status_code == 202 and accept_202:
-            return resp
-        if resp.status_code == 429:
-            retry_after = resp.headers.get("Retry-After", "")
-            # Retry-After can be seconds-integer OR HTTP-date.
-            wait = _parse_retry_after(retry_after) or BACKOFF_BASE_SEC * (2**attempt)
-            log.warning("429 rate limited; Retry-After=%r; sleeping %ds", retry_after, wait)
-            time.sleep(wait)
-            continue
-        if 500 <= resp.status_code < 600:
-            wait = BACKOFF_BASE_SEC * (2**attempt)
-            log.warning("%d server error; sleeping %ds", resp.status_code, wait)
-            time.sleep(wait)
-            continue
-
-        # 4xx other than 429 — not retryable.
-        resp.raise_for_status()
-
-    if last_exc:
-        raise last_exc
-    raise RuntimeError(f"exhausted {MAX_RETRIES} retries for {url}")
-
-
-def _parse_retry_after(value: str) -> int | None:
-    if not value:
-        return None
-    # Integer seconds.
-    try:
-        return max(1, int(value))
-    except ValueError:
-        pass
-    # HTTP-date.
-    try:
-        dt = datetime.strptime(value, "%a, %d %b %Y %H:%M:%S GMT")
-        delta = (dt - datetime.utcnow()).total_seconds()
-        return max(1, int(delta))
-    except ValueError:
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -302,25 +233,18 @@ def _iter_records(payload: dict[str, Any]) -> Iterator[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# State file
+# State file — thin wrappers around the shared StateFile class so existing
+# tests that monkeypatch STATE_FILE or _read_state / _write_state on the
+# load_sam module still resolve. New code should prefer StateFile(path).
 # ---------------------------------------------------------------------------
 
 
 def _read_state() -> date | None:
-    if not STATE_FILE.exists():
-        return None
-    try:
-        raw = STATE_FILE.read_text().strip()
-        return datetime.strptime(raw, "%Y-%m-%d").date()
-    except (OSError, ValueError) as e:
-        log.warning("state file unreadable (%s); treating as absent", e)
-        return None
+    return StateFile(STATE_FILE).read()
 
 
 def _write_state(d: date) -> None:
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(d.strftime("%Y-%m-%d"))
-    log.info("wrote state: last_run=%s", d)
+    StateFile(STATE_FILE).write(d)
 
 
 # ---------------------------------------------------------------------------
