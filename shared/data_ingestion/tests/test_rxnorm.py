@@ -886,13 +886,18 @@ class TestFindRRFFile:
 
 
 class TestCrosswalkBuildSuccessPaths:
-    def test_build_ndc_crosswalk_returns_rowcount_on_success(self) -> None:
-        """_build_ndc_crosswalk returns (rowcount, 0) when execute succeeds."""
+    def _mock_postgres_db(self, rowcount: int) -> MagicMock:
+        """Build a MagicMock session whose dialect reads as 'postgresql'."""
         mock_result = MagicMock()
-        mock_result.rowcount = 5
+        mock_result.rowcount = rowcount
         mock_db = MagicMock()
         mock_db.execute.return_value = mock_result
+        mock_db.bind.dialect.name = "postgresql"
+        return mock_db
 
+    def test_build_ndc_crosswalk_returns_rowcount_on_success(self) -> None:
+        """_build_ndc_crosswalk returns (rowcount, 0) when execute succeeds."""
+        mock_db = self._mock_postgres_db(rowcount=5)
         ingester = RxNormIngester(db_session=mock_db)
         ins, err = ingester._build_ndc_crosswalk()
         assert ins == 5
@@ -900,15 +905,29 @@ class TestCrosswalkBuildSuccessPaths:
 
     def test_build_atc_crosswalk_returns_rowcount_on_success(self) -> None:
         """_build_atc_crosswalk returns (rowcount, 0) when execute succeeds."""
-        mock_result = MagicMock()
-        mock_result.rowcount = 3
-        mock_db = MagicMock()
-        mock_db.execute.return_value = mock_result
-
+        mock_db = self._mock_postgres_db(rowcount=3)
         ingester = RxNormIngester(db_session=mock_db)
         ins, err = ingester._build_atc_crosswalk()
         assert ins == 3
         assert err == 0
+
+    def test_build_ndc_crosswalk_skipped_on_non_postgres(self) -> None:
+        """Non-postgres dialect returns (0, 0) without executing SQL."""
+        mock_db = MagicMock()
+        mock_db.bind.dialect.name = "sqlite"
+        ingester = RxNormIngester(db_session=mock_db)
+        ins, err = ingester._build_ndc_crosswalk()
+        assert (ins, err) == (0, 0)
+        mock_db.execute.assert_not_called()
+
+    def test_build_atc_crosswalk_skipped_on_non_postgres(self) -> None:
+        """Non-postgres dialect returns (0, 0) without executing SQL."""
+        mock_db = MagicMock()
+        mock_db.bind.dialect.name = "sqlite"
+        ingester = RxNormIngester(db_session=mock_db)
+        ins, err = ingester._build_atc_crosswalk()
+        assert (ins, err) == (0, 0)
+        mock_db.execute.assert_not_called()
 
 
 # ===========================================================================

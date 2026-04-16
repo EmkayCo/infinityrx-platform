@@ -277,6 +277,22 @@ def _find_rrf_file(directory: Path, filename: str) -> Path | None:
     return max(candidates, key=lambda p: p.stat().st_size)
 
 
+def _dialect_name(session: Any) -> str:
+    """Return the SQLAlchemy dialect name bound to ``session`` (e.g. 'postgresql').
+
+    Tolerant of MagicMock sessions used in unit tests: returns ``'unknown'``
+    when the bind chain isn't real (prevents AttributeError in mock paths).
+    """
+    bind = getattr(session, "bind", None)
+    dialect = getattr(bind, "dialect", None) if bind is not None else None
+    name = getattr(dialect, "name", None)
+    return name if isinstance(name, str) else "unknown"
+
+
+def _is_postgres(session: Any) -> bool:
+    return _dialect_name(session) == "postgresql"
+
+
 def _extract_zip(zip_path: Path, dest_dir: Path) -> Path:
     """Extract ZIP to dest_dir, return dest_dir."""
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -535,7 +551,23 @@ class RxNormIngester(DataSourceIngester):
     # ------------------------------------------------------------------ #
 
     def _build_ndc_crosswalk(self) -> tuple[int, int]:
-        """Build rxnorm_ndc_crosswalk from rxnorm_attributes + rxnorm_concepts."""
+        """Build rxnorm_ndc_crosswalk from rxnorm_attributes + rxnorm_concepts.
+
+        Postgres-only — uses ``DISTINCT ON``, ``SUBSTRING … FROM … FOR``, and
+        ``ON CONFLICT … DO UPDATE``. On any other dialect the crosswalk build
+        is a no-op: in tests we run against SQLite where rewriting this as
+        portable SQL would obscure the production query, and crosswalk
+        coverage is asserted against dev/mock/prod in the data-load waves.
+        """
+        if not _is_postgres(self._db):
+            logger.info(
+                "RxNorm: skipping NDC crosswalk build on non-postgres dialect",
+                extra={
+                    "ingest_source": _SOURCE_NAME,
+                    "ingest_dialect": _dialect_name(self._db),
+                },
+            )
+            return 0, 0
         try:
             with self._db.begin_nested():
                 sql = text("""
@@ -573,7 +605,19 @@ class RxNormIngester(DataSourceIngester):
             return 0, 1
 
     def _build_atc_crosswalk(self) -> tuple[int, int]:
-        """Build rxnorm_atc_crosswalk from RXNSAT ATN='ATC' UNION RXNCONSO SAB='ATC'."""
+        """Build rxnorm_atc_crosswalk from RXNSAT ATN='ATC' UNION RXNCONSO SAB='ATC'.
+
+        Postgres-only for the same reasons as ``_build_ndc_crosswalk``.
+        """
+        if not _is_postgres(self._db):
+            logger.info(
+                "RxNorm: skipping ATC crosswalk build on non-postgres dialect",
+                extra={
+                    "ingest_source": _SOURCE_NAME,
+                    "ingest_dialect": _dialect_name(self._db),
+                },
+            )
+            return 0, 0
         try:
             with self._db.begin_nested():
                 sql = text("""
