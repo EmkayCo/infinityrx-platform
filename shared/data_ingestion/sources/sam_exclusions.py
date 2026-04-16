@@ -6,15 +6,38 @@ into shared.sam_exclusions. Cross-references prescribers and pharmacies by NPI.
 Requires SAM_API_KEY environment variable. If not configured, returns status=failed
 with a clear error message.
 
-API: https://api.sam.gov/entity-information/v3/exclusions?api_key={SAM_API_KEY}
+API: https://api.sam.gov/entity-information/v4/exclusions?api_key={SAM_API_KEY}
+Pagination: &size=1000&page=N (zero-indexed). Follow ``links.nextLink`` until absent.
 
-LOADER-BUG-07a (2026-04-15): the hardcoded v1 endpoint
-https://api.sam.gov/exclusions/v1/ returned 404 — SAM.gov deprecated
-v1 and moved to the versioned /entity-information/v3/exclusions
-endpoint. The API key itself is valid; only the URL path needed
-updating. The v3 response JSON shape may differ from v1 — if field
-names no longer line up with the field_registry entries below, a
-follow-up fix will be needed to the response parser.
+LOADER-BUG-07a history:
+  - 2026-04-15: hardcoded v1 endpoint /exclusions/v1/ returned 404.
+    Changed to /entity-information/v3/exclusions but never end-to-end
+    tested. v3 also 404s.
+  - 2026-04-16 (this commit): wave 7 end-to-end verification confirmed
+    the working endpoint is /entity-information/v4/exclusions, which
+    has a completely different nested response shape. Rewrote the
+    download paginator (size/page, nextLink-driven) and added
+    ``_flatten_v4_record`` to project the nested JSON into the flat
+    dict shape the upsert path expects.
+
+v4 response shape:
+  {"totalRecords": N,
+   "excludedEntity": [
+     {"exclusionDetails": {"classificationType", "exclusionType",
+                           "exclusionProgram", "excludingAgencyName"},
+      "exclusionIdentification": {"entityName", "firstName", "lastName",
+                                   "npi", "ueiSAM", "cageCode"},
+      "exclusionActions": {"listOfActions": [{"activateDate",
+                                               "terminationDate",
+                                               "recordStatus"}]},
+      "exclusionPrimaryAddress": {"addressLine1", "city",
+                                   "stateOrProvinceCode", "zipCode",
+                                   "countryCode"},
+      "exclusionOtherInformation": {"ctCode", "additionalComments"}},
+     ...],
+   "links": {"selfLink", "nextLink"}}
+
+v4 dates are MM-DD-YYYY (e.g. "03-09-2026"), not ISO.
 
 LESSON-004: \\A...\\Z anchors on all regex.
 LESSON-005: log extra keys prefixed with sam_ or ingest_.
@@ -40,11 +63,11 @@ from shared.data_ingestion.field_registry import register_field
 logger = logging.getLogger(__name__)
 
 _SAM_API_KEY_ENV = "SAM_API_KEY"
-_SAM_API_BASE_URL = "https://api.sam.gov/entity-information/v3/exclusions"
-_SAM_PAGE_SIZE = 100
+_SAM_API_BASE_URL = "https://api.sam.gov/entity-information/v4/exclusions"
+_SAM_PAGE_SIZE = 1000  # API caps at 1000 per page
 _MAX_PAGES = 10_000  # safety cap
 
-_CACHE_DIR = Path("/tmp/ifx_ingest/sam_exclusions")
+_CACHE_DIR = Path("data/reference/sam_exclusions")
 _BATCH_SIZE = 1000
 
 _SOURCE = "sam_exclusions"
@@ -85,16 +108,72 @@ for _col, _src_col, _desc in [
 
 
 def _parse_sam_date(raw: str | None) -> date | None:
-    """Parse SAM.gov date fields."""
+    """Parse SAM.gov date fields.
+
+    v4 uses MM-DD-YYYY (``03-09-2026``). Earlier endpoints returned
+    ISO ``YYYY-MM-DD`` — both accepted for forward/backward compat.
+    """
     if not raw or not raw.strip():
         return None
     raw = raw.strip()
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%Y%m%d"):
+    for fmt in ("%m-%d-%Y", "%Y-%m-%d", "%m/%d/%Y", "%Y%m%d"):
         try:
             return datetime.strptime(raw, fmt).date()
         except ValueError:
             continue
     return None
+
+
+def _flatten_v4_record(entity: dict[str, Any]) -> dict[str, Any]:
+    """Project a v4 ``excludedEntity`` record into the flat shape expected
+    by ``_upsert_row``.
+
+    v4 nests fields under ``exclusionDetails`` / ``exclusionIdentification`` /
+    ``exclusionActions.listOfActions[0]`` / ``exclusionPrimaryAddress`` /
+    ``exclusionOtherInformation``. We use the first ``listOfActions`` entry
+    for the active/termination dates (the record structure allows multiple
+    actions per exclusion; the first is the most recent / currently-active
+    one in every sample we've seen).
+    """
+    details = entity.get("exclusionDetails") or {}
+    ident = entity.get("exclusionIdentification") or {}
+    actions = (entity.get("exclusionActions") or {}).get("listOfActions") or []
+    primary_action = actions[0] if actions else {}
+    address = entity.get("exclusionPrimaryAddress") or {}
+    other = entity.get("exclusionOtherInformation") or {}
+
+    # Name: use entityName if set, else concatenate first/middle/last.
+    name = (ident.get("entityName") or "").strip()
+    if not name:
+        parts = [
+            (ident.get("firstName") or "").strip(),
+            (ident.get("middleName") or "").strip(),
+            (ident.get("lastName") or "").strip(),
+        ]
+        name = " ".join(p for p in parts if p).strip() or None
+
+    return {
+        "classificationType": details.get("classificationType"),
+        "name": name,
+        "exclusionType": details.get("exclusionType"),
+        "exclusionProgram": details.get("exclusionProgram"),
+        "agency": details.get("excludingAgencyName"),
+        "npi": ident.get("npi"),
+        "ueiSAM": ident.get("ueiSAM"),
+        "cageCode": ident.get("cageCode"),
+        "dunsNumber": ident.get("dnbOpenData"),
+        "activationDate": primary_action.get("activateDate"),
+        "terminationDate": primary_action.get("terminationDate"),
+        "addressLine1": address.get("addressLine1"),
+        "addressLine2": address.get("addressLine2"),
+        "city": address.get("city"),
+        "stateOrProvince": address.get("stateOrProvinceCode"),
+        "zipCode": address.get("zipCode"),
+        "country": address.get("countryCode"),
+        "ctCode": other.get("ctCode"),
+        "additionalComments": other.get("additionalComments"),
+        "affiliations": (other.get("references") or {}).get("referencesList"),
+    }
 
 
 class SamExclusionsIngester(DataSourceIngester):
@@ -106,8 +185,74 @@ class SamExclusionsIngester(DataSourceIngester):
 
     source_name = "sam_exclusions"
 
+    @staticmethod
+    async def _get_with_retry(
+        client: httpx.AsyncClient,
+        url: str,
+        params: dict[str, Any],
+        *,
+        max_attempts: int = 6,
+    ) -> httpx.Response:
+        """GET with exponential-backoff retry on 429 / 5xx / transport errors.
+
+        SAM.gov's v4 exclusions API rate-limits bursts — a size=1000 paginated
+        crawl hits 429 after a handful of pages. Back off 2/4/8/16/32 seconds
+        (capped) and honour ``Retry-After`` when the server sets it.
+        """
+        import asyncio
+
+        attempt = 0
+        while True:
+            try:
+                resp = await client.get(url, params=params)
+            except (httpx.TransportError, httpx.TimeoutException) as exc:
+                if attempt >= max_attempts - 1:
+                    raise
+                delay = min(2 ** attempt, 32)
+                logger.warning(
+                    "SAM.gov request transport error — retrying",
+                    extra={
+                        "ingest_source": "sam_exclusions",
+                        "sam_error": str(exc)[:200],
+                        "sam_attempt": attempt + 1,
+                        "sam_delay_s": delay,
+                    },
+                )
+                await asyncio.sleep(delay)
+                attempt += 1
+                continue
+
+            if resp.status_code not in (429, 500, 502, 503, 504):
+                return resp
+            if attempt >= max_attempts - 1:
+                return resp  # let caller raise_for_status
+
+            retry_after = resp.headers.get("Retry-After")
+            try:
+                delay = int(retry_after) if retry_after else min(2 ** attempt, 32)
+            except ValueError:
+                delay = min(2 ** attempt, 32)
+
+            logger.warning(
+                "SAM.gov rate-limit / transient error — retrying",
+                extra={
+                    "ingest_source": "sam_exclusions",
+                    "sam_status": resp.status_code,
+                    "sam_attempt": attempt + 1,
+                    "sam_delay_s": delay,
+                },
+            )
+            await asyncio.sleep(delay)
+            attempt += 1
+
     async def download(self) -> Path:
-        """Paginate SAM.gov exclusions API and write to a local JSONL file."""
+        """Paginate the SAM.gov v4 exclusions API and write to a local JSONL.
+
+        v4 pagination: ``size=N&page=I`` (I is zero-indexed). The response
+        includes ``links.nextLink`` when another page is available; we
+        loop until ``nextLink`` is absent or the page returns empty.
+        Records are flattened to the shape ``_upsert_row`` expects.
+        """
         api_key = os.environ.get(_SAM_API_KEY_ENV, "").strip()
         if not api_key:
             raise _SamApiKeyMissingError(
@@ -120,43 +265,42 @@ class SamExclusionsIngester(DataSourceIngester):
         out_path = _CACHE_DIR / "sam_exclusions.jsonl"
 
         logger.info(
-            "Downloading SAM.gov exclusions",
+            "Downloading SAM.gov exclusions (v4)",
             extra={"ingest_source": self.source_name, "sam_url": _SAM_API_BASE_URL},
         )
 
         total_written = 0
         page = 0
+        total_records: int | None = None
 
         async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
             with out_path.open("w", encoding="utf-8") as fh:
                 while page < _MAX_PAGES:
                     params = {
                         "api_key": api_key,
-                        "limit": _SAM_PAGE_SIZE,
-                        "offset": page * _SAM_PAGE_SIZE,
+                        "size": _SAM_PAGE_SIZE,
+                        "page": page,
                     }
-                    resp = await client.get(_SAM_API_BASE_URL, params=params)
+                    resp = await self._get_with_retry(client, _SAM_API_BASE_URL, params)
 
                     if resp.status_code == 401:
                         raise _SamApiKeyMissingError(
-                            f"SAM.gov API returned 401 — check SAM_API_KEY validity. "
+                            "SAM.gov API returned 401 — check SAM_API_KEY validity. "
                             "Key may have expired or be invalid."
                         )
                     resp.raise_for_status()
 
                     data = resp.json()
-                    exclusions = (
-                        data.get("exclusionList")
-                        or data.get("data")
-                        or data.get("results")
-                        or []
-                    )
+                    if total_records is None:
+                        total_records = int(data.get("totalRecords") or 0)
 
-                    if not exclusions:
+                    entities = data.get("excludedEntity") or []
+                    if not entities:
                         break
 
-                    for record in exclusions:
-                        fh.write(json.dumps(record) + "\n")
+                    for entity in entities:
+                        flat = _flatten_v4_record(entity)
+                        fh.write(json.dumps(flat) + "\n")
                         total_written += 1
 
                     logger.info(
@@ -165,14 +309,19 @@ class SamExclusionsIngester(DataSourceIngester):
                             "ingest_source": self.source_name,
                             "sam_page": page,
                             "sam_records_so_far": total_written,
+                            "sam_total_records": total_records,
                         },
                     )
 
-                    # Check if there are more pages
-                    total_records = data.get("totalRecords") or data.get("total") or 0
-                    if total_written >= int(total_records) or len(exclusions) < _SAM_PAGE_SIZE:
+                    # Stop when we've consumed all records, the page was
+                    # short, or the API didn't offer a next link.
+                    links = data.get("links") or {}
+                    if (
+                        (total_records and total_written >= total_records)
+                        or len(entities) < _SAM_PAGE_SIZE
+                        or not links.get("nextLink")
+                    ):
                         break
-
                     page += 1
 
         logger.info(
