@@ -49,8 +49,10 @@ _WEEKLY_ZIP_RE = re.compile(
 # Max size: 300 MB (weekly file ~50–150 MB; leave headroom)
 _MAX_DOWNLOAD_BYTES = 300 * 1024 * 1024
 
-# Download cache dir
-_CACHE_DIR = Path("/tmp/ifx_ingest/nppes")
+# Download cache dir — project-local so the file survives /tmp cleanup
+# and lives alongside the other reference datasets (data/reference is
+# gitignored).
+_CACHE_DIR = Path("data/reference/nppes")
 
 # ────────────────────────────────────────────────────────────────────────────
 # Field registry — declare all NPPES → prescriber_dir mappings
