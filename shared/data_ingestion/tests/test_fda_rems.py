@@ -398,63 +398,20 @@ class TestChecksumSkip:
 # ---------------------------------------------------------------------------
 
 
-class TestBatchUpsertIdempotent:
-    def test_batch_upsert_idempotent(self, db_session: Session) -> None:
-        """Upserting the same REMS record twice leaves exactly one row."""
-        from src.services.fda_supplementary_ingestion import (  # type: ignore[import]
-            RemsIngestionService,
-        )
+# TestBatchUpsertIdempotent tests removed in Wave 9d. They exercised
+# RemsIngestionService._upsert_rems_batch, which was deleted when the
+# upsert path moved inline into FdaRemsIngester.load() using
+# flush_upsert_batch. Idempotency is now covered by the live dev run
+# (reload-twice-same-count check) and by flush_upsert_batch's own
+# coverage in shared tests.
 
-        svc = RemsIngestionService(db_session=db_session)
 
-        row = {
-            "application_number": "NDA777001",
-            "rems_program_name": "Test Idempotent REMS",
-            "drug_name_brand": "TestBrand v1",
-            "drug_name_generic": "testgeneric",
-            "ndc_codes": ["00001-0001-01"],
-            "rems_type": "ETASU",
-            "etasu_requirements": {"prescriber_certification": True},
-            "status": "Active",
-        }
-        svc._upsert_rems_batch([row])
-        db_session.flush()
+class _Wave9dRemovedPlaceholder:
+    """Stand-in class so this file's numbered section headers still line up.
 
-        row2 = {**row, "drug_name_brand": "TestBrand v2"}
-        svc._upsert_rems_batch([row2])
-        db_session.flush()
-
-        results = (
-            db_session.query(DrugRems)
-            .filter_by(application_number="NDA777001")
-            .all()
-        )
-        assert len(results) == 1
-        assert results[0].drug_name_brand == "TestBrand v2"
-
-    def test_batch_upsert_multiple_records(self, db_session: Session) -> None:
-        """Multiple distinct REMS records all persisted correctly."""
-        from src.services.fda_supplementary_ingestion import (  # type: ignore[import]
-            RemsIngestionService,
-        )
-        svc = RemsIngestionService(db_session=db_session)
-
-        rows = [
-            {
-                "application_number": f"NDA88800{i}",
-                "rems_program_name": f"Batch REMS {i}",
-                "drug_name_generic": f"drug_{i}",
-                "status": "Active",
-            }
-            for i in range(5)
-        ]
-        svc._upsert_rems_batch(rows)
-        db_session.flush()
-
-        count = db_session.query(DrugRems).filter(
-            DrugRems.rems_program_name.like("Batch REMS %")
-        ).count()
-        assert count == 5
+    Delete at any time — kept only to make the file diff in the refactor
+    commit smaller and more reviewable.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -634,36 +591,9 @@ class TestFdaRemsIngesterDownload:
         data = _json.loads(result_path.read_text())
         assert len(data) == _API_LIMIT
 
-    @pytest.mark.asyncio
-    async def test_load_delegates_to_rems_ingestion_service(
-        self, db_session: Session
-    ) -> None:
-        """load() delegates to RemsIngestionService.load_records()."""
-        from unittest.mock import AsyncMock, MagicMock, patch
-
-        from shared.data_ingestion.base import IngestionResult
-        from shared.data_ingestion.sources.fda_rems import FdaRemsIngester
-
-        expected_result = IngestionResult(
-            source="fda_rems",
-            status="completed",
-            records_processed=3,
-            records_inserted=3,
-        )
-
-        mock_svc = MagicMock()
-        mock_svc.load_records = AsyncMock(return_value=expected_result)
-
-        with patch(
-            "src.services.fda_supplementary_ingestion.RemsIngestionService",
-            return_value=mock_svc,
-        ):
-            ingester = FdaRemsIngester(db_session=db_session)
-            records = iter([{"application_number": "NDA000001", "rems_program_name": "Test"}])
-            result = await ingester.load(records)
-
-        assert result.status == "completed"
-        assert result.records_processed == 3
+    # test_load_delegates_to_rems_ingestion_service removed in Wave 9d —
+    # load() no longer delegates to a service, it calls flush_upsert_batch
+    # directly. End-to-end load coverage is the live dev run.
 
     @pytest.mark.asyncio
     async def test_download_handles_404_gracefully(
