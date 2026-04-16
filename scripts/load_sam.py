@@ -1,116 +1,484 @@
-"""Load SAM.gov exclusions into shared.sam_exclusions.
+"""
+scripts/load_sam.py — SAM.gov exclusions loader (Wave 8).
 
-Paginates the SAM.gov v3 entity-information exclusions API (requires
-SAM_API_KEY in environment), writes results to a local JSONL cache,
-upserts into shared.sam_exclusions, then runs cross-reference UPDATEs
-to flip is_excluded on prescriber_dir.prescribers and
-pharmacy_dir.pharmacies by NPI.
+Strategy: hybrid bulk-extract seed + delta updates.
 
-Pipeline: SamExclusionsIngester (DataSourceIngester child)
-  download -> paginate SAM.gov v3 API -> local JSONL
-  parse    -> stream JSONL records
-  load     -> per-row ORM upsert on natural key -> cross-reference SQL
+  - seed:     one async extract request → one download → ~167k records in a
+              single round trip. Used for initial load and full rebuilds.
+  - delta:    async extract scoped by updateDate=[since,today]. Used for
+              incremental daily runs.
+  - backfill: same as delta but with an explicit --since date (manual
+              re-sync).
 
-BUG-07a (2026-04-15): the pre-fix v1 URL
-https://api.sam.gov/exclusions/v1/ returned 404. The ingester now
-uses https://api.sam.gov/entity-information/v3/exclusions; this
-script is the first end-to-end verification.
+Mode is auto-selected based on whether shared.sam_exclusions has any rows
+(empty → seed, non-empty → delta). Override with --mode.
 
-Usage:
-    source infrastructure/scripts/switch_env.sh dev
-    python scripts/load_sam.py
+The `since` watermark for delta is persisted to
+  data/reference/sam_exclusions/.last_run
+after every successful run. It holds the MAX(updateDate) actually observed
+in that run's records (not today's date), so gaps in SAM.gov's own ingest
+pipeline don't cause us to skip records.
 
-Environment:
-    DATABASE_URL_SYNC - set by switch_env.sh
-    SAM_API_KEY       - required. Register at sam.gov/api to obtain.
+Why this replaces paginated JSON crawls: the synchronous JSON endpoint
+caps `size` at 10 records/page. At 167k records that's ~16,724 requests,
+which exceeds the 1,000-req/day public-API quota by 16x. The async
+extract endpoint produces the full dataset in a single request.
+
+Endpoints (all v4):
+  GET /entity-information/v4/exclusions?format=JSON[&updateDate=...]
+      → { token: "..." }  (async job submitted)
+  GET /entity-information/v4/download-exclusions?token=...
+      → JSON file once ready; 202/empty while still generating
+
+Downstream parse/flatten/upsert path (_flatten_v4_record → _upsert_row) is
+unchanged from Wave 7. Records from the extract file have the same
+`excludedEntity[*]` shape as paginated responses.
 """
 
 from __future__ import annotations
 
-import asyncio
+import argparse
+import json
 import logging
 import os
 import sys
+import time
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import Any, Iterator
 
+import requests
+
+# The script is executed directly from the repo, so wire sys.path
+# the same way every other loader script does before we hit the Wave 7 module.
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-for _p in (
-    _REPO_ROOT,
-    _REPO_ROOT / "modules" / "prescriber-directory",
-    _REPO_ROOT / "modules" / "pharmacy-directory",
-):
+for _p in (_REPO_ROOT, _REPO_ROOT / "modules" / "prescriber-directory",
+           _REPO_ROOT / "modules" / "pharmacy-directory"):
     sp = str(_p)
     if sp not in sys.path:
         sys.path.insert(0, sp)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)-5s %(name)s %(message)s",
+# Existing Wave 7 machinery — reused unchanged.
+from shared.data_ingestion.sources.sam_exclusions import (  # noqa: E402
+    _flatten_v4_record,
+    _parse_sam_date,
+    _upsert_row,
+    get_db_connection,
 )
-logger = logging.getLogger("load_sam")
+
+log = logging.getLogger("load_sam")
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+BASE_URL = "https://api.sam.gov/entity-information/v4"
+EXTRACT_URL = f"{BASE_URL}/exclusions"
+DOWNLOAD_URL = f"{BASE_URL}/download-exclusions"
+
+CACHE_DIR = Path("data/reference/sam_exclusions")
+STATE_FILE = CACHE_DIR / ".last_run"
+
+# Token-polling: 30s intervals, 45 min cap. Tuned for ~20-40MB extract files
+# which typically ready in 2-10 min but can stall to 20-30 min under load.
+POLL_INTERVAL_SEC = 30
+POLL_MAX_ATTEMPTS = 90
+
+# Initial extract-submission request: short timeout since this just queues a job.
+SUBMIT_TIMEOUT_SEC = 60
+# Download request: longer timeout since this streams the generated file.
+DOWNLOAD_TIMEOUT_SEC = 300
+
+# Backoff for transient 5xx / 429 on submit or download.
+MAX_RETRIES = 5
+BACKOFF_BASE_SEC = 2
+
+TABLE = "shared.sam_exclusions"
 
 
-def _resolve_db_url() -> str:
-    url = os.environ.get("DATABASE_URL_SYNC") or os.environ.get("DATABASE_URL")
-    if not url:
-        logger.error(
-            "DATABASE_URL_SYNC not set. "
-            "Run: source infrastructure/scripts/switch_env.sh dev"
+# ---------------------------------------------------------------------------
+# Result type
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class LoadResult:
+    mode: str
+    records_seen: int
+    records_upserted: int
+    max_update_date: date | None
+    since: date | None  # window lower bound (None for seed)
+
+
+# ---------------------------------------------------------------------------
+# HTTP with retry/backoff (honours Retry-After, same behaviour as Wave 7)
+# ---------------------------------------------------------------------------
+
+
+def _get_with_retry(
+    url: str,
+    params: dict[str, Any],
+    *,
+    timeout: int,
+    accept_202: bool = False,
+) -> requests.Response:
+    """GET with exponential backoff. Honours Retry-After on 429.
+
+    If accept_202 is True, a 202 response is returned as-is (used by the
+    download poller to detect "file not ready yet").
+    """
+    last_exc: Exception | None = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            resp = requests.get(url, params=params, timeout=timeout)
+        except requests.RequestException as e:
+            last_exc = e
+            wait = BACKOFF_BASE_SEC * (2**attempt)
+            log.warning("request error (attempt %d): %s; sleeping %ds", attempt + 1, e, wait)
+            time.sleep(wait)
+            continue
+
+        if resp.status_code == 200:
+            return resp
+        if resp.status_code == 202 and accept_202:
+            return resp
+        if resp.status_code == 429:
+            retry_after = resp.headers.get("Retry-After", "")
+            # Retry-After can be seconds-integer OR HTTP-date.
+            wait = _parse_retry_after(retry_after) or BACKOFF_BASE_SEC * (2**attempt)
+            log.warning("429 rate limited; Retry-After=%r; sleeping %ds", retry_after, wait)
+            time.sleep(wait)
+            continue
+        if 500 <= resp.status_code < 600:
+            wait = BACKOFF_BASE_SEC * (2**attempt)
+            log.warning("%d server error; sleeping %ds", resp.status_code, wait)
+            time.sleep(wait)
+            continue
+
+        # 4xx other than 429 — not retryable.
+        resp.raise_for_status()
+
+    if last_exc:
+        raise last_exc
+    raise RuntimeError(f"exhausted {MAX_RETRIES} retries for {url}")
+
+
+def _parse_retry_after(value: str) -> int | None:
+    if not value:
+        return None
+    # Integer seconds.
+    try:
+        return max(1, int(value))
+    except ValueError:
+        pass
+    # HTTP-date.
+    try:
+        dt = datetime.strptime(value, "%a, %d %b %Y %H:%M:%S GMT")
+        delta = (dt - datetime.utcnow()).total_seconds()
+        return max(1, int(delta))
+    except ValueError:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Extract submission + polling
+# ---------------------------------------------------------------------------
+
+
+def _submit_extract(api_key: str, since: date | None) -> str:
+    """Submit an async extract job. Returns the token."""
+    params: dict[str, Any] = {"api_key": api_key, "format": "JSON"}
+    if since is not None:
+        # v4 requires MM/DD/YYYY and a closed range. End bound is "today"
+        # in UTC so we don't miss records updated after the submit moment;
+        # SAM.gov treats updateDate as update-day, not update-timestamp.
+        today = datetime.utcnow().date()
+        params["updateDate"] = f"[{since.strftime('%m/%d/%Y')},{today.strftime('%m/%d/%Y')}]"
+
+    log.info("submitting extract job: since=%s", since)
+    resp = _get_with_retry(EXTRACT_URL, params, timeout=SUBMIT_TIMEOUT_SEC)
+
+    # Spec: response is a small JSON envelope containing the download URL
+    # with a REPLACE_WITH_API_KEY placeholder and a token param.
+    body = resp.json()
+    token = _extract_token(body)
+    if not token:
+        raise RuntimeError(f"no token in submit response: {body}")
+    log.info("extract job submitted: token=%s", token)
+    return token
+
+
+def _extract_token(body: dict[str, Any]) -> str | None:
+    """Pull the download token from the submit response.
+
+    The documented shape varies across SAM.gov API docs; we handle both
+    a direct `token` field and parsing it out of a download URL string.
+    """
+    if isinstance(body, dict) and body.get("token"):
+        return str(body["token"])
+
+    # Fallback: scan string values for "token=...". SAM.gov often embeds
+    # the download URL inside a longer message ("... with url: <url> in
+    # some time."), so we stop at the first character that can't be in a
+    # URL token — '&' for more query params, or whitespace for the
+    # message tail.
+    import re
+    for val in (body.values() if isinstance(body, dict) else []):
+        if isinstance(val, str) and "token=" in val:
+            tail = val.split("token=", 1)[1]
+            match = re.match(r"[^\s&]+", tail)
+            if match:
+                return match.group(0)
+    return None
+
+
+def _poll_download(api_key: str, token: str) -> dict[str, Any]:
+    """Poll the download endpoint until the file is ready. Returns parsed JSON."""
+    params = {"api_key": api_key, "token": token}
+    for attempt in range(1, POLL_MAX_ATTEMPTS + 1):
+        resp = _get_with_retry(
+            DOWNLOAD_URL, params, timeout=DOWNLOAD_TIMEOUT_SEC, accept_202=True
         )
-        sys.exit(1)
-    return url.replace("postgresql+asyncpg://", "postgresql://")
+
+        if resp.status_code == 202:
+            log.info("file not ready (attempt %d/%d); sleeping %ds",
+                     attempt, POLL_MAX_ATTEMPTS, POLL_INTERVAL_SEC)
+            time.sleep(POLL_INTERVAL_SEC)
+            continue
+
+        # 200 — but SAM.gov sometimes returns 200 with a "still generating"
+        # JSON envelope rather than 202. Check content for that.
+        try:
+            payload = resp.json()
+        except json.JSONDecodeError:
+            raise RuntimeError(f"download returned non-JSON (len={len(resp.content)})")
+
+        if _is_not_ready(payload):
+            log.info("file not ready per 200-envelope (attempt %d/%d); sleeping %ds",
+                     attempt, POLL_MAX_ATTEMPTS, POLL_INTERVAL_SEC)
+            time.sleep(POLL_INTERVAL_SEC)
+            continue
+
+        log.info("extract file downloaded on attempt %d", attempt)
+        return payload
+
+    raise TimeoutError(
+        f"extract file not ready after {POLL_MAX_ATTEMPTS} polls "
+        f"({POLL_MAX_ATTEMPTS * POLL_INTERVAL_SEC}s)"
+    )
 
 
-async def _run() -> None:
-    from sqlalchemy import create_engine, text
-    from sqlalchemy.orm import Session
+def _is_not_ready(payload: dict[str, Any]) -> bool:
+    """Detect a 'still generating' envelope returned as 200."""
+    if not isinstance(payload, dict):
+        return False
+    msg = (payload.get("message") or "").lower()
+    return "not generated yet" in msg or "try again" in msg
 
-    from shared.data_ingestion.sources.sam_exclusions import SamExclusionsIngester
 
-    if not os.environ.get("SAM_API_KEY", "").strip():
-        logger.error(
-            "SAM_API_KEY not set. "
-            "Register at sam.gov/api to obtain a key."
+# ---------------------------------------------------------------------------
+# Record extraction
+# ---------------------------------------------------------------------------
+
+
+def _iter_records(payload: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """Yield raw v4 records from an extract payload.
+
+    Handles both direct `excludedEntity` arrays and the occasional wrapping
+    under `results` seen in some extract responses.
+    """
+    if "excludedEntity" in payload:
+        yield from payload["excludedEntity"]
+        return
+    if "results" in payload and isinstance(payload["results"], list):
+        for r in payload["results"]:
+            if "excludedEntity" in r:
+                yield from r["excludedEntity"]
+            else:
+                yield r
+        return
+    raise RuntimeError(f"extract payload has no excludedEntity key; top-level keys: {list(payload)}")
+
+
+# ---------------------------------------------------------------------------
+# State file
+# ---------------------------------------------------------------------------
+
+
+def _read_state() -> date | None:
+    if not STATE_FILE.exists():
+        return None
+    try:
+        raw = STATE_FILE.read_text().strip()
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except (OSError, ValueError) as e:
+        log.warning("state file unreadable (%s); treating as absent", e)
+        return None
+
+
+def _write_state(d: date) -> None:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(d.strftime("%Y-%m-%d"))
+    log.info("wrote state: last_run=%s", d)
+
+
+# ---------------------------------------------------------------------------
+# Mode selection
+# ---------------------------------------------------------------------------
+
+
+def _table_is_empty() -> bool:
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT 1 FROM {TABLE} LIMIT 1")
+        return cur.fetchone() is None
+
+
+def _resolve_mode(cli_mode: str | None) -> str:
+    if cli_mode:
+        return cli_mode
+    if _table_is_empty():
+        log.info("auto-mode: table empty → seed")
+        return "seed"
+    log.info("auto-mode: table populated → delta")
+    return "delta"
+
+
+def _resolve_since(mode: str, cli_since: date | None) -> date | None:
+    if mode == "seed":
+        return None
+    if mode == "backfill":
+        if cli_since is None:
+            raise SystemExit("--mode backfill requires --since YYYY-MM-DD")
+        return cli_since
+    # delta
+    if cli_since is not None:
+        return cli_since
+    state = _read_state()
+    if state is None:
+        raise SystemExit(
+            "delta mode but no state file at data/reference/sam_exclusions/.last_run. "
+            "Run --mode seed first, or pass --since YYYY-MM-DD, or use --mode backfill."
         )
-        sys.exit(1)
+    # Start one day before last run to absorb any same-day late-arriving updates.
+    return state - timedelta(days=1)
 
-    db_url = _resolve_db_url()
-    engine = create_engine(db_url, echo=False)
 
-    with Session(engine) as session:
-        ingester = SamExclusionsIngester(db_session=session)
-        logger.info("Starting SAM.gov pipeline (v3 endpoint)...")
-        result = await ingester.run(run_type="manual_trigger")
+# ---------------------------------------------------------------------------
+# Main load
+# ---------------------------------------------------------------------------
 
-    print(f"\n{'=' * 60}")
-    print("SAM.gov Load Result")
-    print(f"{'=' * 60}")
-    print(f"  Status:             {result.status}")
-    print(f"  Records in source:  {result.records_in_source:,}")
-    print(f"  Records processed:  {result.records_processed:,}")
-    print(f"  Records inserted:   {result.records_inserted:,}")
-    print(f"  Records updated:    {result.records_updated:,}")
-    print(f"  Records skipped:    {result.records_skipped:,}")
-    print(f"  Records errored:    {result.records_errored:,}")
-    print(f"  Duration:           {result.duration_seconds:.1f}s")
-    if result.error_message:
-        print(f"  Error:              {result.error_message}")
-    print(f"{'=' * 60}")
 
-    with engine.connect() as conn:
-        cnt = conn.execute(
-            text("SELECT count(*) FROM shared.sam_exclusions")
-        ).scalar()
-        print(f"  shared.sam_exclusions: {cnt:,} rows")
+def load(mode: str, since: date | None, api_key: str) -> LoadResult:
+    token = _submit_extract(api_key, since)
+    payload = _poll_download(api_key, token)
 
-    if result.status != "completed":
-        sys.exit(1)
-    if result.records_errored > 0:
-        logger.warning(
-            "Non-zero error count: %d (per-row upsert failures, non-fatal)",
-            result.records_errored,
-        )
+    seen = 0
+    upserted = 0
+    max_update: date | None = None
+
+    with get_db_connection() as conn:
+        for raw in _iter_records(payload):
+            seen += 1
+            try:
+                flat = _flatten_v4_record(raw)
+            except Exception as e:
+                log.warning("flatten failed for record %d: %s", seen, e)
+                continue
+
+            try:
+                _upsert_row(conn, flat)
+                upserted += 1
+            except Exception as e:
+                log.error("upsert failed for record %d (%s): %s",
+                          seen, flat.get("ueiSAM") or flat.get("entityName"), e)
+                continue
+
+            upd = flat.get("updateDate")
+            if upd:
+                parsed = _parse_sam_date(upd)
+                if parsed and (max_update is None or parsed > max_update):
+                    max_update = parsed
+
+        conn.commit()
+
+    return LoadResult(
+        mode=mode,
+        records_seen=seen,
+        records_upserted=upserted,
+        max_update_date=max_update,
+        since=since,
+    )
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def _parse_date(s: str) -> date:
+    return datetime.strptime(s, "%Y-%m-%d").date()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Load SAM.gov exclusions (Wave 8).")
+    parser.add_argument(
+        "--mode",
+        choices=["seed", "delta", "backfill"],
+        default=None,
+        help="Load mode. Default: auto (seed if table empty, else delta).",
+    )
+    parser.add_argument(
+        "--since",
+        type=_parse_date,
+        default=None,
+        help="YYYY-MM-DD lower bound for updateDate. Required for backfill; "
+             "optional override for delta.",
+    )
+    parser.add_argument(
+        "--log-level",
+        default=os.environ.get("LOG_LEVEL", "INFO"),
+        help="Log level (default INFO).",
+    )
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=args.log_level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    api_key = os.environ.get("SAM_API_KEY")
+    if not api_key:
+        print("error: SAM_API_KEY not set in environment", file=sys.stderr)
+        return 1
+
+    mode = _resolve_mode(args.mode)
+    since = _resolve_since(mode, args.since)
+
+    log.info("starting: mode=%s since=%s", mode, since)
+    result = load(mode, since, api_key)
+
+    log.info(
+        "completed: seen=%d upserted=%d max_update=%s",
+        result.records_seen, result.records_upserted, result.max_update_date,
+    )
+
+    # Only advance the watermark if we actually loaded something with a real
+    # updateDate. Empty delta runs leave state untouched.
+    if result.max_update_date is not None:
+        _write_state(result.max_update_date)
+    else:
+        log.info("no records with updateDate observed; state file untouched")
+
+    # Non-zero exit if nothing was upserted despite seeing records — signals
+    # an upstream parse regression to the caller.
+    if result.records_seen > 0 and result.records_upserted == 0:
+        log.error("saw %d records but upserted 0 — check logs for flatten/upsert errors",
+                  result.records_seen)
+        return 1
+
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(_run())
+    sys.exit(main())

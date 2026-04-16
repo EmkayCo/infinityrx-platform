@@ -134,7 +134,18 @@ def _flatten_v4_record(entity: dict[str, Any]) -> dict[str, Any]:
     for the active/termination dates (the record structure allows multiple
     actions per exclusion; the first is the most recent / currently-active
     one in every sample we've seen).
+
+    Raises ValueError if the entity is missing ``exclusionDetails`` — the
+    minimal required top-level shape. This lets the Wave 8 load() loop
+    log-and-continue on malformed records rather than inserting a
+    mostly-empty row.
     """
+    if not isinstance(entity, dict) or "exclusionDetails" not in entity:
+        raise ValueError(
+            f"missing exclusionDetails; top-level keys: "
+            f"{list(entity) if isinstance(entity, dict) else type(entity).__name__}"
+        )
+
     details = entity.get("exclusionDetails") or {}
     ident = entity.get("exclusionIdentification") or {}
     actions = (entity.get("exclusionActions") or {}).get("listOfActions") or []
@@ -164,6 +175,7 @@ def _flatten_v4_record(entity: dict[str, Any]) -> dict[str, Any]:
         "dunsNumber": ident.get("dnbOpenData"),
         "activationDate": primary_action.get("activateDate"),
         "terminationDate": primary_action.get("terminationDate"),
+        "updateDate": primary_action.get("updateDate"),
         "addressLine1": address.get("addressLine1"),
         "addressLine2": address.get("addressLine2"),
         "city": address.get("city"),
@@ -174,6 +186,139 @@ def _flatten_v4_record(entity: dict[str, Any]) -> dict[str, Any]:
         "additionalComments": other.get("additionalComments"),
         "affiliations": (other.get("references") or {}).get("referencesList"),
     }
+
+
+# ---------------------------------------------------------------------------
+# psycopg2-based upsert path (Wave 8)
+#
+# The Wave 7 SamExclusionsIngester.load() routes records through a SQLAlchemy
+# ORM upsert (self._upsert_row) that handles the NULL-containing natural key
+# correctly via SQLAlchemy's `== None → IS NULL` comparator. Wave 8's extract
+# driver uses raw psycopg2 connections instead and needs the same NULL-aware
+# upsert at module scope. We mirror the ORM semantics with IS NOT DISTINCT
+# FROM on the four natural-key columns.
+# ---------------------------------------------------------------------------
+
+
+def get_db_connection():
+    """Return a new psycopg2 connection using DATABASE_URL_SYNC.
+
+    Caller is responsible for commit/close (the Wave 8 load() uses it as a
+    context manager, which psycopg2 Connection already supports).
+    """
+    import psycopg2  # local import so this module doesn't hard-depend on it
+
+    url = os.environ.get("DATABASE_URL_SYNC") or os.environ.get("DATABASE_URL")
+    if not url:
+        raise RuntimeError(
+            "DATABASE_URL_SYNC / DATABASE_URL not set — cannot connect to Postgres."
+        )
+    # psycopg2 doesn't understand SQLAlchemy-style driver prefixes.
+    url = url.replace("postgresql+psycopg2://", "postgresql://")
+    url = url.replace("postgresql+asyncpg://", "postgresql://")
+    return psycopg2.connect(url)
+
+
+_UPSERT_COLUMNS = (
+    "classification_type",
+    "name",
+    "exclusion_type",
+    "exclusion_program",
+    "agency",
+    "npi",
+    "uei_sam",
+    "cage_code",
+    "duns_number",
+    "active_date",
+    "termination_date",
+    "address_line_1",
+    "address_line_2",
+    "city",
+    "state_province",
+    "zip_postal_code",
+    "country_code",
+    "ct_code",
+    "additional_comments",
+    "affiliations",
+    "raw_payload",
+)
+
+
+def _build_sam_values(flat: dict[str, Any]) -> dict[str, Any]:
+    """Shape a flattened v4 record into the sam_exclusions column layout."""
+    return {
+        "classification_type": (flat.get("classificationType") or "").strip() or None,
+        "name": (flat.get("name") or "").strip() or None,
+        "exclusion_type": (flat.get("exclusionType") or "").strip() or None,
+        "exclusion_program": (flat.get("exclusionProgram") or "").strip() or None,
+        "agency": (flat.get("agency") or "").strip() or None,
+        "npi": (flat.get("npi") or "").strip() or None,
+        "uei_sam": (flat.get("ueiSAM") or "").strip() or None,
+        "cage_code": (flat.get("cageCode") or "").strip() or None,
+        "duns_number": (flat.get("dunsNumber") or "").strip() or None,
+        "active_date": _parse_sam_date(flat.get("activationDate")),
+        "termination_date": _parse_sam_date(flat.get("terminationDate")),
+        "address_line_1": (flat.get("addressLine1") or "").strip() or None,
+        "address_line_2": (flat.get("addressLine2") or "").strip() or None,
+        "city": (flat.get("city") or "").strip() or None,
+        "state_province": (flat.get("stateOrProvince") or "").strip() or None,
+        "zip_postal_code": (flat.get("zipCode") or "").strip() or None,
+        "country_code": (flat.get("country") or "").strip() or None,
+        "ct_code": (flat.get("ctCode") or "").strip() or None,
+        "additional_comments": (flat.get("additionalComments") or "").strip() or None,
+        "affiliations": json.dumps(flat.get("affiliations")) if flat.get("affiliations") else None,
+        "raw_payload": json.dumps(flat),
+    }
+
+
+def _upsert_row(conn: Any, flat: dict[str, Any]) -> None:
+    """Upsert one SAM exclusion row via raw psycopg2.
+
+    Uses ``IS NOT DISTINCT FROM`` on the natural-key lookup so rows with
+    NULL in any of ``(classification_type, name, exclusion_type, active_date)``
+    match correctly — SQL ``=`` treats NULL as distinct, which would
+    duplicate ~30% of the SAM.gov dataset on every run. Mirrors the
+    NULL-aware behaviour of SQLAlchemy's ORM ``== None → IS NULL``.
+    """
+    values = _build_sam_values(flat)
+    now = datetime.now(UTC)
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id FROM shared.sam_exclusions
+            WHERE classification_type IS NOT DISTINCT FROM %s
+              AND name IS NOT DISTINCT FROM %s
+              AND exclusion_type IS NOT DISTINCT FROM %s
+              AND active_date IS NOT DISTINCT FROM %s
+            LIMIT 1
+            """,
+            (
+                values["classification_type"],
+                values["name"],
+                values["exclusion_type"],
+                values["active_date"],
+            ),
+        )
+        existing = cur.fetchone()
+
+        update_cols = [c for c in _UPSERT_COLUMNS
+                        if c not in ("classification_type", "name",
+                                      "exclusion_type", "active_date")]
+
+        if existing is not None:
+            set_clause = ", ".join(f"{c} = %s" for c in update_cols) + ", updated_at = %s"
+            cur.execute(
+                f"UPDATE shared.sam_exclusions SET {set_clause} WHERE id = %s",
+                [*(values[c] for c in update_cols), now, existing[0]],
+            )
+        else:
+            col_list = ", ".join(_UPSERT_COLUMNS) + ", created_at, updated_at"
+            placeholders = ", ".join(["%s"] * (len(_UPSERT_COLUMNS) + 2))
+            cur.execute(
+                f"INSERT INTO shared.sam_exclusions ({col_list}) VALUES ({placeholders})",
+                [*(values[c] for c in _UPSERT_COLUMNS), now, now],
+            )
 
 
 class SamExclusionsIngester(DataSourceIngester):
