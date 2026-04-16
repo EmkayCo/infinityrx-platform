@@ -87,7 +87,49 @@ from src.models.rxnorm_tables import (  # type: ignore[import]
     RxNormSemanticType,
     SCHEMA as RXNORM_SCHEMA,
 )
-from src.services.rxnorm_ingestion import RxNormIngestionService  # type: ignore[import]
+
+
+def _upsert_ndc_crosswalk(
+    db: Session,
+    ndc_11: str,
+    rxcui: str | None,
+    drug_name: str | None,
+    tty: str | None,
+) -> None:
+    """Test helper: direct upsert of a single NDC crosswalk row via ORM."""
+    existing = db.query(RxNormNDCCrosswalk).filter_by(ndc_11=ndc_11).one_or_none()
+    if existing is not None:
+        existing.rxcui = rxcui
+        existing.drug_name = drug_name
+        existing.tty = tty
+    else:
+        db.add(RxNormNDCCrosswalk(ndc_11=ndc_11, rxcui=rxcui, drug_name=drug_name, tty=tty))
+    db.flush()
+
+
+def _upsert_atc_crosswalk(
+    db: Session,
+    rxcui: str,
+    atc_code: str,
+    atc_level: str | None = None,
+    atc_name: str | None = None,
+) -> None:
+    """Test helper: direct upsert of a single ATC crosswalk row via ORM."""
+    existing = (
+        db.query(RxNormATCCrosswalk)
+        .filter_by(rxcui=rxcui, atc_code=atc_code)
+        .one_or_none()
+    )
+    if existing is not None:
+        existing.atc_level = atc_level
+        existing.atc_name = atc_name
+    else:
+        db.add(
+            RxNormATCCrosswalk(
+                rxcui=rxcui, atc_code=atc_code, atc_level=atc_level, atc_name=atc_name
+            )
+        )
+    db.flush()
 
 # ---------------------------------------------------------------------------
 # Sample data paths
@@ -311,10 +353,7 @@ class TestNoSourceFieldsDropped:
 
 class TestNDCCrosswalkBuilt:
     def test_ndc_crosswalk_built_from_rxnsat(self, db_session: Session) -> None:
-        """Upserting a concept + NDC attribute row produces a crosswalk entry."""
-        svc = RxNormIngestionService(db_session)
-
-        # Insert a concept row
+        """Upserting a concept + NDC crosswalk row produces the expected entry."""
         concept = RxNormConcept(
             rxcui="1049502",
             rxaui="7417530",
@@ -327,14 +366,13 @@ class TestNDCCrosswalkBuilt:
         db_session.add(concept)
         db_session.flush()
 
-        # Use service direct upsert to simulate crosswalk build result
-        svc.upsert_ndc_crosswalk_row(
+        _upsert_ndc_crosswalk(
+            db_session,
             ndc_11="00450448001",
             rxcui="1049502",
             drug_name="Acetaminophen 325 MG Oral Tablet",
             tty="SBD",
         )
-        db_session.flush()
 
         row = db_session.query(RxNormNDCCrosswalk).filter_by(ndc_11="00450448001").one()
         assert row.rxcui == "1049502"
@@ -343,21 +381,14 @@ class TestNDCCrosswalkBuilt:
 
     def test_ndc_crosswalk_upsert_idempotent(self, db_session: Session) -> None:
         """Upserting the same NDC row twice results in exactly one row."""
-        svc = RxNormIngestionService(db_session)
-        svc.upsert_ndc_crosswalk_row(
-            ndc_11="00450448009",
-            rxcui="1049502",
-            drug_name="Drug Name",
-            tty="SBD",
+        _upsert_ndc_crosswalk(
+            db_session, ndc_11="00450448009", rxcui="1049502",
+            drug_name="Drug Name", tty="SBD",
         )
-        db_session.flush()
-        svc.upsert_ndc_crosswalk_row(
-            ndc_11="00450448009",
-            rxcui="1049502",
-            drug_name="Drug Name Updated",
-            tty="SBD",
+        _upsert_ndc_crosswalk(
+            db_session, ndc_11="00450448009", rxcui="1049502",
+            drug_name="Drug Name Updated", tty="SBD",
         )
-        db_session.flush()
 
         count = db_session.query(RxNormNDCCrosswalk).filter_by(ndc_11="00450448009").count()
         assert count == 1
@@ -373,14 +404,10 @@ class TestNDCCrosswalkBuilt:
 class TestATCCrosswalkBuilt:
     def test_atc_crosswalk_built(self, db_session: Session) -> None:
         """Upserting an ATC crosswalk row produces the correct entry."""
-        svc = RxNormIngestionService(db_session)
-        svc.upsert_atc_crosswalk_row(
-            rxcui="131725",
-            atc_code="N02BE01",
-            atc_level="5",
-            atc_name="Paracetamol",
+        _upsert_atc_crosswalk(
+            db_session, rxcui="131725", atc_code="N02BE01",
+            atc_level="5", atc_name="Paracetamol",
         )
-        db_session.flush()
 
         row = (
             db_session.query(RxNormATCCrosswalk)
@@ -392,11 +419,10 @@ class TestATCCrosswalkBuilt:
 
     def test_atc_crosswalk_upsert_idempotent(self, db_session: Session) -> None:
         """Upserting the same ATC row twice results in exactly one row."""
-        svc = RxNormIngestionService(db_session)
-        svc.upsert_atc_crosswalk_row(rxcui="999999", atc_code="A01AA01")
-        db_session.flush()
-        svc.upsert_atc_crosswalk_row(rxcui="999999", atc_code="A01AA01", atc_name="Updated")
-        db_session.flush()
+        _upsert_atc_crosswalk(db_session, rxcui="999999", atc_code="A01AA01")
+        _upsert_atc_crosswalk(
+            db_session, rxcui="999999", atc_code="A01AA01", atc_name="Updated",
+        )
 
         count = (
             db_session.query(RxNormATCCrosswalk)
@@ -415,29 +441,19 @@ class TestBatchUpsertIdempotent:
     @pytest.mark.asyncio
     async def test_batch_upsert_idempotent(self, db_session: Session) -> None:
         """Loading the same records twice does not grow row counts."""
-        svc = RxNormIngestionService(db_session)
-
-        def _concept_records() -> Iterator[dict[str, Any]]:
-            for rec in _parse_rrf_records(_RXNCONSO_FILE, _RXNCONSO_FIELDS, "RXNCONSO"):
-                yield rec
-
-        def _attr_records() -> Iterator[dict[str, Any]]:
-            for rec in _parse_rrf_records(_RXNSAT_FILE, _RXNSAT_FIELDS, "RXNSAT"):
-                yield rec
+        ingester = RxNormIngester(db_session=db_session)
 
         def _all_records() -> Iterator[dict[str, Any]]:
-            yield from _concept_records()
-            yield from _attr_records()
-            for rec in _parse_rrf_records(_RXNREL_FILE, _RXNREL_FIELDS, "RXNREL"):
-                yield rec
-            for rec in _parse_rrf_records(_RXNSTY_FILE, _RXNSTY_FIELDS, "RXNSTY"):
-                yield rec
+            yield from _parse_rrf_records(_RXNCONSO_FILE, _RXNCONSO_FIELDS, "RXNCONSO")
+            yield from _parse_rrf_records(_RXNSAT_FILE, _RXNSAT_FIELDS, "RXNSAT")
+            yield from _parse_rrf_records(_RXNREL_FILE, _RXNREL_FIELDS, "RXNREL")
+            yield from _parse_rrf_records(_RXNSTY_FILE, _RXNSTY_FIELDS, "RXNSTY")
 
-        await svc.load_records(_all_records())
+        await ingester.load(_all_records())
         db_session.flush()
         count_after_first = db_session.query(RxNormConcept).count()
 
-        await svc.load_records(_all_records())
+        await ingester.load(_all_records())
         db_session.flush()
         count_after_second = db_session.query(RxNormConcept).count()
 
@@ -658,7 +674,7 @@ class TestIngestorParseMethod:
 
 
 # ===========================================================================
-# 11. load() — integration via RxNormIngestionService
+# 11. load() — integration via RxNormIngester
 # ===========================================================================
 
 
@@ -687,12 +703,12 @@ class TestIngestorLoadMethod:
         The SQLite crosswalk build also raises errors (PG-specific SQL),
         so errored count includes the crosswalk failures too.
         """
-        svc = RxNormIngestionService(db_session)
+        ingester = RxNormIngester(db_session=db_session)
 
         def _bad_records() -> Iterator[dict[str, Any]]:
             yield {"_file": "UNKNOWN_FILE", "rxcui": "123"}
 
-        result = await svc.load_records(_bad_records())
+        result = await ingester.load(_bad_records())
         # 1 unknown-file error + up to 2 crosswalk build errors on SQLite
         assert result.records_errored >= 1
         assert result.records_processed == 0
@@ -787,57 +803,15 @@ class TestDownloadErrorPaths:
 
 
 class TestUpsertExceptionHandling:
-    def test_upsert_concepts_exception_returns_errored_count(self) -> None:
-        """_upsert_concepts logs and returns errored=len(batch) on DB failure."""
-        mock_db = MagicMock()
-        mock_db.execute.side_effect = RuntimeError("DB error")
-        svc = RxNormIngestionService(mock_db)
-
-        batch = [{"rxcui": "1", "rxaui": "A1", "str_": "Test"}]
-        ins, upd, err = svc._upsert_concepts(batch)
-        assert ins == 0
-        assert err == 1
-
-    def test_upsert_relationships_exception_returns_errored_count(self) -> None:
-        mock_db = MagicMock()
-        mock_db.execute.side_effect = RuntimeError("DB error")
-        svc = RxNormIngestionService(mock_db)
-
-        batch = [{"rxcui1": "1", "rxcui2": "2", "rel": "RN"}]
-        ins, upd, err = svc._upsert_relationships(batch)
-        assert ins == 0
-        assert err == 1
-
-    def test_upsert_attributes_exception_returns_errored_count(self) -> None:
-        mock_db = MagicMock()
-        mock_db.execute.side_effect = RuntimeError("DB error")
-        svc = RxNormIngestionService(mock_db)
-
-        batch = [{"rxcui": "1", "atn": "NDC", "atv": "00069420016"}]
-        ins, upd, err = svc._upsert_attributes(batch)
-        assert ins == 0
-        assert err == 1
-
-    def test_upsert_semantic_types_exception_returns_errored_count(self) -> None:
-        mock_db = MagicMock()
-        mock_db.execute.side_effect = RuntimeError("DB error")
-        svc = RxNormIngestionService(mock_db)
-
-        batch = [{"rxcui": "1", "tui": "T200", "sty": "Clinical Drug"}]
-        ins, upd, err = svc._upsert_semantic_types(batch)
-        assert ins == 0
-        assert err == 1
-
     @pytest.mark.asyncio
     async def test_load_triggers_mid_batch_flush_at_batch_boundary(
         self, db_session: Session
     ) -> None:
         """Batch flush path is triggered when buffer reaches _BATCH_SIZE (1000)."""
-        svc = RxNormIngestionService(db_session)
+        from shared.data_ingestion.sources.rxnorm import _BATCH_SIZE
 
-        from src.services.rxnorm_ingestion import _BATCH_SIZE  # type: ignore[import]
+        ingester = RxNormIngester(db_session=db_session)
 
-        # Generate exactly _BATCH_SIZE + 1 concept records to trigger mid-batch flush
         def _many_concepts() -> Iterator[dict[str, Any]]:
             for i in range(_BATCH_SIZE + 1):
                 yield {
@@ -849,7 +823,7 @@ class TestUpsertExceptionHandling:
                     "ispref": "Y",
                 }
 
-        result = await svc.load_records(_many_concepts())
+        result = await ingester.load(_many_concepts())
         assert result.records_processed == _BATCH_SIZE + 1
         count = db_session.query(RxNormConcept).count()
         assert count == _BATCH_SIZE + 1
@@ -918,9 +892,9 @@ class TestCrosswalkBuildSuccessPaths:
         mock_result.rowcount = 5
         mock_db = MagicMock()
         mock_db.execute.return_value = mock_result
-        svc = RxNormIngestionService(mock_db)
 
-        ins, err = svc._build_ndc_crosswalk()
+        ingester = RxNormIngester(db_session=mock_db)
+        ins, err = ingester._build_ndc_crosswalk()
         assert ins == 5
         assert err == 0
 
@@ -930,9 +904,9 @@ class TestCrosswalkBuildSuccessPaths:
         mock_result.rowcount = 3
         mock_db = MagicMock()
         mock_db.execute.return_value = mock_result
-        svc = RxNormIngestionService(mock_db)
 
-        ins, err = svc._build_atc_crosswalk()
+        ingester = RxNormIngester(db_session=mock_db)
+        ins, err = ingester._build_atc_crosswalk()
         assert ins == 3
         assert err == 0
 

@@ -1,33 +1,62 @@
 """RxNorm DataSourceIngester — NLM normalized drug nomenclature.
 
-Downloads the RxNorm full release ZIP from NLM's UMLS download service
-(requires UMLS_API_KEY env var), extracts, and ingests four RRF files:
-  RXNCONSO.RRF  — 18 fields, drug concepts
-  RXNREL.RRF    — 16 fields, relationships
-  RXNSAT.RRF    — 13 fields, attributes (includes NDC/ATC crosswalk data)
-  RXNSTY.RRF    — 6 fields, semantic types
+Downloads RxNorm from NLM (full release with UMLS_API_KEY, or the no-auth
+prescribable subset as fallback), extracts the ZIP, and streams four
+pipe-delimited RRF files into drug_database via shared batching primitives:
 
-After core tables load, two derived crosswalk tables are built via SQL:
-  rxnorm_ndc_crosswalk   — NDC → RxCUI (from RXNSAT ATN='NDC')
-  rxnorm_atc_crosswalk   — RxCUI → ATC (from RXNSAT ATN='ATC' or SAB='ATC')
+  RXNCONSO.RRF (18 fields) → drug_database.rxnorm_concepts
+  RXNREL.RRF   (16 fields) → drug_database.rxnorm_relationships
+  RXNSAT.RRF   (13 fields) → drug_database.rxnorm_attributes
+  RXNSTY.RRF   ( 6 fields) → drug_database.rxnorm_semantic_types
+
+After the main upserts commit, two derived crosswalk tables are built via
+SQL INSERT…SELECT…ON CONFLICT DO UPDATE (Postgres-only):
+
+  rxnorm_ndc_crosswalk   <- RXNSAT ATN='NDC' joined to RXNCONSO preferred atoms
+  rxnorm_atc_crosswalk   <- RXNSAT ATN='ATC' UNION RXNCONSO SAB='ATC'
+
+RXNCONSO column layout (0-indexed, | delimiter, trailing pipe):
+  [0]  RXCUI       concept unique ID        ← key field
+  [1]  LAT         language
+  [2]  TS          term status
+  [3]  LUI         lexical unique id
+  [4]  STT         string type
+  [5]  SUI         string unique id
+  [6]  ISPREF      Y/N preferred atom
+  [7]  RXAUI       atom unique id
+  [8]  SAUI        source atom id
+  [9]  SCUI        source concept id
+  [10] SDUI        source descriptor id
+  [11] SAB         source abbreviation      ← e.g. RXNORM, ATC
+  [12] TTY         term type                ← e.g. IN, SBD, SCD, PT
+  [13] CODE        source-specific code
+  [14] STR         drug name / description  ← stored as str_ (Python reserved)
+  [15] SRL         source restriction level
+  [16] SUPPRESS    suppressible flag
+  [17] CVF         content view flag
+
+NDCs are NOT in RXNCONSO.RRF — they appear in RXNSAT.RRF with ATN='NDC'
+and are surfaced via the rxnorm_ndc_crosswalk derived table.
 
 LESSON-011: Global reference data — no TenantScopedMixin.
-LESSON-004: \\A...\\Z anchors for all regex.
+LESSON-004: \\A...\\Z anchors for regex (none needed in this module).
 LESSON-005: log extra keys prefixed with ingest_.
-No floats anywhere in this module.
+No floats anywhere.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import re
+import sys
 import zipfile
+from collections import defaultdict
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import httpx
+from sqlalchemy import text
 
 from shared.data_ingestion.base import DataSourceIngester, IngestionResult
 from shared.data_ingestion.downloader import download_to_file
@@ -51,30 +80,26 @@ _PRESCRIBABLE_URL = (
 )
 
 _CACHE_DIR = Path("/tmp/ifx_ingest/rxnorm")
-_MAX_DOWNLOAD_BYTES = 800 * 1024 * 1024  # 800 MB — full release is ~400 MB
+_MAX_DOWNLOAD_BYTES = 800 * 1024 * 1024  # full release ~400 MB
 
-# RRF files and their pipe-delimited field specs (field name, position index)
-# RXNCONSO: 18 fields, pipe-delimited, trailing pipe
+_BATCH_SIZE = 1_000
+
+# RRF field specs (0-indexed list of names; "str" → "str_" to avoid
+# clobbering Python's built-in).
 _RXNCONSO_FIELDS = [
     "rxcui", "lat", "ts", "lui", "stt", "sui", "ispref",
     "rxaui", "saui", "scui", "sdui", "sab", "tty", "code",
     "str", "srl", "suppress", "cvf",
 ]
-
-# RXNREL: 16 fields
 _RXNREL_FIELDS = [
     "rxcui1", "rxaui1", "stype1", "rel", "rxcui2", "rxaui2",
     "stype2", "rela", "rui", "srui", "sab", "sl", "rg",
     "dir", "suppress", "cvf",
 ]
-
-# RXNSAT: 13 fields
 _RXNSAT_FIELDS = [
     "rxcui", "lui", "sui", "rxaui", "stype", "code",
     "atui", "satui", "atn", "sab", "atv", "suppress", "cvf",
 ]
-
-# RXNSTY: 6 fields
 _RXNSTY_FIELDS = [
     "rxcui", "tui", "stn", "sty", "atui", "cvf",
 ]
@@ -198,24 +223,74 @@ for _col, _desc in [
 # Parser helpers
 # ---------------------------------------------------------------------------
 
-# LESSON-004: use \A...\Z anchors
-_NDC_RE = re.compile(r"\A\d{11}\Z")
-
 
 def _parse_rrf_line(line: str, fields: list[str], file_key: str) -> dict[str, Any]:
     """Parse a single pipe-delimited RRF line into a dict.
 
-    RRF files have a trailing pipe on each line; split gives an extra empty
-    string at the end. We take only as many values as there are fields.
+    RRF files have a trailing pipe on each line; split produces an extra
+    empty string at the end which we ignore. Empty strings become None.
+    The "str" field is remapped to "str_" because str is a Python built-in.
     """
     parts = line.rstrip("\n").split("|")
     record: dict[str, Any] = {"_file": file_key}
     for i, field_name in enumerate(fields):
         val = parts[i] if i < len(parts) else ""
-        # Normalize 'str' field key to avoid Python builtin collision
         key = "str_" if field_name == "str" else field_name
         record[key] = val if val else None
     return record
+
+
+def _stream_rrf_file(
+    rrf_path: Path,
+    fields: list[str],
+    file_key: str,
+) -> Iterator[dict[str, Any]]:
+    """Stream a single RRF file, yielding one dict per non-empty line."""
+    with rrf_path.open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            yield _parse_rrf_line(line, fields, file_key)
+
+
+def _find_rrf_file(directory: Path, filename: str) -> Path | None:
+    """Find the RRF file by name, preferring the largest match.
+
+    The UMLS full-release ZIP bundles two copies of every RRF file — one
+    under ``rrf/`` (full release) and one under ``prescribe/rrf/``
+    (prescribable subset). A stale sample file may also sit at the
+    extraction root from a previous run. Picking the first ``rglob`` hit
+    is non-deterministic and previously selected a 527-byte sample over
+    the 131 MB real file, silently dropping all rxnorm_concepts rows.
+
+    We pick the largest file instead — any real RRF dwarfs a sample and
+    a full-release copy dwarfs the prescribable-subset copy, so this
+    degrades gracefully to whichever download actually succeeded.
+    """
+    candidates: list[Path] = list(directory.rglob(filename))
+    if not candidates:
+        lower = filename.lower()
+        candidates = [c for c in directory.rglob("*") if c.name.lower() == lower]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_size)
+
+
+def _extract_zip(zip_path: Path, dest_dir: Path) -> Path:
+    """Extract ZIP to dest_dir, return dest_dir."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(dest_dir)
+    logger.info(
+        "RxNorm: ZIP extracted",
+        extra={
+            "ingest_source": _SOURCE_NAME,
+            "ingest_zip": str(zip_path),
+            "ingest_dest": str(dest_dir),
+        },
+    )
+    return dest_dir
 
 
 # ---------------------------------------------------------------------------
@@ -224,12 +299,20 @@ def _parse_rrf_line(line: str, fields: list[str], file_key: str) -> dict[str, An
 
 
 class RxNormIngester(DataSourceIngester):
-    """RxNorm full-release or prescribable-subset ingester.
+    """RxNorm ingester (full release or prescribable subset).
 
-    Download: tries full release (requires UMLS_API_KEY) then falls back to
-    the no-auth prescribable subset ZIP.
-    Parse: streams RRF files line by line; never loads full file into memory.
-    Load: delegates to RxNormIngestionService with batch-1000 upserts.
+    Download tries the authenticated full release first (requires
+    UMLS_API_KEY); on any error or when the env var is unset it falls
+    back to the no-auth prescribable subset.
+
+    Parse streams each RRF file line-by-line — never loads a full file
+    into memory; the full release is ~15M records / ~4 GB.
+
+    Load routes each record to one of four target tables via the
+    ``_file`` key tag and flushes in BATCH_SIZE-sized chunks using
+    ``flush_upsert_batch`` from the shared batching module. After all
+    four tables commit, two derived crosswalk tables are built with
+    SQL INSERT…SELECT (Postgres only).
     """
 
     source_name = _SOURCE_NAME
@@ -279,38 +362,35 @@ class RxNormIngester(DataSourceIngester):
                 )
             except (httpx.HTTPStatusError, httpx.TransportError) as exc:
                 raise RuntimeError(
-                    f"RxNorm: both full-release and prescribable-subset downloads failed. "
+                    "RxNorm: both full-release and prescribable-subset downloads failed. "
                     f"Set UMLS_API_KEY env var for full access. Last error: {exc}"
                 ) from exc
 
-        extract_dir = _extract_zip(zip_path, _CACHE_DIR / "extracted")
-        return extract_dir
+        return _extract_zip(zip_path, _CACHE_DIR / "extracted")
 
     # ------------------------------------------------------------------ #
     # Parse — stream RRF files, yield one dict per line
     # ------------------------------------------------------------------ #
 
     def parse(self, file_path: Path) -> Iterator[dict[str, Any]]:
-        """Parse all RRF files in the extracted directory.
+        """Parse all four RRF files in the extracted directory.
 
-        file_path is expected to be a directory containing .RRF files.
-        Streams line by line; never reads the full file into memory.
-        Tags each record with ``_file`` key for load() routing.
+        file_path is the directory that ``download()`` returned. Yields
+        one dict per RRF line, tagged with ``_file`` so load() can route
+        the record to its target table.
         """
-        if file_path.is_dir():
-            extract_dir = file_path
-        else:
+        if not file_path.is_dir():
             raise ValueError(f"RxNorm parse() expected a directory, got: {file_path}")
 
         for rrf_name, fields in _FILE_FIELD_MAP.items():
-            rrf_path = _find_rrf_file(extract_dir, rrf_name)
+            rrf_path = _find_rrf_file(file_path, rrf_name)
             if rrf_path is None:
                 logger.warning(
                     "RxNorm: RRF file not found in extract dir",
                     extra={
                         "ingest_source": _SOURCE_NAME,
                         "ingest_rrf_file": rrf_name,
-                        "ingest_dir": str(extract_dir),
+                        "ingest_dir": str(file_path),
                     },
                 )
                 continue
@@ -319,79 +399,236 @@ class RxNormIngester(DataSourceIngester):
             yield from _stream_rrf_file(rrf_path, fields, file_key)
 
     # ------------------------------------------------------------------ #
-    # Load — delegate to service
+    # Load — batch-upsert all four tables then build crosswalks
     # ------------------------------------------------------------------ #
 
     async def load(self, records: Iterator[dict[str, Any]]) -> IngestionResult:
-        """Bulk-upsert all RxNorm records via RxNormIngestionService."""
-        import sys
+        """Route each record to its target table and flush via shared primitives.
 
+        Main tables (concepts, relationships, attributes, semantic_types)
+        use ``flush_upsert_batch`` with the table's natural unique key.
+        Cross-batch duplicates are handled by ON CONFLICT DO UPDATE.
+
+        After all four tables are flushed the two derived crosswalk
+        tables are built via SQL INSERT...SELECT. Each crosswalk build
+        runs inside a SAVEPOINT so a failure there can't roll back the
+        ~15M main-table rows above it.
+        """
         _REPO_ROOT = Path(__file__).resolve().parents[3]
         _DRUG_DB_ROOT = _REPO_ROOT / "modules" / "drug-database"
         for _p in (str(_REPO_ROOT), str(_DRUG_DB_ROOT)):
             if _p not in sys.path:
                 sys.path.insert(0, _p)
 
-        from src.services.rxnorm_ingestion import RxNormIngestionService  # type: ignore[import]
+        from src.models.rxnorm_tables import (  # type: ignore[import]
+            RxNormAttribute,
+            RxNormConcept,
+            RxNormRelationship,
+            RxNormSemanticType,
+        )
 
-        service = RxNormIngestionService(db_session=self._db)
-        return await service.load_records(records, source_name=self.source_name)
+        from shared.data_ingestion.batching import ErrorAggregator, flush_upsert_batch
 
+        # str → str_ rename on the RxNormConcept column: the ORM column
+        # name is "str" in Postgres but "str_" in the ORM attribute. The
+        # __table__ object uses the DB column name, so pg_insert works
+        # with the dict key "str" — we convert str_ back to str on flush.
+        # (The parser emits "str_" to avoid Python's built-in clash.)
+        CONCEPT_KEY_REMAP = {"str_": "str"}
 
-# ---------------------------------------------------------------------------
-# Module-level helpers
-# ---------------------------------------------------------------------------
+        TABLE_CFG: dict[str, dict[str, Any]] = {
+            "RXNCONSO": {
+                "table": RxNormConcept.__table__,
+                "unique_key": ["rxcui", "rxaui"],
+                "remap": CONCEPT_KEY_REMAP,
+            },
+            "RXNREL": {
+                "table": RxNormRelationship.__table__,
+                "unique_key": ["rui"],
+                "remap": {},
+            },
+            "RXNSAT": {
+                "table": RxNormAttribute.__table__,
+                "unique_key": ["atui"],
+                "remap": {},
+            },
+            "RXNSTY": {
+                "table": RxNormSemanticType.__table__,
+                "unique_key": ["atui"],
+                "remap": {},
+            },
+        }
 
+        errors = ErrorAggregator()
+        buffers: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        processed = 0
+        inserted = 0
+        skipped = 0
 
-def _stream_rrf_file(
-    rrf_path: Path,
-    fields: list[str],
-    file_key: str,
-) -> Iterator[dict[str, Any]]:
-    """Stream a single RRF file, yielding one dict per non-empty line."""
-    with rrf_path.open(encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            line = line.rstrip("\n")
-            if not line:
+        def _remap_keys(row: dict[str, Any], remap: dict[str, str]) -> dict[str, Any]:
+            if not remap:
+                return row
+            return {remap.get(k, k): v for k, v in row.items()}
+
+        def _flush(file_key: str) -> None:
+            nonlocal inserted, skipped
+            rows = buffers[file_key]
+            if not rows:
+                return
+            cfg = TABLE_CFG[file_key]
+            remapped = [_remap_keys(r, cfg["remap"]) for r in rows]
+            ins, dd = flush_upsert_batch(
+                self._db,
+                source_name=self.source_name,
+                table=cfg["table"],
+                unique_key=cfg["unique_key"],
+                rows=remapped,
+                errors=errors,
+            )
+            inserted += ins
+            skipped += dd
+            buffers[file_key] = []
+
+        for record in records:
+            file_key = record.pop("_file", None)
+            if file_key not in TABLE_CFG:
+                errors.record("unknown_file", f"unknown _file key: {file_key!r}")
                 continue
-            yield _parse_rrf_line(line, fields, file_key)
+            processed += 1
+            buffers[file_key].append(record)
+            if len(buffers[file_key]) >= _BATCH_SIZE:
+                _flush(file_key)
 
+        for file_key in list(buffers.keys()):
+            _flush(file_key)
 
-def _find_rrf_file(directory: Path, filename: str) -> Path | None:
-    """Recursively find a .RRF file by name inside directory."""
-    for candidate in directory.rglob(filename):
-        return candidate
-    # Case-insensitive fallback
-    lower = filename.lower()
-    for candidate in directory.rglob("*"):
-        if candidate.name.lower() == lower:
-            return candidate
-    return None
+        # Build derived crosswalks from what's now committed in the main tables.
+        ndc_ins, ndc_err = self._build_ndc_crosswalk()
+        atc_ins, atc_err = self._build_atc_crosswalk()
+        inserted += ndc_ins + atc_ins
+        errors.total_errors += ndc_err + atc_err
 
+        errors.log_summary(source_name=self.source_name)
 
-def _extract_zip(zip_path: Path, dest_dir: Path) -> Path:
-    """Extract ZIP to dest_dir, return dest_dir."""
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        zf.extractall(dest_dir)
-    logger.info(
-        "RxNorm: ZIP extracted",
-        extra={
-            "ingest_source": _SOURCE_NAME,
-            "ingest_zip": str(zip_path),
-            "ingest_dest": str(dest_dir),
-        },
-    )
-    return dest_dir
+        logger.info(
+            "RxNorm load complete",
+            extra={
+                "ingest_source": self.source_name,
+                "ingest_records_processed": processed,
+                "ingest_records_inserted": inserted,
+                "ingest_records_skipped": skipped,
+                "ingest_records_errored": errors.total_errors,
+            },
+        )
+
+        return IngestionResult(
+            source=self.source_name,
+            status="completed",
+            records_processed=processed,
+            records_inserted=inserted,
+            records_skipped=skipped,
+            records_errored=errors.total_errors,
+        )
+
+    # ------------------------------------------------------------------ #
+    # Crosswalk builders — Postgres-only SQL, each in its own SAVEPOINT
+    # ------------------------------------------------------------------ #
+
+    def _build_ndc_crosswalk(self) -> tuple[int, int]:
+        """Build rxnorm_ndc_crosswalk from rxnorm_attributes + rxnorm_concepts."""
+        try:
+            with self._db.begin_nested():
+                sql = text("""
+                    INSERT INTO drug_database.rxnorm_ndc_crosswalk
+                        (ndc_11, rxcui, drug_name, tty, created_at, updated_at)
+                    SELECT DISTINCT ON (SUBSTRING(ra.atv FROM 1 FOR 11))
+                        SUBSTRING(ra.atv FROM 1 FOR 11) AS ndc_11,
+                        ra.rxcui,
+                        rc.str AS drug_name,
+                        rc.tty,
+                        NOW(),
+                        NOW()
+                    FROM drug_database.rxnorm_attributes ra
+                    LEFT JOIN drug_database.rxnorm_concepts rc
+                        ON rc.rxcui = ra.rxcui
+                        AND rc.ispref = 'Y'
+                        AND rc.lat = 'ENG'
+                    WHERE ra.atn = 'NDC'
+                      AND ra.atv IS NOT NULL
+                      AND LENGTH(ra.atv) >= 11
+                    ORDER BY SUBSTRING(ra.atv FROM 1 FOR 11), ra.rxcui
+                    ON CONFLICT (ndc_11) DO UPDATE
+                        SET rxcui = EXCLUDED.rxcui,
+                            drug_name = EXCLUDED.drug_name,
+                            tty = EXCLUDED.tty,
+                            updated_at = NOW()
+                """)
+                result = self._db.execute(sql)
+                return result.rowcount, 0
+        except Exception as exc:
+            logger.exception(
+                "RxNorm NDC crosswalk build failed",
+                extra={"ingest_source": _SOURCE_NAME, "ingest_error": str(exc)[:500]},
+            )
+            return 0, 1
+
+    def _build_atc_crosswalk(self) -> tuple[int, int]:
+        """Build rxnorm_atc_crosswalk from RXNSAT ATN='ATC' UNION RXNCONSO SAB='ATC'."""
+        try:
+            with self._db.begin_nested():
+                sql = text("""
+                    INSERT INTO drug_database.rxnorm_atc_crosswalk
+                        (rxcui, atc_code, atc_level, atc_name, created_at, updated_at)
+                    SELECT DISTINCT ON (rxcui, atc_code)
+                        rxcui,
+                        atc_code,
+                        CASE
+                            WHEN LENGTH(atc_code) = 1 THEN '1'
+                            WHEN LENGTH(atc_code) = 3 THEN '2'
+                            WHEN LENGTH(atc_code) = 4 THEN '3'
+                            WHEN LENGTH(atc_code) = 5 THEN '4'
+                            ELSE '5'
+                        END AS atc_level,
+                        atc_name,
+                        NOW(),
+                        NOW()
+                    FROM (
+                        SELECT ra.rxcui, ra.atv AS atc_code, rc.str AS atc_name
+                        FROM drug_database.rxnorm_attributes ra
+                        LEFT JOIN drug_database.rxnorm_concepts rc
+                            ON rc.rxcui = ra.rxcui AND rc.sab = 'ATC' AND rc.ispref = 'Y'
+                        WHERE ra.atn = 'ATC' AND ra.atv IS NOT NULL
+
+                        UNION
+
+                        SELECT rc.rxcui, rc.code AS atc_code, rc.str AS atc_name
+                        FROM drug_database.rxnorm_concepts rc
+                        WHERE rc.sab = 'ATC' AND rc.code IS NOT NULL
+                    ) combined
+                    ORDER BY rxcui, atc_code
+                    ON CONFLICT ON CONSTRAINT uq_rxnorm_atc_crosswalk DO UPDATE
+                        SET atc_level = EXCLUDED.atc_level,
+                            atc_name = EXCLUDED.atc_name,
+                            updated_at = NOW()
+                """)
+                result = self._db.execute(sql)
+                return result.rowcount, 0
+        except Exception as exc:
+            logger.exception(
+                "RxNorm ATC crosswalk build failed",
+                extra={"ingest_source": _SOURCE_NAME, "ingest_error": str(exc)[:500]},
+            )
+            return 0, 1
 
 
 __all__ = [
-    "RxNormIngester",
-    "_parse_rrf_line",
-    "_stream_rrf_file",
+    "_FILE_FIELD_MAP",
     "_RXNCONSO_FIELDS",
     "_RXNREL_FIELDS",
     "_RXNSAT_FIELDS",
     "_RXNSTY_FIELDS",
-    "_FILE_FIELD_MAP",
+    "RxNormIngester",
+    "_find_rrf_file",
+    "_parse_rrf_line",
+    "_stream_rrf_file",
 ]
