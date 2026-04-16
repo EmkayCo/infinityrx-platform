@@ -35,9 +35,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.types import TypeDecorator
 
-from src.models.tables import PriorAuthBase
-
-
 class _UUIDString(TypeDecorator):
     """SQLite-compatible UUID stored as VARCHAR(36). Fixes LESSON-007 float bug."""
     impl = String(36)
@@ -52,6 +49,22 @@ class _UUIDString(TypeDecorator):
         if value is None:
             return None
         return uuid.UUID(value)
+
+
+# ---------------------------------------------------------------------------
+# Patch metadata at import time -- BEFORE any ORM objects are constructed.
+# This prevents mapper compilation with PG_UUID types that fail on SQLite.
+# ---------------------------------------------------------------------------
+
+from src.models.tables import PriorAuthBase
+
+for _table in PriorAuthBase.metadata.tables.values():
+    _table.schema = None
+    for _col in _table.columns:
+        if isinstance(_col.type, JSONB):
+            _col.type = JSON()
+        elif isinstance(_col.type, PG_UUID):
+            _col.type = _UUIDString()
 
 
 # ---------------------------------------------------------------------------
@@ -80,15 +93,6 @@ def _engine():
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
-
-    # SQLite doesn't support schemas -- remove schema prefix
-    for table in PriorAuthBase.metadata.tables.values():
-        table.schema = None
-        for col in table.columns:
-            if isinstance(col.type, JSONB):
-                col.type = JSON()
-            elif isinstance(col.type, PG_UUID):
-                col.type = _UUIDString()
 
     PriorAuthBase.metadata.create_all(engine)
     yield engine
