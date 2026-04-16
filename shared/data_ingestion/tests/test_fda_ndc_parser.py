@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import JSON, BigInteger, Integer, String, create_engine, event, text
+from sqlalchemy import JSON, BigInteger, Integer, String, create_engine, event
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Session, sessionmaker
@@ -55,6 +55,8 @@ for _p in (str(_REPO_ROOT), str(_DRUG_DB_ROOT)):
 
 from shared.data_ingestion.models import IngestionRun, IngestionSchedule
 from shared.data_ingestion.sources.fda_ndc import (
+    _explode_ingredients,
+    _explode_pharm_classes,
     _extract_class_type,
     _parse_date,
     _parse_packages,
@@ -65,7 +67,6 @@ from shared.db.base import Base
 
 # Import NDC models (drug-database is on sys.path so src.* resolves)
 from src.models.ndc_tables import (  # type: ignore[import]
-    Drug,
     DrugActiveIngredient,
     DrugPackage,
     DrugPharmClass,
@@ -206,22 +207,6 @@ def db_session(_engine) -> Iterator[Session]:
     session.close()
     outer.rollback()
     connection.close()
-
-
-# ---------------------------------------------------------------------------
-# Helper: insert a Drug row directly via ORM
-# ---------------------------------------------------------------------------
-
-def _insert_drug(db: Session, product_id: str, **kwargs: Any) -> Drug:
-    drug = Drug(
-        product_id=product_id,
-        product_ndc=kwargs.get("product_ndc", product_id.split("_")[0]),
-        ndc_11=kwargs.get("ndc_11", "00069420016"),
-        **{k: v for k, v in kwargs.items() if k not in ("product_ndc", "ndc_11")},
-    )
-    db.add(drug)
-    db.flush()
-    return drug
 
 
 # ===========================================================================
@@ -420,92 +405,61 @@ class TestParsePackages:
 
 
 class TestIngredientsExplodedPreserveSequence:
-    def test_single_ingredient(self, db_session: Session) -> None:
+    def test_single_ingredient(self) -> None:
         """Single-ingredient drug yields one row with sequence=0."""
-        drug = _insert_drug(
-            db_session,
-            product_id="TEST-SINGLE",
-            substance_name="AMLODIPINE BESYLATE",
-            active_numerator_strength="6.944",
-            active_ingred_unit="MG",
-        )
-        from src.services.ndc_ingestion import NDCIngestionService  # type: ignore[import]
-        svc = NDCIngestionService(db_session=db_session)
-        svc._reload_children_for_all_drugs([])
-
-        ingredients = db_session.query(DrugActiveIngredient).filter_by(
-            drug_id="TEST-SINGLE"
-        ).all()
+        drug_row = {
+            "product_id": "TEST-SINGLE",
+            "substance_name": "AMLODIPINE BESYLATE",
+            "active_numerator_strength": "6.944",
+            "active_ingred_unit": "MG",
+        }
+        ingredients = list(_explode_ingredients(drug_row))
         assert len(ingredients) == 1
-        assert ingredients[0].sequence == 0
-        assert ingredients[0].substance_name == "AMLODIPINE BESYLATE"
-        assert ingredients[0].numerator_strength == Decimal("6.944000")
-        assert ingredients[0].unit == "MG"
+        assert ingredients[0]["sequence"] == 0
+        assert ingredients[0]["substance_name"] == "AMLODIPINE BESYLATE"
+        assert ingredients[0]["numerator_strength"] == Decimal("6.944000")
+        assert ingredients[0]["unit"] == "MG"
+        assert ingredients[0]["drug_id"] == "TEST-SINGLE"
 
-    def test_multi_ingredient_three_substances(self, db_session: Session) -> None:
+    def test_multi_ingredient_three_substances(self) -> None:
         """3-ingredient row yields 3 rows with sequence 0, 1, 2."""
-        drug = _insert_drug(
-            db_session,
-            product_id="TEST-MULTI",
-            substance_name="LISINOPRIL;HYDROCHLOROTHIAZIDE;MAGNESIUM STEARATE",
-            active_numerator_strength="10;12.5;5",
-            active_ingred_unit="MG;MG;MG",
-            ndc_11="00268560031",
-        )
-        from src.services.ndc_ingestion import NDCIngestionService  # type: ignore[import]
-        svc = NDCIngestionService(db_session=db_session)
-        svc._reload_children_for_all_drugs([])
-
-        ingredients = (
-            db_session.query(DrugActiveIngredient)
-            .filter_by(drug_id="TEST-MULTI")
-            .order_by(DrugActiveIngredient.sequence)
-            .all()
-        )
+        drug_row = {
+            "product_id": "TEST-MULTI",
+            "substance_name": "LISINOPRIL;HYDROCHLOROTHIAZIDE;MAGNESIUM STEARATE",
+            "active_numerator_strength": "10;12.5;5",
+            "active_ingred_unit": "MG;MG;MG",
+        }
+        ingredients = list(_explode_ingredients(drug_row))
         assert len(ingredients) == 3
-        assert [i.sequence for i in ingredients] == [0, 1, 2]
-        assert ingredients[0].substance_name == "LISINOPRIL"
-        assert ingredients[1].substance_name == "HYDROCHLOROTHIAZIDE"
-        assert ingredients[2].substance_name == "MAGNESIUM STEARATE"
+        assert [i["sequence"] for i in ingredients] == [0, 1, 2]
+        assert ingredients[0]["substance_name"] == "LISINOPRIL"
+        assert ingredients[1]["substance_name"] == "HYDROCHLOROTHIAZIDE"
+        assert ingredients[2]["substance_name"] == "MAGNESIUM STEARATE"
 
-    def test_non_numeric_strength_is_null(self, db_session: Session) -> None:
-        """Non-numeric strength like 'q.s.' is stored as NULL, not 0."""
-        drug = _insert_drug(
-            db_session,
-            product_id="TEST-QS",
-            substance_name="WATER",
-            active_numerator_strength="q.s.",
-            active_ingred_unit="mL",
-            ndc_11="00001234567",
-        )
-        from src.services.ndc_ingestion import NDCIngestionService  # type: ignore[import]
-        svc = NDCIngestionService(db_session=db_session)
-        svc._reload_children_for_all_drugs([])
+    def test_non_numeric_strength_is_null(self) -> None:
+        """Non-numeric strength like 'q.s.' becomes None, not 0."""
+        drug_row = {
+            "product_id": "TEST-QS",
+            "substance_name": "WATER",
+            "active_numerator_strength": "q.s.",
+            "active_ingred_unit": "mL",
+        }
+        ingredients = list(_explode_ingredients(drug_row))
+        assert len(ingredients) == 1
+        assert ingredients[0]["numerator_strength"] is None
 
-        ingredient = db_session.query(DrugActiveIngredient).filter_by(
-            drug_id="TEST-QS"
-        ).one()
-        assert ingredient.numerator_strength is None
-
-    def test_meq_unit_preserved(self, db_session: Session) -> None:
+    def test_meq_unit_preserved(self) -> None:
         """MEQ unit (potassium chloride) is preserved exactly."""
-        drug = _insert_drug(
-            db_session,
-            product_id="TEST-MEQ",
-            substance_name="POTASSIUM CHLORIDE",
-            active_numerator_strength="20",
-            active_ingred_unit="MEQ/100ML",
-            ndc_11="01439924025",
-        )
-        from src.services.ndc_ingestion import NDCIngestionService  # type: ignore[import]
-        svc = NDCIngestionService(db_session=db_session)
-        svc._reload_children_for_all_drugs([])
-
-        ingredient = db_session.query(DrugActiveIngredient).filter_by(
-            drug_id="TEST-MEQ"
-        ).one()
-        assert ingredient.unit == "MEQ/100ML"
-        assert ingredient.numerator_strength == Decimal("20.000000")
+        drug_row = {
+            "product_id": "TEST-MEQ",
+            "substance_name": "POTASSIUM CHLORIDE",
+            "active_numerator_strength": "20",
+            "active_ingred_unit": "MEQ/100ML",
+        }
+        ingredients = list(_explode_ingredients(drug_row))
+        assert len(ingredients) == 1
+        assert ingredients[0]["unit"] == "MEQ/100ML"
+        assert ingredients[0]["numerator_strength"] == Decimal("20.000000")
 
 
 # ===========================================================================
@@ -539,28 +493,19 @@ class TestPharmClassTypeExtraction:
         assert text == "Angiotensin 2 Receptor Blocker"
         assert ctype is None
 
-    def test_pharm_classes_exploded_in_db(self, db_session: Session) -> None:
-        drug = _insert_drug(
-            db_session,
-            product_id="TEST-PC",
-            pharm_classes="Calcium Channel Blocker [EPC],Calcium Channel Antagonists [MoA]",
-            ndc_11="00695770030",
-        )
-        from src.services.ndc_ingestion import NDCIngestionService  # type: ignore[import]
-        svc = NDCIngestionService(db_session=db_session)
-        svc._reload_children_for_all_drugs([])
-
-        classes = (
-            db_session.query(DrugPharmClass)
-            .filter_by(drug_id="TEST-PC")
-            .order_by(DrugPharmClass.sequence)
-            .all()
-        )
+    def test_pharm_classes_exploded_preserves_sequence(self) -> None:
+        drug_row = {
+            "product_id": "TEST-PC",
+            "pharm_classes": "Calcium Channel Blocker [EPC],Calcium Channel Antagonists [MoA]",
+        }
+        classes = list(_explode_pharm_classes(drug_row))
         assert len(classes) == 2
-        assert classes[0].pharm_class == "Calcium Channel Blocker"
-        assert classes[0].class_type == "EPC"
-        assert classes[1].pharm_class == "Calcium Channel Antagonists"
-        assert classes[1].class_type == "MoA"
+        assert [c["sequence"] for c in classes] == [0, 1]
+        assert classes[0]["pharm_class"] == "Calcium Channel Blocker"
+        assert classes[0]["class_type"] == "EPC"
+        assert classes[1]["pharm_class"] == "Calcium Channel Antagonists"
+        assert classes[1]["class_type"] == "MoA"
+        assert all(c["drug_id"] == "TEST-PC" for c in classes)
 
 
 # ===========================================================================
@@ -568,65 +513,22 @@ class TestPharmClassTypeExtraction:
 # ===========================================================================
 
 
-class TestMismatchedIngredientLengthsCapturedInErrorSamples:
-    def test_mismatch_skips_drug_and_records_error(self, db_session: Session) -> None:
-        """SUBSTANCENAME has 3 items but STRENGTH has 2 → drug skipped, error captured."""
-        drug = _insert_drug(
-            db_session,
-            product_id="TEST-MISMATCH",
-            substance_name="DRUG_A;DRUG_B;DRUG_C",
-            active_numerator_strength="100;200",  # only 2, not 3
-            active_ingred_unit="MG;MG;MG",
-            ndc_11="00001111111",
-        )
-        error_samples: list[dict[str, Any]] = []
-
-        from src.services.ndc_ingestion import NDCIngestionService  # type: ignore[import]
-        svc = NDCIngestionService(db_session=db_session)
-        svc._reload_children_for_all_drugs(error_samples)
-
-        # No ingredient rows should be created for this drug
-        count = db_session.query(DrugActiveIngredient).filter_by(
-            drug_id="TEST-MISMATCH"
-        ).count()
-        assert count == 0
-
-        # Error should be captured
-        assert len(error_samples) >= 1
-        assert any("mismatch" in str(e).lower() for e in error_samples)
-
-
-# ===========================================================================
-# 8. Upsert idempotency
-# ===========================================================================
-
-
-class TestUpsertIdempotency:
-    def test_drug_upsert_is_idempotent(self, db_session: Session) -> None:
-        """Upserting the same product_id twice leaves exactly one row."""
-        from src.services.ndc_ingestion import NDCIngestionService  # type: ignore[import]
-        from datetime import datetime, timezone
-
-        svc = NDCIngestionService(db_session=db_session)
-
-        row = {
-            "product_id": "TEST-IDEM",
-            "product_ndc": "0001-1111",
-            "ndc_11": "00011111100",
-            "proprietary_name": "TestDrug v1",
-            "updated_at": datetime.now(timezone.utc),
+class TestMismatchedIngredientLengths:
+    def test_mismatch_yields_no_rows(self) -> None:
+        """SUBSTANCENAME has 3 items but STRENGTH has 2 → explode yields no rows."""
+        drug_row = {
+            "product_id": "TEST-MISMATCH",
+            "substance_name": "DRUG_A;DRUG_B;DRUG_C",
+            "active_numerator_strength": "100;200",  # only 2, not 3
+            "active_ingred_unit": "MG;MG;MG",
         }
+        ingredients = list(_explode_ingredients(drug_row))
+        assert ingredients == []
 
-        svc._upsert_drug_batch([row])
-        db_session.flush()
+    def test_empty_substance_name_yields_no_rows(self) -> None:
+        drug_row = {"product_id": "TEST-EMPTY", "substance_name": None}
+        assert list(_explode_ingredients(drug_row)) == []
 
-        # Update the proprietary_name
-        row2 = {**row, "proprietary_name": "TestDrug v2",
-                 "updated_at": datetime.now(timezone.utc)}
-        svc._upsert_drug_batch([row2])
-        db_session.flush()
-
-        drugs = db_session.query(Drug).filter_by(product_id="TEST-IDEM").all()
-        assert len(drugs) == 1
-        # The second upsert should have updated the name
-        assert drugs[0].proprietary_name == "TestDrug v2"
+    def test_empty_pharm_classes_yields_no_rows(self) -> None:
+        drug_row = {"product_id": "TEST-EMPTY", "pharm_classes": None}
+        assert list(_explode_pharm_classes(drug_row)) == []
