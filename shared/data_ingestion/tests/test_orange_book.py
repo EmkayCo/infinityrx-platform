@@ -574,43 +574,37 @@ class TestOrangeBookDBIntegration:
         """Parse sample products.txt and insert all rows; return row count."""
         import asyncio
 
-        from src.services.orange_book_ingestion import OrangeBookIngestionService  # type: ignore[import]
+        from shared.data_ingestion.sources.fda_orange_book import FDAOrangeBookIngester
 
         records = list(_parse_products(_SAMPLE_DIR / "products.txt"))
-        svc = OrangeBookIngestionService(db_session=db)
-        result = asyncio.run(
-            svc.load_records(iter(records), source_name="fda_orange_book_test")
-        )
+        ingester = FDAOrangeBookIngester(db_session=db)
+        result = asyncio.run(ingester.load(iter(records)))
         return result.records_inserted
 
     def _load_patents(self, db: Session, patent_file: Path | None = None) -> int:
         import asyncio
 
-        from src.services.orange_book_ingestion import OrangeBookIngestionService  # type: ignore[import]
+        from shared.data_ingestion.sources.fda_orange_book import FDAOrangeBookIngester
 
         patent_file = patent_file or (_SAMPLE_DIR / "patent.txt")
         records = list(_parse_patents(patent_file))
-        svc = OrangeBookIngestionService(db_session=db)
-        result = asyncio.run(
-            svc.load_records(iter(records), source_name="fda_orange_book_test")
-        )
+        ingester = FDAOrangeBookIngester(db_session=db)
+        result = asyncio.run(ingester.load(iter(records)))
         return result.records_inserted
 
     def _full_load(self, db: Session) -> None:
-        """Load all three files through the ingestion service."""
+        """Load all three files through the ingester."""
         import asyncio
 
-        from src.services.orange_book_ingestion import OrangeBookIngestionService  # type: ignore[import]
+        from shared.data_ingestion.sources.fda_orange_book import FDAOrangeBookIngester
 
         all_records: list[dict] = []
         all_records.extend(_parse_products(_SAMPLE_DIR / "products.txt"))
         all_records.extend(_parse_patents(_SAMPLE_DIR / "patent.txt"))
         all_records.extend(_parse_exclusivity(_SAMPLE_DIR / "exclusivity.txt"))
 
-        svc = OrangeBookIngestionService(db_session=db)
-        asyncio.run(
-            svc.load_records(iter(all_records), source_name="fda_orange_book_test")
-        )
+        ingester = FDAOrangeBookIngester(db_session=db)
+        asyncio.run(ingester.load(iter(all_records)))
 
     # ------------------------------------------------------------------
     # Tests
