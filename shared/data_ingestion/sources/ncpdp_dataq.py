@@ -464,13 +464,20 @@ class NCPDPDataQIngester(DataSourceIngester):
                 yield from _parse_file(zf, filename, table_name, parser)
 
     async def load(self, records: Iterator[dict[str, Any]]) -> IngestionResult:
-        """Batch-load all 13 tables via NCPDPIngestionService.
+        """Batch-load all 13 NCPDP tables using shared batching primitives.
 
-        Imports the service lazily so the pharmacy-directory module root
-        must be on sys.path (added by the load script or conftest).
+        Uses ``flush_upsert_batch`` for the 7 upsert tables and custom
+        scoped-replace with cross-batch scope tracking for the 6
+        delete-then-insert child tables.
+
+        Models are imported lazily — pharmacy-directory must be on sys.path.
         """
         import sys
+        from collections import defaultdict
+        from datetime import UTC, datetime
         from pathlib import Path as _Path
+
+        from shared.data_ingestion.batching import ErrorAggregator, flush_upsert_batch
 
         _REPO_ROOT = _Path(__file__).resolve().parents[4]
         _PHARM_ROOT = _REPO_ROOT / "modules" / "pharmacy-directory"
@@ -478,10 +485,222 @@ class NCPDPDataQIngester(DataSourceIngester):
             if _p not in sys.path:
                 sys.path.insert(0, _p)
 
-        from src.services.ncpdp_ingestion import NCPDPIngestionService
+        from src.models.ncpdp_tables import (
+            NCPDPPharmacy,
+            NCPDPPharmacyAdditionalInfo,
+            NCPDPPharmacyCoordinate,
+            NCPDPPharmacyErxCapability,
+            NCPDPPharmacyFwaAction,
+            NCPDPPharmacyMedicaid,
+            NCPDPPharmacyPatientCare,
+            NCPDPPharmacyProgram,
+            NCPDPPharmacyRecertification,
+            NCPDPPharmacyRemittance,
+            NCPDPPharmacyService,
+            NCPDPPharmacyStateLicense,
+            NCPDPPharmacyTaxonomy,
+        )
 
-        service = NCPDPIngestionService(db_session=self._db)
-        return await service.load_records(records, source_name=self.source_name)
+        BATCH_SIZE = 1_000
+
+        # -- Table configurations ------------------------------------------
+
+        UPSERT_CFG: dict[str, dict[str, Any]] = {
+            "ncpdp_pharmacies": {"table": NCPDPPharmacy.__table__, "unique_key": ["ncpdp_provider_id"]},
+            "ncpdp_pharmacy_services": {"table": NCPDPPharmacyService.__table__, "unique_key": ["ncpdp_provider_id"]},
+            "ncpdp_pharmacy_coordinates": {"table": NCPDPPharmacyCoordinate.__table__, "unique_key": ["ncpdp_provider_id"]},
+            "ncpdp_pharmacy_additional_info": {"table": NCPDPPharmacyAdditionalInfo.__table__, "unique_key": ["chain_entity_id"]},
+            "ncpdp_pharmacy_patient_care": {"table": NCPDPPharmacyPatientCare.__table__, "unique_key": ["chain_entity_id"]},
+            "ncpdp_pharmacy_programs": {"table": NCPDPPharmacyProgram.__table__, "unique_key": ["chain_entity_id"]},
+            "ncpdp_pharmacy_recertification": {"table": NCPDPPharmacyRecertification.__table__, "unique_key": ["chain_entity_id"]},
+        }
+
+        SCOPED_CFG: dict[str, dict[str, Any]] = {
+            "ncpdp_pharmacy_taxonomies": {
+                "table": NCPDPPharmacyTaxonomy.__table__,
+                "scope_key": ["ncpdp_provider_id"],
+                "unique_key": ["ncpdp_provider_id", "taxonomy_code"],
+            },
+            "ncpdp_pharmacy_state_licenses": {
+                "table": NCPDPPharmacyStateLicense.__table__,
+                "scope_key": ["ncpdp_provider_id"],
+                "unique_key": ["ncpdp_provider_id", "state", "license_number"],
+                "has_db_unique": True,
+            },
+            "ncpdp_pharmacy_remittance": {
+                "table": NCPDPPharmacyRemittance.__table__,
+                "scope_key": ["ncpdp_provider_id"],
+                "unique_key": ["ncpdp_provider_id", "aba_routing_number"],
+            },
+            "ncpdp_pharmacy_erx_capabilities": {
+                "table": NCPDPPharmacyErxCapability.__table__,
+                "scope_key": ["ncpdp_provider_id"],
+                "unique_key": ["ncpdp_provider_id", "software_vendor_code"],
+            },
+            "ncpdp_pharmacy_medicaid": {
+                "table": NCPDPPharmacyMedicaid.__table__,
+                "scope_key": ["ncpdp_provider_id"],
+                "unique_key": ["ncpdp_provider_id", "state"],
+                "has_db_unique": True,
+            },
+            "ncpdp_pharmacy_fwa_actions": {
+                "table": NCPDPPharmacyFwaAction.__table__,
+                "scope_key": ["ncpdp_provider_id"],
+                "unique_key": ["ncpdp_provider_id", "review_year"],
+            },
+        }
+
+        # -- State ---------------------------------------------------------
+
+        errors = ErrorAggregator()
+        buffers: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        # Track which scope-key values have been pre-deleted per table so a
+        # pharmacy whose rows span two batches doesn't lose the first batch.
+        deleted_scopes: dict[str, set[tuple[Any, ...]]] = defaultdict(set)
+        processed = 0
+        inserted = 0
+        skipped = 0
+
+        # -- Flush helpers -------------------------------------------------
+
+        def _flush_upsert(tname: str, rows: list[dict[str, Any]]) -> None:
+            nonlocal inserted, skipped
+            cfg = UPSERT_CFG[tname]
+            ins, dd = flush_upsert_batch(
+                self._db,
+                source_name=self.source_name,
+                table=cfg["table"],
+                unique_key=cfg["unique_key"],
+                rows=rows,
+                errors=errors,
+            )
+            inserted += ins
+            skipped += dd
+
+        def _flush_scoped(tname: str, rows: list[dict[str, Any]]) -> None:
+            """Delete-then-insert with cross-batch scope tracking."""
+            nonlocal inserted, skipped
+            cfg = SCOPED_CFG[tname]
+            table = cfg["table"]
+            scope_key = cfg["scope_key"]
+            unique_key = cfg["unique_key"]
+
+            # Group rows by scope
+            buckets: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+            for row in rows:
+                scope = tuple(row.get(c) for c in scope_key)
+                buckets.setdefault(scope, []).append(row)
+
+            try:
+                # Delete only scopes not yet deleted this run
+                new_scopes = [s for s in buckets if s not in deleted_scopes[tname]]
+                if new_scopes:
+                    col = table.c[scope_key[0]]
+                    self._db.execute(table.delete().where(col.in_([s[0] for s in new_scopes])))
+                    deleted_scopes[tname].update(new_scopes)
+
+                # Dedup within batch by unique_key, then insert
+                to_insert: list[dict[str, Any]] = []
+                dd = 0
+                for scope_rows in buckets.values():
+                    seen: dict[tuple[Any, ...], dict[str, Any]] = {}
+                    for row in scope_rows:
+                        key = tuple(row.get(c) for c in unique_key)
+                        if key not in seen:
+                            seen[key] = row
+                    dd += len(scope_rows) - len(seen)
+                    to_insert.extend(seen.values())
+
+                if to_insert:
+                    now = datetime.now(UTC)
+                    col_names = {c.name for c in table.columns}
+                    enriched = [
+                        {**r, **({"created_at": now} if "created_at" in col_names and "created_at" not in r else {})}
+                        for r in to_insert
+                    ]
+                    # Tables with a DB-level unique constraint need ON CONFLICT
+                    # DO NOTHING to handle rows that span batch boundaries
+                    # (BUG-02a: same key in two consecutive batches).
+                    if cfg.get("has_db_unique"):
+                        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+                        stmt = pg_insert(table).values(enriched)
+                        stmt = stmt.on_conflict_do_nothing(index_elements=unique_key)
+                        self._db.execute(stmt)
+                    else:
+                        self._db.execute(table.insert(), enriched)
+
+                self._db.commit()
+                inserted += len(to_insert)
+                skipped += dd
+
+            except Exception as exc:  # noqa: BLE001
+                self._db.rollback()
+                msg = str(exc)
+                errors.record(
+                    f"scoped_replace:{tname}", msg,
+                    raw_row={"batch_size": len(rows), "scopes": len(buckets)},
+                )
+                errors.total_errors += max(len(rows) - 1, 0)
+                logger.exception(
+                    "NCPDP scoped replace failed",
+                    extra={
+                        "ingest_source": self.source_name,
+                        "ingest_table": tname,
+                        "ingest_batch_size": len(rows),
+                        "ingest_error": msg[:500],
+                    },
+                )
+
+        # -- Main loop -----------------------------------------------------
+
+        for record in records:
+            table_name = record.get("table", "")
+            row = record.get("row")
+            if not table_name or not row:
+                errors.record("empty_record", "Missing table or row")
+                continue
+
+            processed += 1
+            buffers[table_name].append(row)
+
+            if len(buffers[table_name]) >= BATCH_SIZE:
+                if table_name in UPSERT_CFG:
+                    _flush_upsert(table_name, buffers[table_name])
+                elif table_name in SCOPED_CFG:
+                    _flush_scoped(table_name, buffers[table_name])
+                else:
+                    errors.record("unknown_table", f"No config for {table_name}")
+                buffers[table_name] = []
+
+        # Flush remaining buffers
+        for tname, rows in buffers.items():
+            if rows:
+                if tname in UPSERT_CFG:
+                    _flush_upsert(tname, rows)
+                elif tname in SCOPED_CFG:
+                    _flush_scoped(tname, rows)
+
+        errors.log_summary(source_name=self.source_name)
+
+        logger.info(
+            "NCPDP load complete",
+            extra={
+                "ingest_source": self.source_name,
+                "ingest_records_processed": processed,
+                "ingest_records_inserted": inserted,
+                "ingest_records_errored": errors.total_errors,
+            },
+        )
+
+        return IngestionResult(
+            source=self.source_name,
+            status="completed",
+            records_processed=processed,
+            records_inserted=inserted,
+            records_skipped=skipped,
+            records_errored=errors.total_errors,
+        )
 
 
 __all__ = [
