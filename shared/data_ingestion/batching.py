@@ -791,6 +791,431 @@ def flush_scoped_replace_batch(
         return 0, 0
 
 
+# ---------------------------------------------------------------------------
+# COPY-staging primitives (Wave 11.5)
+#
+# Postgres `COPY ... FROM STDIN` bypasses the SQL parser for the data path
+# and is ~3-10x faster than multi-VALUES INSERT on wide / large batches.
+# These primitives follow the standard upsert-via-COPY pattern:
+#
+#   1. CREATE TEMP TABLE stg_<target> (LIKE target) ON COMMIT DROP
+#   2. COPY stg FROM STDIN (text format, \N null)
+#   3. INSERT INTO target SELECT ... FROM stg ON CONFLICT DO UPDATE
+#      (or scoped-replace: DELETE using stg, then INSERT)
+#   4. db.commit()  — ON COMMIT DROP removes the temp table
+#
+# SQLite (and any non-postgres dialect) falls back to the VALUES-based path
+# so unit-test fixtures stay green without a Postgres harness.
+# ---------------------------------------------------------------------------
+
+
+def _pg_copy_text_encode(value: Any) -> str:
+    """Encode a single value for Postgres COPY text format.
+
+    Text format rules:
+      - NULL is the literal string ``\\N``
+      - Field separator is TAB
+      - Row separator is LF
+      - In values we escape ``\\``, TAB, CR, LF with ``\\\\``, ``\\t``, ``\\r``, ``\\n``
+
+    Python's standard string conversions are already compatible with
+    Postgres text format for int/bool/Decimal/date/datetime — we just
+    escape the control characters and backslash.
+    """
+    if value is None:
+        return r"\N"
+    if value is True:
+        return "t"
+    if value is False:
+        return "f"
+    s = str(value)
+    if not s:
+        return ""
+    # Order matters: backslash first so we don't double-escape our own escapes.
+    return (
+        s.replace("\\", "\\\\")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+
+
+def _encode_rows_as_copy_text(
+    rows: list[dict[str, Any]], columns: list[str]
+) -> str:
+    """Serialize ``rows`` into a Postgres COPY text buffer.
+
+    Rows are projected onto ``columns`` in the given order; missing keys
+    are encoded as NULL. Returns the full buffer as a string (caller wraps
+    it in ``io.StringIO`` for ``cursor.copy_expert``).
+    """
+    lines: list[str] = []
+    for row in rows:
+        lines.append("\t".join(_pg_copy_text_encode(row.get(c)) for c in columns))
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _is_postgres(db: Session) -> bool:
+    """True if the session is bound to a PostgreSQL dialect."""
+    bind = db.get_bind() if hasattr(db, "get_bind") else db.bind
+    return bind is not None and bind.dialect.name == "postgresql"
+
+
+def _raw_cursor(db: Session) -> Any:
+    """Return the underlying DBAPI cursor for the session's current connection.
+
+    Use only after ``db.connection()`` has bound the session to a connection
+    (any prior statement does so, or call it yourself). Caller is responsible
+    for closing the cursor.
+    """
+    return db.connection().connection.cursor()
+
+
+def _staging_table_name(target: Table) -> str:
+    """Derive a stable TEMP table name from a target table name.
+
+    TEMP tables are session-scoped but we use ``ON COMMIT DROP`` so each
+    successful flush removes its own staging table. Name is unqualified
+    (no schema) because TEMP tables live in the session's pg_temp schema.
+    """
+    # Strip any schema qualifier — temp tables are always pg_temp.
+    raw = target.name
+    safe = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in raw)
+    return f"stg_{safe}"[:63]  # Postgres NAMEDATALEN is 64
+
+
+def flush_upsert_batch_copy(
+    db: Session,
+    *,
+    source_name: str,
+    table: Table,
+    unique_key: list[str],
+    rows: list[dict[str, Any]],
+    errors: ErrorAggregator,
+    immutable_on_update: tuple[str, ...] = _DEFAULT_IMMUTABLE_ON_UPDATE,
+    prefer_row: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None = None,
+) -> tuple[int, int]:
+    """COPY-staging variant of :func:`flush_upsert_batch`.
+
+    Drop-in replacement: same signature, same return semantics. On
+    non-PostgreSQL dialects this transparently delegates to the existing
+    VALUES-based primitive so SQLite-backed unit tests still pass.
+
+    On PostgreSQL:
+
+      1. In-batch dedup on ``unique_key`` (same as VALUES path).
+      2. Timestamp enrichment (``created_at``/``updated_at`` if table has them).
+      3. ``CREATE TEMP TABLE stg_<target> (LIKE target) ON COMMIT DROP``.
+      4. ``COPY stg FROM STDIN`` with text format.
+      5. ``INSERT INTO target (cols) SELECT cols FROM stg
+            ON CONFLICT (unique_key) DO UPDATE SET ...``
+      6. ``db.commit()``.
+    """
+    if not _is_postgres(db):
+        return flush_upsert_batch(
+            db,
+            source_name=source_name,
+            table=table,
+            unique_key=unique_key,
+            rows=rows,
+            errors=errors,
+            immutable_on_update=immutable_on_update,
+            prefer_row=prefer_row,
+        )
+
+    if not rows:
+        return 0, 0
+
+    # In-batch dedup — identical semantics to flush_upsert_batch.
+    prefer = prefer_row or (lambda _existing, new: new)
+    kept: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for row in rows:
+        try:
+            key = tuple(row[c] for c in unique_key)
+        except KeyError:
+            kept[(id(row),)] = row
+            continue
+        if key in kept:
+            kept[key] = prefer(kept[key], row)
+        else:
+            kept[key] = row
+
+    deduped = list(kept.values())
+    dedup_dropped = len(rows) - len(deduped)
+
+    # Timestamp enrichment.
+    now = datetime.now(UTC)
+    col_names = [c.name for c in table.columns]
+    col_set = set(col_names)
+    enriched: list[dict[str, Any]] = []
+    for r in deduped:
+        new_r = dict(r)
+        if "created_at" in col_set and "created_at" not in new_r:
+            new_r["created_at"] = now
+        if "updated_at" in col_set:
+            new_r["updated_at"] = now
+        enriched.append(new_r)
+
+    target_name = _qualified_sql_name(table)
+    stg_name = _staging_table_name(table)
+    col_list_sql = ", ".join(f'"{c}"' for c in col_names)
+    update_cols = [
+        c for c in col_names
+        if c not in unique_key and c not in immutable_on_update
+    ]
+
+    try:
+        cursor = _raw_cursor(db)
+        try:
+            cursor.execute(
+                f'CREATE TEMP TABLE IF NOT EXISTS "{stg_name}" '
+                f"(LIKE {target_name} INCLUDING DEFAULTS) ON COMMIT DROP"
+            )
+            cursor.execute(f'TRUNCATE "{stg_name}"')
+
+            # COPY text-format payload
+            import io
+            buf = io.StringIO(_encode_rows_as_copy_text(enriched, col_names))
+            cursor.copy_expert(
+                f'COPY "{stg_name}" ({col_list_sql}) FROM STDIN',
+                buf,
+            )
+
+            # INSERT ... SELECT ... ON CONFLICT
+            if update_cols:
+                set_clause = ", ".join(
+                    f'"{c}" = EXCLUDED."{c}"' for c in update_cols
+                )
+                conflict_cols_sql = ", ".join(f'"{c}"' for c in unique_key)
+                cursor.execute(
+                    f"INSERT INTO {target_name} ({col_list_sql}) "
+                    f'SELECT {col_list_sql} FROM "{stg_name}" '
+                    f"ON CONFLICT ({conflict_cols_sql}) DO UPDATE SET {set_clause}"
+                )
+            else:
+                # Every column is in the unique key or immutable — nothing to update.
+                conflict_cols_sql = ", ".join(f'"{c}"' for c in unique_key)
+                cursor.execute(
+                    f"INSERT INTO {target_name} ({col_list_sql}) "
+                    f'SELECT {col_list_sql} FROM "{stg_name}" '
+                    f"ON CONFLICT ({conflict_cols_sql}) DO NOTHING"
+                )
+        finally:
+            cursor.close()
+
+        db.commit()
+        return len(enriched), dedup_dropped
+
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        msg = str(exc)
+        errors.record(
+            f"upsert_copy:{table.name}",
+            msg,
+            raw_row={
+                "batch_size": len(enriched),
+                "sample": enriched[0] if enriched else None,
+            },
+        )
+        errors.total_errors += max(len(enriched) - 1, 0)
+        logger.exception(
+            "COPY upsert batch failed — rolled back",
+            extra={
+                "ingest_source": source_name,
+                "ingest_table": table.name,
+                "ingest_batch_size": len(enriched),
+                "ingest_error": msg[:500],
+            },
+        )
+        return 0, dedup_dropped
+
+
+def flush_scoped_replace_batch_copy(
+    db: Session,
+    *,
+    source_name: str,
+    table: Table,
+    scope_key: list[str],
+    unique_key: list[str],
+    rows: list[dict[str, Any]],
+    errors: ErrorAggregator,
+) -> tuple[int, int]:
+    """COPY-staging variant of :func:`flush_scoped_replace_batch`.
+
+    Drop-in replacement. On non-PostgreSQL dialects delegates to the VALUES
+    path. On PostgreSQL:
+
+      1. Group + in-batch dedup per ``scope_key`` on ``unique_key``.
+      2. ``CREATE TEMP TABLE stg (LIKE target) ON COMMIT DROP`` + COPY.
+      3. ``DELETE FROM target USING (SELECT DISTINCT scope_key FROM stg) s
+            WHERE target.scope_key = s.scope_key``  — bulk-deletes every
+            parent scope the new batch replaces, in a single statement.
+      4. ``INSERT INTO target SELECT ... FROM stg``.
+      5. ``db.commit()``.
+    """
+    if not _is_postgres(db):
+        return flush_scoped_replace_batch(
+            db,
+            source_name=source_name,
+            table=table,
+            scope_key=scope_key,
+            unique_key=unique_key,
+            rows=rows,
+            errors=errors,
+        )
+
+    if not rows:
+        return 0, 0
+
+    # Group rows by scope_key for dedup.
+    buckets: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for row in rows:
+        try:
+            scope = tuple(row[c] for c in scope_key)
+        except KeyError as exc:
+            errors.record(
+                "scoped_replace_copy",
+                f"Missing scope_key column {exc}",
+                raw_row=row,
+            )
+            continue
+        buckets.setdefault(scope, []).append(row)
+
+    if not buckets:
+        return 0, 0
+
+    # Dedup within each scope on unique_key; concatenate for insert.
+    to_insert: list[dict[str, Any]] = []
+    dedup_dropped = 0
+    for bucket_rows in buckets.values():
+        seen: dict[tuple[Any, ...], dict[str, Any]] = {}
+        for row in bucket_rows:
+            try:
+                key = tuple(row[c] for c in unique_key)
+            except KeyError:
+                continue
+            if key not in seen:
+                seen[key] = row
+        dedup_dropped += len(bucket_rows) - len(seen)
+        to_insert.extend(seen.values())
+
+    if not to_insert:
+        # Nothing to insert — but we still need to delete the parent scopes
+        # the caller mentioned so orphaned rows get cleaned. Fall through.
+        pass
+
+    # Timestamp enrichment.
+    now = datetime.now(UTC)
+    col_names = [c.name for c in table.columns]
+    col_set = set(col_names)
+    enriched: list[dict[str, Any]] = []
+    for r in to_insert:
+        new_r = dict(r)
+        if "created_at" in col_set and "created_at" not in new_r:
+            new_r["created_at"] = now
+        if "updated_at" in col_set:
+            new_r["updated_at"] = now
+        enriched.append(new_r)
+
+    target_name = _qualified_sql_name(table)
+    stg_name = _staging_table_name(table)
+    col_list_sql = ", ".join(f'"{c}"' for c in col_names)
+
+    try:
+        cursor = _raw_cursor(db)
+        try:
+            cursor.execute(
+                f'CREATE TEMP TABLE IF NOT EXISTS "{stg_name}" '
+                f"(LIKE {target_name} INCLUDING DEFAULTS) ON COMMIT DROP"
+            )
+            cursor.execute(f'TRUNCATE "{stg_name}"')
+
+            if enriched:
+                import io
+                buf = io.StringIO(_encode_rows_as_copy_text(enriched, col_names))
+                cursor.copy_expert(
+                    f'COPY "{stg_name}" ({col_list_sql}) FROM STDIN',
+                    buf,
+                )
+
+            # Bulk-delete every parent scope this batch replaces.
+            # Use DISTINCT on the scope columns of the staging table so we
+            # issue exactly one DELETE for the whole batch.
+            scope_col_sql = ", ".join(f'"{c}"' for c in scope_key)
+            join_pred = " AND ".join(
+                f'{target_name}."{c}" = s."{c}"' for c in scope_key
+            )
+            if enriched:
+                # Pull distinct scopes from staging.
+                cursor.execute(
+                    f"DELETE FROM {target_name} USING "
+                    f'(SELECT DISTINCT {scope_col_sql} FROM "{stg_name}") s '
+                    f"WHERE {join_pred}"
+                )
+            else:
+                # Staging is empty but caller asked to clear some scopes.
+                # We fall back to a values-list delete of the keys the caller
+                # mentioned. For the NPPES use case this path is unreachable
+                # (a scope only shows up if it had at least one row), but we
+                # handle it for parity with the VALUES primitive.
+                from sqlalchemy import and_, or_
+                scope_values = list(buckets.keys())
+                if len(scope_key) == 1:
+                    col = table.c[scope_key[0]]
+                    db.execute(
+                        table.delete().where(col.in_([s[0] for s in scope_values]))
+                    )
+                else:
+                    preds = [
+                        and_(*[
+                            table.c[c] == v
+                            for c, v in zip(scope_key, s, strict=True)
+                        ])
+                        for s in scope_values
+                    ]
+                    db.execute(table.delete().where(or_(*preds)))
+
+            # Insert the new rows from staging.
+            if enriched:
+                cursor.execute(
+                    f"INSERT INTO {target_name} ({col_list_sql}) "
+                    f'SELECT {col_list_sql} FROM "{stg_name}"'
+                )
+        finally:
+            cursor.close()
+
+        db.commit()
+        return len(enriched), dedup_dropped
+
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        msg = str(exc)
+        errors.record(
+            f"scoped_replace_copy:{table.name}",
+            msg,
+            raw_row={"scopes": len(buckets), "rows": len(rows)},
+        )
+        errors.total_errors += max(len(rows) - 1, 0)
+        logger.exception(
+            "COPY scoped-replace batch failed — rolled back",
+            extra={
+                "ingest_source": source_name,
+                "ingest_table": table.name,
+                "ingest_scopes": len(buckets),
+                "ingest_rows": len(rows),
+                "ingest_error": msg[:500],
+            },
+        )
+        return 0, 0
+
+
+def _qualified_sql_name(table: Table) -> str:
+    """Return a fully-qualified, quoted table name for raw SQL."""
+    if table.schema:
+        return f'"{table.schema}"."{table.name}"'
+    return f'"{table.name}"'
+
+
 def merge_results(results: Iterable[IngestionResult], *, source: str) -> IngestionResult:
     """Collapse multiple per-table IngestionResults into a single summary row.
 
@@ -819,7 +1244,9 @@ __all__ = [
     "HistoryConfig",
     "ScopedReplacer",
     "flush_scoped_replace_batch",
+    "flush_scoped_replace_batch_copy",
     "flush_upsert_batch",
+    "flush_upsert_batch_copy",
     "merge_results",
 ]
 
