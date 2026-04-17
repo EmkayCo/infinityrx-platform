@@ -1,23 +1,26 @@
-"""Load the latest CMS NPPES weekly dissemination file.
-
-Downloads the weekly NPPES ZIP from CMS (or uses the bundled synthetic
-sample), runs the core Prescriber upsert via nppes_upsert.run_nppes_import,
-then populates satellite tables (prescriber_addresses, prescriber_taxonomies,
-prescriber_identifiers, nppes_prescriber_details) via
-nppes_ingestion.load_nppes_satellite_tables.
+"""Load the latest CMS NPPES dissemination file (weekly / monthly / deactivation).
 
 Pipeline: NppesIngester (DataSourceIngester child)
-  download -> scrape CMS index -> fetch latest weekly ZIP
-  parse    -> stream CSV rows
-  load     -> nppes_upsert + nppes_ingestion satellite services
+  download -> scrape CMS index for the chosen mode
+  parse    -> stream rows (csv for weekly/monthly, xlsx for deactivation)
+  load     -> nppes_upsert + satellite services (csv modes)
+              OR batched UPDATE prescribers.status (deactivation mode)
 
 Usage:
     source infrastructure/scripts/switch_env.sh dev
-    python scripts/load_nppes.py [--dry-run] [--sample]
+    python scripts/load_nppes.py [--mode weekly|monthly|deactivation]
+                                 [--dry-run] [--sample]
 
 Options:
+    --mode      which CMS file to fetch (default: weekly)
+                  weekly       — dissemination file for NPIs changed in the last week
+                  monthly      — full 7M-NPI registry snapshot (expect 15-60 min load)
+                  deactivation — xlsx list of all historically-deactivated NPIs;
+                                 only UPDATEs prescribers.status/deactivation_date
     --dry-run   Parse only - no DB writes. Reports yielded counts.
+                (weekly mode only, using the bundled synthetic sample.)
     --sample    Use the bundled synthetic sample CSV instead of downloading.
+                (weekly mode only.)
 
 LESSON-010: NPI is public - plaintext throughout.
 LESSON-011: Global reference tables - no TenantScopedMixin.
@@ -98,7 +101,7 @@ def _dry_run() -> None:
     print(f"{'=' * 60}")
 
 
-async def _run(sample: bool) -> None:
+async def _run(mode: str, sample: bool) -> None:
     """Full pipeline: download or sample -> parse -> load via NppesIngester."""
     from sqlalchemy import create_engine, text
     from sqlalchemy.orm import Session
@@ -109,15 +112,17 @@ async def _run(sample: bool) -> None:
     engine = create_engine(db_url, echo=False)
 
     with Session(engine) as session:
-        ingester = NppesIngester(db_session=session)
+        ingester = NppesIngester(db_session=session, mode=mode)  # type: ignore[arg-type]
 
         if sample:
+            if mode != "weekly":
+                logger.error("--sample is only supported with --mode weekly")
+                sys.exit(2)
             logger.info("Using bundled sample CSV: %s", _SAMPLE_CSV)
-            # Bypass download+checksum by invoking parse/load directly against the sample.
             records = ingester.parse(_SAMPLE_CSV)
             result = await ingester.load(records)
         else:
-            logger.info("Starting NPPES pipeline (latest weekly download)...")
+            logger.info("Starting NPPES pipeline (mode=%s)...", mode)
             result = await ingester.run(run_type="manual_trigger")
 
     print(f"\n{'=' * 60}")
@@ -147,7 +152,13 @@ async def _run(sample: bool) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Load CMS NPPES weekly data")
+    parser = argparse.ArgumentParser(description="Load CMS NPPES data")
+    parser.add_argument(
+        "--mode",
+        choices=["weekly", "monthly", "deactivation"],
+        default="weekly",
+        help="Which CMS file to fetch. Default: weekly.",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -156,14 +167,15 @@ def main() -> None:
     parser.add_argument(
         "--sample",
         action="store_true",
-        help="Use the bundled synthetic sample CSV instead of downloading.",
+        help="Use the bundled synthetic sample CSV instead of downloading "
+             "(weekly mode only).",
     )
     args = parser.parse_args()
 
     if args.dry_run:
         _dry_run()
     else:
-        asyncio.run(_run(sample=args.sample))
+        asyncio.run(_run(mode=args.mode, sample=args.sample))
 
 
 if __name__ == "__main__":

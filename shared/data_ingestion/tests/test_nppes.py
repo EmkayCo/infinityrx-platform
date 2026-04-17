@@ -828,3 +828,88 @@ def test_or_none_value_returns_stripped():
 
 def test_or_none_none_input_returns_none():
     assert _or_none(None) is None  # type: ignore[arg-type]
+
+
+# ── Tests: Wave-11 NppesIngester modes ────────────────────────────────────
+
+
+def test_ingester_default_mode_is_weekly():
+    from shared.data_ingestion.sources.nppes import NppesIngester
+    from unittest.mock import MagicMock
+    ing = NppesIngester(db_session=MagicMock())
+    assert ing._mode == "weekly"
+    assert ing.source_name == "nppes"
+
+
+def test_ingester_monthly_mode_uses_separate_source_name():
+    from shared.data_ingestion.sources.nppes import NppesIngester
+    from unittest.mock import MagicMock
+    ing = NppesIngester(db_session=MagicMock(), mode="monthly")
+    assert ing._mode == "monthly"
+    assert ing.source_name == "nppes_monthly"
+
+
+def test_ingester_deactivation_mode_uses_separate_source_name():
+    from shared.data_ingestion.sources.nppes import NppesIngester
+    from unittest.mock import MagicMock
+    ing = NppesIngester(db_session=MagicMock(), mode="deactivation")
+    assert ing._mode == "deactivation"
+    assert ing.source_name == "nppes_deactivation"
+
+
+def test_ingester_rejects_unknown_mode():
+    from shared.data_ingestion.sources.nppes import NppesIngester
+    from unittest.mock import MagicMock
+    with pytest.raises(ValueError, match="unknown NPPES mode"):
+        NppesIngester(db_session=MagicMock(), mode="yearly")  # type: ignore[arg-type]
+
+
+def test_monthly_regex_matches_cms_filename():
+    from shared.data_ingestion.sources.nppes import _MONTHLY_ZIP_RE
+    assert _MONTHLY_ZIP_RE.findall(
+        'href="NPPES_Data_Dissemination_April_2026_V2.zip"'
+    ) == ["NPPES_Data_Dissemination_April_2026_V2.zip"]
+    # All 12 months should match
+    for month in ["January", "February", "March", "April", "May", "June",
+                   "July", "August", "September", "October", "November", "December"]:
+        assert _MONTHLY_ZIP_RE.findall(
+            f"NPPES_Data_Dissemination_{month}_2026.zip"
+        ) == [f"NPPES_Data_Dissemination_{month}_2026.zip"]
+    # Weekly filenames MUST NOT match the monthly regex
+    assert _MONTHLY_ZIP_RE.findall(
+        "NPPES_Data_Dissemination_040626_041226_Weekly_V2.zip"
+    ) == []
+
+
+def test_deactivation_regex_matches_cms_filename():
+    from shared.data_ingestion.sources.nppes import _DEACT_ZIP_RE
+    assert _DEACT_ZIP_RE.findall(
+        'href="NPPES_Deactivated_NPI_Report_041326_V2.zip"'
+    ) == ["NPPES_Deactivated_NPI_Report_041326_V2.zip"]
+    # Without version suffix
+    assert _DEACT_ZIP_RE.findall(
+        "NPPES_Deactivated_NPI_Report_041326.zip"
+    ) == ["NPPES_Deactivated_NPI_Report_041326.zip"]
+
+
+def test_deactivation_parse_streams_npi_date_pairs(tmp_path: Path):
+    """Build a minimal xlsx matching the CMS deactivation report shape."""
+    import openpyxl
+    from datetime import date
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "DeactivatedNPIs"
+    ws.append(["NPPES Deactivated Records as of Apr 13 2026", None])
+    ws.append(["NPI", "NPPES Deactivation Date"])
+    ws.append(["1234567890", "04/12/2026"])
+    ws.append(["2345678901", "04/11/2026"])
+    xlsx_path = tmp_path / "dummy.xlsx"
+    wb.save(xlsx_path)
+
+    from shared.data_ingestion.sources.nppes import NppesIngester
+    from unittest.mock import MagicMock
+    ing = NppesIngester(db_session=MagicMock(), mode="deactivation")
+    rows = list(ing.parse(xlsx_path))
+    assert len(rows) == 2
+    assert rows[0] == {"npi": "1234567890", "deactivation_date": date(2026, 4, 12)}
+    assert rows[1] == {"npi": "2345678901", "deactivation_date": date(2026, 4, 11)}
