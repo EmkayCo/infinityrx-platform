@@ -871,6 +871,35 @@ def _raw_cursor(db: Session) -> Any:
     return db.connection().connection.cursor()
 
 
+def _columns_present_in_rows(
+    table: Table,
+    rows: list[dict[str, Any]],
+    required: list[str] | None = None,
+) -> list[str]:
+    """Return the table columns that at least one row supplies.
+
+    Preserves ``table.columns`` order so the COPY payload and the
+    staging-table column list stay positionally aligned. Any column
+    named in ``required`` is always included even if it is missing from
+    every row — missing a unique_key / scope_key is a caller error we
+    want to surface at COPY time rather than silently drop.
+
+    Columns not returned are expected to pick up their staging-table
+    default at INSERT time (SERIAL id, server_default timestamp, etc.).
+    Including such a column in the COPY list and sending ``\\N`` would
+    instead violate the NOT NULL constraint — Postgres COPY only
+    substitutes defaults for columns NOT named in the column list.
+    """
+    if not rows:
+        return [c.name for c in table.columns if required and c.name in required]
+    present: set[str] = set()
+    for row in rows:
+        present.update(row.keys())
+    if required:
+        present.update(required)
+    return [c.name for c in table.columns if c.name in present]
+
+
 def _staging_table_name(target: Table) -> str:
     """Derive a stable TEMP table name from a target table name.
 
@@ -958,9 +987,17 @@ def flush_upsert_batch_copy(
 
     target_name = _qualified_sql_name(table)
     stg_name = _staging_table_name(table)
-    col_list_sql = ", ".join(f'"{c}"' for c in col_names)
+    # Only name columns in the COPY list that at least one row supplies.
+    # Staging-table column defaults (SERIAL/Identity on ``id``, NOW() on
+    # timestamps, etc.) apply only to columns NOT listed in the COPY
+    # header — Postgres COPY treats ``\N`` in a listed column as literal
+    # NULL, not "use the default", so including e.g. ``id`` here would
+    # violate the staging table's NOT NULL constraint. See Wave 12
+    # bench-caught bug.
+    copy_cols = _columns_present_in_rows(table, enriched, unique_key)
+    copy_col_list_sql = ", ".join(f'"{c}"' for c in copy_cols)
     update_cols = [
-        c for c in col_names
+        c for c in copy_cols
         if c not in unique_key and c not in immutable_on_update
     ]
 
@@ -973,11 +1010,11 @@ def flush_upsert_batch_copy(
             )
             cursor.execute(f'TRUNCATE "{stg_name}"')
 
-            # COPY text-format payload
+            # COPY text-format payload — only columns in copy_cols
             import io
-            buf = io.StringIO(_encode_rows_as_copy_text(enriched, col_names))
+            buf = io.StringIO(_encode_rows_as_copy_text(enriched, copy_cols))
             cursor.copy_expert(
-                f'COPY "{stg_name}" ({col_list_sql}) FROM STDIN',
+                f'COPY "{stg_name}" ({copy_col_list_sql}) FROM STDIN',
                 buf,
             )
 
@@ -988,16 +1025,16 @@ def flush_upsert_batch_copy(
                 )
                 conflict_cols_sql = ", ".join(f'"{c}"' for c in unique_key)
                 cursor.execute(
-                    f"INSERT INTO {target_name} ({col_list_sql}) "
-                    f'SELECT {col_list_sql} FROM "{stg_name}" '
+                    f"INSERT INTO {target_name} ({copy_col_list_sql}) "
+                    f'SELECT {copy_col_list_sql} FROM "{stg_name}" '
                     f"ON CONFLICT ({conflict_cols_sql}) DO UPDATE SET {set_clause}"
                 )
             else:
                 # Every column is in the unique key or immutable — nothing to update.
                 conflict_cols_sql = ", ".join(f'"{c}"' for c in unique_key)
                 cursor.execute(
-                    f"INSERT INTO {target_name} ({col_list_sql}) "
-                    f'SELECT {col_list_sql} FROM "{stg_name}" '
+                    f"INSERT INTO {target_name} ({copy_col_list_sql}) "
+                    f'SELECT {copy_col_list_sql} FROM "{stg_name}" '
                     f"ON CONFLICT ({conflict_cols_sql}) DO NOTHING"
                 )
         finally:
@@ -1119,7 +1156,12 @@ def flush_scoped_replace_batch_copy(
 
     target_name = _qualified_sql_name(table)
     stg_name = _staging_table_name(table)
-    col_list_sql = ", ".join(f'"{c}"' for c in col_names)
+    # Restrict COPY + INSERT column list to columns actually supplied by
+    # the batch. scope_key + unique_key are always required-present.
+    copy_cols = _columns_present_in_rows(
+        table, enriched, list(scope_key) + list(unique_key)
+    )
+    copy_col_list_sql = ", ".join(f'"{c}"' for c in copy_cols)
 
     try:
         cursor = _raw_cursor(db)
@@ -1132,9 +1174,11 @@ def flush_scoped_replace_batch_copy(
 
             if enriched:
                 import io
-                buf = io.StringIO(_encode_rows_as_copy_text(enriched, col_names))
+                buf = io.StringIO(
+                    _encode_rows_as_copy_text(enriched, copy_cols)
+                )
                 cursor.copy_expert(
-                    f'COPY "{stg_name}" ({col_list_sql}) FROM STDIN',
+                    f'COPY "{stg_name}" ({copy_col_list_sql}) FROM STDIN',
                     buf,
                 )
 
@@ -1178,8 +1222,8 @@ def flush_scoped_replace_batch_copy(
             # Insert the new rows from staging.
             if enriched:
                 cursor.execute(
-                    f"INSERT INTO {target_name} ({col_list_sql}) "
-                    f'SELECT {col_list_sql} FROM "{stg_name}"'
+                    f"INSERT INTO {target_name} ({copy_col_list_sql}) "
+                    f'SELECT {copy_col_list_sql} FROM "{stg_name}"'
                 )
         finally:
             cursor.close()

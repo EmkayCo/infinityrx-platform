@@ -586,23 +586,115 @@ def test_scoped_replace_copy_postgres_empty_rows_is_noop() -> None:
     assert sess.commit_count == 0
 
 
-def test_upsert_copy_column_order_pinned_to_table_columns() -> None:
-    """The COPY column list + VALUES order must follow Table.columns order.
+def test_upsert_copy_excludes_autoincrement_id_absent_from_rows() -> None:
+    """Wave 12 bench-regression: ``id SERIAL`` must be left out of the
+    COPY column list when no row supplies it, so the staging table's
+    ``DEFAULT nextval(...)`` applies on INSERT. The earlier (buggy)
+    version named ``id`` in the COPY list, sent ``\\N``, and hit
+    ``NotNullViolation: null value in column "id"``."""
+    sess = _FakePgSession()
+    tbl = Table(
+        "nppes_prescriber_details",
+        MetaData(),
+        Column("id", Integer, primary_key=True),  # simulates SERIAL
+        Column("npi", String(10), unique=True, nullable=False),
+        Column("last_name", Text, nullable=True),
+        schema="prescriber_dir",
+    )
+    errors = ErrorAggregator()
+    flush_upsert_batch_copy(
+        sess,  # type: ignore[arg-type]
+        source_name="nppes_satellite", table=tbl, unique_key=["npi"],
+        rows=[
+            {"npi": "1679576722", "last_name": "WIEBE"},
+            {"npi": "1871596098", "last_name": "DIAZ-LACAYO"},
+        ],
+        errors=errors,
+    )
+    # COPY list must name only npi and last_name.
+    copy_sql, buf = sess.cursor_mock.copy_expert.call_args.args
+    assert '("npi", "last_name")' in copy_sql
+    assert '"id"' not in copy_sql
+    # Every INSERT...SELECT executed against staging must also omit id.
+    inserts = [
+        call.args[0]
+        for call in sess.cursor_mock.execute.call_args_list
+        if call.args and str(call.args[0]).startswith("INSERT INTO")
+    ]
+    assert inserts, "no INSERT fired"
+    for sql in inserts:
+        assert '"id"' not in sql, f"INSERT still names id column: {sql}"
+    # Rows/sec counts — both rows upserted, zero errors.
+    assert errors.total_errors == 0
 
-    Regression guard: if anyone swaps the source from Table.columns to a
-    dict iteration, the COPY payload and INSERT column list would disagree.
+
+def test_scoped_replace_copy_excludes_autoincrement_id_absent_from_rows() -> None:
+    """Same bug, scoped-replace path."""
+    sess = _FakePgSession()
+    tbl = Table(
+        "prescriber_addresses",
+        MetaData(),
+        Column("id", Integer, primary_key=True),
+        Column("npi", String(10), nullable=False),
+        Column("address_type", String(10), nullable=False),
+        Column("line_1", Text, nullable=True),
+        schema="prescriber_dir",
+    )
+    errors = ErrorAggregator()
+    flush_scoped_replace_batch_copy(
+        sess,  # type: ignore[arg-type]
+        source_name="nppes_satellite", table=tbl,
+        scope_key=["npi"], unique_key=["npi", "address_type"],
+        rows=[
+            {"npi": "1679576722", "address_type": "mailing", "line_1": "PO BOX 2168"},
+            {"npi": "1679576722", "address_type": "practice", "line_1": "123 MAIN ST"},
+        ],
+        errors=errors,
+    )
+    copy_sql, buf = sess.cursor_mock.copy_expert.call_args.args
+    assert '"id"' not in copy_sql
+    # Expected column list (table order, minus id):
+    assert '("npi", "address_type", "line_1")' in copy_sql
+    inserts = [
+        call.args[0]
+        for call in sess.cursor_mock.execute.call_args_list
+        if call.args and str(call.args[0]).startswith("INSERT INTO")
+    ]
+    for sql in inserts:
+        assert '"id"' not in sql
+    assert errors.total_errors == 0
+
+
+def test_upsert_copy_column_order_pinned_to_table_columns() -> None:
+    """COPY column list must follow Table.columns order and must include
+    only columns that at least one row actually supplies.
+
+    Regression guard for two bugs at once:
+
+    1. Column list must be derived from Table.columns (not dict iteration)
+       so the COPY payload stays positionally aligned with the staging
+       table.
+
+    2. An autoincrement PK that rows don't supply (``id`` here) must NOT
+       appear in the COPY list — Postgres COPY treats ``\\N`` as literal
+       NULL and never substitutes a default for columns named in the
+       column list. Wave 12 bench caught this on ``id SERIAL NOT NULL
+       DEFAULT nextval(...)``: sending ``\\N`` violated the NOT NULL
+       constraint, failing every batch.
     """
     sess, tbl = _make_pg_session_and_table()
     errors = ErrorAggregator()
     flush_upsert_batch_copy(
         sess,  # type: ignore[arg-type]
         source_name="t", table=tbl, unique_key=["npi"],
-        # Keys in reverse order — encoder must still produce col order.
+        # Keys in reverse dict order — encoder must still produce
+        # table-column order (npi, name) on the wire.
         rows=[{"name": "Omega", "npi": "9999999999"}],
         errors=errors,
     )
     copy_sql, buf = sess.cursor_mock.copy_expert.call_args.args
-    # Column list in COPY should be (id, npi, name) — table.columns order.
-    # id is PK and missing from the dict, so it should be \N.
-    assert '"id", "npi", "name"' in copy_sql
-    assert buf.getvalue() == "\\N\t9999999999\tOmega\n"
+    # id is missing from the row → excluded from the COPY list.
+    assert '("npi", "name")' in copy_sql
+    assert '"id"' not in copy_sql
+    # Buffer contents preserve table.columns order, not dict order.
+    assert buf.getvalue() == "9999999999\tOmega\n"
