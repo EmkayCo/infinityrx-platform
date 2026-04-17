@@ -38,7 +38,6 @@ DEFAULT_SCHEDULES: dict[str, str | None] = {
     "oig_leie": "0 2 20 * *",          # Monthly 20th 2 AM
     "dea_registrations": "0 6 1 * *",  # Monthly 1st 6 AM
     "sam_exclusions": "0 3 20 * *",    # Monthly 20th 3 AM
-    "cms_part_d": "0 4 1 1,4,7,10 *", # Quarterly
     "cms_opt_out": "0 4 15 * *",       # Monthly 15th 4 AM
 }
 
