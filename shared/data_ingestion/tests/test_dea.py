@@ -43,6 +43,96 @@ _PRESCRIBER_DIR_SRC = _REPO_ROOT / "modules" / "prescriber-directory"
 if str(_PRESCRIBER_DIR_SRC) not in sys.path:
     sys.path.insert(0, str(_PRESCRIBER_DIR_SRC))
 
+
+# ---------------------------------------------------------------------------
+# Pre-load prescriber-directory's compliance_tables module at file path and
+# pin it into sys.modules under the canonical `src.models.compliance_tables`
+# name the production ingester imports.
+#
+# Why: when the full test suite runs, test_fda_ndc_parser.py registers
+# drug-database's ``src.*`` into sys.modules first. drug-database's
+# ``src.models`` does NOT have a ``compliance_tables`` submodule, so a
+# later ``from src.models.compliance_tables import ...`` inside the DEA
+# ingester fails even though prescriber-directory is on sys.path. Once
+# ``src`` is bound, sys.path is not re-searched for bare ``src.*``.
+#
+# The fix: load compliance_tables.py by file path via importlib.util and
+# register it under the three sys.modules keys Python checks during
+# ``from src.models.compliance_tables import DeaRegistration``
+# (``src``, ``src.models``, ``src.models.compliance_tables``). Subsequent
+# imports resolve against our preloaded module regardless of what
+# earlier tests bound.
+# ---------------------------------------------------------------------------
+
+import importlib.util as _importlib_util
+import types as _types
+
+
+def _preload_prescriber_src_into_src_namespace() -> None:
+    """Preload prescriber-directory's src.models into sys.modules.
+
+    Preloads both ``src.models.tables`` (which exports ``PrescriberBase``
+    and is imported relatively by compliance_tables) and
+    ``src.models.compliance_tables`` (which exports ``DeaRegistration``).
+    Extends ``src.models.__path__`` to include prescriber-directory's
+    src/models/ so any not-yet-loaded sibling module resolves there too.
+
+    Idempotent against its own re-invocation. Also tolerates the case
+    where test_fda_ndc_parser.py has already registered drug-database's
+    ``src.models`` under sys.modules — we extend __path__ rather than
+    replace the existing package.
+    """
+    prescriber_models_dir = str(_PRESCRIBER_DIR_SRC / "src" / "models")
+    prescriber_src_dir = str(_PRESCRIBER_DIR_SRC / "src")
+
+    # 1. Ensure src and src.models packages exist, with prescriber-directory
+    #    on their __path__ list.
+    if "src" not in sys.modules:
+        src_pkg = _types.ModuleType("src")
+        src_pkg.__path__ = [prescriber_src_dir]  # type: ignore[attr-defined]
+        sys.modules["src"] = src_pkg
+    else:
+        existing_src = sys.modules["src"]
+        paths = getattr(existing_src, "__path__", None)
+        if paths is not None and prescriber_src_dir not in paths:
+            paths.append(prescriber_src_dir)
+
+    if "src.models" not in sys.modules:
+        models_pkg = _types.ModuleType("src.models")
+        models_pkg.__path__ = [prescriber_models_dir]  # type: ignore[attr-defined]
+        sys.modules["src.models"] = models_pkg
+    else:
+        existing_models = sys.modules["src.models"]
+        paths = getattr(existing_models, "__path__", None)
+        if paths is not None and prescriber_models_dir not in paths:
+            paths.append(prescriber_models_dir)
+
+    # 2. Preload tables.py so the .tables relative import inside
+    #    compliance_tables.py resolves to prescriber-directory's
+    #    PrescriberBase rather than drug-database's NdcBase. Only do
+    #    this if the existing sys.modules["src.models.tables"] (if any)
+    #    is not prescriber-directory's version.
+    for mod_name in ("src.models.tables", "src.models.compliance_tables"):
+        existing = sys.modules.get(mod_name)
+        if existing is not None:
+            src_file = getattr(existing, "__file__", "") or ""
+            if "prescriber-directory" in src_file:
+                continue
+            # Another module's file is bound here — override.
+            del sys.modules[mod_name]
+
+        filename = mod_name.rsplit(".", 1)[-1] + ".py"
+        file_path = _PRESCRIBER_DIR_SRC / "src" / "models" / filename
+        spec = _importlib_util.spec_from_file_location(mod_name, file_path)
+        if spec is None or spec.loader is None:
+            continue
+        module = _importlib_util.module_from_spec(spec)
+        sys.modules[mod_name] = module
+        spec.loader.exec_module(module)
+
+
+_preload_prescriber_src_into_src_namespace()
+
 from shared.data_ingestion.base import IngestionResult
 from shared.data_ingestion.models import IngestionRun, IngestionSchedule
 from shared.data_ingestion.sources.dea_registrations import (
@@ -51,6 +141,7 @@ from shared.data_ingestion.sources.dea_registrations import (
     _parse_dea_date,
 )
 from shared.db.base import Base
+from src.models.compliance_tables import DeaRegistration  # type: ignore[import]
 
 _SAMPLE_DIR = Path(__file__).parent / "sample_data" / "dea_registrations"
 _SAMPLE_CSV = _SAMPLE_DIR / "dea_registrations.csv"
@@ -79,15 +170,11 @@ class _UUIDString(TypeDecorator):
 
 
 def _patch_tables_for_sqlite() -> None:
-    tables_to_patch = [IngestionRun.__table__, IngestionSchedule.__table__]
-
-    # Try to include DeaRegistration if importable
-    try:
-        from src.models.compliance_tables import DeaRegistration  # type: ignore[import]
-        tables_to_patch.append(DeaRegistration.__table__)
-    except (ImportError, Exception):
-        pass
-
+    tables_to_patch = [
+        IngestionRun.__table__,
+        IngestionSchedule.__table__,
+        DeaRegistration.__table__,
+    ]
     for table in tables_to_patch:
         if getattr(table, "_sqlite_patched_dea", False):
             continue
@@ -127,24 +214,15 @@ def _engine():
         schema_translate_map={"shared": None, "prescriber_dir": None}
     )
 
-    tables = [IngestionRun.__table__, IngestionSchedule.__table__]
-
-    # Include DEA table if available
-    try:
-        from src.models.compliance_tables import DeaRegistration  # type: ignore[import]
-        tables.append(DeaRegistration.__table__)
-    except (ImportError, Exception):
-        pass
-
-    Base.metadata.create_all(engine, tables=[IngestionRun.__table__, IngestionSchedule.__table__])
-
-    # Create prescriber_dir tables using their own Base if available
-    try:
-        from src.models.compliance_tables import DeaRegistration  # type: ignore[import]
-        from src.models.tables import PrescriberBase  # type: ignore[import]
-        PrescriberBase.metadata.create_all(engine, tables=[DeaRegistration.__table__])
-    except (ImportError, Exception):
-        pass
+    # Create shared + prescriber_dir tables. DeaRegistration lives on
+    # the prescriber-directory PrescriberBase metadata, but after the
+    # module-level compliance_tables preload (see top of file) we can
+    # reference it directly.
+    from src.models.tables import PrescriberBase  # type: ignore[import]
+    Base.metadata.create_all(
+        engine, tables=[IngestionRun.__table__, IngestionSchedule.__table__]
+    )
+    PrescriberBase.metadata.create_all(engine, tables=[DeaRegistration.__table__])
 
     yield engine
 
@@ -302,24 +380,18 @@ class TestDeaFieldRegistry:
 
     def test_no_source_fields_dropped(self):
         """All expected DEA ORM columns must exist."""
-        # Import the model — requires prescriber_dir path on sys.path
-        prescriber_src = _REPO_ROOT / "modules" / "prescriber-directory"
-        if str(prescriber_src) not in sys.path:
-            sys.path.insert(0, str(prescriber_src))
-
-        try:
-            from src.models.compliance_tables import DeaRegistration  # type: ignore[import]
-
-            model_cols = {col.key for col in DeaRegistration.__table__.columns}
-            expected = {
-                "dea_number", "registrant_name", "address", "city", "state", "zip",
-                "business_activity", "drug_schedules_authorized",
-                "expiration_date", "registration_status", "npi", "raw_payload",
-            }
-            missing = expected - model_cols
-            assert not missing, f"DEA ORM model missing columns: {missing}"
-        except ImportError:
-            pytest.skip("prescriber-directory module not on path — schema test skipped")
+        # DeaRegistration is preloaded at module scope via the
+        # sys.modules["src.models.compliance_tables"] registration at
+        # the top of this file, so the ORM column set is always available
+        # regardless of the test-module load order.
+        model_cols = {col.key for col in DeaRegistration.__table__.columns}
+        expected = {
+            "dea_number", "registrant_name", "address", "city", "state", "zip",
+            "business_activity", "drug_schedules_authorized",
+            "expiration_date", "registration_status", "npi", "raw_payload",
+        }
+        missing = expected - model_cols
+        assert not missing, f"DEA ORM model missing columns: {missing}"
 
 
 class TestDeaLoadWithRealModel:
@@ -329,10 +401,6 @@ class TestDeaLoadWithRealModel:
         self, db_session: Session, ingester: DeaRegistrationsIngester
     ):
         """load() inserts rows via _upsert_row when model is importable."""
-        try:
-            from src.models.compliance_tables import DeaRegistration  # type: ignore[import]
-        except ImportError:
-            pytest.skip("prescriber-directory not importable")
 
         with patch.object(ingester, "_cross_reference_prescribers", return_value=0):
             records = ingester.parse(_SAMPLE_CSV)
@@ -349,10 +417,6 @@ class TestDeaLoadWithRealModel:
         self, db_session: Session, ingester: DeaRegistrationsIngester
     ):
         """_upsert_row returns 'updated' when DEA number already exists."""
-        try:
-            from src.models.compliance_tables import DeaRegistration  # type: ignore[import]
-        except ImportError:
-            pytest.skip("prescriber-directory not importable")
 
         from datetime import datetime, timezone
 
@@ -386,10 +450,6 @@ class TestDeaLoadWithRealModel:
         self, db_session: Session, ingester: DeaRegistrationsIngester
     ):
         """_upsert_row raises ValueError when DEA_NUMBER is missing."""
-        try:
-            from src.models.compliance_tables import DeaRegistration  # type: ignore[import]
-        except ImportError:
-            pytest.skip("prescriber-directory not importable")
 
         with pytest.raises(ValueError, match="DEA_NUMBER missing"):
             ingester._upsert_row({"DEA_NUMBER": "", "REGISTRANT_NAME": "test"})
@@ -538,10 +598,6 @@ class TestDeaUpsertRowListSchedules:
         self, db_session: Session, ingester: DeaRegistrationsIngester
     ):
         """Lines 201-204: when drug_schedules_authorized is already a list, use it directly."""
-        try:
-            from src.models.compliance_tables import DeaRegistration  # type: ignore[import]
-        except ImportError:
-            pytest.skip("prescriber-directory not importable")
 
         row = {
             "DEA_NUMBER": "BL9876540",
@@ -566,10 +622,6 @@ class TestDeaUpsertRowEmptySchedules:
         self, db_session: Session, ingester: DeaRegistrationsIngester
     ):
         """Line 204: when DRUG_SCHEDULES is empty string, schedules list is [] → stored as None."""
-        try:
-            from src.models.compliance_tables import DeaRegistration  # type: ignore[import]
-        except ImportError:
-            pytest.skip("prescriber-directory not importable")
 
         row = {
             "DEA_NUMBER": "BM3344550",
@@ -638,11 +690,11 @@ class TestDeaImportErrorFallback:
                 raise ImportError("simulated first-time import failure")
             return original_import(name, *args, **kwargs)
 
-        # Only run if prescriber-directory is importable (so the retry works)
-        try:
-            original_import("src.models.compliance_tables")
-        except ImportError:
-            pytest.skip("prescriber-directory not importable — cannot test fallback retry")
+        # Sanity check: prescriber-directory preload succeeded at module
+        # load (see top of file), so the non-mocked import resolves.
+        # If this fails, the preload is broken — let the test fail loudly
+        # rather than silently skip.
+        original_import("src.models.compliance_tables")
 
         with patch("builtins.__import__", side_effect=fake_import):
             row = {
