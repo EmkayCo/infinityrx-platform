@@ -435,29 +435,51 @@ is tight.
 
 ## 7. Future Work
 
-### Other loaders as COPY candidates
+### Other loaders as COPY candidates — decision: do not retrofit
 
-The COPY primitives are opt-in and the NPPES satellite loader is the
-only current consumer. A survey of the other loaders for retrofit
-potential, ordered by expected payoff:
+The Wave 12 bench measured a **2.67× speedup** on the NPPES satellite
+schema (§4). That is the "modest" speedup band, not the "dramatic
+bulk-write win" a COPY retrofit needs to justify itself. Concrete
+rule for this codebase:
 
-- **RxNorm** — plausible candidate. The full RxNorm release is wide
-  (~30 columns), loads several million rows across the RXN* /
-  RXNREL / RXNSAT files, and currently runs on the VALUES primitives.
-  Retrofit **after** the NPPES bench (§4) proves the speedup is
-  meaningful, then measure against an RxNorm full load before
-  committing.
-- **FDA NDC / OIG LEIE** — likely not worth the retrofit. NDC has
-  ~100k active rows; LEIE adds ~70k records per month. Both finish
-  in well under a minute on the VALUES path; the COPY primitive's
-  fixed overhead (CREATE TEMP TABLE + the extra INSERT..SELECT hop)
-  eats the gain at this scale.
-- **Everything else** (SAM exclusions, CMS ASP, FDA REMS, FDA Drug
-  Shortages, etc.) — too small. Keep on VALUES.
+- **Do not retrofit any existing loader to COPY.** The measured
+  speedup on narrow satellite-shaped tables does not pay for the
+  behavioral risk surface a COPY retrofit carries (temp-table
+  identity/default handling, auto-increment PKs on staging — see
+  the Wave 12 bench-caught bug fixed in commit `cb21a67`, where
+  `LIKE target INCLUDING DEFAULTS` plus a `\N` for `id SERIAL`
+  violated NOT NULL on every batch). Every existing loader that
+  finishes in under a few minutes on the VALUES primitive (FDA NDC,
+  OIG LEIE, SAM exclusions, CMS ASP, CMS NADAC, FDA REMS, FDA Drug
+  Shortages, CMS opt-out, Medicaid BINs, OFAC SDN) would save at
+  best single-digit seconds per run. Not worth the added complexity.
 
-The general rule: retrofit a loader to COPY when its VALUES
-throughput is the bottleneck for a maintenance-window constraint,
-not just because COPY is available.
+- **RxNorm is specifically out**. It was flagged as a plausible
+  candidate in the first-draft README. At a 2.67× speedup and an
+  estimated 2–3M-row full load, RxNorm would save 1–2 minutes per
+  monthly run — not remotely a maintenance-window constraint. Stay
+  on VALUES.
+
+- **The COPY primitives are an opt-in for future large loads only.**
+  Keep them in `shared/data_ingestion/batching.py` as first-class
+  primitives — they work, they're tested (75 tests in
+  `test_batching_copy.py`), and they're proven in production on
+  NPPES. New loaders with > ~10M rows and > ~30-column-wide target
+  tables should evaluate COPY via
+  `scripts/bench_nppes_satellite.py` as a template. Everything else
+  uses VALUES by default, same as today.
+
+Criteria for a future loader to consider COPY:
+
+  1. Full-load size > 10M rows in a single pass.
+  2. Target table has at least one wide (>30-column) INSERT, OR a
+     scoped-replace pattern on > 5M child rows.
+  3. Current VALUES-path wall time blocks a maintenance window —
+     either it exceeds the scheduled load budget, or it competes
+     with other jobs for the same shared Postgres resources.
+
+All three must be true. Any loader outside this envelope should stay
+on VALUES.
 
 ### `raw_payload` JSONB — deferred
 
