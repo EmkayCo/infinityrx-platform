@@ -29,6 +29,13 @@ Contents:
     incremental loaders to persist the last-successful-run watermark
     across invocations. ``read()`` returns None when the file is absent
     or malformed so callers can branch to "prompt for seed".
+
+- ``stream_json_array(source)``
+    Memory-bounded iterator over a top-level JSON array. Accepts either
+    a path string / Path or a file-like object (so gzip.open or any
+    in-memory BytesIO works without a second wrapper). Uses ijson under
+    the hood — peak memory stays at O(single record) regardless of file
+    size, critical for the 3.26 GB Part D snapshot.
 """
 
 from __future__ import annotations
@@ -36,6 +43,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections.abc import Iterator
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -143,6 +151,44 @@ def get_db_connection():
     return psycopg2.connect(url)
 
 
+def stream_json_array(
+    source: str | Path | Any,
+) -> Iterator[dict[str, Any]]:
+    """Yield items from a top-level JSON array without materialising the file.
+
+    Accepts either:
+      - a ``str`` or ``pathlib.Path`` (opened in binary mode internally), or
+      - a binary file-like object (``gzip.open(...)``, ``BytesIO``, any
+        readable that yields bytes).
+
+    Peak memory is bounded by the size of the largest single record, not
+    the total file. Critical for the 3.26 GB Part D snapshot — a plain
+    ``json.load(fh)`` OOMs there.
+
+    ijson's ``items(fh, 'item')`` matches every direct child of the
+    top-level array. Anything else (object at root, nested array of
+    arrays) would silently yield nothing — callers should assert the
+    expected record count after consumption, not trust silence.
+
+    The caller is responsible for closing file-like inputs it opened
+    itself; when given a path we open and close internally.
+    """
+    if isinstance(source, (str, Path)):
+        path = Path(source)
+        fh = path.open("rb")
+        close_on_exit = True
+    else:
+        fh = source
+        close_on_exit = False
+
+    try:
+        import ijson  # local import — only pulled in when streaming is actually used
+        yield from ijson.items(fh, "item")
+    finally:
+        if close_on_exit:
+            fh.close()
+
+
 class StateFile:
     """Per-source watermark, persisted as a single YYYY-MM-DD line.
 
@@ -178,4 +224,5 @@ __all__ = [
     "get_db_connection",
     "get_with_retry",
     "parse_retry_after",
+    "stream_json_array",
 ]

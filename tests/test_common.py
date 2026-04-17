@@ -242,3 +242,129 @@ def test_get_db_connection_falls_back_to_database_url(monkeypatch):
     with patch("psycopg2.connect", side_effect=fake_connect):
         common.get_db_connection()
     assert captured["url"] == "postgresql://plain/db"
+
+
+# ---------------------------------------------------------------------------
+# stream_json_array — memory-bounded iteration over a top-level JSON array
+# ---------------------------------------------------------------------------
+
+
+import inspect
+import io
+import json
+
+
+def test_stream_json_array_empty_array(tmp_path):
+    p = tmp_path / "a.json"
+    p.write_text("[]")
+    assert list(common.stream_json_array(p)) == []
+
+
+def test_stream_json_array_single_record(tmp_path):
+    p = tmp_path / "a.json"
+    p.write_text('[{"k": "v"}]')
+    assert list(common.stream_json_array(p)) == [{"k": "v"}]
+
+
+def test_stream_json_array_many_records(tmp_path):
+    p = tmp_path / "a.json"
+    records = [{"i": i, "s": f"row-{i}"} for i in range(1000)]
+    p.write_text(json.dumps(records))
+    result = list(common.stream_json_array(p))
+    assert len(result) == 1000
+    assert result[0] == {"i": 0, "s": "row-0"}
+    assert result[-1] == {"i": 999, "s": "row-999"}
+
+
+def test_stream_json_array_accepts_string_path(tmp_path):
+    p = tmp_path / "a.json"
+    p.write_text('[{"x": 1}]')
+    # str path, not Path
+    result = list(common.stream_json_array(str(p)))
+    assert result == [{"x": 1}]
+
+
+def test_stream_json_array_accepts_file_like(tmp_path):
+    """Accepts a binary file-like so gzip.open(...) works without a wrapper."""
+    payload = json.dumps([{"a": 1}, {"a": 2}]).encode()
+    fh = io.BytesIO(payload)
+    assert list(common.stream_json_array(fh)) == [{"a": 1}, {"a": 2}]
+
+
+def test_stream_json_array_file_like_stays_open_for_caller(tmp_path):
+    """When caller passes a file-like, we must NOT close it — they own it."""
+    payload = json.dumps([{"x": 1}]).encode()
+    fh = io.BytesIO(payload)
+    list(common.stream_json_array(fh))
+    assert not fh.closed, "stream_json_array must not close caller-provided file handles"
+
+
+def test_stream_json_array_closes_path_inputs(tmp_path):
+    """When we opened it ourselves, we must close it so tmp files cleanup works."""
+    # Hard to observe closure directly without mocking open. Instead verify
+    # the iterator is fully consumable and a second call on the same path
+    # still works (which it wouldn't if the first call held an exclusive
+    # handle on Windows; passes trivially on POSIX).
+    p = tmp_path / "a.json"
+    p.write_text('[{"x": 1}]')
+    list(common.stream_json_array(p))
+    list(common.stream_json_array(p))  # second call must succeed
+
+
+def test_stream_json_array_is_a_generator():
+    """Critical: must return a generator, not materialise into a list."""
+    gen = common.stream_json_array(io.BytesIO(b"[]"))
+    assert inspect.isgenerator(gen)
+
+
+def test_stream_json_array_nested_arrays_per_item(tmp_path):
+    """Records that themselves contain arrays should pass through as dicts."""
+    p = tmp_path / "a.json"
+    p.write_text('[{"tags": ["a", "b"]}, {"tags": []}]')
+    result = list(common.stream_json_array(p))
+    assert result == [{"tags": ["a", "b"]}, {"tags": []}]
+
+
+def test_stream_json_array_non_ascii(tmp_path):
+    """UTF-8 content (names, special characters) round-trips cleanly."""
+    p = tmp_path / "a.json"
+    p.write_text(json.dumps([{"name": "José Muñoz"}, {"name": "北京"}]), encoding="utf-8")
+    result = list(common.stream_json_array(p))
+    assert result[0]["name"] == "José Muñoz"
+    assert result[1]["name"] == "北京"
+
+
+def test_stream_json_array_memory_bounded_over_large_file(tmp_path):
+    """Peak memory must not scale with file size — the whole point of this helper.
+
+    Synthetic ~5 MB file of 5000 records. We track the iterator's footprint
+    by asserting we can consume it while holding only one record at a time.
+    A json.load() alternative would load all 5000 into memory at once.
+    """
+    import tracemalloc
+
+    p = tmp_path / "big.json"
+    records = [{"i": i, "pad": "x" * 800} for i in range(5000)]
+    p.write_text(json.dumps(records))
+    file_size = p.stat().st_size
+    assert file_size > 4_000_000, f"test file unexpectedly small: {file_size}"
+
+    tracemalloc.start()
+    count = 0
+    peak_after_warmup = 0
+    for rec in common.stream_json_array(p):
+        count += 1
+        if count == 100:
+            tracemalloc.reset_peak()
+        if count > 100:
+            _, peak = tracemalloc.get_traced_memory()
+            peak_after_warmup = max(peak_after_warmup, peak)
+    tracemalloc.stop()
+
+    assert count == 5000
+    # The peak between record 100 and end should be well under the file
+    # size — empirically <200 KB is typical for 800-byte records.
+    assert peak_after_warmup < file_size // 4, (
+        f"memory footprint {peak_after_warmup} too large vs file {file_size} "
+        "— streaming likely broken"
+    )
