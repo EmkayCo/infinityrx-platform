@@ -137,10 +137,13 @@ _ncpdp_tables_mod = _load_file_as(
     _PHARM_SRC / "models" / "ncpdp_tables.py",
     "pharmacy_src.models.ncpdp_tables",
 )
-_ncpdp_service_mod = _load_file_as(
-    _PHARM_SRC / "services" / "ncpdp_ingestion.py",
-    "pharmacy_src.services.ncpdp_ingestion",
-)
+# The old NCPDPIngestionService lived at services/ncpdp_ingestion.py and
+# was removed in commit fcab0d6 (Wave 6 refactor onto flush_upsert_batch).
+# Integration tests that drove it were deleted alongside; the upsert /
+# delete-then-insert semantics it covered are now exercised by
+# shared/data_ingestion/tests/test_batching_copy.py at the primitive
+# level. Only the parser helpers (imported below from
+# shared.data_ingestion.sources.ncpdp_dataq) are tested in this file.
 
 PharmacyBase = _base_mod.PharmacyBase
 NCPDPPharmacy = _ncpdp_tables_mod.NCPDPPharmacy
@@ -156,7 +159,6 @@ NCPDPPharmacyRemittance = _ncpdp_tables_mod.NCPDPPharmacyRemittance
 NCPDPPharmacyService = _ncpdp_tables_mod.NCPDPPharmacyService
 NCPDPPharmacyStateLicense = _ncpdp_tables_mod.NCPDPPharmacyStateLicense
 NCPDPPharmacyTaxonomy = _ncpdp_tables_mod.NCPDPPharmacyTaxonomy
-NCPDPIngestionService = _ncpdp_service_mod.NCPDPIngestionService
 
 # Patch all tables for SQLite
 _NCPDP_TABLES = [
@@ -617,133 +619,13 @@ def test_parse_mas_rec_recertification() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Upsert idempotency test
+# NCPDPIngestionService integration tests were removed in Wave 14 debt
+# cleanup: the service class was deleted in commit fcab0d6 (Wave 6 NCPDP
+# refactor onto flush_upsert_batch). The semantics those tests checked
+# (upsert idempotency, scoped-replace delete-then-insert, 1000-row batch)
+# are now covered at the primitive level in
+# shared/data_ingestion/tests/test_batching_copy.py.
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_upsert_idempotent(db_session: Session) -> None:
-    """Loading the same records twice must not duplicate rows."""
-    service = NCPDPIngestionService(db_session=db_session)
-
-    # Prepare one pharmacy row
-    ncpdp_id = "9990001"
-    row = {
-        "ncpdp_provider_id": ncpdp_id,
-        "legal_name": "TEST PHARMACY INC",
-        "dba_name": "TEST RX",
-        "city": "TESTVILLE",
-        "state": "TX",
-        "zip5": "75001",
-    }
-
-    def _make_records() -> Iterator[dict[str, Any]]:
-        yield {"table": "ncpdp_pharmacies", "row": row}
-
-    # Load once
-    await service.load_records(_make_records(), source_name="ncpdp_test")
-    db_session.flush()
-
-    count_after_first = db_session.execute(
-        select(NCPDPPharmacy).where(NCPDPPharmacy.ncpdp_provider_id == ncpdp_id)
-    ).scalars().all()
-    assert len(count_after_first) == 1
-
-    # Load again (upsert — no duplicate)
-    await service.load_records(_make_records(), source_name="ncpdp_test")
-    db_session.flush()
-
-    count_after_second = db_session.execute(
-        select(NCPDPPharmacy).where(NCPDPPharmacy.ncpdp_provider_id == ncpdp_id)
-    ).scalars().all()
-    assert len(count_after_second) == 1, (
-        f"Upsert should not create duplicate: got {len(count_after_second)} rows"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Child table delete-then-insert semantics
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_child_table_delete_then_insert(db_session: Session) -> None:
-    """Child tables (taxonomies) use delete-then-insert so stale rows are purged."""
-    service = NCPDPIngestionService(db_session=db_session)
-    ncpdp_id = "9990002"
-
-    # Load 2 taxonomy rows
-    def _make_tx(codes: list[str]) -> Iterator[dict[str, Any]]:
-        for code in codes:
-            yield {
-                "table": "ncpdp_pharmacy_taxonomies",
-                "row": {"ncpdp_provider_id": ncpdp_id, "taxonomy_code": code},
-            }
-
-    await service.load_records(_make_tx(["3336C0003X", "333600000X"]), source_name="ncpdp_test")
-    db_session.flush()
-
-    count_first = db_session.execute(
-        select(NCPDPPharmacyTaxonomy).where(
-            NCPDPPharmacyTaxonomy.ncpdp_provider_id == ncpdp_id
-        )
-    ).scalars().all()
-    assert len(count_first) == 2
-
-    # Second load with only 1 code — stale row should be purged
-    await service.load_records(_make_tx(["3336C0003X"]), source_name="ncpdp_test")
-    db_session.flush()
-
-    count_second = db_session.execute(
-        select(NCPDPPharmacyTaxonomy).where(
-            NCPDPPharmacyTaxonomy.ncpdp_provider_id == ncpdp_id
-        )
-    ).scalars().all()
-    assert len(count_second) == 1, (
-        f"Delete-then-insert should purge stale rows; got {len(count_second)}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Batch size test
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_batch_size_1000_rows(db_session: Session) -> None:
-    """1000-row batch loads without error and all rows are present."""
-    service = NCPDPIngestionService(db_session=db_session)
-
-    def _make_1000_rows() -> Iterator[dict[str, Any]]:
-        for i in range(1000):
-            ncpdp_id = f"8{i:06d}"
-            yield {
-                "table": "ncpdp_pharmacies",
-                "row": {
-                    "ncpdp_provider_id": ncpdp_id,
-                    "legal_name": f"PHARMACY {i}",
-                    "state": "TX",
-                    "zip5": "75001",
-                },
-            }
-
-    result = await service.load_records(_make_1000_rows(), source_name="ncpdp_test")
-    db_session.flush()
-
-    assert result.records_processed == 1000
-    assert result.records_errored == 0
-
-    # Spot check first and last row
-    first_row = db_session.execute(
-        select(NCPDPPharmacy).where(NCPDPPharmacy.ncpdp_provider_id == "8000000")
-    ).scalar_one_or_none()
-    assert first_row is not None
-    assert first_row.legal_name == "PHARMACY 0"
-
-    last_row = db_session.execute(
-        select(NCPDPPharmacy).where(NCPDPPharmacy.ncpdp_provider_id == "8000999")
-    ).scalar_one_or_none()
-    assert last_row is not None
 
 
 # ---------------------------------------------------------------------------
