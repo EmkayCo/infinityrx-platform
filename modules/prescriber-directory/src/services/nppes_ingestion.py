@@ -37,7 +37,9 @@ from sqlalchemy.orm import Session
 from shared.data_ingestion.batching import (
     ErrorAggregator,
     flush_scoped_replace_batch,
+    flush_scoped_replace_batch_copy,
     flush_upsert_batch,
+    flush_upsert_batch_copy,
 )
 
 from ..models.nppes_tables import (
@@ -435,6 +437,7 @@ def load_nppes_satellite_tables(
     *,
     batch_size: int = _BATCH_SIZE,
     progress_every: int = 10_000,
+    use_copy: bool = True,
 ) -> NppesIngestionStats:
     """Stream-parse a NPPES CSV and populate the satellite tables.
 
@@ -444,9 +447,8 @@ def load_nppes_satellite_tables(
     entity_type=2 + taxonomy 333*.
 
     Batching: up to ``batch_size`` NPIs worth of rows are buffered per table,
-    then flushed together via the shared ``flush_upsert_batch`` /
-    ``flush_scoped_replace_batch`` primitives. DB round-trip count drops from
-    O(4 × N) to O(4 × N / batch_size).
+    then flushed together via the shared flush primitives. DB round-trip count
+    drops from O(4 × N) to O(4 × N / batch_size).
 
     Parameters
     ----------
@@ -458,6 +460,14 @@ def load_nppes_satellite_tables(
         Number of NPIs to buffer before flushing all four tables.
     progress_every:
         Log a progress line every this many rows.
+    use_copy:
+        When True (default), route each satellite flush through the COPY-
+        staging primitives (``flush_upsert_batch_copy`` /
+        ``flush_scoped_replace_batch_copy``) — 3-10x faster than the VALUES
+        path for the 30M-row monthly satellite pass. On non-PostgreSQL
+        dialects (SQLite tests) the COPY primitives transparently fall back
+        to VALUES, so the flag has no visible effect there. Set False to
+        force the VALUES path even on Postgres (bench comparisons only).
 
     Returns
     -------
@@ -468,6 +478,12 @@ def load_nppes_satellite_tables(
     source_name = "nppes_satellite"
     now = datetime.now(UTC)
     row_count = 0
+
+    # Dispatch to COPY or VALUES primitives for every flush in this run.
+    _upsert_fn = flush_upsert_batch_copy if use_copy else flush_upsert_batch
+    _replace_fn = (
+        flush_scoped_replace_batch_copy if use_copy else flush_scoped_replace_batch
+    )
 
     # Probe once — if T2's pharmacy table doesn't exist we skip the
     # supplement path entirely. Checking per-row would either pollute
@@ -496,7 +512,7 @@ def load_nppes_satellite_tables(
         nonlocal pending_details, pending_addresses, pending_taxonomies
         nonlocal pending_identifiers, pending_npis
         if pending_details:
-            flush_upsert_batch(
+            _upsert_fn(
                 db,
                 source_name=source_name,
                 table=NppesPrescriberDetail.__table__,
@@ -505,7 +521,7 @@ def load_nppes_satellite_tables(
                 errors=errors,
             )
         if pending_addresses:
-            flush_scoped_replace_batch(
+            _replace_fn(
                 db,
                 source_name=source_name,
                 table=PrescriberAddress.__table__,
@@ -515,7 +531,7 @@ def load_nppes_satellite_tables(
                 errors=errors,
             )
         if pending_taxonomies:
-            flush_scoped_replace_batch(
+            _replace_fn(
                 db,
                 source_name=source_name,
                 table=PrescriberTaxonomy.__table__,
@@ -525,7 +541,7 @@ def load_nppes_satellite_tables(
                 errors=errors,
             )
         if pending_identifiers:
-            flush_scoped_replace_batch(
+            _replace_fn(
                 db,
                 source_name=source_name,
                 table=PrescriberIdentifier.__table__,

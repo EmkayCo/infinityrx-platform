@@ -913,3 +913,117 @@ def test_deactivation_parse_streams_npi_date_pairs(tmp_path: Path):
     assert len(rows) == 2
     assert rows[0] == {"npi": "1234567890", "deactivation_date": date(2026, 4, 12)}
     assert rows[1] == {"npi": "2345678901", "deactivation_date": date(2026, 4, 11)}
+
+
+# ── Tests: Wave-11.5 use_copy dispatch ────────────────────────────────────
+
+
+def test_satellite_load_use_copy_false_routes_to_values_primitives(
+    db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``use_copy=False`` must call the VALUES primitives, not the COPY ones."""
+    values_calls: list[str] = []
+    copy_calls: list[str] = []
+
+    from shared.data_ingestion import batching as _batching_mod
+
+    orig_upsert = _batching_mod.flush_upsert_batch
+    orig_replace = _batching_mod.flush_scoped_replace_batch
+    orig_upsert_copy = _batching_mod.flush_upsert_batch_copy
+    orig_replace_copy = _batching_mod.flush_scoped_replace_batch_copy
+
+    def _upsert_spy(*args: object, **kwargs: object) -> object:
+        values_calls.append("upsert")
+        return orig_upsert(*args, **kwargs)  # type: ignore[arg-type]
+
+    def _replace_spy(*args: object, **kwargs: object) -> object:
+        values_calls.append("replace")
+        return orig_replace(*args, **kwargs)  # type: ignore[arg-type]
+
+    def _upsert_copy_spy(*args: object, **kwargs: object) -> object:
+        copy_calls.append("upsert_copy")
+        return orig_upsert_copy(*args, **kwargs)  # type: ignore[arg-type]
+
+    def _replace_copy_spy(*args: object, **kwargs: object) -> object:
+        copy_calls.append("replace_copy")
+        return orig_replace_copy(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(_ingestion_mod, "flush_upsert_batch", _upsert_spy)
+    monkeypatch.setattr(_ingestion_mod, "flush_scoped_replace_batch", _replace_spy)
+    monkeypatch.setattr(_ingestion_mod, "flush_upsert_batch_copy", _upsert_copy_spy)
+    monkeypatch.setattr(
+        _ingestion_mod, "flush_scoped_replace_batch_copy", _replace_copy_spy
+    )
+
+    rows = _read_sample_rows()
+    individual_row = _row_by_npi(rows, "1000000079")
+    mini_csv = tmp_path / "mini.csv"
+    with mini_csv.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerow(individual_row)
+
+    load_nppes_satellite_tables(db, mini_csv, use_copy=False)
+
+    # VALUES path must have fired (detail + at least one scoped replace);
+    # COPY path must not have been touched.
+    assert values_calls, "VALUES primitives were not invoked under use_copy=False"
+    assert not copy_calls, f"COPY primitives fired unexpectedly: {copy_calls}"
+
+
+def test_satellite_load_use_copy_true_routes_to_copy_primitives(
+    db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Default ``use_copy=True`` dispatches the COPY primitives (which then
+    fall back to VALUES under SQLite, but the dispatch must still go through
+    the COPY-variant entry points so a future refactor can't silently revert
+    this to VALUES on Postgres)."""
+    copy_calls: list[str] = []
+    values_calls: list[str] = []
+
+    from shared.data_ingestion import batching as _batching_mod
+
+    orig_upsert_copy = _batching_mod.flush_upsert_batch_copy
+    orig_replace_copy = _batching_mod.flush_scoped_replace_batch_copy
+    orig_upsert = _batching_mod.flush_upsert_batch
+    orig_replace = _batching_mod.flush_scoped_replace_batch
+
+    def _upsert_copy_spy(*args: object, **kwargs: object) -> object:
+        copy_calls.append("upsert_copy")
+        return orig_upsert_copy(*args, **kwargs)  # type: ignore[arg-type]
+
+    def _replace_copy_spy(*args: object, **kwargs: object) -> object:
+        copy_calls.append("replace_copy")
+        return orig_replace_copy(*args, **kwargs)  # type: ignore[arg-type]
+
+    def _upsert_spy(*args: object, **kwargs: object) -> object:
+        values_calls.append("upsert")
+        return orig_upsert(*args, **kwargs)  # type: ignore[arg-type]
+
+    def _replace_spy(*args: object, **kwargs: object) -> object:
+        values_calls.append("replace")
+        return orig_replace(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(_ingestion_mod, "flush_upsert_batch_copy", _upsert_copy_spy)
+    monkeypatch.setattr(
+        _ingestion_mod, "flush_scoped_replace_batch_copy", _replace_copy_spy
+    )
+    monkeypatch.setattr(_ingestion_mod, "flush_upsert_batch", _upsert_spy)
+    monkeypatch.setattr(_ingestion_mod, "flush_scoped_replace_batch", _replace_spy)
+
+    rows = _read_sample_rows()
+    individual_row = _row_by_npi(rows, "1000000079")
+    mini_csv = tmp_path / "mini.csv"
+    with mini_csv.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerow(individual_row)
+
+    load_nppes_satellite_tables(db, mini_csv)  # default use_copy=True
+
+    assert copy_calls, "COPY-variant primitives were not dispatched on default"
+    # VALUES primitives are only reached via the COPY fallback under SQLite;
+    # the dispatch itself must not call the VALUES entry points directly.
+    assert not values_calls, (
+        f"Direct VALUES-primitive call detected — copy dispatch bypassed: {values_calls}"
+    )
