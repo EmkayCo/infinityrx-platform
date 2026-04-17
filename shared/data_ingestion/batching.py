@@ -386,7 +386,14 @@ class BatchedUpserter:
         return enriched
 
     def _execute_upsert(self, rows: list[dict[str, Any]]) -> None:
-        """Execute one ``INSERT ... ON CONFLICT DO UPDATE`` for the batch."""
+        """Execute one ``INSERT ... ON CONFLICT`` statement for the batch.
+
+        Uses ``DO UPDATE`` when the target has any column that is not in
+        ``unique_key`` and not in ``immutable_on_update`` (i.e. something
+        to actually update). Falls back to ``DO NOTHING`` when every
+        non-key column is marked immutable — a row collision in that
+        case is a no-op, preserving existing data.
+        """
         if not rows:
             return
         stmt = pg_insert(self.table).values(rows)
@@ -624,6 +631,12 @@ def flush_upsert_batch(
     shared :class:`ErrorAggregator`. Use when a caller is buffering rows by
     table and needs to flush a filled batch without going through the
     iterator-consuming ``BatchedUpserter.load()`` entry point.
+
+    Conflict behavior mirrors :meth:`BatchedUpserter._execute_upsert` —
+    ``DO UPDATE`` when there is at least one non-key, non-immutable column
+    to update; ``DO NOTHING`` otherwise. The fallback keeps idempotent
+    re-loads clean on tables whose payload is fully captured by the
+    unique key (e.g. append-only audit-style reference tables).
     """
     if not rows:
         return 0, 0
@@ -934,10 +947,18 @@ def flush_upsert_batch_copy(
 
       1. In-batch dedup on ``unique_key`` (same as VALUES path).
       2. Timestamp enrichment (``created_at``/``updated_at`` if table has them).
-      3. ``CREATE TEMP TABLE stg_<target> (LIKE target) ON COMMIT DROP``.
-      4. ``COPY stg FROM STDIN`` with text format.
+      3. ``CREATE TEMP TABLE IF NOT EXISTS stg_<target> (LIKE target
+          INCLUDING DEFAULTS) ON COMMIT DROP``; ``TRUNCATE stg_<target>``
+          to guarantee a clean staging table even across repeated calls
+          inside one transaction.
+      4. ``COPY stg (cols) FROM STDIN`` — text format with ``\\N`` for
+          NULL; column list restricted to keys any row supplies so
+          SERIAL / server-default columns pick up their defaults on
+          INSERT (Wave 12 bug fix `cb21a67`).
       5. ``INSERT INTO target (cols) SELECT cols FROM stg
-            ON CONFLICT (unique_key) DO UPDATE SET ...``
+          ON CONFLICT (unique_key) DO UPDATE SET ...`` when there is
+          anything to update; ``DO NOTHING`` when every non-key column
+          is immutable.
       6. ``db.commit()``.
     """
     if not _is_postgres(db):
