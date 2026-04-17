@@ -11,8 +11,10 @@ connection to avoid requiring a live postgres.
 
 from __future__ import annotations
 
+import gzip
 import json
 from datetime import date, datetime
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -109,36 +111,37 @@ def test_extract_token_missing_returns_none():
 
 
 # ---------------------------------------------------------------------------
-# _is_not_ready: distinguish real payloads from "still generating" envelopes
+# _iter_records: streams from a gzipped SAM v4 extract file
 # ---------------------------------------------------------------------------
 
 
-def test_not_ready_detects_generation_message():
-    assert loader._is_not_ready({"message": "File is not generated yet. Please try again later."})
+def _write_extract_gz(tmp_path: Path, payload: dict) -> Path:
+    """Serialize *payload* to a gzipped JSON file the way SAM ships it."""
+    p = tmp_path / "extract.json.gz"
+    with gzip.open(p, "wb") as fh:
+        fh.write(json.dumps(payload).encode("utf-8"))
+    return p
 
 
-def test_not_ready_rejects_real_payload():
-    assert not loader._is_not_ready({"totalRecords": 167240, "excludedEntity": []})
+def test_iter_records_streams_excluded_entity(tmp_path):
+    payload = {"totalRecords": 2, "excludedEntity": [{"a": 1}, {"a": 2}]}
+    path = _write_extract_gz(tmp_path, payload)
+    assert list(loader._iter_records(path)) == [{"a": 1}, {"a": 2}]
 
 
-# ---------------------------------------------------------------------------
-# _iter_records: handles both extract shapes
-# ---------------------------------------------------------------------------
+def test_iter_records_empty_array(tmp_path):
+    payload = {"totalRecords": 0, "excludedEntity": []}
+    path = _write_extract_gz(tmp_path, payload)
+    assert list(loader._iter_records(path)) == []
 
 
-def test_iter_records_direct_shape():
-    payload = {"excludedEntity": [{"a": 1}, {"a": 2}]}
-    assert list(loader._iter_records(payload)) == [{"a": 1}, {"a": 2}]
-
-
-def test_iter_records_nested_results_shape():
-    payload = {"results": [{"excludedEntity": [{"a": 1}]}, {"excludedEntity": [{"a": 2}]}]}
-    assert list(loader._iter_records(payload)) == [{"a": 1}, {"a": 2}]
-
-
-def test_iter_records_unknown_shape_raises():
-    with pytest.raises(RuntimeError, match="no excludedEntity key"):
-        list(loader._iter_records({"foo": "bar"}))
+def test_iter_records_missing_key_yields_nothing(tmp_path):
+    # ijson silently yields nothing when prefix doesn't match — documented
+    # in shared.data_ingestion.common.stream_json_array. Callers must
+    # assert the count post-consumption, which load() does via records_seen.
+    payload = {"foo": "bar"}
+    path = _write_extract_gz(tmp_path, payload)
+    assert list(loader._iter_records(path)) == []
 
 
 # State-file read/write/corrupt tests moved to tests/test_common.py
@@ -196,54 +199,75 @@ def test_resolve_since_delta_cli_override_wins(tmp_state):
 
 
 # ---------------------------------------------------------------------------
-# Polling: retries on 202 and on 200-envelope "still generating"
+# Polling: real v4 protocol — 400 while generating, 302→S3 → 200 gzip when ready
 # ---------------------------------------------------------------------------
 
 
-def test_poll_download_retries_on_202(monkeypatch):
+def _streaming_response(status: int, body_bytes: bytes = b""):
+    """Fake requests.Response with iter_content + close.
+
+    Matches what ``requests.get(..., stream=True, allow_redirects=True)``
+    returns after any 302 has been transparently followed.
+    """
+    r = MagicMock()
+    r.status_code = status
+    r.headers = {}
+    r.iter_content = MagicMock(return_value=iter([body_bytes]) if body_bytes else iter([]))
+    r.raise_for_status = MagicMock()
+    r.close = MagicMock()
+    return r
+
+
+def test_poll_download_retries_on_400_until_ready(monkeypatch, tmp_path):
+    monkeypatch.setattr(loader, "CACHE_DIR", tmp_path)
     real_payload = {"totalRecords": 1, "excludedEntity": [{"entityName": "Acme"}]}
+    gz_body = gzip.compress(json.dumps(real_payload).encode("utf-8"))
     responses = [
-        _response(202),
-        _response(202),
-        _response(200, real_payload),
+        _streaming_response(400),
+        _streaming_response(400),
+        _streaming_response(200, gz_body),
     ]
-    call_count = {"n": 0}
-
-    def fake_get(url, params, timeout, accept_202=False):
-        r = responses[call_count["n"]]
-        call_count["n"] += 1
-        return r
-
-    monkeypatch.setattr(loader, "_get_with_retry", fake_get)
-    monkeypatch.setattr(loader.time, "sleep", lambda s: None)
-
-    result = loader._poll_download("KEY", "TOKEN")
-    assert result == real_payload
-    assert call_count["n"] == 3
-
-
-def test_poll_download_retries_on_200_not_ready_envelope(monkeypatch):
-    not_ready = {"message": "File is not generated yet. Please try again later."}
-    real = {"totalRecords": 0, "excludedEntity": []}
-    responses = [_response(200, not_ready), _response(200, real)]
     calls = iter(responses)
 
-    monkeypatch.setattr(
-        loader, "_get_with_retry",
-        lambda *a, **kw: next(calls),
-    )
+    monkeypatch.setattr(loader.requests, "get", lambda *a, **kw: next(calls))
     monkeypatch.setattr(loader.time, "sleep", lambda s: None)
 
-    assert loader._poll_download("KEY", "TOKEN") == real
+    path = loader._poll_download("KEY", "TOKEN")
+    assert isinstance(path, Path)
+    assert path.read_bytes() == gz_body
 
 
-def test_poll_download_times_out(monkeypatch):
-    # Always 202 → should eventually raise TimeoutError.
-    monkeypatch.setattr(loader, "_get_with_retry", lambda *a, **kw: _response(202))
+def test_poll_download_retries_on_202_for_safety(monkeypatch, tmp_path):
+    """Older SAM docs claim 202 while generating; keep compat alongside 400."""
+    monkeypatch.setattr(loader, "CACHE_DIR", tmp_path)
+    gz_body = gzip.compress(b'{"excludedEntity": []}')
+    responses = [_streaming_response(202), _streaming_response(200, gz_body)]
+    calls = iter(responses)
+
+    monkeypatch.setattr(loader.requests, "get", lambda *a, **kw: next(calls))
+    monkeypatch.setattr(loader.time, "sleep", lambda s: None)
+
+    path = loader._poll_download("KEY", "TOKEN")
+    assert path.exists()
+
+
+def test_poll_download_times_out(monkeypatch, tmp_path):
+    monkeypatch.setattr(loader, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(loader.requests, "get", lambda *a, **kw: _streaming_response(400))
     monkeypatch.setattr(loader.time, "sleep", lambda s: None)
     monkeypatch.setattr(loader, "POLL_MAX_ATTEMPTS", 3)
 
     with pytest.raises(TimeoutError, match="not ready after 3 polls"):
+        loader._poll_download("KEY", "TOKEN")
+
+
+def test_poll_download_unexpected_status_raises(monkeypatch, tmp_path):
+    monkeypatch.setattr(loader, "CACHE_DIR", tmp_path)
+    bad = _streaming_response(500)
+    bad.raise_for_status.side_effect = RuntimeError("boom")
+    monkeypatch.setattr(loader.requests, "get", lambda *a, **kw: bad)
+
+    with pytest.raises(RuntimeError, match="boom"):
         loader._poll_download("KEY", "TOKEN")
 
 
@@ -252,7 +276,7 @@ def test_poll_download_times_out(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_load_end_to_end_tracks_max_update(monkeypatch, mock_db, tmp_state):
+def test_load_end_to_end_tracks_max_update(monkeypatch, mock_db, tmp_state, tmp_path):
     # Two records: older and newer. max_update should be the newer one.
     payload = {
         "totalRecords": 2,
@@ -285,9 +309,10 @@ def test_load_end_to_end_tracks_max_update(monkeypatch, mock_db, tmp_state):
             },
         ],
     }
+    extract_path = _write_extract_gz(tmp_path, payload)
 
     monkeypatch.setattr(loader, "_submit_extract", lambda k, s: "TOKEN123")
-    monkeypatch.setattr(loader, "_poll_download", lambda k, t: payload)
+    monkeypatch.setattr(loader, "_poll_download", lambda k, t: extract_path)
 
     result = loader.load(mode="seed", since=None, api_key="KEY")
 
@@ -297,7 +322,7 @@ def test_load_end_to_end_tracks_max_update(monkeypatch, mock_db, tmp_state):
     assert len(mock_db) == 2
 
 
-def test_load_continues_past_single_record_flatten_error(monkeypatch, mock_db, tmp_state):
+def test_load_continues_past_single_record_flatten_error(monkeypatch, mock_db, tmp_state, tmp_path):
     """One bad record shouldn't abort the whole load."""
     payload = {
         "excludedEntity": [
@@ -317,8 +342,9 @@ def test_load_continues_past_single_record_flatten_error(monkeypatch, mock_db, t
             },
         ],
     }
+    extract_path = _write_extract_gz(tmp_path, payload)
     monkeypatch.setattr(loader, "_submit_extract", lambda k, s: "T")
-    monkeypatch.setattr(loader, "_poll_download", lambda k, t: payload)
+    monkeypatch.setattr(loader, "_poll_download", lambda k, t: extract_path)
 
     result = loader.load(mode="seed", since=None, api_key="KEY")
     assert result.records_seen == 2

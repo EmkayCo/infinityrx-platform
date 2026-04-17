@@ -38,7 +38,6 @@ unchanged from Wave 7. Records from the extract file have the same
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
 import sys
@@ -171,35 +170,53 @@ def _extract_token(body: dict[str, Any]) -> str | None:
     return None
 
 
-def _poll_download(api_key: str, token: str) -> dict[str, Any]:
-    """Poll the download endpoint until the file is ready. Returns parsed JSON."""
+def _poll_download(api_key: str, token: str) -> Path:
+    """Poll the download endpoint until the file is ready; stream to local gzip.
+
+    Live v4 behavior (verified 2026-04-16):
+      - While the extract is still generating, SAM returns HTTP 400. Docs
+        suggested 202; reality is 400. Treat both identically.
+      - When ready, SAM returns HTTP 302 → presigned S3 URL whose body is
+        ``application/gzip`` containing the JSON extract. ``requests`` with
+        ``allow_redirects=True`` follows the redirect to a 200 from S3.
+      - We stream the gzip bytes into CACHE_DIR/<token>.json.gz and return
+        the path. Downstream parse runs on the gzip file directly.
+
+    NOT using ``get_with_retry`` here because that helper treats 400 as
+    fatal. 4xx during async-extract polling is load-bearing status, not
+    an error.
+    """
     params = {"api_key": api_key, "token": token}
     for attempt in range(1, POLL_MAX_ATTEMPTS + 1):
-        resp = _get_with_retry(
-            DOWNLOAD_URL, params, timeout=DOWNLOAD_TIMEOUT_SEC, accept_202=True
+        resp = requests.get(
+            DOWNLOAD_URL,
+            params=params,
+            timeout=DOWNLOAD_TIMEOUT_SEC,
+            allow_redirects=True,
+            stream=True,
         )
 
-        if resp.status_code == 202:
-            log.info("file not ready (attempt %d/%d); sleeping %ds",
-                     attempt, POLL_MAX_ATTEMPTS, POLL_INTERVAL_SEC)
+        if resp.status_code in (400, 202):
+            resp.close()
+            log.info("file not ready (HTTP %d, attempt %d/%d); sleeping %ds",
+                     resp.status_code, attempt, POLL_MAX_ATTEMPTS, POLL_INTERVAL_SEC)
             time.sleep(POLL_INTERVAL_SEC)
             continue
 
-        # 200 — but SAM.gov sometimes returns 200 with a "still generating"
-        # JSON envelope rather than 202. Check content for that.
-        try:
-            payload = resp.json()
-        except json.JSONDecodeError:
-            raise RuntimeError(f"download returned non-JSON (len={len(resp.content)})")
+        if resp.status_code != 200:
+            resp.close()
+            resp.raise_for_status()
 
-        if _is_not_ready(payload):
-            log.info("file not ready per 200-envelope (attempt %d/%d); sleeping %ds",
-                     attempt, POLL_MAX_ATTEMPTS, POLL_INTERVAL_SEC)
-            time.sleep(POLL_INTERVAL_SEC)
-            continue
-
-        log.info("extract file downloaded on attempt %d", attempt)
-        return payload
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        extract_path = CACHE_DIR / f"extract_{token}.json.gz"
+        with extract_path.open("wb") as fh:
+            for chunk in resp.iter_content(chunk_size=1 << 20):
+                if chunk:
+                    fh.write(chunk)
+        resp.close()
+        log.info("extract downloaded on attempt %d: %s (%d bytes gz)",
+                 attempt, extract_path, extract_path.stat().st_size)
+        return extract_path
 
     raise TimeoutError(
         f"extract file not ready after {POLL_MAX_ATTEMPTS} polls "
@@ -207,36 +224,27 @@ def _poll_download(api_key: str, token: str) -> dict[str, Any]:
     )
 
 
-def _is_not_ready(payload: dict[str, Any]) -> bool:
-    """Detect a 'still generating' envelope returned as 200."""
-    if not isinstance(payload, dict):
-        return False
-    msg = (payload.get("message") or "").lower()
-    return "not generated yet" in msg or "try again" in msg
-
-
 # ---------------------------------------------------------------------------
 # Record extraction
 # ---------------------------------------------------------------------------
 
 
-def _iter_records(payload: dict[str, Any]) -> Iterator[dict[str, Any]]:
-    """Yield raw v4 records from an extract payload.
+def _iter_records(file_path: Path) -> Iterator[dict[str, Any]]:
+    """Stream raw v4 records from a gzipped extract file at *file_path*.
 
-    Handles both direct `excludedEntity` arrays and the occasional wrapping
-    under `results` seen in some extract responses.
+    SAM v4 payload shape: ``{"totalRecords": N, "excludedEntity": [...]}``.
+    Uses ijson with prefix ``excludedEntity.item`` so peak memory is the
+    size of one record, not the whole 167k-row payload. Wave 9e-lite's
+    ``stream_json_array`` hardcodes the top-level-array prefix so isn't
+    reusable here — this ijson call is intentionally inlined rather than
+    extending the shared primitive for one caller.
     """
-    if "excludedEntity" in payload:
-        yield from payload["excludedEntity"]
-        return
-    if "results" in payload and isinstance(payload["results"], list):
-        for r in payload["results"]:
-            if "excludedEntity" in r:
-                yield from r["excludedEntity"]
-            else:
-                yield r
-        return
-    raise RuntimeError(f"extract payload has no excludedEntity key; top-level keys: {list(payload)}")
+    import gzip
+
+    import ijson
+
+    with gzip.open(file_path, "rb") as fh:
+        yield from ijson.items(fh, "excludedEntity.item")
 
 
 # ---------------------------------------------------------------------------
@@ -302,14 +310,14 @@ def _resolve_since(mode: str, cli_since: date | None) -> date | None:
 
 def load(mode: str, since: date | None, api_key: str) -> LoadResult:
     token = _submit_extract(api_key, since)
-    payload = _poll_download(api_key, token)
+    extract_path = _poll_download(api_key, token)
 
     seen = 0
     upserted = 0
     max_update: date | None = None
 
     with get_db_connection() as conn:
-        for raw in _iter_records(payload):
+        for raw in _iter_records(extract_path):
             seen += 1
             try:
                 flat = _flatten_v4_record(raw)
