@@ -48,6 +48,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator
 
+import requests
+
 # The script is executed directly from the repo, so wire sys.path
 # the same way every other loader script does before we hit the shared modules.
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -132,7 +134,12 @@ def _submit_extract(api_key: str, since: date | None) -> str:
 
     # Spec: response is a small JSON envelope containing the download URL
     # with a REPLACE_WITH_API_KEY placeholder and a token param.
-    body = resp.json()
+    # Reality (v4): SAM.gov returns text/plain with the URL embedded in an
+    # English sentence; _extract_token's fallback handles both shapes.
+    try:
+        body = resp.json()
+    except (ValueError, requests.exceptions.JSONDecodeError):
+        body = {"message": resp.text}
     token = _extract_token(body)
     if not token:
         raise RuntimeError(f"no token in submit response: {body}")
