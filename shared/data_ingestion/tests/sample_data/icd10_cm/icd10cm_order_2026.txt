@@ -1,0 +1,8 @@
+00001 A00     0 Cholera                                                      Cholera
+00002 A000    1 Cholera due to Vibrio cholerae 01, biovar cholerae           Cholera due to Vibrio cholerae 01, biovar cholerae
+00003 A001    1 Cholera due to Vibrio cholerae 01, biovar eltor              Cholera due to Vibrio cholerae 01, biovar eltor
+00004 A009    1 Cholera, unspecified                                         Cholera, unspecified
+00005 A01     0 Typhoid and paratyphoid fevers                               Typhoid and paratyphoid fevers
+00006 A0100   1 Typhoid fever, unspecified                                   Typhoid fever, unspecified
+00007 A0101   1 Typhoid meningitis                                           Typhoid meningitis
+00008 Z000    1 Encntr for general adult medical exam w/o abnormal findings  Encounter for general adult medical examination without abnormal findings

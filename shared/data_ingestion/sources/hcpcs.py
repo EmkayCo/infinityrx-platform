@@ -424,49 +424,10 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
-_cached_table: Table | None = None
-
-
 def _get_target_table() -> Table:
-    global _cached_table
-    if _cached_table is None:
-        from sqlalchemy import (
-            Boolean,
-            Column,
-            Date,
-            DateTime,
-            Integer,
-            MetaData,
-            String,
-            Table as _Table,
-            Text,
-        )
-        from sqlalchemy.dialects.postgresql import JSONB
-
-        metadata = MetaData(schema="shared")
-        _cached_table = _Table(
-            "hcpcs_codes",
-            metadata,
-            Column("id", Integer, primary_key=True),
-            Column("code", String(5), nullable=False),
-            Column("is_modifier", Boolean, nullable=False),
-            Column("publication_quarter", String(6), nullable=False),
-            Column("effective_date", Date, nullable=False),
-            Column("long_description", Text),
-            Column("short_description", String(28)),
-            Column("pricing_indicator", String(2)),
-            Column("coverage_code", String(1)),
-            Column("anesthesia_base_units", Integer),
-            Column("action_code", String(1)),
-            Column("added_date", Date),
-            Column("action_effective_date", Date),
-            Column("termination_date", Date),
-            Column("raw_payload", JSONB),
-            Column("created_at", DateTime(timezone=True)),
-            Column("updated_at", DateTime(timezone=True)),
-            schema="shared",
-        )
-    return _cached_table
+    """Return the SQLAlchemy Table for ``shared.hcpcs_codes``."""
+    from shared.db.models.hcpcs_codes import HcpcsCode
+    return HcpcsCode.__table__
 
 
 __all__ = [

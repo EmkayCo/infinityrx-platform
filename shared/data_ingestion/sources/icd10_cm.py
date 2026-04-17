@@ -346,43 +346,10 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
-_cached_table: Table | None = None
-
-
 def _get_target_table() -> Table:
-    """Reflect ``shared.icd10_cm_codes`` on first use (keeps module-import fast)."""
-    global _cached_table
-    if _cached_table is None:
-        from sqlalchemy import (
-            Boolean,
-            Column,
-            Date,
-            DateTime,
-            Integer,
-            MetaData,
-            String,
-            Table as _Table,
-            Text,
-        )
-        from sqlalchemy.dialects.postgresql import JSONB
-
-        metadata = MetaData(schema="shared")
-        _cached_table = _Table(
-            "icd10_cm_codes",
-            metadata,
-            Column("id", Integer, primary_key=True),
-            Column("code", String(7), nullable=False),
-            Column("effective_date", Date, nullable=False),
-            Column("is_billable", Boolean, nullable=False),
-            Column("short_description", String(80)),
-            Column("long_description", Text),
-            Column("ordinal_num", Integer),
-            Column("raw_payload", JSONB),
-            Column("created_at", DateTime(timezone=True)),
-            Column("updated_at", DateTime(timezone=True)),
-            schema="shared",
-        )
-    return _cached_table
+    """Return the SQLAlchemy Table for ``shared.icd10_cm_codes``."""
+    from shared.db.models.icd10_cm_codes import Icd10CmCode
+    return Icd10CmCode.__table__
 
 
 __all__ = [
