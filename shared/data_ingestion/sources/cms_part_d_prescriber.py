@@ -352,14 +352,23 @@ class CmsPartDPrescriberIngester(DataSourceIngester):
         return dest_path
 
     def parse(self, file_path: Path) -> Iterator[dict[str, Any]]:
-        """Parse the collected JSON file; yield normalized dicts."""
-        # Support both JSON (from Socrata API) and CSV bulk download
+        """Stream-parse the downloaded file; yield normalised dicts.
+
+        JSON: uses ``stream_json_array`` from shared.data_ingestion.common —
+        ijson-backed, O(single record) memory regardless of file size.
+        The pre-refactor ``json.load(fh)`` OOMed on the 3.26 GB CY2023
+        snapshot; this path keeps peak RSS bounded so the loader runs to
+        completion on a dev laptop.
+
+        CSV: unchanged — csv.DictReader is already streaming.
+        """
         if file_path.suffix.lower() == ".csv":
             yield from self._parse_csv(file_path)
             return
-        with file_path.open(encoding="utf-8") as fh:
-            records: list[dict[str, Any]] = json.load(fh)
-        for raw in records:
+
+        from shared.data_ingestion.common import stream_json_array
+
+        for raw in stream_json_array(file_path):
             parsed = parse_part_d_row(raw, self._year)
             if parsed is not None:
                 yield parsed
@@ -373,54 +382,72 @@ class CmsPartDPrescriberIngester(DataSourceIngester):
                     yield parsed
 
     async def load(self, records: Iterator[dict[str, Any]]) -> IngestionResult:
-        """Batch-upsert Part D rows; INSERT ON CONFLICT (npi, year) DO UPDATE."""
+        """Batch-upsert via flush_upsert_batch; unique_key = (npi, year).
+
+        Wave 10b: switched from hand-rolled pg_insert + SQLite-merge
+        branching to the shared flush_upsert_batch primitive. Memory
+        stays bounded because parse() streams and we flush every
+        _BATCH_SIZE (1000) rows — never accumulates all 1.38M records
+        in memory at once.
+        """
         import importlib
-        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        from shared.data_ingestion.batching import ErrorAggregator, flush_upsert_batch
 
         _m = importlib.import_module("src.models.medicare_tables")
         PartDModel = _m.MedicarePartDUtilization
 
-        inserted = 0
-        updated = 0
-        errored = 0
+        errors = ErrorAggregator()
         batch: list[dict[str, Any]] = []
         now = datetime.now(UTC)
+        inserted = 0
+        skipped = 0
 
-        dialect_name = self._db.connection().dialect.name
-
-        def _flush(b: list[dict[str, Any]]) -> tuple[int, int]:
-            for row in b:
+        def _flush() -> None:
+            nonlocal inserted, skipped
+            if not batch:
+                return
+            for row in batch:
                 row["updated_at"] = now
-            if dialect_name == "postgresql":
-                tbl = PartDModel.__table__
-                stmt = pg_insert(tbl).values(b)
-                update_cols = {c.name: stmt.excluded[c.name] for c in tbl.columns if c.name not in ("npi", "year")}
-                self._db.execute(stmt.on_conflict_do_update(index_elements=["npi", "year"], set_=update_cols))
-            else:
-                for row in b:
-                    obj = PartDModel(**row)
-                    self._db.merge(obj)
-            self._db.flush()
-            return len(b), 0
+            ins, dd = flush_upsert_batch(
+                self._db,
+                source_name=_SOURCE_NAME,
+                table=PartDModel.__table__,
+                unique_key=["npi", "year"],
+                rows=batch,
+                errors=errors,
+            )
+            inserted += ins
+            skipped += dd
+            batch.clear()
 
         for record in records:
             batch.append(record)
             if len(batch) >= _BATCH_SIZE:
-                _ins, _upd = _flush(batch)
-                inserted += _ins
-                batch = []
+                _flush()
 
-        if batch:
-            _ins, _upd = _flush(batch)
-            inserted += _ins
+        _flush()
+
+        errors.log_summary(source_name=_SOURCE_NAME)
+
+        logger.info(
+            "Part D load complete",
+            extra={
+                "ingest_source": _SOURCE_NAME,
+                "ingest_year": self._year,
+                "ingest_records_inserted": inserted,
+                "ingest_records_skipped": skipped,
+                "ingest_records_errored": errors.total_errors,
+            },
+        )
 
         return IngestionResult(
             source=self.source_name,
             status="completed",
-            records_processed=inserted + updated + errored,
+            records_processed=inserted + skipped + errors.total_errors,
             records_inserted=inserted,
-            records_updated=updated,
-            records_errored=errored,
+            records_skipped=skipped,
+            records_errored=errors.total_errors,
         )
 
 
