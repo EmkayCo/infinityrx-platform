@@ -87,6 +87,36 @@ def _or_none(v: str | None) -> str | None:
     return stripped if stripped else None
 
 
+def _state_or_none(value: str | None) -> str | None:
+    """Return a 2-char US state/territory code, or None for anything else.
+
+    Mirrors nppes_parser._state_or_none (applied to the core prescribers
+    table) — extended to the satellite address + taxonomy + identifier
+    tables whose state columns are also VARCHAR(2). Foreign provider rows
+    populate these with region names ("ONTARIO", "ENGLAND", "MAHARASHTRA,
+    INDIA") that overflow the target column and fail the batch INSERT.
+    Dropping them to NULL at parse time is strictly better than losing
+    the whole batch.
+    """
+    v = (value or "").strip().upper()
+    if len(v) == 2 and v.isalpha():
+        return v
+    return None
+
+
+def _fit_or_none(value: str | None, max_len: int) -> str | None:
+    """Return ``value`` if it fits within ``max_len`` characters, else None.
+
+    Used for VARCHAR-constrained columns where the source occasionally
+    overflows. NULL is preferred over truncation because a partial
+    postal code / reason code is meaningless for downstream matching.
+    """
+    v = (value or "").strip()
+    if not v or len(v) > max_len:
+        return None
+    return v
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # Row → satellite ORM objects
 # (Returning ORM objects preserves the _build_* API that existing tests
@@ -97,14 +127,14 @@ def _build_detail(row: dict[str, str], now: datetime) -> NppesPrescriberDetail:
     """Map a raw NPPES CSV row to NppesPrescriberDetail."""
     return NppesPrescriberDetail(
         npi=row.get("NPI", "").strip(),
-        entity_type_code=_or_none(row.get("Entity Type Code", "")),
-        replacement_npi=_or_none(row.get("Replacement NPI", "")),
+        entity_type_code=_fit_or_none(row.get("Entity Type Code", ""), 1),
+        replacement_npi=_fit_or_none(row.get("Replacement NPI", ""), 10),
         ein=_or_none(row.get("Employer Identification Number (EIN)", "")),
         provider_last_name_legal=_or_none(row.get("Provider Last Name (Legal Name)", "")),
         provider_first_name=_or_none(row.get("Provider First Name", "")),
         provider_middle_name=_or_none(row.get("Provider Middle Name", "")),
-        provider_name_prefix=_or_none(row.get("Provider Name Prefix Text", "")),
-        provider_name_suffix=_or_none(row.get("Provider Name Suffix Text", "")),
+        provider_name_prefix=_fit_or_none(row.get("Provider Name Prefix Text", ""), 10),
+        provider_name_suffix=_fit_or_none(row.get("Provider Name Suffix Text", ""), 10),
         provider_credential_text=_or_none(row.get("Provider Credential Text", "")),
         provider_organization_name_legal=_or_none(
             row.get("Provider Organization Name (Legal Business Name)", "")
@@ -112,27 +142,27 @@ def _build_detail(row: dict[str, str], now: datetime) -> NppesPrescriberDetail:
         provider_other_organization_name=_or_none(
             row.get("Provider Other Organization Name", "")
         ),
-        provider_other_organization_name_type_code=_or_none(
-            row.get("Provider Other Organization Name Type Code", "")
+        provider_other_organization_name_type_code=_fit_or_none(
+            row.get("Provider Other Organization Name Type Code", ""), 2
         ),
         provider_other_last_name=_or_none(row.get("Provider Other Last Name (former)", "")),
         provider_other_first_name=_or_none(row.get("Provider Other First Name", "")),
         provider_other_middle_name=_or_none(row.get("Provider Other Middle Name", "")),
-        provider_other_name_prefix=_or_none(row.get("Provider Other Name Prefix Text", "")),
-        provider_other_name_suffix=_or_none(row.get("Provider Other Name Suffix Text", "")),
+        provider_other_name_prefix=_fit_or_none(row.get("Provider Other Name Prefix Text", ""), 10),
+        provider_other_name_suffix=_fit_or_none(row.get("Provider Other Name Suffix Text", ""), 10),
         provider_other_credential_text=_or_none(row.get("Provider Other Credential Text", "")),
-        provider_other_last_name_type_code=_or_none(
-            row.get("Provider Other Last Name Type Code", "")
+        provider_other_last_name_type_code=_fit_or_none(
+            row.get("Provider Other Last Name Type Code", ""), 2
         ),
         provider_enumeration_date=_parse_date(row.get("Provider Enumeration Date", "")),  # type: ignore[arg-type]
         last_update_date=_parse_date(row.get("Last Update Date", "")),  # type: ignore[arg-type]
-        npi_deactivation_reason_code=_or_none(row.get("NPI Deactivation Reason Code", "")),
+        npi_deactivation_reason_code=_fit_or_none(row.get("NPI Deactivation Reason Code", ""), 2),
         npi_deactivation_date=_parse_date(row.get("NPI Deactivation Date", "")),  # type: ignore[arg-type]
         npi_reactivation_date=_parse_date(row.get("NPI Reactivation Date", "")),  # type: ignore[arg-type]
         certification_date=_parse_date(row.get("Certification Date", "")),  # type: ignore[arg-type]
-        provider_gender_code=_or_none(row.get("Provider Gender Code", "")),
-        is_sole_proprietor=_or_none(row.get("Is Sole Proprietor", "")),
-        is_organization_subpart=_or_none(row.get("Is Organization Subpart", "")),
+        provider_gender_code=_fit_or_none(row.get("Provider Gender Code", ""), 1),
+        is_sole_proprietor=_fit_or_none(row.get("Is Sole Proprietor", ""), 1),
+        is_organization_subpart=_fit_or_none(row.get("Is Organization Subpart", ""), 1),
         parent_organization_lbn=_or_none(
             row.get("Parent Organization Legal Business Name", "")
         ),
@@ -155,11 +185,11 @@ def _build_detail(row: dict[str, str], now: datetime) -> NppesPrescriberDetail:
         authorized_official_credential=_or_none(
             row.get("Authorized Official Credential", "")
         ),
-        authorized_official_name_prefix=_or_none(
-            row.get("Authorized Official Name Prefix Text", "")
+        authorized_official_name_prefix=_fit_or_none(
+            row.get("Authorized Official Name Prefix Text", ""), 10
         ),
-        authorized_official_name_suffix=_or_none(
-            row.get("Authorized Official Name Suffix Text", "")
+        authorized_official_name_suffix=_fit_or_none(
+            row.get("Authorized Official Name Suffix Text", ""), 10
         ),
         nppes_loaded_at=now,
     )
@@ -178,12 +208,12 @@ def _build_addresses(npi: str, row: dict[str, str], now: datetime) -> list[Presc
                 line_1=ml1,
                 line_2=_or_none(row.get("Provider Second Line Business Mailing Address", "")),
                 city=_or_none(row.get("Provider Business Mailing Address City Name", "")),
-                state=_or_none(row.get("Provider Business Mailing Address State Name", "")),
-                postal_code=_or_none(
-                    row.get("Provider Business Mailing Address Postal Code", "")
+                state=_state_or_none(row.get("Provider Business Mailing Address State Name", "")),
+                postal_code=_fit_or_none(
+                    row.get("Provider Business Mailing Address Postal Code", ""), 10
                 ),
-                country_code=_or_none(
-                    row.get("Provider Business Mailing Address Country Code (If outside U.S.)", "")
+                country_code=_fit_or_none(
+                    row.get("Provider Business Mailing Address Country Code (If outside U.S.)", ""), 3
                 ),
                 telephone_number=_or_none(
                     row.get("Provider Business Mailing Address Telephone Number", "")
@@ -210,17 +240,18 @@ def _build_addresses(npi: str, row: dict[str, str], now: datetime) -> list[Presc
                 city=_or_none(
                     row.get("Provider Business Practice Location Address City Name", "")
                 ),
-                state=_or_none(
+                state=_state_or_none(
                     row.get("Provider Business Practice Location Address State Name", "")
                 ),
-                postal_code=_or_none(
-                    row.get("Provider Business Practice Location Address Postal Code", "")
+                postal_code=_fit_or_none(
+                    row.get("Provider Business Practice Location Address Postal Code", ""), 10
                 ),
-                country_code=_or_none(
+                country_code=_fit_or_none(
                     row.get(
                         "Provider Business Practice Location Address Country Code (If outside U.S.)",
                         "",
-                    )
+                    ),
+                    3,
                 ),
                 telephone_number=_or_none(
                     row.get("Provider Business Practice Location Address Telephone Number", "")
@@ -248,11 +279,11 @@ def _build_taxonomies(npi: str, row: dict[str, str], now: datetime) -> list[Pres
                 sequence=i,
                 taxonomy_code=code,
                 license_number=_or_none(row.get(f"Provider License Number_{i}", "")),
-                license_state_code=_or_none(
+                license_state_code=_state_or_none(
                     row.get(f"Provider License Number State Code_{i}", "")
                 ),
-                is_primary=_or_none(
-                    row.get(f"Healthcare Provider Primary Taxonomy Switch_{i}", "")
+                is_primary=_fit_or_none(
+                    row.get(f"Healthcare Provider Primary Taxonomy Switch_{i}", ""), 1
                 ),
                 taxonomy_group=_or_none(
                     row.get(f"Healthcare Provider Taxonomy Group_{i}", "")
@@ -275,10 +306,10 @@ def _build_identifiers(npi: str, row: dict[str, str], now: datetime) -> list[Pre
                 npi=npi,
                 sequence=i,
                 identifier=ident,
-                identifier_type_code=_or_none(
-                    row.get(f"Other Provider Identifier Type Code_{i}", "")
+                identifier_type_code=_fit_or_none(
+                    row.get(f"Other Provider Identifier Type Code_{i}", ""), 2
                 ),
-                identifier_state=_or_none(
+                identifier_state=_state_or_none(
                     row.get(f"Other Provider Identifier State_{i}", "")
                 ),
                 identifier_issuer=_or_none(
@@ -307,6 +338,28 @@ def _orm_to_dict(obj: Any) -> dict[str, Any]:
 # Pharmacy supplement (unchanged from pre-Wave-11 — already uses ON CONFLICT)
 # ────────────────────────────────────────────────────────────────────────────
 
+def _pharmacy_table_exists(db: Session) -> bool:
+    """Check if ``pharmacy_directory.pharmacies`` exists.
+
+    Uses Postgres's ``to_regclass`` (returns NULL for missing tables)
+    so the check itself never aborts the current transaction. Under
+    SQLite tests ``to_regclass`` doesn't exist and the Exception path
+    returns False — which is correct, since the test SQLite schema
+    never contains T2's tables anyway.
+    """
+    from sqlalchemy import text
+
+    try:
+        result = db.execute(
+            text("SELECT to_regclass('pharmacy_directory.pharmacies')")
+        ).scalar()
+        return result is not None
+    except Exception:
+        # SQLite or any dialect without to_regclass — treat as "not available"
+        db.rollback()
+        return False
+
+
 def _maybe_supplement_pharmacy(
     db: Session,
     npi: str,
@@ -315,12 +368,14 @@ def _maybe_supplement_pharmacy(
 ) -> bool:
     """Insert/upsert into pharmacy_directory.pharmacies if conditions met.
 
+    Callers MUST check ``_pharmacy_table_exists(db)`` before invoking this
+    in a loop — we do not re-check per row. If the table is missing the
+    caller should skip calling this function entirely; otherwise the raw
+    SQL would abort the enclosing transaction.
+
     Conditions:
       - entity_type_code == "2" (organization)
       - at least one taxonomy code starts with "333" (pharmacy taxonomy)
-
-    Returns True if supplement was attempted. T2's pharmacies table may not
-    exist yet — wrap in try/except and log-and-skip gracefully.
     """
     if entity_type_code != "2":
         return False
@@ -328,39 +383,28 @@ def _maybe_supplement_pharmacy(
     if not pharmacy_tax:
         return False
 
-    try:
-        from sqlalchemy import text
+    from sqlalchemy import text
 
-        primary_tax = next((t for t in pharmacy_tax if t.is_primary == "Y"), pharmacy_tax[0])
-        db.execute(
-            text(
-                """
-                INSERT INTO pharmacy_directory.pharmacies
-                    (npi, pharmacy_name, taxonomy_code, npi_source, created_at, updated_at)
-                VALUES
-                    (:npi, :name, :taxonomy_code, 'nppes', NOW(), NOW())
-                ON CONFLICT (npi) DO UPDATE SET
-                    taxonomy_code = EXCLUDED.taxonomy_code,
-                    updated_at    = NOW()
-                """
-            ),
-            {
-                "npi": npi,
-                "name": None,
-                "taxonomy_code": primary_tax.taxonomy_code,
-            },
-        )
-        return True
-    except Exception as exc:
-        logger.warning(
-            "nppes_pharmacy_supplement_skipped",
-            extra={
-                "svc_npi": npi,
-                "svc_reason": str(exc)[:200],
-                "svc_note": "T2 pharmacy table not yet migrated — supplement will activate after T2 migration",
-            },
-        )
-        return False
+    primary_tax = next((t for t in pharmacy_tax if t.is_primary == "Y"), pharmacy_tax[0])
+    db.execute(
+        text(
+            """
+            INSERT INTO pharmacy_directory.pharmacies
+                (npi, pharmacy_name, taxonomy_code, npi_source, created_at, updated_at)
+            VALUES
+                (:npi, :name, :taxonomy_code, 'nppes', NOW(), NOW())
+            ON CONFLICT (npi) DO UPDATE SET
+                taxonomy_code = EXCLUDED.taxonomy_code,
+                updated_at    = NOW()
+            """
+        ),
+        {
+            "npi": npi,
+            "name": None,
+            "taxonomy_code": primary_tax.taxonomy_code,
+        },
+    )
+    return True
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -424,6 +468,21 @@ def load_nppes_satellite_tables(
     source_name = "nppes_satellite"
     now = datetime.now(UTC)
     row_count = 0
+
+    # Probe once — if T2's pharmacy table doesn't exist we skip the
+    # supplement path entirely. Checking per-row would either pollute
+    # the transaction (plain try/except) or force SAVEPOINT nesting
+    # (incompatible with test-fixture SAVEPOINT isolation).
+    pharmacy_available = _pharmacy_table_exists(db)
+    if not pharmacy_available:
+        logger.info(
+            "nppes_pharmacy_supplement_disabled",
+            extra={
+                "svc_source": source_name,
+                "svc_note": "pharmacy_directory.pharmacies not present — pharmacy "
+                            "supplement will activate once T2 migrations land",
+            },
+        )
 
     # Per-table buffers of row dicts
     pending_details: list[dict[str, Any]] = []
@@ -496,7 +555,6 @@ def load_nppes_satellite_tables(
             try:
                 validate_npi(npi)
             except NpiValidationError as exc:
-                stats.records_errored += 1
                 errors.record("luhn", str(exc), raw_row={"npi_prefix": npi[:4]})
                 continue
 
@@ -517,8 +575,13 @@ def load_nppes_satellite_tables(
                     pending_identifiers.append(_orm_to_dict(ident))
 
                 # Pharmacy supplement (raw SQL, per-row — acceptable since
-                # only a small subset of orgs trigger it)
-                supplemented = _maybe_supplement_pharmacy(db, npi, entity_type_code, taxonomies)
+                # only a small subset of orgs trigger it). Skipped entirely
+                # when the target table isn't present.
+                supplemented = (
+                    _maybe_supplement_pharmacy(db, npi, entity_type_code, taxonomies)
+                    if pharmacy_available
+                    else False
+                )
 
                 if entity_type_code == "1":
                     stats.individuals += 1
@@ -545,7 +608,6 @@ def load_nppes_satellite_tables(
                     )
 
             except Exception as exc:
-                stats.records_errored += 1
                 errors.record("row_build", str(exc), raw_row={"npi": npi})
                 logger.warning(
                     "nppes_row_error",
@@ -555,6 +617,10 @@ def load_nppes_satellite_tables(
     # Final flush
     if pending_npis > 0:
         _flush()
+
+    # Propagate the canonical error tally from ErrorAggregator (which counts
+    # both row-level validation + batch-flush failures) into stats.
+    stats.records_errored = errors.total_errors
 
     errors.log_summary(source_name=source_name)
 
