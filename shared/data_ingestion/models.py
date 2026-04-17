@@ -61,7 +61,12 @@ class IngestionRun(Base):
     )  # auto_scheduled | manual_trigger | file_upload
     status: Mapped[str] = mapped_column(
         String(50), nullable=False, server_default="running"
-    )  # running | completed | failed | skipped_unchanged | cancelled
+    )  # running | completed | completed_core | failed | skipped_unchanged | cancelled
+    # "completed_core": a multi-phase loader finished its primary phase (e.g.,
+    # NPPES monthly's core prescribers upsert) but one or more dependent
+    # phases (e.g., satellite tables) were deferred or killed before finishing.
+    # Used when the core data is usable on its own and a separate follow-up
+    # run fills in the remainder.
     source_url: Mapped[str | None] = mapped_column(Text)
     source_file_name: Mapped[str | None] = mapped_column(String(500))
     source_file_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
