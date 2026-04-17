@@ -1,13 +1,21 @@
-"""NPPES ingestion service — full normalized load for prescriber-directory.
+"""NPPES ingestion service — populates the satellite tables from a parsed CSV.
 
-Extends the existing NppesParser / nppes_upsert pipeline to also populate:
-  - prescriber_dir.nppes_prescriber_details  (extended NPPES fields)
-  - prescriber_dir.prescriber_addresses      (mailing + practice, up to 2)
-  - prescriber_dir.prescriber_taxonomies     (up to 15 exploded rows)
-  - prescriber_dir.prescriber_identifiers    (up to 50 exploded rows)
+Writes to:
+  - prescriber_dir.nppes_prescriber_details  (extended NPPES fields, 1 per NPI)
+  - prescriber_dir.prescriber_addresses      (mailing + practice, up to 2 per NPI)
+  - prescriber_dir.prescriber_taxonomies     (up to 15 exploded rows per NPI)
+  - prescriber_dir.prescriber_identifiers    (up to 50 exploded rows per NPI)
 
-The core Prescriber upsert remains in nppes_upsert.py. This service layers
-the satellite tables on top, called from shared.data_ingestion.sources.nppes.
+Core ``prescriber_dir.prescribers`` upsert lives in ``nppes_upsert.py`` —
+this service layers the satellites on top, called from
+``shared.data_ingestion.sources.nppes`` after the core pass completes.
+
+Wave-11 refactor: the four tables were previously written row-at-a-time via
+``db.query().filter().delete()`` followed by ``db.add()`` per ORM instance —
+~O(14M) DB round-trips for a 7M-row monthly baseline. Now they're batched
+via the shared ``flush_upsert_batch`` (details, keyed on npi) and
+``flush_scoped_replace_batch`` (addresses/taxonomies/identifiers, scoped
+per npi with composite unique keys).
 
 LESSON-010: NPI is public — plaintext throughout, do NOT encrypt.
 LESSON-011: Global reference — no TenantScopedMixin on any table here.
@@ -22,9 +30,15 @@ import logging
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from sqlalchemy.orm import Session
+
+from shared.data_ingestion.batching import (
+    ErrorAggregator,
+    flush_scoped_replace_batch,
+    flush_upsert_batch,
+)
 
 from ..models.nppes_tables import (
     NppesPrescriberDetail,
@@ -32,23 +46,23 @@ from ..models.nppes_tables import (
     PrescriberIdentifier,
     PrescriberTaxonomy,
 )
-from ..models.tables import Prescriber
 from ..utils.validators import NpiValidationError, validate_npi
 
 logger = logging.getLogger("prescriber-directory.nppes-ingestion")
 
-# Regex — LESSON-004: use \A...\Z
+# Regex — LESSON-004
 _NPI_RE = re.compile(r"\A\d{10}\Z")
 
-# Number of taxonomy and identifier columns in NPPES V2
+# NPPES V2 column counts
 _MAX_TAXONOMIES = 15
 _MAX_IDENTIFIERS = 50
 
-# Batch size for satellite-table inserts
-_BATCH_SIZE = 1000
+# Number of NPIs processed before a full 4-table flush
+_BATCH_SIZE = 1_000
+
 
 # ────────────────────────────────────────────────────────────────────────────
-# Date parsing
+# Date + value parsing
 # ────────────────────────────────────────────────────────────────────────────
 
 def _parse_date(value: str) -> "datetime | None":
@@ -74,7 +88,9 @@ def _or_none(v: str | None) -> str | None:
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Row → satellite objects
+# Row → satellite ORM objects
+# (Returning ORM objects preserves the _build_* API that existing tests
+#  exercise directly. The flush path below converts to dicts at the boundary.)
 # ────────────────────────────────────────────────────────────────────────────
 
 def _build_detail(row: dict[str, str], now: datetime) -> NppesPrescriberDetail:
@@ -153,7 +169,6 @@ def _build_addresses(npi: str, row: dict[str, str], now: datetime) -> list[Presc
     """Extract mailing and practice addresses; returns 0, 1, or 2 rows."""
     addresses = []
 
-    # Mailing address
     ml1 = _or_none(row.get("Provider First Line Business Mailing Address", ""))
     if ml1:
         addresses.append(
@@ -180,7 +195,6 @@ def _build_addresses(npi: str, row: dict[str, str], now: datetime) -> list[Presc
             )
         )
 
-    # Practice address
     pl1 = _or_none(
         row.get("Provider First Line Business Practice Location Address", "")
     )
@@ -227,7 +241,7 @@ def _build_taxonomies(npi: str, row: dict[str, str], now: datetime) -> list[Pres
     for i in range(1, _MAX_TAXONOMIES + 1):
         code = _or_none(row.get(f"Healthcare Provider Taxonomy Code_{i}", ""))
         if not code:
-            break  # stop at first empty slot per spec
+            break
         taxonomies.append(
             PrescriberTaxonomy(
                 npi=npi,
@@ -255,7 +269,7 @@ def _build_identifiers(npi: str, row: dict[str, str], now: datetime) -> list[Pre
     for i in range(1, _MAX_IDENTIFIERS + 1):
         ident = _or_none(row.get(f"Other Provider Identifier_{i}", ""))
         if not ident:
-            break  # stop at first empty slot
+            break
         identifiers.append(
             PrescriberIdentifier(
                 npi=npi,
@@ -276,8 +290,21 @@ def _build_identifiers(npi: str, row: dict[str, str], now: datetime) -> list[Pre
     return identifiers
 
 
+def _orm_to_dict(obj: Any) -> dict[str, Any]:
+    """Extract column values from an ORM instance to a plain dict.
+
+    Excludes the auto-increment ``id`` column so flush_* primitives let the
+    DB assign new values on insert.
+    """
+    return {
+        c.name: getattr(obj, c.name)
+        for c in obj.__table__.columns
+        if c.name != "id"
+    }
+
+
 # ────────────────────────────────────────────────────────────────────────────
-# Pharmacy supplement
+# Pharmacy supplement (unchanged from pre-Wave-11 — already uses ON CONFLICT)
 # ────────────────────────────────────────────────────────────────────────────
 
 def _maybe_supplement_pharmacy(
@@ -292,8 +319,8 @@ def _maybe_supplement_pharmacy(
       - entity_type_code == "2" (organization)
       - at least one taxonomy code starts with "333" (pharmacy taxonomy)
 
-    Returns True if supplement was attempted (regardless of T2 table existence).
-    T2 may not have landed yet — wrap in try/except and log-and-skip gracefully.
+    Returns True if supplement was attempted. T2's pharmacies table may not
+    exist yet — wrap in try/except and log-and-skip gracefully.
     """
     if entity_type_code != "2":
         return False
@@ -301,8 +328,6 @@ def _maybe_supplement_pharmacy(
     if not pharmacy_tax:
         return False
 
-    # T2's pharmacies table may not exist yet — attempt and gracefully skip.
-    # This supplement path will light up automatically once T2's migrations are applied.
     try:
         from sqlalchemy import text
 
@@ -321,13 +346,12 @@ def _maybe_supplement_pharmacy(
             ),
             {
                 "npi": npi,
-                "name": None,  # T2 will enrich from NPPES organization name
+                "name": None,
                 "taxonomy_code": primary_tax.taxonomy_code,
             },
         )
         return True
     except Exception as exc:
-        # T2 table doesn't exist yet — log warning and continue
         logger.warning(
             "nppes_pharmacy_supplement_skipped",
             extra={
@@ -337,48 +361,6 @@ def _maybe_supplement_pharmacy(
             },
         )
         return False
-
-
-# ────────────────────────────────────────────────────────────────────────────
-# Batch upsert helpers for satellite tables
-# ────────────────────────────────────────────────────────────────────────────
-
-def _upsert_detail(db: Session, detail: NppesPrescriberDetail) -> None:
-    """Insert or update NppesPrescriberDetail row keyed on npi."""
-    existing = (
-        db.query(NppesPrescriberDetail)
-        .filter(NppesPrescriberDetail.npi == detail.npi)
-        .first()
-    )
-    if existing is None:
-        db.add(detail)
-    else:
-        # Update all mutable fields
-        for col in NppesPrescriberDetail.__table__.columns:
-            if col.name in ("id", "npi"):
-                continue
-            setattr(existing, col.name, getattr(detail, col.name))
-
-
-def _replace_addresses(db: Session, npi: str, addresses: list[PrescriberAddress]) -> None:
-    """Delete existing addresses for NPI and insert fresh rows."""
-    db.query(PrescriberAddress).filter(PrescriberAddress.npi == npi).delete()
-    for addr in addresses:
-        db.add(addr)
-
-
-def _replace_taxonomies(db: Session, npi: str, taxonomies: list[PrescriberTaxonomy]) -> None:
-    """Delete existing taxonomies for NPI and insert fresh rows."""
-    db.query(PrescriberTaxonomy).filter(PrescriberTaxonomy.npi == npi).delete()
-    for tax in taxonomies:
-        db.add(tax)
-
-
-def _replace_identifiers(db: Session, npi: str, identifiers: list[PrescriberIdentifier]) -> None:
-    """Delete existing identifiers for NPI and insert fresh rows."""
-    db.query(PrescriberIdentifier).filter(PrescriberIdentifier.npi == npi).delete()
-    for ident in identifiers:
-        db.add(ident)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -412,13 +394,15 @@ def load_nppes_satellite_tables(
 ) -> NppesIngestionStats:
     """Stream-parse a NPPES CSV and populate the satellite tables.
 
-    This is the second-pass pipeline called after the core Prescriber upsert.
-    It populates:
-      - nppes_prescriber_details
-      - prescriber_addresses
-      - prescriber_taxonomies
-      - prescriber_identifiers
-    And attempts the pharmacy supplement for entity_type=2 + taxonomy 333*.
+    Second-pass pipeline, run after the core ``prescribers`` upsert. Populates
+    nppes_prescriber_details, prescriber_addresses, prescriber_taxonomies,
+    prescriber_identifiers; attempts a pharmacy supplement for
+    entity_type=2 + taxonomy 333*.
+
+    Batching: up to ``batch_size`` NPIs worth of rows are buffered per table,
+    then flushed together via the shared ``flush_upsert_batch`` /
+    ``flush_scoped_replace_batch`` primitives. DB round-trip count drops from
+    O(4 × N) to O(4 × N / batch_size).
 
     Parameters
     ----------
@@ -427,7 +411,7 @@ def load_nppes_satellite_tables(
     csv_path:
         Path to the extracted NPPES CSV file.
     batch_size:
-        Number of NPI rows to process before flushing to DB.
+        Number of NPIs to buffer before flushing all four tables.
     progress_every:
         Log a progress line every this many rows.
 
@@ -436,9 +420,68 @@ def load_nppes_satellite_tables(
     NppesIngestionStats
     """
     stats = NppesIngestionStats()
+    errors = ErrorAggregator()
+    source_name = "nppes_satellite"
     now = datetime.now(UTC)
     row_count = 0
-    batch_count = 0
+
+    # Per-table buffers of row dicts
+    pending_details: list[dict[str, Any]] = []
+    pending_addresses: list[dict[str, Any]] = []
+    pending_taxonomies: list[dict[str, Any]] = []
+    pending_identifiers: list[dict[str, Any]] = []
+    pending_npis = 0
+
+    def _flush() -> None:
+        """Flush all four satellite buffers via shared primitives."""
+        nonlocal pending_details, pending_addresses, pending_taxonomies
+        nonlocal pending_identifiers, pending_npis
+        if pending_details:
+            flush_upsert_batch(
+                db,
+                source_name=source_name,
+                table=NppesPrescriberDetail.__table__,
+                unique_key=["npi"],
+                rows=pending_details,
+                errors=errors,
+            )
+        if pending_addresses:
+            flush_scoped_replace_batch(
+                db,
+                source_name=source_name,
+                table=PrescriberAddress.__table__,
+                scope_key=["npi"],
+                unique_key=["npi", "address_type"],
+                rows=pending_addresses,
+                errors=errors,
+            )
+        if pending_taxonomies:
+            flush_scoped_replace_batch(
+                db,
+                source_name=source_name,
+                table=PrescriberTaxonomy.__table__,
+                scope_key=["npi"],
+                unique_key=["npi", "sequence"],
+                rows=pending_taxonomies,
+                errors=errors,
+            )
+        if pending_identifiers:
+            flush_scoped_replace_batch(
+                db,
+                source_name=source_name,
+                table=PrescriberIdentifier.__table__,
+                scope_key=["npi"],
+                unique_key=["npi", "sequence"],
+                rows=pending_identifiers,
+                errors=errors,
+            )
+        # Invalidate ORM identity map so tests reading via ORM see post-flush state
+        db.expire_all()
+        pending_details = []
+        pending_addresses = []
+        pending_taxonomies = []
+        pending_identifiers = []
+        pending_npis = 0
 
     with csv_path.open(newline="", encoding="utf-8", errors="replace") as fh:
         reader = csv.DictReader(fh)
@@ -446,43 +489,37 @@ def load_nppes_satellite_tables(
             row_count += 1
             npi = row.get("NPI", "").strip()
 
-            # Validate NPI — LESSON-004 regex + Luhn
+            # NPI validation — LESSON-004 regex + Luhn
             if not _NPI_RE.fullmatch(npi):
                 stats.records_skipped += 1
-                logger.debug(
-                    "nppes_invalid_npi_format_skipped",
-                    extra={"svc_npi_prefix": npi[:4] if npi else "empty"},
-                )
                 continue
             try:
                 validate_npi(npi)
             except NpiValidationError as exc:
                 stats.records_errored += 1
-                logger.warning(
-                    "nppes_luhn_fail_skipped",
-                    extra={"svc_npi_prefix": npi[:4], "svc_error": str(exc)[:100]},
-                )
+                errors.record("luhn", str(exc), raw_row={"npi_prefix": npi[:4]})
                 continue
 
             try:
                 entity_type_code = _or_none(row.get("Entity Type Code", ""))
 
-                # Build satellite objects
                 detail = _build_detail(row, now)
                 addresses = _build_addresses(npi, row, now)
                 taxonomies = _build_taxonomies(npi, row, now)
                 identifiers = _build_identifiers(npi, row, now)
 
-                # Upsert all tables
-                _upsert_detail(db, detail)
-                _replace_addresses(db, npi, addresses)
-                _replace_taxonomies(db, npi, taxonomies)
-                _replace_identifiers(db, npi, identifiers)
+                pending_details.append(_orm_to_dict(detail))
+                for addr in addresses:
+                    pending_addresses.append(_orm_to_dict(addr))
+                for tax in taxonomies:
+                    pending_taxonomies.append(_orm_to_dict(tax))
+                for ident in identifiers:
+                    pending_identifiers.append(_orm_to_dict(ident))
 
-                # Pharmacy supplement (entity=2 + taxonomy 333*)
+                # Pharmacy supplement (raw SQL, per-row — acceptable since
+                # only a small subset of orgs trigger it)
                 supplemented = _maybe_supplement_pharmacy(db, npi, entity_type_code, taxonomies)
 
-                # Update stats
                 if entity_type_code == "1":
                     stats.individuals += 1
                 else:
@@ -493,10 +530,9 @@ def load_nppes_satellite_tables(
                 stats.total_taxonomies += len(taxonomies)
                 stats.total_identifiers += len(identifiers)
 
-                batch_count += 1
-                if batch_count >= batch_size:
-                    db.flush()
-                    batch_count = 0
+                pending_npis += 1
+                if pending_npis >= batch_size:
+                    _flush()
 
                 if row_count % progress_every == 0:
                     logger.info(
@@ -510,17 +546,17 @@ def load_nppes_satellite_tables(
 
             except Exception as exc:
                 stats.records_errored += 1
+                errors.record("row_build", str(exc), raw_row={"npi": npi})
                 logger.warning(
                     "nppes_row_error",
                     extra={"svc_npi": npi[:10], "svc_error": str(exc)[:200]},
                 )
-                db.rollback()
-                # Re-open after rollback so remaining rows can continue
-                now = datetime.now(UTC)
 
     # Final flush
-    if batch_count > 0:
-        db.flush()
+    if pending_npis > 0:
+        _flush()
+
+    errors.log_summary(source_name=source_name)
 
     logger.info(
         "nppes_satellite_load_complete",
