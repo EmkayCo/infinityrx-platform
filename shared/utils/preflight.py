@@ -58,7 +58,6 @@ REQUIRED_SCHEMAS: tuple[str, ...] = (
     "ai_nlp",
     "rebate_mgmt",
     "dataiq",
-    "part_d",
     "mtm_clinical",
 )
 

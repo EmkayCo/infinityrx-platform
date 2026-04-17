@@ -131,7 +131,6 @@ CREATE TABLE member_mgmt.members (
     -- Medicare
     is_medicare BOOLEAN DEFAULT FALSE,
     medicare_beneficiary_id VARCHAR(20),
-    medicare_part_d_start DATE,
     lis_level VARCHAR(5),                              -- Low-Income Subsidy level
     
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

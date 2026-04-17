@@ -30,7 +30,6 @@ CREATE SCHEMA IF NOT EXISTS edi_compliance;            -- alternate name, kept f
 CREATE SCHEMA IF NOT EXISTS medical_claims;
 CREATE SCHEMA IF NOT EXISTS adjudication;
 CREATE SCHEMA IF NOT EXISTS mtm_clinical;
-CREATE SCHEMA IF NOT EXISTS part_d;
 CREATE SCHEMA IF NOT EXISTS plan_design;
 CREATE SCHEMA IF NOT EXISTS prior_auth;
 CREATE SCHEMA IF NOT EXISTS program_config;
