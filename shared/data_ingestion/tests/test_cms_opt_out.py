@@ -50,6 +50,62 @@ for _p in (str(_REPO_ROOT), str(_PRESCRIBER_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+# ---------------------------------------------------------------------------
+# Preload prescriber-directory's src.models submodules into sys.modules
+# under their canonical ``src.models.*`` names. Required because
+# test_fda_ndc_parser.py (if it runs earlier in the pytest session)
+# registers drug-database's src.* first, and Python will then refuse
+# to re-search sys.path when we say ``from src.models.tables import
+# Prescriber`` — it finds drug-database's tables.py which has neither
+# ``Prescriber`` nor ``PrescriberBase``. Same root cause as debt item
+# (d) in Wave 14. See test_dea.py for the sibling copy of this logic.
+# ---------------------------------------------------------------------------
+
+import importlib.util as _importlib_util
+import types as _types
+
+
+def _preload_prescriber_src_into_src_namespace() -> None:
+    prescriber_models_dir = str(_PRESCRIBER_ROOT / "src" / "models")
+    prescriber_src_dir = str(_PRESCRIBER_ROOT / "src")
+
+    if "src" not in sys.modules:
+        src_pkg = _types.ModuleType("src")
+        src_pkg.__path__ = [prescriber_src_dir]  # type: ignore[attr-defined]
+        sys.modules["src"] = src_pkg
+    else:
+        paths = getattr(sys.modules["src"], "__path__", None)
+        if paths is not None and prescriber_src_dir not in paths:
+            paths.append(prescriber_src_dir)
+
+    if "src.models" not in sys.modules:
+        models_pkg = _types.ModuleType("src.models")
+        models_pkg.__path__ = [prescriber_models_dir]  # type: ignore[attr-defined]
+        sys.modules["src.models"] = models_pkg
+    else:
+        paths = getattr(sys.modules["src.models"], "__path__", None)
+        if paths is not None and prescriber_models_dir not in paths:
+            paths.append(prescriber_models_dir)
+
+    for mod_name in ("src.models.tables", "src.models.medicare_tables"):
+        existing = sys.modules.get(mod_name)
+        if existing is not None:
+            src_file = getattr(existing, "__file__", "") or ""
+            if "prescriber-directory" in src_file:
+                continue
+            del sys.modules[mod_name]
+        filename = mod_name.rsplit(".", 1)[-1] + ".py"
+        file_path = _PRESCRIBER_ROOT / "src" / "models" / filename
+        spec = _importlib_util.spec_from_file_location(mod_name, file_path)
+        if spec is None or spec.loader is None:
+            continue
+        module = _importlib_util.module_from_spec(spec)
+        sys.modules[mod_name] = module
+        spec.loader.exec_module(module)
+
+
+_preload_prescriber_src_into_src_namespace()
+
 # --- imports ----------------------------------------------------------------
 from shared.data_ingestion.models import IngestionRun, IngestionSchedule
 from shared.data_ingestion.sources.cms_opt_out import (
@@ -499,26 +555,37 @@ class TestSampleDataSmokeTest:
 
 
 class TestOptOutDownload:
+    """download() exercises the v1 data.cms.gov API — dataset + pagination.
+
+    The test references the live constants from the production loader
+    (``_API_BASE_URL`` derived from ``_DATASET_ID``, ``_PAGE_SIZE``) so
+    a future dataset-ID migration or page-size tweak keeps the mocks
+    in sync automatically.
+    """
+
     @pytest.mark.asyncio
     async def test_download_paginates_and_merges(self, tmp_path: Path) -> None:
         """CmsOptOutIngester.download() paginates and writes JSON file."""
-        page1 = [_opt_out_row()] * 10_000
-        page2 = [_opt_out_row(**{"NPI": "5555555557"})] * 5_000
+        import shared.data_ingestion.sources.cms_opt_out as mod
+
+        page_size = mod._PAGE_SIZE
+        page1 = [_opt_out_row()] * page_size
+        # page2 is smaller than page_size so the pagination loop terminates
+        page2 = [_opt_out_row(**{"NPI": "5555555557"})] * 1_234
 
         mock_db = MagicMock()
 
         with respx.mock(assert_all_called=False) as mock_router:
             mock_router.get(
-                "https://data.cms.gov/data-api/v1/dataset/7yuw-3alc/data",
-                params={"$limit": "10000", "$offset": "0"},
+                mod._API_BASE_URL,
+                params={"size": str(page_size), "offset": "0"},
             ).mock(return_value=httpx.Response(200, json=page1))
             mock_router.get(
-                "https://data.cms.gov/data-api/v1/dataset/7yuw-3alc/data",
-                params={"$limit": "10000", "$offset": "10000"},
+                mod._API_BASE_URL,
+                params={"size": str(page_size), "offset": str(page_size)},
             ).mock(return_value=httpx.Response(200, json=page2))
 
             ingester = CmsOptOutIngester(db_session=mock_db)
-            import shared.data_ingestion.sources.cms_opt_out as mod
             orig = mod._DEST_DIR
             mod._DEST_DIR = tmp_path
             try:
@@ -527,20 +594,22 @@ class TestOptOutDownload:
                 mod._DEST_DIR = orig
 
         data = json.loads(path.read_text())
-        assert len(data) == 15_000
+        assert len(data) == page_size + 1_234
 
     @pytest.mark.asyncio
     async def test_download_terminates_on_empty_page(self, tmp_path: Path) -> None:
+        import shared.data_ingestion.sources.cms_opt_out as mod
+
+        page_size = mod._PAGE_SIZE
         mock_db = MagicMock()
 
         with respx.mock(assert_all_called=False) as mock_router:
             mock_router.get(
-                "https://data.cms.gov/data-api/v1/dataset/7yuw-3alc/data",
-                params={"$limit": "10000", "$offset": "0"},
+                mod._API_BASE_URL,
+                params={"size": str(page_size), "offset": "0"},
             ).mock(return_value=httpx.Response(200, json=[]))
 
             ingester = CmsOptOutIngester(db_session=mock_db)
-            import shared.data_ingestion.sources.cms_opt_out as mod
             orig = mod._DEST_DIR
             mod._DEST_DIR = tmp_path
             try:

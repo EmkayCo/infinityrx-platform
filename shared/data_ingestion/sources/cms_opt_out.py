@@ -6,9 +6,10 @@ API and upserts into prescriber_dir.medicare_opt_out.
 After loading, cross-references prescriber_dir.prescribers to set
 medicare_opt_out = TRUE for currently opted-out providers.
 
-Socrata API:
+data.cms.gov v1 API:
   https://data.cms.gov/data-api/v1/dataset/{dataset_id}/data
-  Pagination: ?$limit=10000&$offset=N
+  Pagination: ?size=<page>&offset=<N>   (NOT the older Socrata
+  $limit/$offset — that style 404s on the v1 endpoint.)
 
 LESSON-010: NPI plaintext — public NPPES identifier.
 LESSON-011: Global reference — no TenantScopedMixin.
