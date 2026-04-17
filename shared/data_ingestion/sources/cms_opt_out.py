@@ -241,60 +241,70 @@ class CmsOptOutIngester(DataSourceIngester):
                 yield parsed
 
     async def load(self, records: Iterator[dict[str, Any]]) -> IngestionResult:
-        """Batch-upsert opt-out rows; then cross-reference prescribers."""
+        """Batch-upsert opt-out rows via flush_upsert_batch, then cross-reference.
+
+        Wave 10a: switched from hand-rolled pg_insert / ORM-merge branching
+        to the shared ``flush_upsert_batch`` primitive. Same in-batch dedup
+        semantics (last-wins on NPI, since CMS publishes multiple affidavits
+        per provider); cross-reference to prescribers.medicare_opt_out runs
+        post-upsert as before.
+
+        SQLite-path note: the shared primitive emits pg_insert + ON CONFLICT
+        SQL, which SQLite 3.24+ parses compatibly (our integration tests
+        confirm). The pre-refactor ORM-merge fallback is gone.
+        """
         import importlib
-        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        from shared.data_ingestion.batching import ErrorAggregator, flush_upsert_batch
 
         _m = importlib.import_module("src.models.medicare_tables")
         OptOutModel = _m.MedicareOptOut
 
-        inserted = 0
-        errored = 0
+        errors = ErrorAggregator()
         batch: list[dict[str, Any]] = []
         now = datetime.now(UTC)
         all_npis: list[str] = []
+        inserted = 0
+        skipped = 0
 
-        dialect_name = self._db.connection().dialect.name
-
-        def _flush(b: list[dict[str, Any]]) -> int:
-            for row in b:
+        def _flush() -> None:
+            nonlocal inserted, skipped
+            if not batch:
+                return
+            for row in batch:
                 row["updated_at"] = now
-            # Dedupe by NPI within batch — last occurrence wins. CMS publishes
-            # multiple opt-out affidavits per provider; ON CONFLICT cannot
-            # affect the same row twice in one statement.
-            deduped: dict[str, dict[str, Any]] = {}
-            for row in b:
-                deduped[row["npi"]] = row
-            b = list(deduped.values())
-            if dialect_name == "postgresql":
-                tbl = OptOutModel.__table__
-                stmt = pg_insert(tbl).values(b)
-                update_cols = {c.name: stmt.excluded[c.name] for c in tbl.columns if c.name != "npi"}
-                self._db.execute(stmt.on_conflict_do_update(index_elements=["npi"], set_=update_cols))
-            else:
-                for row in b:
-                    obj = OptOutModel(**row)
-                    self._db.merge(obj)
-            self._db.flush()
-            return len(b)
+            ins, dd = flush_upsert_batch(
+                self._db,
+                source_name=_SOURCE_NAME,
+                table=OptOutModel.__table__,
+                unique_key=["npi"],
+                rows=batch,
+                errors=errors,
+            )
+            inserted += ins
+            skipped += dd
+            batch.clear()
 
         for record in records:
             all_npis.append(record["npi"])
             batch.append(record)
             if len(batch) >= _BATCH_SIZE:
-                inserted += _flush(batch)
-                batch = []
+                _flush()
 
-        if batch:
-            inserted += _flush(batch)
+        _flush()
 
         # Cross-reference: update prescribers.medicare_opt_out
         cross_ref_count = self._update_prescriber_opt_out_status(all_npis, now)
 
+        errors.log_summary(source_name=_SOURCE_NAME)
+
         logger.info(
-            "Opt-Out: cross-reference complete",
+            "Opt-Out load complete",
             extra={
                 "ingest_source": _SOURCE_NAME,
+                "ingest_records_inserted": inserted,
+                "ingest_records_skipped": skipped,
+                "ingest_records_errored": errors.total_errors,
                 "ingest_cross_ref_count": cross_ref_count,
             },
         )
@@ -302,10 +312,10 @@ class CmsOptOutIngester(DataSourceIngester):
         return IngestionResult(
             source=self.source_name,
             status="completed",
-            records_processed=inserted + errored,
+            records_processed=inserted + skipped + errors.total_errors,
             records_inserted=inserted,
-            records_updated=0,
-            records_errored=errored,
+            records_skipped=skipped,
+            records_errored=errors.total_errors,
         )
 
     def _update_prescriber_opt_out_status(
