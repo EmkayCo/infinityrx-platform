@@ -43,8 +43,22 @@ logger = logging.getLogger(__name__)
 
 _SOURCE_NAME = "cms_part_d"
 
-# Dataset ID for Medicare Part D Prescribers by Provider (CY2022 current)
+# Dataset ID for Medicare Part D Prescribers by Provider.
+#
+# CMS keeps this ID stable and rolls the data year forward in-place when
+# a new CY is released. As of 2025-09-09 the dataset's temporal range is
+# 2013-01-01 / 2023-12-31, so ``14d8e8a9-…`` now points to CY2023. When
+# CMS publishes CY2024 (expected ~2026-09, their usual cadence), this
+# same ID will point at that data — only _CURRENT_DATA_YEAR below needs
+# to be bumped. CMS data.json catalog will also be useful for
+# confirming.
 _DATASET_ID = "14d8e8a9-7e9b-4370-a044-bf97c46b4b44"
+
+# Calendar year of the data currently published at _DATASET_ID. This is
+# NOT "current year" and NOT "now.year - 1" — CMS Part D PUFs have a
+# 2-3 year privacy-review lag. Bump this when the dataset's temporal
+# range in the CMS catalog advances.
+_CURRENT_DATA_YEAR = 2023
 _API_BASE_URL = f"https://data.cms.gov/data-api/v1/dataset/{_DATASET_ID}/data"
 _PAGE_SIZE = 5_000  # data.cms.gov v1 API caps page size; 5000 is a safe limit
 _TIMEOUT_SECONDS = 120.0
@@ -286,7 +300,12 @@ class CmsPartDPrescriberIngester(DataSourceIngester):
 
     def __init__(self, db_session: Any, *, year: int | None = None) -> None:
         super().__init__(db_session)
-        self._year = year or datetime.now(UTC).year - 1
+        # Default to _CURRENT_DATA_YEAR (the CY actually published at the
+        # stable dataset ID), NOT calendar-now-minus-one. CMS Part D PUFs
+        # lag 2-3 years, so `datetime.now().year - 1` gets a year CMS
+        # hasn't published yet and silently tags every row with the
+        # wrong year.
+        self._year = year if year is not None else _CURRENT_DATA_YEAR
 
     async def download(self) -> Path:
         """Paginate CMS Socrata API and write results to a local JSON file."""

@@ -712,10 +712,18 @@ class TestHelperEdgeCases:
     def test_parse_int_decimal_string(self) -> None:
         assert _parse_int("42.7") == 43  # rounds up
 
-    def test_default_year_is_prior_year(self) -> None:
-        from datetime import datetime, timezone
+    def test_default_year_is_current_data_year(self) -> None:
+        """Default year must be _CURRENT_DATA_YEAR, NOT calendar-now-minus-one.
+
+        CMS Part D PUFs publish with a 2-3 year privacy-review lag, so
+        ``datetime.now().year - 1`` would silently stamp rows with a year
+        CMS hasn't released yet. Wave 10b-prep fix.
+        """
+        from shared.data_ingestion.sources.cms_part_d_prescriber import (
+            _CURRENT_DATA_YEAR,
+        )
         ingester = CmsPartDPrescriberIngester(db_session=MagicMock())
-        assert ingester._year == datetime.now(timezone.utc).year - 1
+        assert ingester._year == _CURRENT_DATA_YEAR
 
     def test_parse_json_file_skips_invalid_npi_rows(self, tmp_path: Path) -> None:
         """parse() with .json file skips rows with invalid NPI."""
