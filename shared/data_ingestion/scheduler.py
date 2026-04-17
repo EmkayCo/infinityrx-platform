@@ -39,6 +39,18 @@ DEFAULT_SCHEDULES: dict[str, str | None] = {
     "dea_registrations": "0 6 1 * *",  # Monthly 1st 6 AM
     "sam_exclusions": "0 3 20 * *",    # Monthly 20th 3 AM
     "cms_opt_out": "0 4 15 * *",       # Monthly 15th 4 AM
+    "icd10_cm": "0 2 15 4,10 *",       # 15th of April + October, 2 AM
+                                       # CMS publishes the annual release
+                                       # around Oct 1 and a mid-year update
+                                       # around April 1; day-15 gives a
+                                       # two-week buffer for the files to
+                                       # actually land on download.cms.gov.
+    "hcpcs": "0 3 15 1,4,7,10 *",      # 15th of Jan/Apr/Jul/Oct, 3 AM
+                                       # Quarterly alpha-numeric release —
+                                       # CMS typically posts in the first
+                                       # week of the month, day-15 is safe.
+                                       # 1h after icd10_cm to avoid sharing
+                                       # a DB-session slot.
 }
 
 # Interval between scheduler ticks

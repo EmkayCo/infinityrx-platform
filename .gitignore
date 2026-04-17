@@ -61,8 +61,13 @@ data/raw/
 # Mock/scrambled outputs derived from raw exports — local-only
 data/mock/
 
-# Reference data (large files — kept out of git except whitelisted)
-data/reference/
+# Reference data (large files — kept out of git except whitelisted
+# READMEs and specific fixtures; negations require the parent dirs to
+# remain un-ignored, so we ignore files, not the tree).
+data/reference/**
+!data/reference/
+!data/reference/*/
+!data/reference/**/README.md
 !data/reference/ncpdp/NCPDP_v3.1_Monthly_Master_20240501.ZIP
 data/demo/
 test-results/

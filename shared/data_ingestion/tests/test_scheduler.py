@@ -23,7 +23,11 @@ from sqlalchemy.orm import Session
 
 from shared.data_ingestion.base import DataSourceIngester, IngestionResult
 from shared.data_ingestion.models import IngestionRun, IngestionSchedule
-from shared.data_ingestion.scheduler import IngestionScheduler, _next_run_at
+from shared.data_ingestion.scheduler import (
+    DEFAULT_SCHEDULES,
+    IngestionScheduler,
+    _next_run_at,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -449,3 +453,59 @@ def test_start_runs_tick_and_exits_on_stop(db_session: Session) -> None:
 
     assert tick_count == 1
     assert scheduler._running is False
+
+
+# ---------------------------------------------------------------------------
+# DEFAULT_SCHEDULES — Wave 13 medical-code entries
+# ---------------------------------------------------------------------------
+
+
+def test_default_schedules_has_icd10_cm_and_hcpcs() -> None:
+    """Both Wave-13 source_names must have DEFAULT_SCHEDULES entries."""
+    assert "icd10_cm" in DEFAULT_SCHEDULES
+    assert "hcpcs" in DEFAULT_SCHEDULES
+
+
+def test_default_schedules_medical_code_crons_are_valid() -> None:
+    """Each Wave-13 cron parses and yields a future datetime."""
+    now = datetime.now(UTC)
+    for name in ("icd10_cm", "hcpcs"):
+        cron = DEFAULT_SCHEDULES[name]
+        assert cron is not None, f"{name} must not be manual-only"
+        nxt = _next_run_at(cron, after=now)
+        assert nxt > now
+
+
+def test_default_schedules_icd10_fires_twice_per_year() -> None:
+    """icd10_cm runs 15th of April and October — next two firings must
+    land on month 4 and month 10 in some order."""
+    # Start from Jan 1 so we see the full year ahead.
+    anchor = datetime(2026, 1, 1, tzinfo=UTC)
+    first = _next_run_at(DEFAULT_SCHEDULES["icd10_cm"], after=anchor)
+    second = _next_run_at(DEFAULT_SCHEDULES["icd10_cm"], after=first)
+    assert {first.month, second.month} == {4, 10}
+    assert first.day == 15 and second.day == 15
+
+
+def test_default_schedules_hcpcs_fires_quarterly() -> None:
+    """hcpcs runs 15th of Jan/Apr/Jul/Oct — next four firings must cover
+    all four months."""
+    anchor = datetime(2025, 12, 31, tzinfo=UTC)
+    months: list[int] = []
+    cursor = anchor
+    for _ in range(4):
+        cursor = _next_run_at(DEFAULT_SCHEDULES["hcpcs"], after=cursor)
+        months.append(cursor.month)
+        assert cursor.day == 15
+    assert set(months) == {1, 4, 7, 10}
+
+
+def test_default_schedules_icd10_and_hcpcs_stagger_by_hour() -> None:
+    """The two medical-code entries should not share the same clock slot."""
+    # Both fire on April 15; ICD at 02:00, HCPCS at 03:00.
+    icd_anchor = datetime(2026, 4, 14, 0, 0, tzinfo=UTC)
+    icd_fire = _next_run_at(DEFAULT_SCHEDULES["icd10_cm"], after=icd_anchor)
+    hcpcs_fire = _next_run_at(DEFAULT_SCHEDULES["hcpcs"], after=icd_anchor)
+    assert icd_fire.month == 4 and icd_fire.day == 15
+    assert hcpcs_fire.month == 4 and hcpcs_fire.day == 15
+    assert icd_fire.hour != hcpcs_fire.hour
