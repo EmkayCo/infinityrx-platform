@@ -23,7 +23,11 @@ from sqlalchemy.orm import Session
 
 from shared.data_ingestion.base import DataSourceIngester, IngestionResult
 from shared.data_ingestion.models import IngestionRun, IngestionSchedule
-from shared.data_ingestion.scheduler import IngestionScheduler, _next_run_at
+from shared.data_ingestion.scheduler import (
+    DEFAULT_SCHEDULES,
+    IngestionScheduler,
+    _next_run_at,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -449,3 +453,30 @@ def test_start_runs_tick_and_exits_on_stop(db_session: Session) -> None:
 
     assert tick_count == 1
     assert scheduler._running is False
+
+
+# ---------------------------------------------------------------------------
+# DEFAULT_SCHEDULES — NPPES mode coverage (Wave 11 commit 5)
+# ---------------------------------------------------------------------------
+
+
+def test_default_schedules_has_all_three_nppes_modes() -> None:
+    """Each Wave-11 NPPES source_name must have a DEFAULT_SCHEDULES entry."""
+    assert "nppes" in DEFAULT_SCHEDULES
+    assert "nppes_monthly" in DEFAULT_SCHEDULES
+    assert "nppes_deactivation" in DEFAULT_SCHEDULES
+
+
+def test_default_schedules_nppes_crons_are_valid() -> None:
+    """Every NPPES cron expression must parse and yield a future datetime."""
+    now = datetime.now(UTC)
+    for name in ("nppes", "nppes_monthly", "nppes_deactivation"):
+        cron = DEFAULT_SCHEDULES[name]
+        assert cron is not None, f"{name} must not be manual-only"
+        nxt = _next_run_at(cron, after=now)
+        assert nxt > now
+
+
+def test_default_schedules_nppes_modes_do_not_collide() -> None:
+    """nppes_monthly and nppes_deactivation must fire at distinct times."""
+    assert DEFAULT_SCHEDULES["nppes_monthly"] != DEFAULT_SCHEDULES["nppes_deactivation"]

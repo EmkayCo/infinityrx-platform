@@ -828,3 +828,202 @@ def test_or_none_value_returns_stripped():
 
 def test_or_none_none_input_returns_none():
     assert _or_none(None) is None  # type: ignore[arg-type]
+
+
+# ── Tests: Wave-11 NppesIngester modes ────────────────────────────────────
+
+
+def test_ingester_default_mode_is_weekly():
+    from shared.data_ingestion.sources.nppes import NppesIngester
+    from unittest.mock import MagicMock
+    ing = NppesIngester(db_session=MagicMock())
+    assert ing._mode == "weekly"
+    assert ing.source_name == "nppes"
+
+
+def test_ingester_monthly_mode_uses_separate_source_name():
+    from shared.data_ingestion.sources.nppes import NppesIngester
+    from unittest.mock import MagicMock
+    ing = NppesIngester(db_session=MagicMock(), mode="monthly")
+    assert ing._mode == "monthly"
+    assert ing.source_name == "nppes_monthly"
+
+
+def test_ingester_deactivation_mode_uses_separate_source_name():
+    from shared.data_ingestion.sources.nppes import NppesIngester
+    from unittest.mock import MagicMock
+    ing = NppesIngester(db_session=MagicMock(), mode="deactivation")
+    assert ing._mode == "deactivation"
+    assert ing.source_name == "nppes_deactivation"
+
+
+def test_ingester_rejects_unknown_mode():
+    from shared.data_ingestion.sources.nppes import NppesIngester
+    from unittest.mock import MagicMock
+    with pytest.raises(ValueError, match="unknown NPPES mode"):
+        NppesIngester(db_session=MagicMock(), mode="yearly")  # type: ignore[arg-type]
+
+
+def test_monthly_regex_matches_cms_filename():
+    from shared.data_ingestion.sources.nppes import _MONTHLY_ZIP_RE
+    assert _MONTHLY_ZIP_RE.findall(
+        'href="NPPES_Data_Dissemination_April_2026_V2.zip"'
+    ) == ["NPPES_Data_Dissemination_April_2026_V2.zip"]
+    # All 12 months should match
+    for month in ["January", "February", "March", "April", "May", "June",
+                   "July", "August", "September", "October", "November", "December"]:
+        assert _MONTHLY_ZIP_RE.findall(
+            f"NPPES_Data_Dissemination_{month}_2026.zip"
+        ) == [f"NPPES_Data_Dissemination_{month}_2026.zip"]
+    # Weekly filenames MUST NOT match the monthly regex
+    assert _MONTHLY_ZIP_RE.findall(
+        "NPPES_Data_Dissemination_040626_041226_Weekly_V2.zip"
+    ) == []
+
+
+def test_deactivation_regex_matches_cms_filename():
+    from shared.data_ingestion.sources.nppes import _DEACT_ZIP_RE
+    assert _DEACT_ZIP_RE.findall(
+        'href="NPPES_Deactivated_NPI_Report_041326_V2.zip"'
+    ) == ["NPPES_Deactivated_NPI_Report_041326_V2.zip"]
+    # Without version suffix
+    assert _DEACT_ZIP_RE.findall(
+        "NPPES_Deactivated_NPI_Report_041326.zip"
+    ) == ["NPPES_Deactivated_NPI_Report_041326.zip"]
+
+
+def test_deactivation_parse_streams_npi_date_pairs(tmp_path: Path):
+    """Build a minimal xlsx matching the CMS deactivation report shape."""
+    import openpyxl
+    from datetime import date
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "DeactivatedNPIs"
+    ws.append(["NPPES Deactivated Records as of Apr 13 2026", None])
+    ws.append(["NPI", "NPPES Deactivation Date"])
+    ws.append(["1234567890", "04/12/2026"])
+    ws.append(["2345678901", "04/11/2026"])
+    xlsx_path = tmp_path / "dummy.xlsx"
+    wb.save(xlsx_path)
+
+    from shared.data_ingestion.sources.nppes import NppesIngester
+    from unittest.mock import MagicMock
+    ing = NppesIngester(db_session=MagicMock(), mode="deactivation")
+    rows = list(ing.parse(xlsx_path))
+    assert len(rows) == 2
+    assert rows[0] == {"npi": "1234567890", "deactivation_date": date(2026, 4, 12)}
+    assert rows[1] == {"npi": "2345678901", "deactivation_date": date(2026, 4, 11)}
+
+
+# ── Tests: Wave-11.5 use_copy dispatch ────────────────────────────────────
+
+
+def test_satellite_load_use_copy_false_routes_to_values_primitives(
+    db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``use_copy=False`` must call the VALUES primitives, not the COPY ones."""
+    values_calls: list[str] = []
+    copy_calls: list[str] = []
+
+    from shared.data_ingestion import batching as _batching_mod
+
+    orig_upsert = _batching_mod.flush_upsert_batch
+    orig_replace = _batching_mod.flush_scoped_replace_batch
+    orig_upsert_copy = _batching_mod.flush_upsert_batch_copy
+    orig_replace_copy = _batching_mod.flush_scoped_replace_batch_copy
+
+    def _upsert_spy(*args: object, **kwargs: object) -> object:
+        values_calls.append("upsert")
+        return orig_upsert(*args, **kwargs)  # type: ignore[arg-type]
+
+    def _replace_spy(*args: object, **kwargs: object) -> object:
+        values_calls.append("replace")
+        return orig_replace(*args, **kwargs)  # type: ignore[arg-type]
+
+    def _upsert_copy_spy(*args: object, **kwargs: object) -> object:
+        copy_calls.append("upsert_copy")
+        return orig_upsert_copy(*args, **kwargs)  # type: ignore[arg-type]
+
+    def _replace_copy_spy(*args: object, **kwargs: object) -> object:
+        copy_calls.append("replace_copy")
+        return orig_replace_copy(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(_ingestion_mod, "flush_upsert_batch", _upsert_spy)
+    monkeypatch.setattr(_ingestion_mod, "flush_scoped_replace_batch", _replace_spy)
+    monkeypatch.setattr(_ingestion_mod, "flush_upsert_batch_copy", _upsert_copy_spy)
+    monkeypatch.setattr(
+        _ingestion_mod, "flush_scoped_replace_batch_copy", _replace_copy_spy
+    )
+
+    rows = _read_sample_rows()
+    individual_row = _row_by_npi(rows, "1000000079")
+    mini_csv = tmp_path / "mini.csv"
+    with mini_csv.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerow(individual_row)
+
+    load_nppes_satellite_tables(db, mini_csv, use_copy=False)
+
+    # VALUES path must have fired (detail + at least one scoped replace);
+    # COPY path must not have been touched.
+    assert values_calls, "VALUES primitives were not invoked under use_copy=False"
+    assert not copy_calls, f"COPY primitives fired unexpectedly: {copy_calls}"
+
+
+def test_satellite_load_use_copy_true_routes_to_copy_primitives(
+    db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Default ``use_copy=True`` dispatches the COPY primitives (which then
+    fall back to VALUES under SQLite, but the dispatch must still go through
+    the COPY-variant entry points so a future refactor can't silently revert
+    this to VALUES on Postgres)."""
+    copy_calls: list[str] = []
+    values_calls: list[str] = []
+
+    from shared.data_ingestion import batching as _batching_mod
+
+    orig_upsert_copy = _batching_mod.flush_upsert_batch_copy
+    orig_replace_copy = _batching_mod.flush_scoped_replace_batch_copy
+    orig_upsert = _batching_mod.flush_upsert_batch
+    orig_replace = _batching_mod.flush_scoped_replace_batch
+
+    def _upsert_copy_spy(*args: object, **kwargs: object) -> object:
+        copy_calls.append("upsert_copy")
+        return orig_upsert_copy(*args, **kwargs)  # type: ignore[arg-type]
+
+    def _replace_copy_spy(*args: object, **kwargs: object) -> object:
+        copy_calls.append("replace_copy")
+        return orig_replace_copy(*args, **kwargs)  # type: ignore[arg-type]
+
+    def _upsert_spy(*args: object, **kwargs: object) -> object:
+        values_calls.append("upsert")
+        return orig_upsert(*args, **kwargs)  # type: ignore[arg-type]
+
+    def _replace_spy(*args: object, **kwargs: object) -> object:
+        values_calls.append("replace")
+        return orig_replace(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(_ingestion_mod, "flush_upsert_batch_copy", _upsert_copy_spy)
+    monkeypatch.setattr(
+        _ingestion_mod, "flush_scoped_replace_batch_copy", _replace_copy_spy
+    )
+    monkeypatch.setattr(_ingestion_mod, "flush_upsert_batch", _upsert_spy)
+    monkeypatch.setattr(_ingestion_mod, "flush_scoped_replace_batch", _replace_spy)
+
+    rows = _read_sample_rows()
+    individual_row = _row_by_npi(rows, "1000000079")
+    mini_csv = tmp_path / "mini.csv"
+    with mini_csv.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerow(individual_row)
+
+    load_nppes_satellite_tables(db, mini_csv)  # default use_copy=True
+
+    assert copy_calls, "COPY-variant primitives were not dispatched on default"
+    # VALUES primitives are only reached via the COPY fallback under SQLite;
+    # the dispatch itself must not call the VALUES entry points directly.
+    assert not values_calls, (
+        f"Direct VALUES-primitive call detected — copy dispatch bypassed: {values_calls}"
+    )

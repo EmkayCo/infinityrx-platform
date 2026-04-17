@@ -29,6 +29,8 @@ DEFAULT_SCHEDULES: dict[str, str | None] = {
     "cms_nadac": "0 3 * * 1",         # Weekly Monday 3 AM
     "fda_orange_book": "0 4 1 * *",   # Monthly 1st 4 AM
     "nppes": "0 3 * * 2",             # Weekly Tuesday 3 AM
+    "nppes_monthly": "0 4 15 * *",    # Monthly 15th 4 AM (CMS posts ~10-12th; 15th = buffer)
+    "nppes_deactivation": "0 5 15 * *",  # Monthly 15th 5 AM (1h after monthly to avoid overlap)
     "cms_asp": "0 4 1 1,4,7,10 *",   # Quarterly
     "ncpdp": None,                     # Manual only
     "rxnorm": "0 1 1-7 * 1",           # First Monday of month, 1 AM
