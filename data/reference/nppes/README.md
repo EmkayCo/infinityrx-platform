@@ -190,18 +190,57 @@ dev Postgres. For each path it TRUNCATEs the 4 satellite tables, streams
 the first N rows of a real NPPES CSV to a tmp file, times the loader
 invocation, and reports per-table row counts and aggregate rows/sec.
 
-**Observed throughput:** _TODO — populate after 11.5-3 operator run._
+**Observed throughput** (dev Postgres 17.5, container `shm_size=64MB`,
+`shared_buffers=256MB`, single writer session, April 2026 monthly CSV):
+
+_Bench — first 2,000 NPIs streamed to a tmp CSV, both paths loaded
+from identical bytes; satellites TRUNCATEd between runs._
 
 | Path      | rows/sec (all 4 satellite tables) | wall time at 2,000 NPIs |
 |-----------|-----------------------------------|-------------------------|
-| VALUES    | _TODO_                            | _TODO_                  |
-| COPY      | _TODO_                            | _TODO_                  |
-| Speedup   | _TODO_x                           | —                       |
+| VALUES    | 10,544                            | 1.12 s                  |
+| COPY      | **28,177**                        | 0.42 s                  |
+| Speedup   | **2.67×**                         | —                       |
 
-Baseline to beat: the 611 rows/sec observed during the April 2026
-monthly core run. The 11.5-3 commit will replace the _TODO_ cells with
-the measured values from a bench run at 2,000 NPIs on dev and the
-full 9.5M-NPI satellite run on the same file.
+_Full-registry satellite load — `scripts/load_nppes.py --phase satellites
+--source-csv <monthly>.csv --truncate-satellites`, 9,494,438 NPIs, dev
+Postgres:_
+
+| Metric                                | Value             |
+|---------------------------------------|-------------------|
+| Wall time                             | **34.2 min** (2,050.4 s) |
+| NPIs processed                        | 9,494,438 (100%)  |
+| Individuals / organizations           | 7,236,712 / 2,257,726 |
+| Details rows                          | 9,494,438         |
+| Addresses rows                        | 18,308,153        |
+| Taxonomies rows                       | 11,884,153        |
+| Identifiers rows                      | 2,760,629         |
+| Total satellite rows                  | **42,447,373**    |
+| Sustained rows/sec (all 4 combined)   | **20,702**        |
+| Records errored                       | 0                 |
+| Records skipped                       | 0                 |
+| Peak RSS (parser process)             | 91.4 MB           |
+
+Orphan check ran cleanly afterwards — zero satellite rows reference an
+NPI absent from `prescribers` across all 4 tables. Spot-check of five
+random NPIs against `npiregistry.cms.hhs.gov/api` returned exact
+matches on name, enumeration date, all addresses, all taxonomies
+(including the primary flag), and all secondary identifiers for every
+NPI.
+
+The core-phase baseline of 611 rows/sec (from the April monthly run,
+commit `ff82aec`) is not directly comparable to the satellite numbers
+here — that run was against the 330-column `prescribers` table with
+full index maintenance and a single 9.5M-row write. Satellite tables
+are narrower (8–45 columns) with fewer indexes, so their VALUES-path
+throughput sits much higher than core's. The meaningful comparison is
+the bench table above, where both paths hit the same schema and
+index structure. The full-registry satellite load sustained 20,702
+rows/sec — lower than the 28,177 rows/sec bench peak because the
+bench ran against an already-warm page cache and skipped the 11.36-GB
+CSV parse cost; the full run pays both. The gate set by commit 11.5-2
+(≥1,200 rows/sec on COPY) is cleared by an order of magnitude on both
+measurements.
 
 ## 5. Error Handling (G6 Findings)
 
