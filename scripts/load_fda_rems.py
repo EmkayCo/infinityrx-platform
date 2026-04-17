@@ -1,18 +1,19 @@
-"""Load OIG LEIE (List of Excluded Individuals/Entities) into shared.
+"""Load FDA REMS (Risk Evaluation and Mitigation Strategies) into drug_database.
 
-Downloads the monthly UPDATED.csv from oig.hhs.gov, upserts into
-shared.oig_leie_exclusions via flush_upsert_batch, then runs cross-
-reference UPDATEs to flip is_excluded on prescriber_dir.prescribers
-and pharmacy_dir.pharmacies where NPI matches an active exclusion.
+Fetches REMS-mentioning drug labels from openFDA's label endpoint
+(falls back to data/reference/fda-rems/fda_rems.json on network issues),
+upserts into drug_database.drug_rems, and bulk-replaces drug_rems_ndc
+for each parent.
 
-Pipeline: OigLeieIngester (DataSourceIngester child)
-  download -> scrape OIG page -> fetch UPDATED.csv
-  parse    -> stream CSV rows
-  load     -> flush_upsert_batch on natural key -> cross-reference SQL
+Silent-bug caveat: openFDA labels in the current dataset don't populate
+a top-level rems[] key, so rems_program_name falls back to
+application_number and rems_type / etasu_requirements stay NULL.
+See the module docstring in shared/data_ingestion/sources/fda_rems.py
+and tasks/TODO-WAVE-REMS-EXTRACT.md for the follow-up.
 
 Usage:
     source infrastructure/scripts/switch_env.sh dev
-    python scripts/load_oig_leie.py
+    python scripts/load_fda_rems.py
 
 Environment:
     DATABASE_URL_SYNC - set by switch_env.sh
@@ -27,20 +28,16 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-for _p in (
-    _REPO_ROOT,
-    _REPO_ROOT / "modules" / "prescriber-directory",
-    _REPO_ROOT / "modules" / "pharmacy-directory",
-):
-    sp = str(_p)
-    if sp not in sys.path:
-        sys.path.insert(0, sp)
+_DRUG_DB_ROOT = _REPO_ROOT / "modules" / "drug-database"
+for _p in (str(_REPO_ROOT), str(_DRUG_DB_ROOT)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)-5s %(name)s %(message)s",
 )
-logger = logging.getLogger("load_oig_leie")
+logger = logging.getLogger("load_fda_rems")
 
 
 def _resolve_db_url() -> str:
@@ -58,18 +55,18 @@ async def _run() -> None:
     from sqlalchemy import create_engine, text
     from sqlalchemy.orm import Session
 
-    from shared.data_ingestion.sources.oig_leie import OigLeieIngester
+    from shared.data_ingestion.sources.fda_rems import FdaRemsIngester
 
     db_url = _resolve_db_url()
     engine = create_engine(db_url, echo=False)
 
     with Session(engine) as session:
-        ingester = OigLeieIngester(db_session=session)
-        logger.info("Starting OIG LEIE pipeline...")
+        ingester = FdaRemsIngester(db_session=session)
+        logger.info("Starting FDA REMS pipeline...")
         result = await ingester.run(run_type="manual_trigger")
 
     print(f"\n{'=' * 60}")
-    print("OIG LEIE Load Result")
+    print("FDA REMS Load Result")
     print(f"{'=' * 60}")
     print(f"  Status:             {result.status}")
     print(f"  Records in source:  {result.records_in_source:,}")
@@ -84,10 +81,11 @@ async def _run() -> None:
     print(f"{'=' * 60}")
 
     with engine.connect() as conn:
-        cnt = conn.execute(
-            text("SELECT count(*) FROM shared.oig_leie_exclusions")
-        ).scalar()
-        print(f"  shared.oig_leie_exclusions: {cnt:,} rows")
+        for table in ("drug_rems", "drug_rems_ndc"):
+            cnt = conn.execute(
+                text(f"SELECT count(*) FROM drug_database.{table}")
+            ).scalar()
+            print(f"  drug_database.{table}: {cnt:,} rows")
 
     if result.records_errored > 0:
         logger.error("Non-zero error count: %d - check logs", result.records_errored)

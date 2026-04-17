@@ -1,18 +1,19 @@
-"""Load OIG LEIE (List of Excluded Individuals/Entities) into shared.
+"""Load OFAC SDN exclusions into shared.ofac_sdn + 3 child tables.
 
-Downloads the monthly UPDATED.csv from oig.hhs.gov, upserts into
-shared.oig_leie_exclusions via flush_upsert_batch, then runs cross-
-reference UPDATEs to flip is_excluded on prescriber_dir.prescribers
-and pharmacy_dir.pharmacies where NPI matches an active exclusion.
+Reads pre-staged CSVs from data/reference/ofac-sdn/ (sdn / add / alt /
+sdn_comments) and upserts via OfacSdnIngester. No HTTP download in
+this wave — OFAC moved distribution behind sanctionslistservice and
+the add.csv/alt.csv endpoints are currently 400; HTTP wiring is a
+follow-up.
 
-Pipeline: OigLeieIngester (DataSourceIngester child)
-  download -> scrape OIG page -> fetch UPDATED.csv
-  parse    -> stream CSV rows
-  load     -> flush_upsert_batch on natural key -> cross-reference SQL
+Pipeline: OfacSdnIngester (DataSourceIngester child)
+  download -> return data/reference/ofac-sdn/ (stub, no HTTP)
+  parse    -> stream 4 CSVs (positional cols, latin-1, "-0-" -> NULL)
+  load     -> parent upsert + 3 child scoped-replaces
 
 Usage:
     source infrastructure/scripts/switch_env.sh dev
-    python scripts/load_oig_leie.py
+    python scripts/load_ofac.py
 
 Environment:
     DATABASE_URL_SYNC - set by switch_env.sh
@@ -27,20 +28,14 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-for _p in (
-    _REPO_ROOT,
-    _REPO_ROOT / "modules" / "prescriber-directory",
-    _REPO_ROOT / "modules" / "pharmacy-directory",
-):
-    sp = str(_p)
-    if sp not in sys.path:
-        sys.path.insert(0, sp)
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)-5s %(name)s %(message)s",
 )
-logger = logging.getLogger("load_oig_leie")
+logger = logging.getLogger("load_ofac")
 
 
 def _resolve_db_url() -> str:
@@ -58,24 +53,22 @@ async def _run() -> None:
     from sqlalchemy import create_engine, text
     from sqlalchemy.orm import Session
 
-    from shared.data_ingestion.sources.oig_leie import OigLeieIngester
+    from shared.data_ingestion.sources.ofac_sdn import OfacSdnIngester
 
     db_url = _resolve_db_url()
     engine = create_engine(db_url, echo=False)
 
     with Session(engine) as session:
-        ingester = OigLeieIngester(db_session=session)
-        logger.info("Starting OIG LEIE pipeline...")
+        ingester = OfacSdnIngester(db_session=session)
+        logger.info("Starting OFAC SDN pipeline...")
         result = await ingester.run(run_type="manual_trigger")
 
     print(f"\n{'=' * 60}")
-    print("OIG LEIE Load Result")
+    print("OFAC SDN Load Result")
     print(f"{'=' * 60}")
     print(f"  Status:             {result.status}")
-    print(f"  Records in source:  {result.records_in_source:,}")
     print(f"  Records processed:  {result.records_processed:,}")
     print(f"  Records inserted:   {result.records_inserted:,}")
-    print(f"  Records updated:    {result.records_updated:,}")
     print(f"  Records skipped:    {result.records_skipped:,}")
     print(f"  Records errored:    {result.records_errored:,}")
     print(f"  Duration:           {result.duration_seconds:.1f}s")
@@ -84,10 +77,12 @@ async def _run() -> None:
     print(f"{'=' * 60}")
 
     with engine.connect() as conn:
-        cnt = conn.execute(
-            text("SELECT count(*) FROM shared.oig_leie_exclusions")
-        ).scalar()
-        print(f"  shared.oig_leie_exclusions: {cnt:,} rows")
+        for table in ("ofac_sdn", "ofac_sdn_addresses",
+                      "ofac_sdn_aliases", "ofac_sdn_comments"):
+            cnt = conn.execute(
+                text(f"SELECT count(*) FROM shared.{table}")
+            ).scalar()
+            print(f"  shared.{table}: {cnt:,} rows")
 
     if result.records_errored > 0:
         logger.error("Non-zero error count: %d - check logs", result.records_errored)

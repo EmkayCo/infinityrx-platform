@@ -177,7 +177,6 @@ class Member(MemberMgmtBase, TenantScopedMixin):
     # Medicare
     is_medicare: Mapped[bool] = mapped_column(Boolean, server_default="false", default=False)
     medicare_beneficiary_id: Mapped[str | None] = mapped_column(String(20))
-    medicare_part_d_start: Mapped[date | None] = mapped_column(Date)
     lis_level: Mapped[str | None] = mapped_column(String(5))
 
     created_at: Mapped[datetime] = _ts_now()

@@ -1,36 +1,31 @@
-"""Script to download and load CMS NADAC pricing data into drug_database.
+"""Load CMS NADAC pricing data into drug_database.
 
-Downloads the full NADAC dataset from the CMS Medicaid Socrata API
-(~85,000 records as of 2026), paginating 10K records per page, and
-bulk-upserts into:
-  drug_database.drug_nadac_pricing          (current — upsert by ndc_11)
-  drug_database.drug_nadac_pricing_history  (append-only — price changes)
+Downloads the full NADAC dataset from the CMS Medicaid Socrata API,
+upserts into drug_nadac_pricing (current row per NDC-11) and appends
+to drug_nadac_pricing_history (price/date change rows only).
+
+Pipeline: CMSNADACIngester (DataSourceIngester child)
+  download → paginate Socrata API → local JSON
+  parse    → normalize fields, Decimal(18,6) prices, date parsing
+  load     → BatchedUpserter: per-batch commit, in-batch dedup, history
 
 Usage:
+    source infrastructure/scripts/switch_env.sh dev
     python scripts/load_cms_nadac.py [--dry-run]
 
-Options:
-    --dry-run   Downloads and parses without a DB load (prints record counts).
-
-Requires:
-    - DATABASE_URL_SYNC env var pointing to a running PostgreSQL instance, OR
-    - --dry-run flag for no-DB run.
-
-Expected counts (2026 NADAC dataset):
-    drug_nadac_pricing (current rows): ~85,000
-    Records parsed from API:           ~85,000
+Environment:
+    DATABASE_URL_SYNC — set by switch_env.sh
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
+import os
 import sys
 from pathlib import Path
 
-# Ensure repo root and drug-database module root are on sys.path
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DRUG_DB_ROOT = _REPO_ROOT / "modules" / "drug-database"
 for _p in (str(_REPO_ROOT), str(_DRUG_DB_ROOT)):
@@ -44,96 +39,95 @@ logging.basicConfig(
 logger = logging.getLogger("load_cms_nadac")
 
 
-async def _dry_run_parse() -> None:
-    """Download from CMS Socrata API and report parsed record counts (no DB)."""
-    from shared.data_ingestion.sources.cms_nadac import CMSNADACIngester, _parse_record
+def _resolve_db_url() -> str:
+    url = os.environ.get("DATABASE_URL_SYNC") or os.environ.get("DATABASE_URL")
+    if not url:
+        logger.error(
+            "DATABASE_URL_SYNC not set. "
+            "Run: source infrastructure/scripts/switch_env.sh dev"
+        )
+        sys.exit(1)
+    # Async URL won't work for sync engine
+    return url.replace("postgresql+asyncpg://", "postgresql://")
 
+
+async def _dry_run() -> None:
+    """Download and parse without DB — report record counts."""
     from unittest.mock import MagicMock
-    mock_db = MagicMock()
-    ingester = CMSNADACIngester(db_session=mock_db)
 
-    logger.info("Downloading NADAC data from CMS Medicaid API (paginated)...")
+    from shared.data_ingestion.sources.cms_nadac import CMSNADACIngester
+
+    ingester = CMSNADACIngester(db_session=MagicMock())
+    cached = _REPO_ROOT / "data" / "reference" / "cms-nadac" / "nadac_full.json"
+
+    logger.info("Downloading NADAC data (paginated)...")
     try:
         file_path = await ingester.download()
     except Exception as exc:
-        logger.error("Download failed: %s", exc)
-        # If network unavailable, try any cached file
-        cached = Path("data/reference/cms-nadac/nadac_full.json")
+        logger.warning("Download failed (%s), trying cached file", exc)
         if cached.exists():
-            logger.info("Using cached file: %s", cached)
             file_path = cached
         else:
-            logger.error("No cached file available. Aborting.")
+            logger.error("No cached file at %s — aborting", cached)
             sys.exit(1)
 
-    logger.info("Parsing NADAC records from %s ...", file_path)
-    raw_data = json.loads(file_path.read_text())
-    total_raw = len(raw_data)
-    parsed_count = 0
-    skipped_count = 0
-
-    for raw in raw_data:
-        result = _parse_record(raw)
-        if result is not None:
-            parsed_count += 1
-        else:
-            skipped_count += 1
-
-    print("\n" + "=" * 55)
-    print("DRY-RUN PARSE COUNTS (CMS NADAC):")
-    print(f"  Total raw API records:    {total_raw:,}")
-    print(f"  Successfully parsed:      {parsed_count:,}")
-    print(f"  Skipped (invalid/missing):{skipped_count:,}")
-    print("=" * 55)
+    count = sum(1 for _ in ingester.parse(file_path))
+    print(f"\nDRY-RUN: {count:,} records parsed from {file_path.name}")
 
 
-async def _run_full_pipeline() -> None:
-    """Run the full CMSNADACIngester pipeline against a real database."""
-    import os
-
-    from sqlalchemy import create_engine
+async def _run() -> None:
+    """Full pipeline: download → parse → load via BatchedUpserter."""
+    from sqlalchemy import create_engine, text
     from sqlalchemy.orm import Session
 
-    db_url = os.environ.get("DATABASE_URL_SYNC") or os.environ.get("DATABASE_URL")
-    if not db_url:
-        logger.error("DATABASE_URL_SYNC not set; use --dry-run for no-DB run")
-        sys.exit(1)
+    from shared.data_ingestion.sources.cms_nadac import CMSNADACIngester
 
+    db_url = _resolve_db_url()
     engine = create_engine(db_url, echo=False)
-    with Session(engine) as session:
-        from shared.data_ingestion.sources.cms_nadac import CMSNADACIngester
 
+    with Session(engine) as session:
         ingester = CMSNADACIngester(db_session=session)
-        logger.info("Starting CMSNADACIngester.run()...")
+        logger.info("Starting CMS NADAC pipeline...")
         result = await ingester.run(run_type="manual_trigger")
 
-    print("\n" + "=" * 55)
-    print("FULL PIPELINE RESULT (CMS NADAC):")
-    print(f"  status:             {result.status}")
-    print(f"  records_in_source:  {result.records_in_source:,}")
-    print(f"  records_processed:  {result.records_processed:,}")
-    print(f"  records_inserted:   {result.records_inserted:,}")
-    print(f"  records_updated:    {result.records_updated:,}")
-    print(f"  records_errored:    {result.records_errored:,}")
-    print(f"  duration_seconds:   {result.duration_seconds:.1f}s")
+    # Report
+    print(f"\n{'=' * 60}")
+    print("CMS NADAC Load Result")
+    print(f"{'=' * 60}")
+    print(f"  Status:             {result.status}")
+    print(f"  Records in source:  {result.records_in_source:,}")
+    print(f"  Records processed:  {result.records_processed:,}")
+    print(f"  Records inserted:   {result.records_inserted:,}")
+    print(f"  Records updated:    {result.records_updated:,}")
+    print(f"  Records skipped:    {result.records_skipped:,}")
+    print(f"  Records errored:    {result.records_errored:,}")
+    print(f"  Duration:           {result.duration_seconds:.1f}s")
     if result.error_message:
-        print(f"  error:              {result.error_message}")
-    print("=" * 55)
+        print(f"  Error:              {result.error_message}")
+    print(f"{'=' * 60}")
+
+    # Verify row counts
+    with engine.connect() as conn:
+        for table in ("drug_nadac_pricing", "drug_nadac_pricing_history"):
+            cnt = conn.execute(
+                text(f"SELECT count(*) FROM drug_database.{table}")
+            ).scalar()
+            print(f"  {table}: {cnt:,} rows")
+
+    if result.records_errored > 0:
+        logger.error("Non-zero error count: %d — check logs", result.records_errored)
+        sys.exit(1)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Load CMS NADAC pricing data")
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Download + parse without DB — prints record counts only",
+        help="Download + parse without DB load (prints record counts only)",
     )
     args = parser.parse_args()
-
-    if args.dry_run:
-        asyncio.run(_dry_run_parse())
-    else:
-        asyncio.run(_run_full_pipeline())
+    asyncio.run(_dry_run() if args.dry_run else _run())
 
 
 if __name__ == "__main__":

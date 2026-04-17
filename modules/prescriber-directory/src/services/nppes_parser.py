@@ -89,6 +89,35 @@ def _or_none(value: str) -> str | None:
     return v if v else None
 
 
+def _state_or_none(value: str) -> str | None:
+    """Return a 2-char US state code, or None for anything else.
+
+    NPPES provider addresses outside the US sometimes populate the "State
+    Name" field with region or country text ("ONTARIO", "ENGLAND",
+    "MAHARASHTRA, INDIA", "GYEONGGI-DO 17759"). Those don't fit the
+    schema's String(2) state columns. Drop them to NULL at parse time
+    rather than failing the batch INSERT downstream.
+    """
+    v = (value or "").strip().upper()
+    if len(v) == 2 and v.isalpha():
+        return v
+    return None
+
+
+def _zip_or_none(value: str, max_len: int = 10) -> str | None:
+    """Return a ZIP code that fits the target column, or None on overflow.
+
+    Most NPPES postal codes are 5 or 9 digits. Military APO/FPO addresses
+    occasionally stuff text like "APO AP 96271" (12 chars) into the postal
+    field, overflowing the String(10) column. NULL them out at parse time
+    rather than failing the batch INSERT downstream.
+    """
+    v = (value or "").strip()
+    if not v or len(v) > max_len:
+        return None
+    return v
+
+
 def _build_display_name(row: dict[str, str], entity_type: str) -> str:
     if entity_type == "2":
         org = row.get("Provider Organization Name (Legal Business Name)", "").strip()
@@ -132,7 +161,7 @@ def _extract_taxonomy_codes(row: dict[str, str]) -> tuple[str | None, list[dict[
             "code": code,
             "is_primary": is_primary,
             "license_number": _or_none(row.get(license_key, "")),
-            "license_state": _or_none(row.get(license_state_key, "")),
+            "license_state": _state_or_none(row.get(license_state_key, "")),
         }
         codes.append(entry)
         if is_primary:
@@ -200,15 +229,15 @@ class NppesParser:
                 practice_address_line_1=_or_none(row.get("Provider First Line Business Practice Location Address", "")),
                 practice_address_line_2=_or_none(row.get("Provider Second Line Business Practice Location Address", "")),
                 practice_city=_or_none(row.get("Provider Business Practice Location Address City Name", "")),
-                practice_state=_or_none(row.get("Provider Business Practice Location Address State Name", "")),
-                practice_zip=_or_none(row.get("Provider Business Practice Location Address Postal Code", "")),
+                practice_state=_state_or_none(row.get("Provider Business Practice Location Address State Name", "")),
+                practice_zip=_zip_or_none(row.get("Provider Business Practice Location Address Postal Code", "")),
                 practice_phone=_or_none(row.get("Provider Business Practice Location Address Telephone Number", "")),
                 practice_fax=_or_none(row.get("Provider Business Practice Location Address Fax Number", "")),
                 mailing_address_line_1=_or_none(row.get("Provider First Line Business Mailing Address", "")),
                 mailing_address_line_2=_or_none(row.get("Provider Second Line Business Mailing Address", "")),
                 mailing_city=_or_none(row.get("Provider Business Mailing Address City Name", "")),
-                mailing_state=_or_none(row.get("Provider Business Mailing Address State Name", "")),
-                mailing_zip=_or_none(row.get("Provider Business Mailing Address Postal Code", "")),
+                mailing_state=_state_or_none(row.get("Provider Business Mailing Address State Name", "")),
+                mailing_zip=_zip_or_none(row.get("Provider Business Mailing Address Postal Code", "")),
                 primary_taxonomy_code=primary_taxonomy_code,
                 taxonomy_codes=taxonomy_codes,
                 state_license_number=state_license_number,

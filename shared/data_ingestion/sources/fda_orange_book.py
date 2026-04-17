@@ -50,6 +50,12 @@ _FILENAME = "orange_book.zip"
 
 _BATCH_SIZE = 1_000
 
+# drug_orange_book.te_code is String(10); the FDA source emits comma-separated
+# multi-value TE codes like "AB1,AB2,AB3,AB4" (up to 15 chars observed) that
+# blow the column. We NULL them out rather than truncate to preserve a parseable
+# value — a truncated code would be malformed.
+_TE_CODE_MAX_LEN = 10
+
 # Sentinel text for "Approved Prior to Jan 1, 1982"
 _APPROVED_PRIOR_TEXT = "Approved Prior to Jan 1, 1982"
 _APPROVED_PRIOR_DATE = date(1982, 1, 1)
@@ -275,6 +281,10 @@ def _parse_products(file_path: Path) -> Iterator[dict[str, Any]]:
                 row_raw.get("Approval_Date", "") or ""
             )
 
+            te_code = _strip_or_none(row_raw.get("TE_Code", ""))
+            if te_code is not None and len(te_code) > _TE_CODE_MAX_LEN:
+                te_code = None  # multi-value code exceeds String(10); see _TE_CODE_MAX_LEN
+
             row: dict[str, Any] = {
                 "ingredient": _strip_or_none(row_raw.get("Ingredient", "")),
                 "dosage_form": dosage_form,
@@ -286,7 +296,7 @@ def _parse_products(file_path: Path) -> Iterator[dict[str, Any]]:
                 "appl_no": appl_no,
                 "application_number": _compute_application_number(appl_type, appl_no),
                 "product_no": _strip_or_none(row_raw.get("Product_No", "")) or "",
-                "te_code": _strip_or_none(row_raw.get("TE_Code", "")),
+                "te_code": te_code,
                 "approval_date": approval_date,
                 "approved_prior_to_1982": prior_flag,
                 "rld": _yn_to_bool(row_raw.get("RLD", "")),
@@ -470,21 +480,138 @@ class FDAOrangeBookIngester(DataSourceIngester):
             )
 
     async def load(self, records: Iterator[dict[str, Any]]) -> IngestionResult:
-        """Delegate to OrangeBookIngestionService for DB writes."""
+        """Route parsed records to shared batching primitives.
+
+        Products are upserted in BATCH_SIZE chunks by (appl_type, appl_no,
+        product_no). Patents and exclusivity are each a single scoped-replace
+        pass: we buffer the full file in memory (16K patents, 2K exclusivity
+        — both tiny), delete every (appl_type, appl_no, product_no) scope
+        that appears, then re-insert the deduped rows. A single-pass flush
+        per child table avoids the cross-batch scope-deletion problem that
+        would otherwise eat the first batch's rows when a scope spans two
+        flushes.
+        """
         import sys
         from pathlib import Path as _Path
 
-        # Ensure drug-database module is on sys.path for src.* imports
+        from shared.data_ingestion.batching import (
+            ErrorAggregator,
+            flush_scoped_replace_batch,
+            flush_upsert_batch,
+        )
+
         _repo_root = _Path(__file__).resolve().parents[3]
         _drug_db_root = _repo_root / "modules" / "drug-database"
         for _p in (str(_repo_root), str(_drug_db_root)):
             if _p not in sys.path:
                 sys.path.insert(0, _p)
 
-        from src.services.orange_book_ingestion import OrangeBookIngestionService  # type: ignore[import]
+        from src.models.orange_book_tables import (  # type: ignore[import]
+            DrugExclusivity,
+            DrugOrangeBook,
+            DrugPatent,
+        )
 
-        svc = OrangeBookIngestionService(db_session=self._db)
-        return await svc.load_records(records, source_name=_SOURCE_NAME)
+        errors = ErrorAggregator()
+        product_buffer: list[dict[str, Any]] = []
+        patent_rows: list[dict[str, Any]] = []
+        exclusivity_rows: list[dict[str, Any]] = []
+        processed = 0
+        inserted = 0
+        skipped = 0
+
+        def _flush_products() -> None:
+            nonlocal inserted, skipped
+            if not product_buffer:
+                return
+            ins, dd = flush_upsert_batch(
+                self._db,
+                source_name=self.source_name,
+                table=DrugOrangeBook.__table__,
+                unique_key=["appl_type", "appl_no", "product_no"],
+                rows=product_buffer,
+                errors=errors,
+            )
+            inserted += ins
+            skipped += dd
+            product_buffer.clear()
+
+        for record in records:
+            tbl = record.get("table")
+            row = record.get("row")
+            if not tbl or not row:
+                errors.record("empty_record", "missing table or row")
+                continue
+            processed += 1
+
+            if tbl == "drug_orange_book":
+                product_buffer.append(row)
+                if len(product_buffer) >= _BATCH_SIZE:
+                    _flush_products()
+            elif tbl == "drug_patents":
+                patent_rows.append(row)
+            elif tbl == "drug_exclusivity":
+                exclusivity_rows.append(row)
+            else:
+                errors.record("unknown_table", f"no config for table {tbl}", raw_row=row)
+
+        _flush_products()
+
+        # Patents: one-shot scoped-replace. Delete every scope the incoming
+        # file touches, then re-insert all deduped rows. Uniqueness tuple
+        # matches the DB UNIQUE constraint so duplicate rows in the source
+        # don't violate it.
+        pat_ins, pat_dd = flush_scoped_replace_batch(
+            self._db,
+            source_name=self.source_name,
+            table=DrugPatent.__table__,
+            scope_key=["appl_type", "appl_no", "product_no"],
+            unique_key=["appl_type", "appl_no", "product_no", "patent_no"],
+            rows=patent_rows,
+            errors=errors,
+        )
+        inserted += pat_ins
+        skipped += pat_dd
+
+        exc_ins, exc_dd = flush_scoped_replace_batch(
+            self._db,
+            source_name=self.source_name,
+            table=DrugExclusivity.__table__,
+            scope_key=["appl_type", "appl_no", "product_no"],
+            unique_key=[
+                "appl_type",
+                "appl_no",
+                "product_no",
+                "exclusivity_code",
+                "exclusivity_date",
+            ],
+            rows=exclusivity_rows,
+            errors=errors,
+        )
+        inserted += exc_ins
+        skipped += exc_dd
+
+        errors.log_summary(source_name=self.source_name)
+
+        logger.info(
+            "Orange Book load complete",
+            extra={
+                "ingest_source": self.source_name,
+                "ingest_records_processed": processed,
+                "ingest_records_inserted": inserted,
+                "ingest_records_skipped": skipped,
+                "ingest_records_errored": errors.total_errors,
+            },
+        )
+
+        return IngestionResult(
+            source=self.source_name,
+            status="completed",
+            records_processed=processed,
+            records_inserted=inserted,
+            records_skipped=skipped,
+            records_errored=errors.total_errors,
+        )
 
 
 __all__ = [

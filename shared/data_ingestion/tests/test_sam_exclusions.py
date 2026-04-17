@@ -587,18 +587,21 @@ class TestSamDownload:
 
         from shared.data_ingestion.sources.sam_exclusions import _SAM_API_BASE_URL
 
-        sample_record = {
-            "classificationType": "Individual",
-            "name": "TEST PERSON",
-            "exclusionType": "Reciprocal",
-            "activationDate": "2020-01-01",
-            "npi": "1234567890",
+        v4_entity = {
+            "exclusionDetails": {
+                "classificationType": "Individual",
+                "exclusionType": "Reciprocal",
+            },
+            "exclusionIdentification": {
+                "entityName": "TEST PERSON",
+                "npi": "1234567890",
+            },
+            "exclusionActions": {
+                "listOfActions": [{"activateDate": "01-01-2020"}],
+            },
         }
 
-        response_data = {
-            "exclusionList": [sample_record],
-            "totalRecords": 1,
-        }
+        response_data = {"excludedEntity": [v4_entity], "totalRecords": 1}
 
         with patch.dict(os.environ, {"SAM_API_KEY": "test-api-key-abc123"}):
             with respx.mock:
@@ -633,12 +636,12 @@ class TestSamDownload:
     async def test_download_empty_response_writes_empty_file(
         self, db_session: Session, ingester: SamExclusionsIngester
     ):
-        """download() with empty exclusionList stops pagination immediately."""
+        """download() with empty excludedEntity stops pagination immediately."""
         import respx
         import httpx
         from shared.data_ingestion.sources.sam_exclusions import _SAM_API_BASE_URL
 
-        response_data = {"exclusionList": [], "totalRecords": 0}
+        response_data = {"excludedEntity": [], "totalRecords": 0}
 
         with patch.dict(os.environ, {"SAM_API_KEY": "test-key"}):
             with respx.mock:
@@ -649,42 +652,24 @@ class TestSamDownload:
 
         assert out_path.exists()
 
-    async def test_download_uses_data_key_fallback(
-        self, db_session: Session, ingester: SamExclusionsIngester
-    ):
-        """download() uses 'data' key if 'exclusionList' absent."""
-        import respx
-        import httpx
-        from shared.data_ingestion.sources.sam_exclusions import _SAM_API_BASE_URL
-
-        record = {"classificationType": "Firm", "name": "ACME", "activationDate": "2021-01-01"}
-        response_data = {"data": [record], "total": 1}
-
-        with patch.dict(os.environ, {"SAM_API_KEY": "test-key"}):
-            with respx.mock:
-                respx.get(_SAM_API_BASE_URL).mock(
-                    return_value=httpx.Response(200, json=response_data)
-                )
-                out_path = await ingester.download()
-
-        content = out_path.read_text()
-        assert "ACME" in content
-
     async def test_download_pagination_stops_when_total_reached(
         self, db_session: Session, ingester: SamExclusionsIngester
     ):
-        """Lines 124→170, 168: pagination loop exits when total_written >= totalRecords.
-        Covers the logger.info after page and the break on total condition."""
+        """Pagination exits when total_written >= totalRecords."""
         import respx
         import httpx
         from shared.data_ingestion.sources.sam_exclusions import _SAM_API_BASE_URL, _SAM_PAGE_SIZE
 
-        records = [
-            {"classificationType": "Individual", "name": f"P{i}", "activationDate": "2020-01-01"}
+        entities = [
+            {
+                "exclusionDetails": {"classificationType": "Individual"},
+                "exclusionIdentification": {"entityName": f"P{i}"},
+                "exclusionActions": {"listOfActions": [{"activateDate": "01-01-2020"}]},
+            }
             for i in range(_SAM_PAGE_SIZE)
         ]
-        # totalRecords == len(records) so loop exits after first page via total_written >= totalRecords
-        response_data = {"exclusionList": records, "totalRecords": _SAM_PAGE_SIZE}
+        # totalRecords == len(entities) so loop exits after first page via total_written >= totalRecords
+        response_data = {"excludedEntity": entities, "totalRecords": _SAM_PAGE_SIZE}
 
         call_count = 0
 
@@ -722,19 +707,20 @@ class TestSamDownload:
     async def test_download_multi_page_increments_page_counter(
         self, db_session: Session, ingester: SamExclusionsIngester
     ):
-        """Lines 168, 182: page += 1 fires when first page has more records than totalRecords
-        suggests (i.e., second page needed), then logger after loop fires on completion."""
+        """page += 1 fires when first page is full with nextLink, second page drains the rest."""
         import respx
         import httpx
         from shared.data_ingestion.sources.sam_exclusions import _SAM_API_BASE_URL, _SAM_PAGE_SIZE
 
-        page1_records = [
-            {"classificationType": "Individual", "name": f"P{i}", "activationDate": "2020-01-01"}
-            for i in range(_SAM_PAGE_SIZE)
-        ]
-        page2_records = [
-            {"classificationType": "Individual", "name": "LAST", "activationDate": "2020-01-01"}
-        ]
+        def _entity(name: str) -> dict:
+            return {
+                "exclusionDetails": {"classificationType": "Individual"},
+                "exclusionIdentification": {"entityName": name},
+                "exclusionActions": {"listOfActions": [{"activateDate": "01-01-2020"}]},
+            }
+
+        page1 = [_entity(f"P{i}") for i in range(_SAM_PAGE_SIZE)]
+        page2 = [_entity("LAST")]
 
         call_count = 0
 
@@ -742,17 +728,17 @@ class TestSamDownload:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                # First page: full page size, totalRecords > written → page += 1 fires
+                # First page: full, nextLink present → loop continues
                 return httpx.Response(200, json={
-                    "exclusionList": page1_records,
+                    "excludedEntity": page1,
                     "totalRecords": _SAM_PAGE_SIZE + 1,
+                    "links": {"nextLink": "https://api.sam.gov/.../exclusions?page=1"},
                 })
-            else:
-                # Second page: fewer than page_size → break
-                return httpx.Response(200, json={
-                    "exclusionList": page2_records,
-                    "totalRecords": _SAM_PAGE_SIZE + 1,
-                })
+            # Second page: short → loop breaks
+            return httpx.Response(200, json={
+                "excludedEntity": page2,
+                "totalRecords": _SAM_PAGE_SIZE + 1,
+            })
 
         with patch.dict(os.environ, {"SAM_API_KEY": "test-key"}):
             with respx.mock:

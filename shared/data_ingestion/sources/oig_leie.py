@@ -144,17 +144,30 @@ class OigLeieIngester(DataSourceIngester):
                 yield dict(row)
 
     async def load(self, records: Iterator[dict[str, Any]]) -> IngestionResult:
-        """Batch-upsert LEIE records; then run cross-reference updates."""
-        from sqlalchemy import text
+        """Batch-upsert LEIE records, then run cross-reference UPDATEs.
 
-        inserted = 0
-        updated = 0
-        errored = 0
+        Uses per-row SQLAlchemy ORM upsert rather than flush_upsert_batch
+        because the natural key ``(lastname, firstname, busname, excldate)``
+        has NULL-containing rows in production: 3,369 rows have NULL
+        lastname/firstname (pure businesses) and 79,527 have NULL busname
+        (individuals). SQL ON CONFLICT treats NULL as distinct — running
+        flush_upsert_batch would silently duplicate those rows on every
+        monthly load. SQLAlchemy's ``col == None`` comparator correctly
+        generates ``IS NULL``, so the ORM path gets it right.
+
+        Per-batch commits limit blast radius of a failure. Rows are
+        committed in chunks of ``_BATCH_SIZE`` so a bad row late in the
+        stream doesn't roll back everything upstream.
+        """
+        from shared.data_ingestion.batching import ErrorAggregator
+
+        errors = ErrorAggregator()
         processed = 0
+        inserted = 0
         batch: list[dict[str, Any]] = []
 
         def _flush_batch() -> None:
-            nonlocal inserted, updated, errored
+            nonlocal inserted
             if not batch:
                 return
             for row in batch:
@@ -162,15 +175,8 @@ class OigLeieIngester(DataSourceIngester):
                     self._upsert_row(row)
                     inserted += 1
                 except Exception as exc:
-                    errored += 1
-                    logger.warning(
-                        "LEIE row upsert failed",
-                        extra={
-                            "ingest_source": self.source_name,
-                            "leie_error": str(exc)[:200],
-                        },
-                    )
-            self._db.flush()
+                    errors.record("upsert", str(exc), raw_row=row)
+            self._db.commit()
             batch.clear()
 
         for raw in records:
@@ -180,15 +186,19 @@ class OigLeieIngester(DataSourceIngester):
                 _flush_batch()
 
         _flush_batch()
-        self._db.commit()
 
-        # Cross-reference: flip is_excluded on prescribers
         xref_prescribers = self._cross_reference_prescribers()
         xref_pharmacies = self._cross_reference_pharmacies()
 
+        errors.log_summary(source_name=self.source_name)
+
         logger.info(
-            "OIG LEIE cross-reference complete",
+            "OIG LEIE load complete",
             extra={
+                "ingest_source": self.source_name,
+                "ingest_records_processed": processed,
+                "ingest_records_inserted": inserted,
+                "ingest_records_errored": errors.total_errors,
                 "leie_prescribers_flagged": xref_prescribers,
                 "leie_pharmacies_flagged": xref_pharmacies,
             },
@@ -199,23 +209,17 @@ class OigLeieIngester(DataSourceIngester):
             status="completed",
             records_processed=processed,
             records_inserted=inserted,
-            records_updated=updated,
-            records_errored=errored,
+            records_errored=errors.total_errors,
         )
 
     def _upsert_row(self, raw: dict[str, Any]) -> None:
-        """Insert or update one LEIE row."""
-        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-
+        """Insert or update one LEIE row, matching NULL keys via IS NULL."""
         from shared.db.models.oig_leie_exclusions import OigLeieExclusion
 
         lastname = (raw.get("LASTNAME") or "").strip() or None
         firstname = (raw.get("FIRSTNAME") or "").strip() or None
         busname = (raw.get("BUSNAME") or "").strip() or None
         excldate = _parse_leie_date(raw.get("EXCLDATE"))
-
-        # Store full raw payload for forward-compatibility
-        raw_payload = json.dumps({k: v for k, v in raw.items()})
 
         values: dict[str, Any] = {
             "lastname": lastname,
@@ -236,12 +240,10 @@ class OigLeieIngester(DataSourceIngester):
             "reindate": _parse_leie_date(raw.get("REINDATE")),
             "waiverdate": _parse_leie_date(raw.get("WAIVERDATE")),
             "waiverstate": (raw.get("WAIVERSTATE") or "").strip() or None,
-            "raw_payload": raw_payload,
+            "raw_payload": json.dumps(dict(raw)),
             "updated_at": datetime.now(UTC),
         }
 
-        # Build natural key for upsert
-        # Use INSERT OR REPLACE / ON CONFLICT for SQLite + PostgreSQL
         existing = (
             self._db.query(OigLeieExclusion)
             .filter(
@@ -258,8 +260,7 @@ class OigLeieIngester(DataSourceIngester):
                 setattr(existing, k, v)
         else:
             values["created_at"] = datetime.now(UTC)
-            obj = OigLeieExclusion(**values)
-            self._db.add(obj)
+            self._db.add(OigLeieExclusion(**values))
 
     def _cross_reference_prescribers(self) -> int:
         """Update prescribers.is_excluded for NPI matches in active LEIE exclusions."""

@@ -1,18 +1,18 @@
-"""Load OIG LEIE (List of Excluded Individuals/Entities) into shared.
+"""Load CMS Medicare Opt-Out Affidavits into prescriber_dir.medicare_opt_out.
 
-Downloads the monthly UPDATED.csv from oig.hhs.gov, upserts into
-shared.oig_leie_exclusions via flush_upsert_batch, then runs cross-
-reference UPDATEs to flip is_excluded on prescriber_dir.prescribers
-and pharmacy_dir.pharmacies where NPI matches an active exclusion.
+Paginates the CMS Socrata-style Data API (anonymous, ~55K rows / 22 MB)
+and upserts via shared.data_ingestion.batching.flush_upsert_batch. After
+upsert, cross-references prescriber_dir.prescribers.medicare_opt_out to
+flip the status flag on matching NPIs.
 
-Pipeline: OigLeieIngester (DataSourceIngester child)
-  download -> scrape OIG page -> fetch UPDATED.csv
-  parse    -> stream CSV rows
-  load     -> flush_upsert_batch on natural key -> cross-reference SQL
+Pipeline: CmsOptOutIngester (DataSourceIngester child)
+  download -> paginate CMS API -> data/reference/cms-opt-out/opt_out.json
+  parse    -> stream rows, normalise dates + booleans + NPI
+  load     -> flush_upsert_batch (unique_key=[npi]) + cross-reference SQL
 
 Usage:
     source infrastructure/scripts/switch_env.sh dev
-    python scripts/load_oig_leie.py
+    python scripts/load_opt_out.py
 
 Environment:
     DATABASE_URL_SYNC - set by switch_env.sh
@@ -27,20 +27,16 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-for _p in (
-    _REPO_ROOT,
-    _REPO_ROOT / "modules" / "prescriber-directory",
-    _REPO_ROOT / "modules" / "pharmacy-directory",
-):
-    sp = str(_p)
-    if sp not in sys.path:
-        sys.path.insert(0, sp)
+_PRESCRIBER_DIR = _REPO_ROOT / "modules" / "prescriber-directory"
+for _p in (str(_REPO_ROOT), str(_PRESCRIBER_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)-5s %(name)s %(message)s",
 )
-logger = logging.getLogger("load_oig_leie")
+logger = logging.getLogger("load_opt_out")
 
 
 def _resolve_db_url() -> str:
@@ -58,18 +54,18 @@ async def _run() -> None:
     from sqlalchemy import create_engine, text
     from sqlalchemy.orm import Session
 
-    from shared.data_ingestion.sources.oig_leie import OigLeieIngester
+    from shared.data_ingestion.sources.cms_opt_out import CmsOptOutIngester
 
     db_url = _resolve_db_url()
     engine = create_engine(db_url, echo=False)
 
     with Session(engine) as session:
-        ingester = OigLeieIngester(db_session=session)
-        logger.info("Starting OIG LEIE pipeline...")
+        ingester = CmsOptOutIngester(db_session=session)
+        logger.info("Starting CMS Opt-Out pipeline...")
         result = await ingester.run(run_type="manual_trigger")
 
     print(f"\n{'=' * 60}")
-    print("OIG LEIE Load Result")
+    print("CMS Opt-Out Load Result")
     print(f"{'=' * 60}")
     print(f"  Status:             {result.status}")
     print(f"  Records in source:  {result.records_in_source:,}")
@@ -84,10 +80,19 @@ async def _run() -> None:
     print(f"{'=' * 60}")
 
     with engine.connect() as conn:
-        cnt = conn.execute(
-            text("SELECT count(*) FROM shared.oig_leie_exclusions")
+        for table in ("medicare_opt_out",):
+            cnt = conn.execute(
+                text(f"SELECT count(*) FROM prescriber_dir.{table}")
+            ).scalar()
+            print(f"  prescriber_dir.{table}: {cnt:,} rows")
+
+        opted_out = conn.execute(
+            text(
+                "SELECT count(*) FROM prescriber_dir.prescribers "
+                "WHERE medicare_opt_out IS TRUE"
+            )
         ).scalar()
-        print(f"  shared.oig_leie_exclusions: {cnt:,} rows")
+        print(f"  prescribers flagged medicare_opt_out=TRUE: {opted_out:,}")
 
     if result.records_errored > 0:
         logger.error("Non-zero error count: %d - check logs", result.records_errored)

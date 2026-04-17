@@ -463,7 +463,8 @@ class TestPaginatedAPIMergesPages:
 
 
 class TestHistoryRowBehavior:
-    def test_history_row_created_on_price_change(self, db_session: Session) -> None:
+    @pytest.mark.asyncio
+    async def test_history_row_created_on_price_change(self, db_session: Session) -> None:
         """Upserting with changed price creates a new history row."""
         svc = NADACIngestionService(db_session)
         row_v1 = _nadac_row(price="1.000000")
@@ -473,35 +474,29 @@ class TestHistoryRowBehavior:
             eff_date=date(2026, 4, 1),
         )
 
-        # First insert
-        svc._upsert_batch([row_v1], [])
-        db_session.flush()
+        await svc.load_records(iter([row_v1]), source_name="cms_nadac")
         h1 = db_session.query(DrugNADACPricingHistory).count()
         assert h1 == 1
 
-        # Second insert with changed price
-        svc._upsert_batch([row_v2], [])
-        db_session.flush()
+        await svc.load_records(iter([row_v2]), source_name="cms_nadac")
         h2 = db_session.query(DrugNADACPricingHistory).count()
         assert h2 == 2
 
-    def test_history_row_NOT_created_when_price_unchanged(
+    @pytest.mark.asyncio
+    async def test_history_row_NOT_created_when_price_unchanged(
         self, db_session: Session
     ) -> None:
         """Re-upserting the exact same row does NOT create a duplicate history row."""
         svc = NADACIngestionService(db_session)
         row = _nadac_row(ndc_11="00093745798")
 
-        svc._upsert_batch([row], [])
-        db_session.flush()
+        await svc.load_records(iter([row]), source_name="cms_nadac")
         count_after_first = db_session.query(DrugNADACPricingHistory).filter_by(
             ndc_11="00093745798"
         ).count()
         assert count_after_first == 1
 
-        # Re-ingest same row — ON CONFLICT DO NOTHING on history
-        svc._upsert_batch([row], [])
-        db_session.flush()
+        await svc.load_records(iter([row]), source_name="cms_nadac")
         count_after_second = db_session.query(DrugNADACPricingHistory).filter_by(
             ndc_11="00093745798"
         ).count()

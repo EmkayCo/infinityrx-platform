@@ -5,7 +5,7 @@ Usage:
 
 where <source> is one of:
     rxnorm, fda_rems, fda_purple_book, fda_drug_shortages,
-    medicare_opt_out, medicare_part_d, oig_leie
+    medicare_opt_out, oig_leie
 
 Options:
     --sample N    Only process the first N records yielded by the parser.
@@ -59,9 +59,6 @@ def _ingester_for(source: str, db_session):
     if source == "medicare_opt_out":
         from shared.data_ingestion.sources.cms_opt_out import CmsOptOutIngester
         return CmsOptOutIngester(db_session=db_session)
-    if source == "medicare_part_d":
-        from shared.data_ingestion.sources.cms_part_d_prescriber import CmsPartDPrescriberIngester
-        return CmsPartDPrescriberIngester(db_session=db_session)
     if source == "oig_leie":
         from shared.data_ingestion.sources.oig_leie import OigLeieIngester
         return OigLeieIngester(db_session=db_session)

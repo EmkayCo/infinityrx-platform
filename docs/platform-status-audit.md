@@ -94,7 +94,7 @@ PostgreSQL 17 is running in `infinityrx-postgres` (healthy, 10 hours uptime). Da
 ```
 adjudication, ai_nlp, billing, core, dataiq, drug_database, drug_db, ebv_ebi,
 edi, edi_compliance, med_prescriber_dir, medical_claims, member_mgmt,
-mtm_clinical, part_d, payment_proc, pharmacy_dir, plan_design, prescriber_dir,
+mtm_clinical, payment_proc, pharmacy_dir, plan_design, prescriber_dir,
 prior_auth, program_config, public, rebate_mgmt, reclaimrx, reporting,
 rules_engine, shared, switch_conn, testing_sim
 ```

@@ -413,14 +413,83 @@ class StateMedicaidBinLoader:
         return summary
 
 
+from collections.abc import Iterator as _Iterator
+from typing import Any as _Any
+
+from shared.data_ingestion.base import DataSourceIngester, IngestionResult
+
+
+class MedicaidBinIngester(DataSourceIngester):
+    """DataSourceIngester wrapper around StateMedicaidBinLoader.
+
+    The confidence-based upsert and plan_type-conflict detection live in
+    ``StateMedicaidBinLoader``; wrapping it in a DataSourceIngester exposes
+    the medicaid loader through the same orchestration surface as the
+    other refactored loaders (download/parse/load/run) without duplicating
+    the specialised confidence-resolution logic.
+
+    No HTTP download — regional CSVs are pre-staged under
+    ``data/reference/medicaid/``. ``download()`` returns that directory
+    path; ``parse()`` is a no-op because ``StateMedicaidBinLoader`` owns
+    the read+validate+upsert cycle per file, and ``load()`` just invokes
+    it across all five regional CSVs.
+    """
+
+    source_name = "state_medicaid_bins"
+
+    async def download(self) -> Path:
+        if not _MEDICAID_DATA_DIR.is_dir():
+            raise FileNotFoundError(
+                f"Medicaid data dir missing: {_MEDICAID_DATA_DIR}. "
+                "Regional CSVs must be pre-staged."
+            )
+        return _MEDICAID_DATA_DIR
+
+    def parse(self, file_path: Path) -> _Iterator[dict[str, _Any]]:
+        return iter([])
+
+    async def load(
+        self, records: _Iterator[dict[str, _Any]]
+    ) -> IngestionResult:
+        loader = StateMedicaidBinLoader(db=self._db)
+        results = loader.load_all_regions()
+        total_parsed = sum(r.rows_parsed for r in results.values())
+        total_upserted = sum(r.rows_upserted for r in results.values())
+        total_skipped = sum(r.rows_skipped for r in results.values())
+        total_errors = sum(len(r.errors) for r in results.values())
+
+        for region, result in results.items():
+            logger.info(
+                "Medicaid region loaded",
+                extra={
+                    "ingest_source": self.source_name,
+                    "medicaid_region": region,
+                    "medicaid_rows_parsed": result.rows_parsed,
+                    "medicaid_rows_upserted": result.rows_upserted,
+                    "medicaid_rows_skipped": result.rows_skipped,
+                    "medicaid_error_count": len(result.errors),
+                },
+            )
+
+        return IngestionResult(
+            source=self.source_name,
+            status="completed",
+            records_processed=total_parsed,
+            records_inserted=total_upserted,
+            records_skipped=total_skipped,
+            records_errored=total_errors,
+        )
+
+
 __all__ = [
-    "StateMedicaidBinLoader",
-    "LoadResult",
     "BulkLoadSummary",
+    "LoadResult",
+    "MedicaidBinIngester",
     "RowError",
+    "StateMedicaidBinLoader",
     "VALID_STATES",
+    "_MEDICAID_DATA_DIR",
     "_MEDICAID_PLAN_TYPES",
     "_REGIONS",
-    "_MEDICAID_DATA_DIR",
     "_build_conflict_list",
 ]

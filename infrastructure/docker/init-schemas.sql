@@ -25,7 +25,6 @@ CREATE SCHEMA IF NOT EXISTS ebv_ebi;
 CREATE SCHEMA IF NOT EXISTS ai_nlp;
 CREATE SCHEMA IF NOT EXISTS rebate_mgmt;
 CREATE SCHEMA IF NOT EXISTS dataiq;
-CREATE SCHEMA IF NOT EXISTS part_d;
 CREATE SCHEMA IF NOT EXISTS mtm_clinical;
 
 -- Required extension for gen_random_uuid()
