@@ -69,32 +69,56 @@ def fdb_name_to_table_name(fdb_table_name: str) -> str:
     return fdb_table_name.strip().lower()
 
 
-def load_expected_names(record_counts_path: Path) -> list[str]:
-    """Read RECORD_COUNTS.TXT and return the full list of expected DB table names.
+def load_expected_names(source_path: Path) -> list[str]:
+    """Return the full list of expected DB table names.
 
-    Real-file format observed at `data/reference/fdb/TEL251759D/Current/`:
-      <KEY>|<count>
-    one entry per CRLF line; blanks and `#` comments tolerated.
+    Two source formats supported (B9.B C3):
 
-    The loader accepts BOTH `|` (production format) and `=` (legacy
-    synthetic test fixtures). Matches `_fdb_contract._parse_record_counts`.
+    1. **DB.zip namelist** (canonical — `*_namelist.txt`): one
+       FDB table name per line. This is the SOURCE OF TRUTH for the
+       220 B9 schema-driving tables. Lock-in:
+       `infrastructure/scripts/lib/fdb_db_zip_namelist.txt`.
+
+    2. **RECORD_COUNTS.TXT** (legacy / superset): pipe-delimited
+       `<KEY>|<count>` rows. Real file ships ~906 entries — a
+       SUPERSET that includes archives (`AR*`), surveillance
+       (`CMCS*`), UPD variants, etc. Use ONLY for row-count
+       reconciliation, NOT for schema generation.
+
+    The loader auto-detects: if any line contains `|` or `=` (a
+    delimiter), it is treated as a RECORD_COUNTS-style file; otherwise
+    each line is a bare table name (DB.zip namelist style).
 
     Returns DB-shaped names (lower-cased). Order preserved from the
     file for reproducibility.
     """
-    text = record_counts_path.read_text(encoding="latin-1")
+    text = source_path.read_text(encoding="latin-1")
     out: list[str] = []
     seen: set[str] = set()
+
+    # Detect format: if ANY non-comment data line contains a delimiter,
+    # treat the entire file as RECORD_COUNTS-style; else namelist-style.
+    sample_lines = [
+        line.strip() for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    if not sample_lines:
+        return out
+    record_counts_style = any("|" in s or "=" in s for s in sample_lines[:5])
+
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        if "|" in line:
-            key, _, _val = line.partition("|")
-        elif "=" in line:
-            key, _, _val = line.partition("=")
+        if record_counts_style:
+            if "|" in line:
+                key, _, _val = line.partition("|")
+            elif "=" in line:
+                key, _, _val = line.partition("=")
+            else:
+                continue
         else:
-            continue
+            key = line
         db_name = fdb_name_to_table_name(key)
         if db_name in seen:
             continue
@@ -239,10 +263,23 @@ def format_evidence(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--namelist",
+        type=Path,
+        default=None,
+        help=(
+            "Path to B9 canonical name list (default: "
+            "infrastructure/scripts/lib/fdb_db_zip_namelist.txt — 220 "
+            "table names extracted from DB.zip). RECORD_COUNTS.TXT is "
+            "ALSO accepted (superset of 906 entries) — auto-detected "
+            "by delimiter presence."
+        ),
+    )
+    # Backward-compat alias for B9.A C10 callers.
+    parser.add_argument(
         "--record-counts",
         type=Path,
         default=None,
-        help="Path to FDB RECORD_COUNTS.TXT (defaults to data/reference/fdb/TEL251759D/Current/).",
+        help="DEPRECATED — alias for --namelist (B9.A C10 backward compat).",
     )
     parser.add_argument(
         "--evidence-out",
@@ -257,22 +294,24 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)-5s %(name)s %(message)s",
     )
 
-    # --record-counts default
-    if args.record_counts is None:
-        repo_root = Path(__file__).resolve().parents[2]
-        args.record_counts = (
-            repo_root / "data" / "reference" / "fdb" / "TEL251759D"
-            / "Current" / "RECORD_COUNTS.TXT"
+    # Resolve source: --namelist beats --record-counts (compat); default
+    # to the in-repo canonical DB.zip namelist.
+    repo_root = Path(__file__).resolve().parents[2]
+    source = args.namelist or args.record_counts
+    if source is None:
+        source = (
+            repo_root / "infrastructure" / "scripts" / "lib"
+            / "fdb_db_zip_namelist.txt"
         )
-    if not args.record_counts.exists():
+    if not source.exists():
         logger.error(
-            "RECORD_COUNTS.TXT not found at %s — pass --record-counts or "
-            "verify the FDB drop is on disk.",
-            args.record_counts,
+            "name list not found at %s — pass --namelist or verify the "
+            "B9 canonical namelist is committed.",
+            source,
         )
         return 1
 
-    expected = load_expected_names(args.record_counts)
+    expected = load_expected_names(source)
     logger.info("preflight_b9_expected_names count=%d", len(expected))
 
     # Resolve reference-DB URL via shared guard (strict — no fallback).

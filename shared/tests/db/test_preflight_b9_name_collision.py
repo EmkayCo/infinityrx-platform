@@ -62,6 +62,45 @@ def test_load_expected_names_parses_record_counts(tmp_path: Path) -> None:
     assert names == ["rfoo", "rbar", "rnp3_ndc_price"]
 
 
+def test_load_expected_names_parses_pipe_delimited_record_counts(tmp_path: Path) -> None:
+    """Real FDB format uses `|`; C2 fixed this."""
+    rc = tmp_path / "RECORD_COUNTS.TXT"
+    rc.write_text(
+        "RFOO|000000010\n"
+        "RBAR|000000020\n"
+        "RNP3_NDC_PRICE|015635770\n",
+        encoding="latin-1",
+    )
+    names = load_expected_names(rc)
+    assert names == ["rfoo", "rbar", "rnp3_ndc_price"]
+
+
+def test_load_expected_names_parses_db_zip_namelist(tmp_path: Path) -> None:
+    """B9.B C3 — bare-name format (one table per line, no delimiter)."""
+    nl = tmp_path / "fdb_db_zip_namelist.txt"
+    nl.write_text(
+        "RFOO_TEST\n"
+        "RBAR_LOOKUP\n"
+        "RNP3_NDC_PRICE\n",
+        encoding="utf-8",
+    )
+    names = load_expected_names(nl)
+    assert names == ["rfoo_test", "rbar_lookup", "rnp3_ndc_price"]
+
+
+def test_canonical_namelist_in_repo_has_220_entries() -> None:
+    """The committed canonical namelist matches DB.zip's exact 220 count."""
+    nl = _SCRIPTS_DIR / "lib" / "fdb_db_zip_namelist.txt"
+    assert nl.exists(), f"canonical namelist missing at {nl}"
+    names = load_expected_names(nl)
+    assert len(names) == 220, (
+        f"Canonical FDB namelist has {len(names)} entries; expected "
+        f"exactly 220 (per DB.zip namelist). If the FDB vendor drop "
+        f"shape changed, re-generate via "
+        f"`python -c 'import zipfile, pathlib; ...'`."
+    )
+
+
 def test_load_expected_names_dedupes_repeats(tmp_path: Path) -> None:
     """Same key on two lines → one entry in the output."""
     rc = tmp_path / "RECORD_COUNTS.TXT"
