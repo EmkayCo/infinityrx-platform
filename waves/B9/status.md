@@ -15,7 +15,8 @@ this file; do not duplicate state in `~/.claude/.../memory/*.md`.
 | Phase | Scope | Status | Commit range | Notes |
 |---|---|---|---|---|
 | B9.A | Infra + contracts | **CLOSED** (gate-close R1+R2+R3 absorbed) | `503cd7b..a114303` (13 commits) | C0-C14 + 3 gate-close absorptions |
-| B9.B | Tier A — **107 specs / FDW 173 / migration with PKs / generic loader** | **R1 ABSORBED — pending R2** | `93c9d8b..<HEAD>` | Scope amended: B9.B closes at 107 (not 113); B9.C absorbs the 6 NDC/GCN/MEDID-keyed reclassifieds (now 72 tables, not 66) |
+| B9.B | Tier A — **107 specs / FDW 173 / migration (99 PK + 8 UQ) / generic loader / GATE-CLOSE GO** | **CLOSED** (R1→R2→R3, GO at R3) | `93c9d8b..82617b9` | Scope amended: B9.B closes at 107 (not 113); B9.C absorbs the 6 NDC/GCN/MEDID-keyed reclassifieds (now 72 tables, not 66) |
+| B9.C | Tier B — 72 NDC/GCN-keyed joins (was 66; +6 from B9.B reclassification) | NOT STARTED | — | Opens next session |
 | B9.C | Tier B — 66 NDC/GCN joins | NOT STARTED | — | Blocked on B9.B |
 | B9.D | Tier C non-RNDC14 — 16 complex | NOT STARTED | — | Blocked on B9.C |
 | B9.E | RNDC14 standalone | NOT STARTED | — | Blocked on B9.D |
@@ -179,7 +180,30 @@ violating the SC-7 idempotency contract.
 
 **New replay-idempotency test** (`test_append_only_replay_with_natural_key_does_not_duplicate`): constructs SQLite table with UNIQUE index over natural_key, loads twice, asserts row count unchanged after second load. Green.
 
-787 unit tests pass. R3 (verification of R2 absorption) dispatched next.
+787 unit tests pass. R3 (verification of R2 absorption) returned GO.
+
+---
+
+## B9.B GATE-CLOSE R3 — GO verdict (B9.B officially closed)
+
+**Verdict:** GO
+**Round:** R3 (2026-05-12)
+**Artifact:** `waves/B9/codex-b9b-gate-close-r3-result.md`
+
+R3 static-verified every R2 fix landed correctly:
+- 99 PrimaryKeyConstraint + 8 UniqueConstraint + 1 Numeric(16, 6) in migration
+- The 8 UQs are exactly the batch_09 APPEND_ONLY history tables
+- Loader's APPEND_ONLY path uses `on_conflict_do_nothing` with `natural_key`
+- Replay-idempotency test exists and asserts row count unchanged on second load
+- Generator's asymmetric strictness (UPSERT hard-fails without natural_key; APPEND_ONLY allows legacy compat) is defensible
+
+**No residual HIGH/MEDIUM blockers. B9.B officially closes here.**
+
+Two non-blocking notes from R3 (carry to a future polish wave, not gate-blocking):
+- Loader's `summary.inserted` counter increments after DO NOTHING — row-count idempotency is correct, but the per-table counter slightly over-reports actual inserted rows (it's a parse-count, not an insert-count).
+- Live-DB evidence (FDW verify 173/173, migration up+down+up, row-count reconciliation against RECORD_COUNTS.TXT) is captured in a Docker-up follow-on, not in this gate.
+
+**Wave B9.B closed; B9.C opens with 72 Tier B tables (66 planned + 6 reclassifieds).**
 
 ---
 
