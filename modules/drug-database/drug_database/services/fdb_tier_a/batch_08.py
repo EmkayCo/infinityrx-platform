@@ -46,6 +46,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RTMDFID1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('ROUTED_DOSAGE_FORM_MED_ID', 'TM_SOURCE_ID', 'TM_IND'),
     ),
     # Tall Man: MEDID alternates
     TableSpec(
@@ -61,6 +62,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RTMMID1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MEDID', 'TM_SOURCE_ID', 'TM_IND'),
     ),
     # Tall Man: GNN alternates — 4-column NK (the largest composite in batch_08)
     TableSpec(
@@ -83,6 +85,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RTMNGN0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('HICL_SEQNO', 'TM_GNN_TYPE_ID', 'TM_SOURCE_ID', 'TM_IND'),
     ),
     # Tall Man: med-name id alternates
     TableSpec(
@@ -103,6 +106,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RTMNMID1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_NAME_ID', 'TM_SOURCE_ID', 'TM_IND'),
     ),
     # Tall Man: routed-med id alternates
     TableSpec(
@@ -123,6 +127,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RTMRMID1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('ROUTED_MED_ID', 'TM_SOURCE_ID', 'TM_IND'),
     ),
 ]
 

@@ -43,10 +43,9 @@ NATURAL_KEY_COUNT convention (from batch_08):
 """
 from __future__ import annotations
 
-from decimal import Decimal
-
 from drug_database.services.fdb_adapter import (
     DeltaSemantics,
+    decimal_16_6,
     TableSpec,
     Tier,
 )
@@ -70,6 +69,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RETCSCH0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('ETC_SEARCH_ETC_ID', 'ETC_PRODUCT_RELATED_ETC_ID'),
     ),
     # ------------------------------------------------------------------
     # ETC ↔ HIC3 cross-reference — pure link, 2-col composite NK
@@ -88,6 +88,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RETCXRF0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('ETC_ID', 'HIC3_SEQN'),
     ),
     # ------------------------------------------------------------------
     # Dosage-form ↔ attribute link — pure link, 2-col composite NK
@@ -106,6 +107,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPEIAL0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('DOSAGE_FORM_ID', 'DOSAGE_FORM_ATTRIBUTE_ID'),
     ),
     # ------------------------------------------------------------------
     # Generic dosage-form master link — NK=2, indicator flag as 3rd col
@@ -126,6 +128,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPEIGL0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('DOSAGE_FORM_ID', 'GCDF'),
     ),
     # ------------------------------------------------------------------
     # Med dosage-form master link — NK=2, indicator flag as 3rd col
@@ -146,6 +149,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPEIML0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('DOSAGE_FORM_ID', 'MED_DOSAGE_FORM_ID'),
     ),
     # ------------------------------------------------------------------
     # OVW dosage-form master link — NK=2, indicator flag as 3rd col
@@ -166,6 +170,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPEIOL0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('DOSAGE_FORM_ID', 'OVW_DOSAGE_FORM_ID'),
     ),
     # ------------------------------------------------------------------
     # Related route-of-administration — pure link, 2-col composite NK
@@ -184,6 +189,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPEIRER0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('CONTINUOUS_RT_ID', 'INTERMITTENT_RT_ID'),
     ),
     # ------------------------------------------------------------------
     # Route-of-administration hierarchy — pure link, 2-col composite NK
@@ -202,6 +208,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPEIRH0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('PARENT_RT_ID', 'CLINICAL_RT_ID'),
     ),
     # ------------------------------------------------------------------
     # Unit-of-measure conversion — NK=2, conversion factor as 3rd col
@@ -216,12 +223,13 @@ SPECS: list[TableSpec] = [
         coercers={
             "FROM_UOM_MSTR_ID": int,
             "TO_UOM_MSTR_ID": int,
-            "UOM_CONVERSION_FACTOR": Decimal,
+            "UOM_CONVERSION_FACTOR": decimal_16_6,
         },
         tier=Tier.A,
         loader_group="fdb_tier_a",
         record_counts_key="RPEIUC0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('FROM_UOM_MSTR_ID', 'TO_UOM_MSTR_ID'),
     ),
     # ------------------------------------------------------------------
     # Dosing-module units description — single NK (VARCHAR), 2 nullable descs
@@ -243,6 +251,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RUNITSD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('DOSING_MODULE_UNIT_ABBREV',),
     ),
     # ------------------------------------------------------------------
     # XRF source description — single NK (NUMERIC), 1 nullable desc
@@ -262,6 +271,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RXRNSRC0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('XRF_SOURCE_ID',),
     ),
 ]
 

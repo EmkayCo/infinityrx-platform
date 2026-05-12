@@ -35,6 +35,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMIDEAD1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_REF_DEA_CD',),
     ),
     # DESI indicator descriptor
     TableSpec(
@@ -45,6 +46,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMIDESD1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_REF_DESI_IND',),
     ),
     # Dose form (3-column: id + abbreviation + description)
     TableSpec(
@@ -59,6 +61,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMIDFD1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_DOSAGE_FORM_ID',),
     ),
     # Routed dose form medID cross-reference (5-column)
     TableSpec(
@@ -81,6 +84,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMIDFID1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('ROUTED_DOSAGE_FORM_MED_ID',),
     ),
     # GCN sequence-number assignment code descriptor
     TableSpec(
@@ -91,6 +95,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMIGCND1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_GCNSEQNO_ASSIGN_CD',),
     ),
     # Generic therapeutic equivalency code descriptor
     TableSpec(
@@ -104,6 +109,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMIGECD1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_REF_GEN_THERA_EQU_CD',),
     ),
     # Generic drug name code descriptor
     TableSpec(
@@ -117,6 +123,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMIGNCD1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_REF_GEN_DRUG_NAME_CD',),
     ),
     # Generic competitive price code descriptor
     TableSpec(
@@ -130,6 +137,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMIGPCD1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_REF_GEN_COMP_PRICE_CD',),
     ),
     # Generic price spread code descriptor
     TableSpec(
@@ -143,6 +151,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMIGSCD1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_REF_GEN_SPREAD_CD',),
     ),
     # Innovator indicator code descriptor
     TableSpec(
@@ -153,6 +162,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMIINND1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_REF_INNOV_IND',),
     ),
 ]
 

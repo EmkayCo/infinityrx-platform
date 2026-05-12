@@ -38,6 +38,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RNDCTD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('NDC_ATTRIBUTE_TYPE_CD',),
     ),
     # NDC attribute value descriptor (3 cols, none nullable)
     TableSpec(
@@ -56,6 +57,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RNDCVD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('NDC_ATTRIBUTE_TYPE_CD',),
     ),
     # Price attribute type descriptor (4 cols; LENGTH and PRECISION nullable per DDL)
     TableSpec(
@@ -77,6 +79,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPRDPAT0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('PRICE_ATTRIBUTE_TYPE_CD',),
     ),
     # Price attribute value descriptor (3 cols; VALUE_DESC nullable per DDL)
     TableSpec(
@@ -96,6 +99,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPRDPAV0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('PRICE_ATTRIBUTE_CD',),
     ),
     # Extended product code descriptor (5 cols; DEFINITION nullable per DDL)
     TableSpec(
@@ -119,6 +123,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPRDPCD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('EXT_PRODUCT_CD_TYPE_ID',),
     ),
     # Package type descriptor (4 cols, none nullable)
     TableSpec(
@@ -139,6 +144,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPRDPKD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('PACKAGE_TYPE_ID',),
     ),
     # Product status descriptor (3 cols; STATUS_DEFINITION nullable per DDL)
     TableSpec(
@@ -158,6 +164,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPRDSD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('FDB_PRODUCT_STATUS_CD',),
     ),
     # Price quantity unit of measure (2 cols, none nullable)
     TableSpec(
@@ -171,6 +178,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPRDUOM0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('PRICE_UOM_ID',),
     ),
     # Route descriptor (5 cols; RT, GCRT2, GCRT_DESC, SYSTEMIC nullable per DDL)
     TableSpec(
@@ -194,6 +202,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RROUTED3",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('GCRT',),
     ),
     # Routed generic master (5 cols, none nullable)
     TableSpec(
@@ -216,6 +225,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RRTGN0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('ROUTED_GEN_ID',),
     ),
 ]
 

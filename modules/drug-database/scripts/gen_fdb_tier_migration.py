@@ -80,6 +80,9 @@ def _sql_type_for_coercer(coercer: Callable[[str], Any]) -> str:
     if name in {"_str11", "_str14"}:  # NDC string forms used in fdb_adapter helpers
         width = int(name[4:])
         return f"sa.String({width})"
+    # B9.B GATE-CLOSE R1 MEDIUM 2 mitigation — per-precision Decimal coercers
+    if name == "decimal_16_6":
+        return "sa.Numeric(16, 6)"
 
     raise ValueError(
         f"Unknown coercer {coercer!r} (name={name!r}) — extend "
@@ -108,13 +111,26 @@ def _column_block(spec: TableSpec) -> str:
 
 
 def _create_table_block(spec: TableSpec, schema: str) -> str:
-    """Generate the op.create_table(...) call for one table."""
+    """Generate the op.create_table(...) call for one table.
+
+    When `spec.natural_key` is non-empty, emits a PrimaryKeyConstraint
+    over those columns so Postgres `ON CONFLICT (natural_key)` upserts
+    have a unique surface to bind to.  Per codex B9.B GATE-CLOSE R1
+    HIGH 2.
+    """
     table_name = spec.table_name.lower()  # FDB names are upper; DB tables snake_case
     rcounts_key = spec.record_counts_key or spec.table_name
+    pk_line = ""
+    if spec.natural_key:
+        pk_cols = ", ".join(repr(c) for c in spec.natural_key)
+        pk_line = (
+            f'\n        sa.PrimaryKeyConstraint({pk_cols}, '
+            f'name="pk_{table_name}"),'
+        )
     return f"""    # {spec.table_name} — tier={spec.tier.value} delta={spec.delta_semantics.value} record_counts_key={rcounts_key}
     op.create_table(
         "{table_name}",
-{_column_block(spec)}
+{_column_block(spec)}{pk_line}
         schema={schema!r},
     )"""
 
@@ -217,11 +233,33 @@ def generate_tier_migration(
     """
     if not specs:
         raise ValueError("generate_tier_migration: empty specs list")
+    # Import here to avoid a circular: fdb_adapter imports nothing from
+    # this module, but `generate_tier_migration` is itself invoked by
+    # scripts that import fdb_adapter via the registry.
+    from drug_database.services.fdb_adapter import DeltaSemantics  # noqa: E402
+
+    _checkable = {
+        DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        DeltaSemantics.UPSERT_WITH_EFFECTIVE_DATE,
+    }
     for spec in specs:
         if spec.tier is not tier:
             raise ValueError(
                 f"Spec {spec.table_name!r} has tier {spec.tier.value} "
                 f"but generator was invoked for tier {tier.value}."
+            )
+        # B9.B GATE-CLOSE R1 HIGH 2: every UPSERT spec MUST declare a
+        # natural_key so the migration can emit a PRIMARY KEY for
+        # Postgres ON CONFLICT to bind to. Without this the migration
+        # creates columns but no uniqueness surface — upsert fails at
+        # runtime with `there is no unique or exclusion constraint`.
+        if spec.delta_semantics in _checkable and not spec.natural_key:
+            raise ValueError(
+                f"Spec {spec.table_name!r} has delta_semantics="
+                f"{spec.delta_semantics.value} but natural_key is empty. "
+                f"Set natural_key=(<key col(s)>,) on the TableSpec so the "
+                f"generated migration emits a PRIMARY KEY for ON CONFLICT "
+                f"to bind to (B9.B GATE-CLOSE R1 HIGH 2)."
             )
 
     if gen_date is None:

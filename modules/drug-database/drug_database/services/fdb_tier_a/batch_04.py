@@ -38,6 +38,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMILGND1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_REF_FED_LEGEND_IND',),
     ),
     # Multi-source code descriptor
     TableSpec(
@@ -51,6 +52,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMIMLTD1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_REF_MULTI_SOURCE_CD',),
     ),
     # Name source code descriptor
     TableSpec(
@@ -64,6 +66,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMINAMD1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_NAME_SOURCE_CD',),
     ),
     # Med name type code descriptor
     TableSpec(
@@ -77,6 +80,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMINMD1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_NAME_TYPE_CD',),
     ),
     # Routed medication (5 columns; natural key = ROUTED_MED_ID, first col)
     TableSpec(
@@ -99,6 +103,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMIRMID1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('ROUTED_MED_ID',),
     ),
     # Route of administration descriptor
     TableSpec(
@@ -113,6 +118,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMIRTD1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_ROUTE_ID',),
     ),
     # Medication status code descriptor
     TableSpec(
@@ -126,6 +132,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMISCD1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_STATUS_CD',),
     ),
     # OBC descriptor (OBC_DESC is nullable per DDL)
     TableSpec(
@@ -141,6 +148,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="ROBCD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('OBC',),
     ),
     # Attribute descriptor (ATTRIBUTE_GROUP_CODE nullable per DDL)
     TableSpec(
@@ -162,6 +170,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPEIAD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('ATTRIBUTE_CODE',),
     ),
     # Attribute type descriptor (LENGTH and PRECISION nullable per DDL)
     TableSpec(
@@ -183,6 +192,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPEIAT0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('ATTRIBUTE_TYPE_CODE',),
     ),
 ]
 

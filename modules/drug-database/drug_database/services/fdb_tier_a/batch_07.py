@@ -39,6 +39,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RRTGNSD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('ROUTED_GEN_STATUS_CD',),
     ),
     # Strength descriptor (5 cols; STRNUM/VOLNUM/STRUN50/VOLUN50 nullable per DDL)
     TableSpec(
@@ -56,6 +57,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RSTR1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('STR60',),
     ),
     # Strength status code descriptor (STRENGTH_STATUS_DESC nullable per DDL)
     TableSpec(
@@ -70,6 +72,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RSTRSCD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('STRENGTH_STATUS_CODE',),
     ),
     # Strength type code descriptor (STRENGTH_TYP_DESC nullable per DDL)
     TableSpec(
@@ -84,6 +87,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RSTRTD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('STRENGTH_TYP_CODE',),
     ),
     # Strength unit of measure (UOM_DESC/UOM_ABBR/UOM_PREFERRED_DESC nullable per DDL)
     TableSpec(
@@ -100,6 +104,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RSTRUOM0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('UOM_ID',),
     ),
     # Standard therapeutic class descriptor (TC_DESC nullable per DDL)
     TableSpec(
@@ -114,6 +119,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RTCD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('TC',),
     ),
     # TM name type (no nullable columns per DDL)
     TableSpec(
@@ -128,6 +134,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RTMDT0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('TM_NAME_TYPE_ID',),
     ),
     # TM group descriptor (TM_GROUP_DESC nullable per DDL)
     TableSpec(
@@ -142,6 +149,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RTMGRPD1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('TM_GROUP_ID',),
     ),
     # TM GNN type (no nullable columns per DDL)
     TableSpec(
@@ -156,6 +164,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RTMNGT0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('TM_GNN_TYPE_ID',),
     ),
     # TM source descriptor (TM_SOURCE_DESC nullable per DDL)
     TableSpec(
@@ -170,6 +179,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RTMSRCD1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('TM_SOURCE_ID',),
     ),
 ]
 

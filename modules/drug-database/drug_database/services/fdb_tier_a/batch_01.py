@@ -42,6 +42,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RAHFSD1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('AHFS8',),
     ),
     # FDA application relation type
     TableSpec(
@@ -52,6 +53,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RAPLRT0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('APPL_RELATION_TYPE_ID',),
     ),
     # FDA application type
     TableSpec(
@@ -62,6 +64,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RAPPLTD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('APPL_TYPE_CD',),
     ),
     # Anatomical Therapeutic Chemical class
     TableSpec(
@@ -73,6 +76,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RATCD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('ATC',),
     ),
     # Biologic name grouper
     TableSpec(
@@ -86,6 +90,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RBLANG0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('BIOLOGIC_NAME_GROUPER_ID',),
     ),
     # Biologic substance group
     TableSpec(
@@ -96,6 +101,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RBLASG0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('SUBSTANCE_GROUP_ID',),
     ),
     # Drug Category Class
     TableSpec(
@@ -107,6 +113,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RDCCD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('DCC',),
     ),
     # ETC change-type code (Enhanced Therapeutic Classification)
     TableSpec(
@@ -121,6 +128,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RETCCTD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('ETC_CHANGE_TYPE_CODE',),
     ),
     # Generic Therapeutic Class
     TableSpec(
@@ -132,6 +140,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RGTCD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('GTC',),
     ),
     # Ingredient status code
     TableSpec(
@@ -143,6 +152,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RHICSCD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('ING_STATUS_CD',),
     ),
     # MEDID concept-id type descriptor
     TableSpec(
@@ -154,6 +164,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMEDCD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_CONCEPT_ID_TYP',),
     ),
     # MEDID move-reason code
     TableSpec(
@@ -164,6 +175,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMEDMRD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MOVE_REASON_CD',),
     ),
 ]
 

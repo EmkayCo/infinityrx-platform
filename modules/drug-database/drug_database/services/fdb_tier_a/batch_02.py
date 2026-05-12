@@ -41,6 +41,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RAPLT0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('APPL_TYPE_ID',),
     ),
     # Dose form description (NDDF BASICS 3.0)
     TableSpec(
@@ -52,6 +53,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RDOSED2",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('GCDF',),
     ),
     # HIC organ-system descriptor (NDDF BASICS 3.0)
     TableSpec(
@@ -63,6 +65,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RHIC1D2",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('HIC1_SEQN',),
     ),
     # HIC Rx-class descriptor (NDDF BASICS 3.0)
     TableSpec(
@@ -79,6 +82,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RHIC2D3",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('HIC2_SEQN',),
     ),
     # HIC therapeutic-class descriptor (NDDF BASICS 3.0)
     TableSpec(
@@ -96,6 +100,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RHIC3D3",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('HIC3_SEQN',),
     ),
     # Labeler descriptor (NDDF BASICS 3.0)
     TableSpec(
@@ -107,6 +112,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RLBLRID3",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('LBLRID',),
     ),
     # MEDID specification code descriptor (NDDF MEDNAMES 3.0)
     TableSpec(
@@ -120,6 +126,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMEDSPD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MEDID_SPECIFICATION_CODE',),
     ),
     # MEDID search term (NDDF MEDNAMES 3.0)
     TableSpec(
@@ -142,6 +149,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMEDST0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MEDID',),
     ),
     # Search term type code descriptor (NDDF MEDNAMES 3.0)
     TableSpec(
@@ -155,6 +163,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMEDSTD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('SEARCH_TERM_TYPE_CD',),
     ),
     # DESI-2 indicator descriptor (NDDF MEDNAMES 3.0)
     TableSpec(
@@ -165,6 +174,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMIDE2D1",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_REF_DESI2_IND',),
     ),
 ]
 

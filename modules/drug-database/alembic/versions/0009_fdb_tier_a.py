@@ -47,6 +47,7 @@ def upgrade() -> None:
         "rahfsd1_desc",
         sa.Column('AHFS8', sa.Integer(), nullable=False),
         sa.Column('AHFS_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('AHFS8', name="pk_rahfsd1_desc"),
         schema='drug_database',
     )
 
@@ -55,6 +56,7 @@ def upgrade() -> None:
         "raplrt0_appl_relation_type",
         sa.Column('APPL_RELATION_TYPE_ID', sa.Integer(), nullable=False),
         sa.Column('APPL_RELATION_TYPE_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('APPL_RELATION_TYPE_ID', name="pk_raplrt0_appl_relation_type"),
         schema='drug_database',
     )
 
@@ -63,6 +65,7 @@ def upgrade() -> None:
         "rappltd0_fda_appl_type",
         sa.Column('APPL_TYPE_CD', sa.Integer(), nullable=False),
         sa.Column('APPL_TYPE_CD_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('APPL_TYPE_CD', name="pk_rappltd0_fda_appl_type"),
         schema='drug_database',
     )
 
@@ -71,6 +74,7 @@ def upgrade() -> None:
         "ratcd0_atc_desc",
         sa.Column('ATC', sa.Text(), nullable=False),
         sa.Column('ATC_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('ATC', name="pk_ratcd0_atc_desc"),
         schema='drug_database',
     )
 
@@ -79,6 +83,7 @@ def upgrade() -> None:
         "rblang0_name_grp_desc",
         sa.Column('BIOLOGIC_NAME_GROUPER_ID', sa.Integer(), nullable=False),
         sa.Column('BIOLOGIC_NAME_GROUPER_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('BIOLOGIC_NAME_GROUPER_ID', name="pk_rblang0_name_grp_desc"),
         schema='drug_database',
     )
 
@@ -87,6 +92,7 @@ def upgrade() -> None:
         "rblasg0_substance_grp_desc",
         sa.Column('SUBSTANCE_GROUP_ID', sa.Integer(), nullable=False),
         sa.Column('SUBSTANCE_GROUP_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('SUBSTANCE_GROUP_ID', name="pk_rblasg0_substance_grp_desc"),
         schema='drug_database',
     )
 
@@ -95,6 +101,7 @@ def upgrade() -> None:
         "rdccd0_drug_cat_desc",
         sa.Column('DCC', sa.Text(), nullable=False),
         sa.Column('DCC_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('DCC', name="pk_rdccd0_drug_cat_desc"),
         schema='drug_database',
     )
 
@@ -103,6 +110,7 @@ def upgrade() -> None:
         "retcctd0_etc_change_type_desc",
         sa.Column('ETC_CHANGE_TYPE_CODE', sa.Text(), nullable=False),
         sa.Column('ETC_CHANGE_TYPE_CODE_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('ETC_CHANGE_TYPE_CODE', name="pk_retcctd0_etc_change_type_desc"),
         schema='drug_database',
     )
 
@@ -111,6 +119,7 @@ def upgrade() -> None:
         "rgtcd0_gen_therap_class_desc",
         sa.Column('GTC', sa.Integer(), nullable=False),
         sa.Column('GTC_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('GTC', name="pk_rgtcd0_gen_therap_class_desc"),
         schema='drug_database',
     )
 
@@ -119,6 +128,7 @@ def upgrade() -> None:
         "rhicscd0_ing_stat_cd_desc",
         sa.Column('ING_STATUS_CD', sa.Integer(), nullable=False),
         sa.Column('ING_STATUS_CD_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('ING_STATUS_CD', name="pk_rhicscd0_ing_stat_cd_desc"),
         schema='drug_database',
     )
 
@@ -127,6 +137,7 @@ def upgrade() -> None:
         "rmedcd0_med_concept_typ_desc",
         sa.Column('MED_CONCEPT_ID_TYP', sa.Integer(), nullable=False),
         sa.Column('MED_CONCEPT_ID_TYP_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('MED_CONCEPT_ID_TYP', name="pk_rmedcd0_med_concept_typ_desc"),
         schema='drug_database',
     )
 
@@ -135,6 +146,7 @@ def upgrade() -> None:
         "rmedmrd0_move_reason_desc",
         sa.Column('MOVE_REASON_CD', sa.Integer(), nullable=False),
         sa.Column('MOVE_REASON_CD_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MOVE_REASON_CD', name="pk_rmedmrd0_move_reason_desc"),
         schema='drug_database',
     )
 
@@ -144,6 +156,7 @@ def upgrade() -> None:
         sa.Column('APPL_TYPE_ID', sa.Integer(), nullable=False),
         sa.Column('APPL_TYPE_ABBREV', sa.Text(), nullable=False),
         sa.Column('APPL_TYPE_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('APPL_TYPE_ID', name="pk_raplt0_appl_type"),
         schema='drug_database',
     )
 
@@ -153,6 +166,7 @@ def upgrade() -> None:
         sa.Column('GCDF', sa.Text(), nullable=False),
         sa.Column('DOSE', sa.Text(), nullable=True),
         sa.Column('GCDF_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('GCDF', name="pk_rdosed2_dose_desc"),
         schema='drug_database',
     )
 
@@ -162,6 +176,7 @@ def upgrade() -> None:
         sa.Column('HIC1_SEQN', sa.Integer(), nullable=False),
         sa.Column('HIC1', sa.Text(), nullable=False),
         sa.Column('HIC1_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('HIC1_SEQN', name="pk_rhic1d2_hic_organ_sys_desc"),
         schema='drug_database',
     )
 
@@ -172,6 +187,7 @@ def upgrade() -> None:
         sa.Column('HIC2', sa.Text(), nullable=False),
         sa.Column('HIC2_DESC', sa.Text(), nullable=True),
         sa.Column('HIC2_ROOT', sa.Integer(), nullable=True),
+        sa.PrimaryKeyConstraint('HIC2_SEQN', name="pk_rhic2d3_hic_rx_class_desc"),
         schema='drug_database',
     )
 
@@ -183,6 +199,7 @@ def upgrade() -> None:
         sa.Column('HIC3_DESC', sa.Text(), nullable=True),
         sa.Column('HIC3_GRPN', sa.Integer(), nullable=True),
         sa.Column('HIC3_ROOT', sa.Integer(), nullable=True),
+        sa.PrimaryKeyConstraint('HIC3_SEQN', name="pk_rhic3d3_hic_therap_class_desc"),
         schema='drug_database',
     )
 
@@ -192,6 +209,7 @@ def upgrade() -> None:
         sa.Column('LBLRID', sa.Text(), nullable=False),
         sa.Column('MFG', sa.Text(), nullable=True),
         sa.Column('LBLRIND', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('LBLRID', name="pk_rlblrid3_lblr_desc"),
         schema='drug_database',
     )
 
@@ -200,6 +218,7 @@ def upgrade() -> None:
         "rmedspd0_specification_desc",
         sa.Column('MEDID_SPECIFICATION_CODE', sa.Integer(), nullable=False),
         sa.Column('MEDID_SPECIFICATION_CODE_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MEDID_SPECIFICATION_CODE', name="pk_rmedspd0_specification_desc"),
         schema='drug_database',
     )
 
@@ -211,6 +230,7 @@ def upgrade() -> None:
         sa.Column('SEARCH_TERM_TEXT', sa.Text(), nullable=False),
         sa.Column('MED_MEDID_DESC', sa.Text(), nullable=False),
         sa.Column('MEDICAL_SUPPLY_IND', sa.Integer(), nullable=False),
+        sa.PrimaryKeyConstraint('MEDID', name="pk_rmedst0_medid_search_term"),
         schema='drug_database',
     )
 
@@ -219,6 +239,7 @@ def upgrade() -> None:
         "rmedstd0_search_term_type_desc",
         sa.Column('SEARCH_TERM_TYPE_CD', sa.Integer(), nullable=False),
         sa.Column('SEARCH_TERM_TYPE_CD_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('SEARCH_TERM_TYPE_CD', name="pk_rmedstd0_search_term_type_desc"),
         schema='drug_database',
     )
 
@@ -227,6 +248,7 @@ def upgrade() -> None:
         "rmide2d1_ref_desi2_ind_desc",
         sa.Column('MED_REF_DESI2_IND', sa.Text(), nullable=False),
         sa.Column('MED_REF_DESI2_IND_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_REF_DESI2_IND', name="pk_rmide2d1_ref_desi2_ind_desc"),
         schema='drug_database',
     )
 
@@ -235,6 +257,7 @@ def upgrade() -> None:
         "rmidead1_ref_fed_dea_desc",
         sa.Column('MED_REF_DEA_CD', sa.Text(), nullable=False),
         sa.Column('MED_REF_DEA_CD_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_REF_DEA_CD', name="pk_rmidead1_ref_fed_dea_desc"),
         schema='drug_database',
     )
 
@@ -243,6 +266,7 @@ def upgrade() -> None:
         "rmidesd1_ref_desi_ind_desc",
         sa.Column('MED_REF_DESI_IND', sa.Text(), nullable=False),
         sa.Column('MED_REF_DESI_IND_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_REF_DESI_IND', name="pk_rmidesd1_ref_desi_ind_desc"),
         schema='drug_database',
     )
 
@@ -252,6 +276,7 @@ def upgrade() -> None:
         sa.Column('MED_DOSAGE_FORM_ID', sa.Integer(), nullable=False),
         sa.Column('MED_DOSAGE_FORM_ABBR', sa.Text(), nullable=False),
         sa.Column('MED_DOSAGE_FORM_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_DOSAGE_FORM_ID', name="pk_rmidfd1_dose_form"),
         schema='drug_database',
     )
 
@@ -263,6 +288,7 @@ def upgrade() -> None:
         sa.Column('MED_DOSAGE_FORM_ID', sa.Integer(), nullable=False),
         sa.Column('MED_ROUTED_DF_MED_ID_DESC', sa.Text(), nullable=False),
         sa.Column('MED_STATUS_CD', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('ROUTED_DOSAGE_FORM_MED_ID', name="pk_rmidfid1_routed_dose_form_med"),
         schema='drug_database',
     )
 
@@ -271,6 +297,7 @@ def upgrade() -> None:
         "rmigcnd1_gcnseqno_assgn_desc",
         sa.Column('MED_GCNSEQNO_ASSIGN_CD', sa.Text(), nullable=False),
         sa.Column('MED_GCNSEQNO_ASSIGN_CD_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_GCNSEQNO_ASSIGN_CD', name="pk_rmigcnd1_gcnseqno_assgn_desc"),
         schema='drug_database',
     )
 
@@ -279,6 +306,7 @@ def upgrade() -> None:
         "rmigecd1_ref_gen_therap_desc",
         sa.Column('MED_REF_GEN_THERA_EQU_CD', sa.Text(), nullable=False),
         sa.Column('MED_REF_GEN_THERA_EQU_CD_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_REF_GEN_THERA_EQU_CD', name="pk_rmigecd1_ref_gen_therap_desc"),
         schema='drug_database',
     )
 
@@ -287,6 +315,7 @@ def upgrade() -> None:
         "rmigncd1_ref_gen_name_desc",
         sa.Column('MED_REF_GEN_DRUG_NAME_CD', sa.Text(), nullable=False),
         sa.Column('MED_REF_GEN_DRUG_NAME_CD_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_REF_GEN_DRUG_NAME_CD', name="pk_rmigncd1_ref_gen_name_desc"),
         schema='drug_database',
     )
 
@@ -295,6 +324,7 @@ def upgrade() -> None:
         "rmigpcd1_ref_gen_prc_desc",
         sa.Column('MED_REF_GEN_COMP_PRICE_CD', sa.Text(), nullable=False),
         sa.Column('MED_REF_GEN_COMP_PRICE_CD_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_REF_GEN_COMP_PRICE_CD', name="pk_rmigpcd1_ref_gen_prc_desc"),
         schema='drug_database',
     )
 
@@ -303,6 +333,7 @@ def upgrade() -> None:
         "rmigscd1_ref_gen_prc_sprd_desc",
         sa.Column('MED_REF_GEN_SPREAD_CD', sa.Text(), nullable=False),
         sa.Column('MED_REF_GEN_SPREAD_CD_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_REF_GEN_SPREAD_CD', name="pk_rmigscd1_ref_gen_prc_sprd_desc"),
         schema='drug_database',
     )
 
@@ -311,6 +342,7 @@ def upgrade() -> None:
         "rmiinnd1_ref_innov_ind_desc",
         sa.Column('MED_REF_INNOV_IND', sa.Text(), nullable=False),
         sa.Column('MED_REF_INNOV_IND_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_REF_INNOV_IND', name="pk_rmiinnd1_ref_innov_ind_desc"),
         schema='drug_database',
     )
 
@@ -319,6 +351,7 @@ def upgrade() -> None:
         "rmilgnd1_ref_fed_lgnd_desc",
         sa.Column('MED_REF_FED_LEGEND_IND', sa.Text(), nullable=False),
         sa.Column('MED_REF_FED_LEGEND_IND_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_REF_FED_LEGEND_IND', name="pk_rmilgnd1_ref_fed_lgnd_desc"),
         schema='drug_database',
     )
 
@@ -327,6 +360,7 @@ def upgrade() -> None:
         "rmimltd1_ref_multi_src_desc",
         sa.Column('MED_REF_MULTI_SOURCE_CD', sa.Text(), nullable=False),
         sa.Column('MED_REF_MULTI_SOURCE_CD_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_REF_MULTI_SOURCE_CD', name="pk_rmimltd1_ref_multi_src_desc"),
         schema='drug_database',
     )
 
@@ -335,6 +369,7 @@ def upgrade() -> None:
         "rminamd1_name_src_desc",
         sa.Column('MED_NAME_SOURCE_CD', sa.Text(), nullable=False),
         sa.Column('MED_NAME_SOURCE_CD_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_NAME_SOURCE_CD', name="pk_rminamd1_name_src_desc"),
         schema='drug_database',
     )
 
@@ -343,6 +378,7 @@ def upgrade() -> None:
         "rminmd1_med_name_type_desc",
         sa.Column('MED_NAME_TYPE_CD', sa.Text(), nullable=False),
         sa.Column('MED_NAME_TYPE_CD_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_NAME_TYPE_CD', name="pk_rminmd1_med_name_type_desc"),
         schema='drug_database',
     )
 
@@ -354,6 +390,7 @@ def upgrade() -> None:
         sa.Column('MED_ROUTE_ID', sa.Integer(), nullable=False),
         sa.Column('MED_ROUTED_MED_ID_DESC', sa.Text(), nullable=False),
         sa.Column('MED_STATUS_CD', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('ROUTED_MED_ID', name="pk_rmirmid1_routed_med"),
         schema='drug_database',
     )
 
@@ -363,6 +400,7 @@ def upgrade() -> None:
         sa.Column('MED_ROUTE_ID', sa.Integer(), nullable=False),
         sa.Column('MED_ROUTE_ABBR', sa.Text(), nullable=False),
         sa.Column('MED_ROUTE_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_ROUTE_ID', name="pk_rmirtd1_route"),
         schema='drug_database',
     )
 
@@ -371,6 +409,7 @@ def upgrade() -> None:
         "rmiscd1_status_desc",
         sa.Column('MED_STATUS_CD', sa.Text(), nullable=False),
         sa.Column('MED_STATUS_CD_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_STATUS_CD', name="pk_rmiscd1_status_desc"),
         schema='drug_database',
     )
 
@@ -380,6 +419,7 @@ def upgrade() -> None:
         sa.Column('OBC', sa.Text(), nullable=False),
         sa.Column('OBC_SN', sa.Integer(), nullable=False),
         sa.Column('OBC_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('OBC', name="pk_robcd0_obc_desc"),
         schema='drug_database',
     )
 
@@ -390,6 +430,7 @@ def upgrade() -> None:
         sa.Column('ATTRIBUTE_DESC', sa.Text(), nullable=False),
         sa.Column('ATTRIBUTE_TYPE_CODE', sa.Integer(), nullable=False),
         sa.Column('ATTRIBUTE_GROUP_CODE', sa.Integer(), nullable=True),
+        sa.PrimaryKeyConstraint('ATTRIBUTE_CODE', name="pk_rpeiad0_attribute_desc"),
         schema='drug_database',
     )
 
@@ -400,6 +441,7 @@ def upgrade() -> None:
         sa.Column('ATTRIBUTE_TYPE_DESC', sa.Text(), nullable=False),
         sa.Column('ATTRIBUTE_TYPE_LENGTH', sa.Integer(), nullable=True),
         sa.Column('ATTRIBUTE_TYPE_PRECISION', sa.Integer(), nullable=True),
+        sa.PrimaryKeyConstraint('ATTRIBUTE_TYPE_CODE', name="pk_rpeiat0_attribute_type_desc"),
         schema='drug_database',
     )
 
@@ -409,6 +451,7 @@ def upgrade() -> None:
         sa.Column('ATTRIBUTE_CODE', sa.Integer(), nullable=False),
         sa.Column('ATTRIBUTE_VALUE', sa.Text(), nullable=False),
         sa.Column('ATTRIBUTE_VALUE_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('ATTRIBUTE_CODE', name="pk_rpeiav0_attribute_value_desc"),
         schema='drug_database',
     )
 
@@ -417,6 +460,7 @@ def upgrade() -> None:
         "rpeidfa0_dosage_form_attribute",
         sa.Column('DOSAGE_FORM_ATTRIBUTE_ID', sa.Integer(), nullable=False),
         sa.Column('DOSAGE_FORM_ATTRIBUTE_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('DOSAGE_FORM_ATTRIBUTE_ID', name="pk_rpeidfa0_dosage_form_attribute"),
         schema='drug_database',
     )
 
@@ -428,6 +472,7 @@ def upgrade() -> None:
         sa.Column('DOSAGE_FORM_DESC_LONG', sa.Text(), nullable=False),
         sa.Column('DOSAGE_FORM_RETIRE_DT', sa.Date(), nullable=True),
         sa.Column('UOM_MSTR_ID', sa.Integer(), nullable=True),
+        sa.PrimaryKeyConstraint('DOSAGE_FORM_ID', name="pk_rpeidm0_dosage_form_mstr"),
         schema='drug_database',
     )
 
@@ -436,6 +481,7 @@ def upgrade() -> None:
         "rpeidt0_dosage_form_type",
         sa.Column('DOSAGE_FORM_TYPE_ID', sa.Integer(), nullable=False),
         sa.Column('DOSAGE_FORM_TYPE_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('DOSAGE_FORM_TYPE_ID', name="pk_rpeidt0_dosage_form_type"),
         schema='drug_database',
     )
 
@@ -444,6 +490,7 @@ def upgrade() -> None:
         "rpeipp0_patient_param_req_desc",
         sa.Column('PATIENT_PARAM_REQ_CD', sa.Integer(), nullable=False),
         sa.Column('PATIENT_PARAM_REQ_CD_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('PATIENT_PARAM_REQ_CD', name="pk_rpeipp0_patient_param_req_desc"),
         schema='drug_database',
     )
 
@@ -452,6 +499,7 @@ def upgrade() -> None:
         "rpeirl0_rt_labeled_desc",
         sa.Column('RT_LABELED_ID', sa.Integer(), nullable=False),
         sa.Column('RT_LABELED_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('RT_LABELED_ID', name="pk_rpeirl0_rt_labeled_desc"),
         schema='drug_database',
     )
 
@@ -460,6 +508,7 @@ def upgrade() -> None:
         "rpeist0_str_conc_type",
         sa.Column('STR_CONC_TYPE_ID', sa.Integer(), nullable=False),
         sa.Column('STR_CONC_TYPE_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('STR_CONC_TYPE_ID', name="pk_rpeist0_str_conc_type"),
         schema='drug_database',
     )
 
@@ -468,6 +517,7 @@ def upgrade() -> None:
         "rpeiut0_uom_type_desc",
         sa.Column('UOM_TYPE_CD', sa.Integer(), nullable=False),
         sa.Column('UOM_TYPE_CD_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('UOM_TYPE_CD', name="pk_rpeiut0_uom_type_desc"),
         schema='drug_database',
     )
 
@@ -476,6 +526,7 @@ def upgrade() -> None:
         "rprdcc0_currency_cd_desc",
         sa.Column('CURRENCY_CD', sa.Text(), nullable=False),
         sa.Column('CURRENCY_CD_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('CURRENCY_CD', name="pk_rprdcc0_currency_cd_desc"),
         schema='drug_database',
     )
 
@@ -486,6 +537,7 @@ def upgrade() -> None:
         sa.Column('PRICE_ATTRIBUTE_DESC', sa.Text(), nullable=False),
         sa.Column('PRICE_ATTRIBUTE_TYPE_CD', sa.Text(), nullable=False),
         sa.Column('PRICE_ATTRIBUTE_GROUP_CD', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('PRICE_ATTRIBUTE_CD', name="pk_rprdpad0_price_attr_desc"),
         schema='drug_database',
     )
 
@@ -494,6 +546,7 @@ def upgrade() -> None:
         "rndctd0_ndc_attribute_typ_dsc",
         sa.Column('NDC_ATTRIBUTE_TYPE_CD', sa.Integer(), nullable=False),
         sa.Column('NDC_ATTRIBUTE_TYPE_DSC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('NDC_ATTRIBUTE_TYPE_CD', name="pk_rndctd0_ndc_attribute_typ_dsc"),
         schema='drug_database',
     )
 
@@ -503,6 +556,7 @@ def upgrade() -> None:
         sa.Column('NDC_ATTRIBUTE_TYPE_CD', sa.Integer(), nullable=False),
         sa.Column('NDC_ATTRIBUTE_VALUE', sa.Text(), nullable=False),
         sa.Column('NDC_ATTRIBUTE_VALUE_DSC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('NDC_ATTRIBUTE_TYPE_CD', name="pk_rndcvd0_ndc_attribute_valu_dsc"),
         schema='drug_database',
     )
 
@@ -513,6 +567,7 @@ def upgrade() -> None:
         sa.Column('PRICE_ATTRIBUTE_TYPE_DESC', sa.Text(), nullable=False),
         sa.Column('PRICE_ATTRIBUTE_TYPE_LENGTH', sa.Integer(), nullable=True),
         sa.Column('PRICE_ATTRIBUTE_TYPE_PRECISION', sa.Integer(), nullable=True),
+        sa.PrimaryKeyConstraint('PRICE_ATTRIBUTE_TYPE_CD', name="pk_rprdpat0_price_attr_type_desc"),
         schema='drug_database',
     )
 
@@ -522,6 +577,7 @@ def upgrade() -> None:
         sa.Column('PRICE_ATTRIBUTE_CD', sa.Text(), nullable=False),
         sa.Column('PRICE_ATTRIBUTE_VALUE', sa.Text(), nullable=False),
         sa.Column('PRICE_ATTRIBUTE_VALUE_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('PRICE_ATTRIBUTE_CD', name="pk_rprdpav0_price_attr_value_desc"),
         schema='drug_database',
     )
 
@@ -533,6 +589,7 @@ def upgrade() -> None:
         sa.Column('EXT_PRODUCT_CD_DATA_TYPE', sa.Text(), nullable=False),
         sa.Column('EXT_PRODUCT_CD_FIELD_LENGTH', sa.Integer(), nullable=False),
         sa.Column('EXT_PRODUCT_CD_DEFINITION', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('EXT_PRODUCT_CD_TYPE_ID', name="pk_rprdpcd0_ext_product_cd_desc"),
         schema='drug_database',
     )
 
@@ -543,6 +600,7 @@ def upgrade() -> None:
         sa.Column('PKG_TYPE_LONG_DESC', sa.Text(), nullable=False),
         sa.Column('PKG_TYPE_SHORT_DESC', sa.Text(), nullable=False),
         sa.Column('ACTIVELY_USED_IND', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('PACKAGE_TYPE_ID', name="pk_rprdpkd0_package_desc"),
         schema='drug_database',
     )
 
@@ -552,6 +610,7 @@ def upgrade() -> None:
         sa.Column('FDB_PRODUCT_STATUS_CD', sa.Text(), nullable=False),
         sa.Column('FDB_PRODUCT_STATUS_DESC', sa.Text(), nullable=False),
         sa.Column('FDB_PRODUCT_STATUS_DEFINITION', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('FDB_PRODUCT_STATUS_CD', name="pk_rprdsd0_product_status_desc"),
         schema='drug_database',
     )
 
@@ -560,6 +619,7 @@ def upgrade() -> None:
         "rprduom0_price_qty_uom",
         sa.Column('PRICE_UOM_ID', sa.Integer(), nullable=False),
         sa.Column('PRICE_UOM_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('PRICE_UOM_ID', name="pk_rprduom0_price_qty_uom"),
         schema='drug_database',
     )
 
@@ -571,6 +631,7 @@ def upgrade() -> None:
         sa.Column('GCRT2', sa.Text(), nullable=True),
         sa.Column('GCRT_DESC', sa.Text(), nullable=True),
         sa.Column('SYSTEMIC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('GCRT', name="pk_rrouted3_route_desc"),
         schema='drug_database',
     )
 
@@ -582,6 +643,7 @@ def upgrade() -> None:
         sa.Column('GCRT', sa.Text(), nullable=False),
         sa.Column('HICL_SEQNO', sa.Integer(), nullable=False),
         sa.Column('ROUTED_GEN_STATUS_CD', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('ROUTED_GEN_ID', name="pk_rrtgn0_routed_gen_mstr"),
         schema='drug_database',
     )
 
@@ -590,6 +652,7 @@ def upgrade() -> None:
         "rrtgnsd0_rtd_gen_status_dsc",
         sa.Column('ROUTED_GEN_STATUS_CD', sa.Text(), nullable=False),
         sa.Column('ROUTED_GEN_STATUS_CD_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('ROUTED_GEN_STATUS_CD', name="pk_rrtgnsd0_rtd_gen_status_dsc"),
         schema='drug_database',
     )
 
@@ -601,6 +664,7 @@ def upgrade() -> None:
         sa.Column('VOLNUM', sa.Integer(), nullable=True),
         sa.Column('STRUN50', sa.Text(), nullable=True),
         sa.Column('VOLUN50', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('STR60', name="pk_rstr1_strngth_desc"),
         schema='drug_database',
     )
 
@@ -609,6 +673,7 @@ def upgrade() -> None:
         "rstrscd0_strength_status_desc",
         sa.Column('STRENGTH_STATUS_CODE', sa.Integer(), nullable=False),
         sa.Column('STRENGTH_STATUS_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('STRENGTH_STATUS_CODE', name="pk_rstrscd0_strength_status_desc"),
         schema='drug_database',
     )
 
@@ -617,6 +682,7 @@ def upgrade() -> None:
         "rstrtd0_strength_typ_desc",
         sa.Column('STRENGTH_TYP_CODE', sa.Integer(), nullable=False),
         sa.Column('STRENGTH_TYP_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('STRENGTH_TYP_CODE', name="pk_rstrtd0_strength_typ_desc"),
         schema='drug_database',
     )
 
@@ -627,6 +693,7 @@ def upgrade() -> None:
         sa.Column('UOM_DESC', sa.Text(), nullable=True),
         sa.Column('UOM_ABBR', sa.Text(), nullable=True),
         sa.Column('UOM_PREFERRED_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('UOM_ID', name="pk_rstruom0_strength_uom"),
         schema='drug_database',
     )
 
@@ -635,6 +702,7 @@ def upgrade() -> None:
         "rtcd0_std_therap_class_desc",
         sa.Column('TC', sa.Integer(), nullable=False),
         sa.Column('TC_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('TC', name="pk_rtcd0_std_therap_class_desc"),
         schema='drug_database',
     )
 
@@ -643,6 +711,7 @@ def upgrade() -> None:
         "rtmdt0_tm_name_type",
         sa.Column('TM_NAME_TYPE_ID', sa.Integer(), nullable=False),
         sa.Column('TM_NAME_TYPE_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('TM_NAME_TYPE_ID', name="pk_rtmdt0_tm_name_type"),
         schema='drug_database',
     )
 
@@ -651,6 +720,7 @@ def upgrade() -> None:
         "rtmgrpd1_tm_group_desc",
         sa.Column('TM_GROUP_ID', sa.Integer(), nullable=False),
         sa.Column('TM_GROUP_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('TM_GROUP_ID', name="pk_rtmgrpd1_tm_group_desc"),
         schema='drug_database',
     )
 
@@ -659,6 +729,7 @@ def upgrade() -> None:
         "rtmngt0_tm_gnn_type",
         sa.Column('TM_GNN_TYPE_ID', sa.Integer(), nullable=False),
         sa.Column('TM_GNN_TYPE_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('TM_GNN_TYPE_ID', name="pk_rtmngt0_tm_gnn_type"),
         schema='drug_database',
     )
 
@@ -667,6 +738,7 @@ def upgrade() -> None:
         "rtmsrcd1_tm_source_desc",
         sa.Column('TM_SOURCE_ID', sa.Integer(), nullable=False),
         sa.Column('TM_SOURCE_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('TM_SOURCE_ID', name="pk_rtmsrcd1_tm_source_desc"),
         schema='drug_database',
     )
 
@@ -677,6 +749,7 @@ def upgrade() -> None:
         sa.Column('TM_SOURCE_ID', sa.Integer(), nullable=False),
         sa.Column('TM_IND', sa.Text(), nullable=False),
         sa.Column('TM_ALT_ROUTED_DF_MED_ID_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('ROUTED_DOSAGE_FORM_MED_ID', 'TM_SOURCE_ID', 'TM_IND', name="pk_rtmdfid1_tm_routed_df_med"),
         schema='drug_database',
     )
 
@@ -687,6 +760,7 @@ def upgrade() -> None:
         sa.Column('TM_SOURCE_ID', sa.Integer(), nullable=False),
         sa.Column('TM_IND', sa.Text(), nullable=False),
         sa.Column('TM_ALT_MEDID_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MEDID', 'TM_SOURCE_ID', 'TM_IND', name="pk_rtmmid1_tm_med"),
         schema='drug_database',
     )
 
@@ -698,6 +772,7 @@ def upgrade() -> None:
         sa.Column('TM_SOURCE_ID', sa.Integer(), nullable=False),
         sa.Column('TM_IND', sa.Text(), nullable=False),
         sa.Column('TM_ALT_GNN_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('HICL_SEQNO', 'TM_GNN_TYPE_ID', 'TM_SOURCE_ID', 'TM_IND', name="pk_rtmngn0_tm_gnn"),
         schema='drug_database',
     )
 
@@ -708,6 +783,7 @@ def upgrade() -> None:
         sa.Column('TM_SOURCE_ID', sa.Integer(), nullable=False),
         sa.Column('TM_IND', sa.Text(), nullable=False),
         sa.Column('TM_ALT_MED_NAME_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_NAME_ID', 'TM_SOURCE_ID', 'TM_IND', name="pk_rtmnmid1_tm_med_name"),
         schema='drug_database',
     )
 
@@ -718,6 +794,7 @@ def upgrade() -> None:
         sa.Column('TM_SOURCE_ID', sa.Integer(), nullable=False),
         sa.Column('TM_IND', sa.Text(), nullable=False),
         sa.Column('TM_ALT_ROUTED_MED_ID_DESC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('ROUTED_MED_ID', 'TM_SOURCE_ID', 'TM_IND', name="pk_rtmrmid1_tm_routed_med"),
         schema='drug_database',
     )
 
@@ -804,6 +881,7 @@ def upgrade() -> None:
         "retcsch0_etc_search",
         sa.Column('ETC_SEARCH_ETC_ID', sa.Integer(), nullable=False),
         sa.Column('ETC_PRODUCT_RELATED_ETC_ID', sa.Integer(), nullable=False),
+        sa.PrimaryKeyConstraint('ETC_SEARCH_ETC_ID', 'ETC_PRODUCT_RELATED_ETC_ID', name="pk_retcsch0_etc_search"),
         schema='drug_database',
     )
 
@@ -812,6 +890,7 @@ def upgrade() -> None:
         "retcxrf0_etc_hic3_etc",
         sa.Column('ETC_ID', sa.Integer(), nullable=False),
         sa.Column('HIC3_SEQN', sa.Integer(), nullable=False),
+        sa.PrimaryKeyConstraint('ETC_ID', 'HIC3_SEQN', name="pk_retcxrf0_etc_hic3_etc"),
         schema='drug_database',
     )
 
@@ -820,6 +899,7 @@ def upgrade() -> None:
         "rpeial0_df_attribute_link",
         sa.Column('DOSAGE_FORM_ID', sa.Integer(), nullable=False),
         sa.Column('DOSAGE_FORM_ATTRIBUTE_ID', sa.Integer(), nullable=False),
+        sa.PrimaryKeyConstraint('DOSAGE_FORM_ID', 'DOSAGE_FORM_ATTRIBUTE_ID', name="pk_rpeial0_df_attribute_link"),
         schema='drug_database',
     )
 
@@ -829,6 +909,7 @@ def upgrade() -> None:
         sa.Column('DOSAGE_FORM_ID', sa.Integer(), nullable=False),
         sa.Column('GCDF', sa.Text(), nullable=False),
         sa.Column('PREFERRED_DOSAGE_FORM_IND', sa.Integer(), nullable=False),
+        sa.PrimaryKeyConstraint('DOSAGE_FORM_ID', 'GCDF', name="pk_rpeigl0_gen_df_mstr_link"),
         schema='drug_database',
     )
 
@@ -838,6 +919,7 @@ def upgrade() -> None:
         sa.Column('DOSAGE_FORM_ID', sa.Integer(), nullable=False),
         sa.Column('MED_DOSAGE_FORM_ID', sa.Integer(), nullable=False),
         sa.Column('PREFERRED_DOSAGE_FORM_IND', sa.Integer(), nullable=False),
+        sa.PrimaryKeyConstraint('DOSAGE_FORM_ID', 'MED_DOSAGE_FORM_ID', name="pk_rpeiml0_med_df_mstr_link"),
         schema='drug_database',
     )
 
@@ -847,6 +929,7 @@ def upgrade() -> None:
         sa.Column('DOSAGE_FORM_ID', sa.Integer(), nullable=False),
         sa.Column('OVW_DOSAGE_FORM_ID', sa.Integer(), nullable=False),
         sa.Column('PREFERRED_DOSAGE_FORM_IND', sa.Integer(), nullable=False),
+        sa.PrimaryKeyConstraint('DOSAGE_FORM_ID', 'OVW_DOSAGE_FORM_ID', name="pk_rpeiol0_ovw_df_mstr_link"),
         schema='drug_database',
     )
 
@@ -855,6 +938,7 @@ def upgrade() -> None:
         "rpeirer0_related_rt",
         sa.Column('CONTINUOUS_RT_ID', sa.Integer(), nullable=False),
         sa.Column('INTERMITTENT_RT_ID', sa.Integer(), nullable=False),
+        sa.PrimaryKeyConstraint('CONTINUOUS_RT_ID', 'INTERMITTENT_RT_ID', name="pk_rpeirer0_related_rt"),
         schema='drug_database',
     )
 
@@ -863,6 +947,7 @@ def upgrade() -> None:
         "rpeirh0_rt_hierarchy",
         sa.Column('PARENT_RT_ID', sa.Integer(), nullable=False),
         sa.Column('CLINICAL_RT_ID', sa.Integer(), nullable=False),
+        sa.PrimaryKeyConstraint('PARENT_RT_ID', 'CLINICAL_RT_ID', name="pk_rpeirh0_rt_hierarchy"),
         schema='drug_database',
     )
 
@@ -871,7 +956,8 @@ def upgrade() -> None:
         "rpeiuc0_uom_conversion",
         sa.Column('FROM_UOM_MSTR_ID', sa.Integer(), nullable=False),
         sa.Column('TO_UOM_MSTR_ID', sa.Integer(), nullable=False),
-        sa.Column('UOM_CONVERSION_FACTOR', sa.Numeric(16, 5), nullable=False),
+        sa.Column('UOM_CONVERSION_FACTOR', sa.Numeric(16, 6), nullable=False),
+        sa.PrimaryKeyConstraint('FROM_UOM_MSTR_ID', 'TO_UOM_MSTR_ID', name="pk_rpeiuc0_uom_conversion"),
         schema='drug_database',
     )
 
@@ -881,6 +967,7 @@ def upgrade() -> None:
         sa.Column('DOSING_MODULE_UNIT_ABBREV', sa.Text(), nullable=False),
         sa.Column('UNIT_DESC_ABBREV', sa.Text(), nullable=True),
         sa.Column('UNIT_DESC_EXPANDED', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('DOSING_MODULE_UNIT_ABBREV', name="pk_runitsd0_units_desc"),
         schema='drug_database',
     )
 
@@ -889,6 +976,7 @@ def upgrade() -> None:
         "rxrnsrc0_source_desc",
         sa.Column('XRF_SOURCE_ID', sa.Integer(), nullable=False),
         sa.Column('XRF_SOURCE_DESC', sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint('XRF_SOURCE_ID', name="pk_rxrnsrc0_source_desc"),
         schema='drug_database',
     )
 
@@ -900,6 +988,7 @@ def upgrade() -> None:
         sa.Column('BIOLOGICS_SN', sa.Integer(), nullable=False),
         sa.Column('MULTI_INGREDIENT_SN', sa.Integer(), nullable=False),
         sa.Column('HIC_SEQN', sa.Integer(), nullable=False),
+        sa.PrimaryKeyConstraint('BLA_APPL_NBR', 'APPL_TYPE_ID', 'BIOLOGICS_SN', 'MULTI_INGREDIENT_SN', name="pk_rblahic0_ingredients"),
         schema='drug_database',
     )
 
@@ -910,6 +999,7 @@ def upgrade() -> None:
         sa.Column('BLA_APPL_NBR', sa.Text(), nullable=False),
         sa.Column('APPL_TYPE_ID', sa.Integer(), nullable=False),
         sa.Column('PROPRIETARY_NAME', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('PROPRIETARY_NAME_ID', name="pk_rblapn0_proprietary_name"),
         schema='drug_database',
     )
 
@@ -920,6 +1010,7 @@ def upgrade() -> None:
         sa.Column('MED_CONCEPT_ID_TYP', sa.Integer(), nullable=False),
         sa.Column('GENERIC_MED_CONCEPT_ID', sa.Integer(), nullable=False),
         sa.Column('MED_CONCEPT_OBSDATEC', sa.Date(), nullable=True),
+        sa.PrimaryKeyConstraint('MED_CONCEPT_ID', 'MED_CONCEPT_ID_TYP', 'GENERIC_MED_CONCEPT_ID', name="pk_rmedmgl0_med_generic_med_link"),
         schema='drug_database',
     )
 
@@ -931,6 +1022,7 @@ def upgrade() -> None:
         sa.Column('HICL_SEQNO', sa.Integer(), nullable=False),
         sa.Column('MED_CONCEPT_HICL_SRC_CD', sa.Integer(), nullable=False),
         sa.Column('MED_CONCEPT_OBSDATEC', sa.Date(), nullable=True),
+        sa.PrimaryKeyConstraint('MED_CONCEPT_ID', 'MED_CONCEPT_ID_TYP', 'HICL_SEQNO', name="pk_rmedmhl0_med_hiclseqno_link"),
         schema='drug_database',
     )
 
@@ -942,6 +1034,7 @@ def upgrade() -> None:
         sa.Column('EXT_PRODUCT_CD_START_DT', sa.Date(), nullable=False),
         sa.Column('EXT_PRODUCT_CD', sa.Text(), nullable=False),
         sa.Column('EXT_PRODUCT_CD_END_DT', sa.Date(), nullable=True),
+        sa.PrimaryKeyConstraint('FDB_PRODUCT_ID', 'EXT_PRODUCT_CD_TYPE_ID', 'EXT_PRODUCT_CD_START_DT', 'EXT_PRODUCT_CD', name="pk_rprdpc0_ext_product_cd"),
         schema='drug_database',
     )
 
@@ -951,6 +1044,7 @@ def upgrade() -> None:
         sa.Column('DAM_AGCSP', sa.Integer(), nullable=False),
         sa.Column('HIC_SEQN', sa.Integer(), nullable=False),
         sa.Column('HIC', sa.Text(), nullable=False),
+        sa.PrimaryKeyConstraint('DAM_AGCSP', 'HIC_SEQN', name="pk_rxrfahx0_agcsp_hicseqn"),
         schema='drug_database',
     )
 
@@ -959,6 +1053,7 @@ def upgrade() -> None:
         "rxrfddx0_dacn_agcsp",
         sa.Column('DACN', sa.Text(), nullable=False),
         sa.Column('DAM_AGCSP', sa.Integer(), nullable=False),
+        sa.PrimaryKeyConstraint('DACN', 'DAM_AGCSP', name="pk_rxrfddx0_dacn_agcsp"),
         schema='drug_database',
     )
 
@@ -967,6 +1062,7 @@ def upgrade() -> None:
         "rxrgdfq0_gcdf_script_qq",
         sa.Column('GCDF', sa.Text(), nullable=False),
         sa.Column('SCRIPT_QQ_ID', sa.Integer(), nullable=False),
+        sa.PrimaryKeyConstraint('GCDF', 'SCRIPT_QQ_ID', name="pk_rxrgdfq0_gcdf_script_qq"),
         schema='drug_database',
     )
 
@@ -975,6 +1071,7 @@ def upgrade() -> None:
         "rxrmdfq0_meddosfm_script_qq",
         sa.Column('MED_DOSAGE_FORM_ID', sa.Integer(), nullable=False),
         sa.Column('SCRIPT_QQ_ID', sa.Integer(), nullable=False),
+        sa.PrimaryKeyConstraint('MED_DOSAGE_FORM_ID', 'SCRIPT_QQ_ID', name="pk_rxrmdfq0_meddosfm_script_qq"),
         schema='drug_database',
     )
 
@@ -986,6 +1083,7 @@ def upgrade() -> None:
         sa.Column('SCRIPT_QQ_DESC', sa.Text(), nullable=True),
         sa.Column('XRF_SOURCE_ID', sa.Integer(), nullable=True),
         sa.Column('OBSOLETE_DATE', sa.Date(), nullable=True),
+        sa.PrimaryKeyConstraint('SCRIPT_QQ_ID', name="pk_rxrncqq0_qq_mstr"),
         schema='drug_database',
     )
 
@@ -994,6 +1092,7 @@ def upgrade() -> None:
         "rxrpdfq0_poemdosfm_script_qq",
         sa.Column('POEUNITCDE', sa.Integer(), nullable=False),
         sa.Column('SCRIPT_QQ_ID', sa.Integer(), nullable=False),
+        sa.PrimaryKeyConstraint('POEUNITCDE', 'SCRIPT_QQ_ID', name="pk_rxrpdfq0_poemdosfm_script_qq"),
         schema='drug_database',
     )
 

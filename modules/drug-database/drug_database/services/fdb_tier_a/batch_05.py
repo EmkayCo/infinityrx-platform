@@ -43,6 +43,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPEIAV0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('ATTRIBUTE_CODE',),
     ),
     # Dosage form attribute descriptor
     TableSpec(
@@ -56,6 +57,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPEIDFA0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('DOSAGE_FORM_ATTRIBUTE_ID',),
     ),
     # Dosage form master — 5-column table with a DATE retirement column.
     # DOSAGE_FORM_RETIRE_DT is DATE: uses _parse_fdb_date (YYYYMMDD→date).
@@ -81,6 +83,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPEIDM0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('DOSAGE_FORM_ID',),
     ),
     # Dosage form type descriptor
     TableSpec(
@@ -94,6 +97,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPEIDT0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('DOSAGE_FORM_TYPE_ID',),
     ),
     # Patient parameter requirement code descriptor
     TableSpec(
@@ -107,6 +111,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPEIPP0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('PATIENT_PARAM_REQ_CD',),
     ),
     # Route/labeled descriptor
     TableSpec(
@@ -120,6 +125,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPEIRL0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('RT_LABELED_ID',),
     ),
     # Strength/concentration type descriptor
     TableSpec(
@@ -133,6 +139,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPEIST0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('STR_CONC_TYPE_ID',),
     ),
     # Unit-of-measure type descriptor
     TableSpec(
@@ -146,6 +153,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPEIUT0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('UOM_TYPE_CD',),
     ),
     # Currency code descriptor
     TableSpec(
@@ -159,6 +167,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPRDCC0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('CURRENCY_CD',),
     ),
     # Price attribute descriptor (4-column; PRICE_ATTRIBUTE_GROUP_CD nullable)
     TableSpec(
@@ -180,6 +189,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPRDPAD0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('PRICE_ATTRIBUTE_CD',),
     ),
 ]
 

@@ -69,7 +69,12 @@ def test_sql_type_for_unknown_coercer_raises() -> None:
 
 
 def _make_simple_tier_a_spec(name: str = "RMIID1_MED") -> TableSpec:
-    """A minimal valid Tier A TableSpec for tests."""
+    """A minimal valid Tier A TableSpec for tests.
+
+    B9.B GATE-CLOSE R1 HIGH 2: UPSERT specs MUST declare natural_key
+    so the generator can emit a PRIMARY KEY constraint. Without it
+    the generator raises ValueError.
+    """
     return TableSpec(
         table_name=name,
         columns=("med_name_id", "med_name"),
@@ -78,6 +83,7 @@ def _make_simple_tier_a_spec(name: str = "RMIID1_MED") -> TableSpec:
         record_counts_key=name.split("_")[0],
         loader_group="fdb_tier_a",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=("med_name_id",),
     )
 
 

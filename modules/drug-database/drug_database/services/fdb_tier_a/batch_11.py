@@ -54,6 +54,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RBLAHIC0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('BLA_APPL_NBR', 'APPL_TYPE_ID', 'BIOLOGICS_SN', 'MULTI_INGREDIENT_SN'),
     ),
     # Biologics BLA proprietary name lookup (4 cols, NK=1 PROPRIETARY_NAME_ID).
     # All columns NOT NULL.
@@ -75,6 +76,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RBLAPN0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('PROPRIETARY_NAME_ID',),
     ),
     # Med concept → generic med concept link (4 cols, NK=3).
     # MED_CONCEPT_OBSDATEC is DATE, nullable.
@@ -97,6 +99,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMEDMGL0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_CONCEPT_ID', 'MED_CONCEPT_ID_TYP', 'GENERIC_MED_CONCEPT_ID'),
     ),
     # Med concept → HICL sequence number link (5 cols, NK=3).
     # MED_CONCEPT_HICL_SRC_CD is NUMERIC NOT NULL (col 4).
@@ -122,6 +125,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMEDMHL0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_CONCEPT_ID', 'MED_CONCEPT_ID_TYP', 'HICL_SEQNO'),
     ),
     # External product code mapping (5 cols, NK=4).
     # EXT_PRODUCT_CD_START_DT is DATE NOT NULL (part of NK).
@@ -147,6 +151,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RPRDPC0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('FDB_PRODUCT_ID', 'EXT_PRODUCT_CD_TYPE_ID', 'EXT_PRODUCT_CD_START_DT', 'EXT_PRODUCT_CD'),
     ),
     # DAM AGCSP → HIC sequence cross-reference (3 cols, NK=2).
     # All columns NOT NULL.
@@ -166,6 +171,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RXRFAHX0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('DAM_AGCSP', 'HIC_SEQN'),
     ),
     # DACN → DAM AGCSP cross-reference (2 cols, NK=2).
     # Both columns NOT NULL.
@@ -183,6 +189,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RXRFDDX0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('DACN', 'DAM_AGCSP'),
     ),
     # GCDF → ScriptQQ cross-reference (2 cols, NK=2).
     # Both columns NOT NULL.
@@ -200,6 +207,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RXRGDFQ0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('GCDF', 'SCRIPT_QQ_ID'),
     ),
     # Med dosage form → ScriptQQ cross-reference (2 cols, NK=2).
     # Both columns NOT NULL.
@@ -217,6 +225,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RXRMDFQ0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('MED_DOSAGE_FORM_ID', 'SCRIPT_QQ_ID'),
     ),
     # ScriptQQ master (5 cols, NK=1 SCRIPT_QQ_ID).
     # Cols 2-5 nullable; OBSOLETE_DATE is DATE nullable.
@@ -241,6 +250,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RXRNCQQ0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('SCRIPT_QQ_ID',),
     ),
     # POE med dosage form → ScriptQQ cross-reference (2 cols, NK=2).
     # Both columns NOT NULL.
@@ -258,6 +268,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RXRPDFQ0",
         delta_semantics=DeltaSemantics.UPSERT_BY_NATURAL_KEY,
+        natural_key=('POEUNITCDE', 'SCRIPT_QQ_ID'),
     ),
 ]
 

@@ -15,7 +15,7 @@ this file; do not duplicate state in `~/.claude/.../memory/*.md`.
 | Phase | Scope | Status | Commit range | Notes |
 |---|---|---|---|---|
 | B9.A | Infra + contracts | **CLOSED** (gate-close R1+R2+R3 absorbed) | `503cd7b..a114303` (13 commits) | C0-C14 + 3 gate-close absorptions |
-| B9.B | Tier A — **107 specs across 11 batches + migration + FDW manifest** | **READY FOR GATE-CLOSE** | `93c9d8b..<HEAD>` | 6 short of recon's 113 target; the 6 residual are NDC/GCN/MEDID-keyed → reclassified as Tier B (B9.C scope) |
+| B9.B | Tier A — **107 specs / FDW 173 / migration with PKs / generic loader** | **R1 ABSORBED — pending R2** | `93c9d8b..<HEAD>` | Scope amended: B9.B closes at 107 (not 113); B9.C absorbs the 6 NDC/GCN/MEDID-keyed reclassifieds (now 72 tables, not 66) |
 | B9.C | Tier B — 66 NDC/GCN joins | NOT STARTED | — | Blocked on B9.B |
 | B9.D | Tier C non-RNDC14 — 16 complex | NOT STARTED | — | Blocked on B9.C |
 | B9.E | RNDC14 standalone | NOT STARTED | — | Blocked on B9.D |
@@ -131,6 +131,30 @@ After F2-final, **every consult artifact named in `status.md` or
 reconstructible from the InfinityRx checkout alone.
 
 F1 / F3 / F4: all remained accepted across R1 → R2 → R3.
+
+---
+
+## B9.B GATE-CLOSE R1 — verdict & absorption
+
+**Verdict:** GO-WITH-FIXES (2 HIGH + 3 MEDIUM)
+**Round:** R1 (2026-05-12)
+**Artifact:** `waves/B9/codex-b9b-gate-close-r1-result.md`
+
+**Absorbed in same session:**
+
+| Sev | Concern | Fix |
+|---|---|---|
+| HIGH 1 | `load_fdb.py` had no `--mode fdb_tier_a` | New `drug_database/services/fdb_tier_loader.py` generic loader; `--mode fdb_tier_a` wired in `scripts/load_fdb.py`. 5 unit tests pass. |
+| HIGH 2 | Migration `0009_fdb_tier_a.py` had no PK constraints — `ON CONFLICT` would fail at runtime | Added `natural_key: tuple[str, ...]` field to TableSpec; patched all 99 UPSERT specs across 11 batches; generator now emits `sa.PrimaryKeyConstraint(...)` per spec; generator validates natural_key presence for UPSERT semantics (raises ValueError otherwise) |
+| MEDIUM 1 | Charter said 113 / FDW 179; reality is 107 / 173 | Status ledger amended above. Plan scope for B9.C will inherit the 6 reclassifieds. |
+| MEDIUM 2 | `UOM_CONVERSION_FACTOR` was NUMERIC(16,6) emitted as Numeric(16,5) | New `decimal_16_6` coercer in `fdb_adapter.py`; generator maps it to `sa.Numeric(16, 6)`; batch_10 spec swapped to use it |
+| MEDIUM 3 | Live-DB evidence (FDW verify, migration up/down/up, row-count reconciliation) missing | Deferred to Docker-up follow-on session. Unit-test layer is gate-close-ready; live verification is a separate gate. |
+
+**Regenerated migration:** 1,432 lines (was 1,220); 99 `PrimaryKeyConstraint` + 1 `Numeric(16, 6)` confirmed via grep.
+
+**Test result post-absorption:** 789 unit tests pass (784 B9 batches + adapter + helpers + 5 new tier loader). No regression.
+
+R2 (verification of R1 absorption) dispatched after this commit.
 
 ---
 

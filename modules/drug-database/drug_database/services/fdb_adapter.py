@@ -93,6 +93,20 @@ def _parse_fdb_date(raw: str) -> date:
     return datetime.strptime(raw, "%Y%m%d").date()
 
 
+def decimal_16_6(raw: str) -> Decimal:
+    """Decimal coercer for NUMERIC(16,6) columns (UOM_CONVERSION_FACTOR).
+
+    Default `Decimal` coercer is generator-mapped to `sa.Numeric(16, 5)`
+    (FDB pricing precision). Some non-money columns ship with NUMERIC(16,6)
+    in the DDL — most notably `RPEIUC0_UOM_CONVERSION.UOM_CONVERSION_FACTOR`.
+    Using this named coercer signals the generator to emit `Numeric(16, 6)`
+    instead, preserving DDL precision exactly.
+
+    Codex B9.B GATE-CLOSE R1 MEDIUM 2 mitigation.
+    """
+    return Decimal(raw)
+
+
 _DROP_FOLDER_RE = re.compile(r"\A(\d{2})([A-Z]{3})(\d{4})\.([A-Z]{3}\d{6}[A-Z])\Z")
 _MONTH_MAP = {
     "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
@@ -229,6 +243,16 @@ class TableSpec:
                           ADVERSARIAL A4 mitigation. UNKNOWN preserves
                           Phase 09 behavior (treated as APPEND_ONLY
                           downstream for backward-compat).
+      natural_key:        tuple of column names that form the table's
+                          natural key (PRIMARY KEY in the emitted DDL).
+                          Required for `UPSERT_BY_NATURAL_KEY` /
+                          `UPSERT_WITH_EFFECTIVE_DATE` semantics —
+                          Postgres `ON CONFLICT` needs a matching
+                          unique constraint surface. Empty default
+                          preserves Phase 09 specs (RNP3 uses a
+                          composite unique covered separately by the
+                          0008 migration).  Codex B9.B GATE-CLOSE
+                          R1 HIGH 2 mitigation.
     """
 
     table_name: str
@@ -242,6 +266,7 @@ class TableSpec:
     record_counts_key: str | None = None
     loader_group: str | None = None
     delta_semantics: DeltaSemantics = DeltaSemantics.UNKNOWN
+    natural_key: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
