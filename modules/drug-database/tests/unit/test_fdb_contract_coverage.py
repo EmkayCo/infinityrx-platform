@@ -131,22 +131,8 @@ def test_no_stale_entries_in_contract_tested_specs() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Empty-baseline trivially-true assertions (B9.A close / B9.B open)
+# Empty-baseline canary — DELETED on first batch landing (B9.B C6, `50e7a88`).
+# The canary served its purpose: forced the operator's attention to this
+# file when the first Tier A spec arrived. Now that batch_01 is in, the
+# coverage assertion above is the live invariant.
 # ---------------------------------------------------------------------------
-
-
-def test_b9b_registered_specs_starts_empty() -> None:
-    """Baseline state at B9.B open.
-
-    This assertion FAILS the moment B9.B's first Tier A spec lands.
-    The failing test forces the operator to update the same file
-    (or to delete this test if the empty-baseline contract is no
-    longer meaningful).
-    """
-    assert REGISTERED_SPECS == [], (
-        f"B9.B baseline expected empty REGISTERED_SPECS. Got: "
-        f"{[s.table_name for s in REGISTERED_SPECS]}. If this is the "
-        f"FIRST B9.B Tier A spec, delete this test (it has served its "
-        f"purpose). Otherwise investigate — specs should land in B9.B "
-        f"C2+, not C1."
-    )
