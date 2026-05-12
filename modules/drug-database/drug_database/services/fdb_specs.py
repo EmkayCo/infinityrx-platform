@@ -25,12 +25,16 @@ The F4 contract (codex GATE-CLOSE R1 MEDIUM 2):
 from __future__ import annotations
 
 from drug_database.services.fdb_adapter import TableSpec
+from drug_database.services.fdb_tier_a import TIER_A_SPECS
 
 
-# B9.B starts empty. Each B9.B Tier A commit appends to this list AND
-# updates the CONTRACT_TESTED_SPECS frozenset in
-# `tests/unit/test_fdb_contract_coverage.py` — atomic per-spec PRs.
-REGISTERED_SPECS: list[TableSpec] = []
+# Tier A: auto-aggregated from `fdb_tier_a.batch_*` modules so parallel
+# agents do not contend on this file (B9.B C5+ pattern). Each agent
+# adds their batch_NN.py + matching test module; this list discovers
+# them via pkgutil.
+#
+# Tier B-G: append-here when those waves land (B9.C-G).
+REGISTERED_SPECS: list[TableSpec] = list(TIER_A_SPECS)
 
 
 __all__ = ["REGISTERED_SPECS"]

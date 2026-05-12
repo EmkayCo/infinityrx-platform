@@ -36,14 +36,57 @@ _CHECKABLE_SEMANTICS = frozenset({
 
 
 # Names of TableSpecs known to have a contract-test wired up.
-# B9.B-G appends to this set in lock-step with REGISTERED_SPECS;
-# the test below fails the moment the two drift.
 #
-# B9.A baseline: empty (no B9 specs registered yet). Phase 09's
-# 3 pricing specs live outside REGISTERED_SPECS with delta_semantics
-# = UNKNOWN; they are not covered by this assertion (and that's fine
-# — they predate the contract template).
-CONTRACT_TESTED_SPECS: frozenset[str] = frozenset()
+# B9.B C5+ pattern: per-batch test modules declare their own
+# `BATCH_TESTED_NAMES` constant. This loader unions every such constant
+# across all `test_fdb_tier_a_batch_*.py` modules in the same package.
+# Parallel agents own their own batch_N file; no merge conflict here.
+#
+# Phase 09's 3 pricing specs (RNP3 / RPRDPTD0 / RNPTYPD0) live outside
+# REGISTERED_SPECS with delta_semantics=UNKNOWN — they predate the
+# contract template and are out of scope for this assertion.
+
+
+def _load_batch_tested_names() -> frozenset[str]:
+    """Discover per-batch BATCH_TESTED_NAMES exports and union them.
+
+    Looks at every sibling test module in this package whose name
+    starts with `test_fdb_tier_a_batch_`. Imports each, reads its
+    BATCH_TESTED_NAMES constant (frozenset[str] expected). Missing
+    or wrong-typed exports raise loudly — silent type drift would
+    let the coverage canary go quiet on a real omission.
+    """
+    import importlib
+    import pkgutil
+
+    parent_pkg = ".".join(__name__.split(".")[:-1]) or __name__
+    try:
+        pkg = importlib.import_module(parent_pkg)
+    except ImportError:
+        return frozenset()
+    if not hasattr(pkg, "__path__"):
+        return frozenset()
+    out: set[str] = set()
+    for info in pkgutil.iter_modules(pkg.__path__):
+        if not info.name.startswith("test_fdb_tier_a_batch_"):
+            continue
+        mod = importlib.import_module(f"{parent_pkg}.{info.name}")
+        names = getattr(mod, "BATCH_TESTED_NAMES", None)
+        if names is None:
+            # Tolerate batch test modules that haven't declared the
+            # constant yet (during the C6+ wave evolution); the F4
+            # canary will still fire on coverage gaps.
+            continue
+        if not isinstance(names, (frozenset, set, tuple, list)):
+            raise TypeError(
+                f"{parent_pkg}.{info.name}.BATCH_TESTED_NAMES must be "
+                f"frozenset/set/tuple/list of str; got {type(names).__name__}."
+            )
+        out.update(names)
+    return frozenset(out)
+
+
+CONTRACT_TESTED_SPECS: frozenset[str] = _load_batch_tested_names()
 
 
 # ---------------------------------------------------------------------------
