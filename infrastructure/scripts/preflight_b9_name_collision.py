@@ -72,9 +72,12 @@ def fdb_name_to_table_name(fdb_table_name: str) -> str:
 def load_expected_names(record_counts_path: Path) -> list[str]:
     """Read RECORD_COUNTS.TXT and return the full list of expected DB table names.
 
-    Format (matches `_fdb_contract.py::_parse_record_counts`):
-      <KEY>=<count>
+    Real-file format observed at `data/reference/fdb/TEL251759D/Current/`:
+      <KEY>|<count>
     one entry per CRLF line; blanks and `#` comments tolerated.
+
+    The loader accepts BOTH `|` (production format) and `=` (legacy
+    synthetic test fixtures). Matches `_fdb_contract._parse_record_counts`.
 
     Returns DB-shaped names (lower-cased). Order preserved from the
     file for reproducibility.
@@ -86,9 +89,12 @@ def load_expected_names(record_counts_path: Path) -> list[str]:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        if "=" not in line:
+        if "|" in line:
+            key, _, _val = line.partition("|")
+        elif "=" in line:
+            key, _, _val = line.partition("=")
+        else:
             continue
-        key, _, _val = line.partition("=")
         db_name = fdb_name_to_table_name(key)
         if db_name in seen:
             continue

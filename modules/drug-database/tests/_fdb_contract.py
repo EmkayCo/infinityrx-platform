@@ -237,10 +237,15 @@ def assert_latin1_decode_smoke(
 def _parse_record_counts(path: Path) -> dict[str, int]:
     """Parse FDB's RECORD_COUNTS.TXT into {table_name: row_count}.
 
-    Format observed at `data/reference/fdb/TEL251759D/`:
-      <table_name>=<count>
-    one entry per CRLF line. Encoding is latin-1; numbers are decimal.
-    Blank lines and `#` comment lines are tolerated.
+    Real-file format observed at `data/reference/fdb/TEL251759D/Current/`:
+      <TABLE_NAME>|<COUNT>
+    one entry per CRLF line. Encoding is latin-1; counts are zero-
+    padded decimal (e.g. `000091031`). Blank lines and `#` comment
+    lines are tolerated.
+
+    The loader accepts BOTH `|` (production format) and `=` (legacy
+    synthetic test fixtures) as the delimiter. New tests should use
+    `|` to match real-file behavior.
     """
     out: dict[str, int] = {}
     text = path.read_text(encoding="latin-1")
@@ -248,9 +253,14 @@ def _parse_record_counts(path: Path) -> dict[str, int]:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        if "=" not in line:
+        # Prefer `|` (real FDB format); fall through to `=` for legacy
+        # synthetic fixtures so older tests still parse.
+        if "|" in line:
+            key, _, val = line.partition("|")
+        elif "=" in line:
+            key, _, val = line.partition("=")
+        else:
             continue
-        key, _, val = line.partition("=")
         key = key.strip()
         val = val.strip()
         try:

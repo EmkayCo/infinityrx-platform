@@ -15,7 +15,7 @@ this file; do not duplicate state in `~/.claude/.../memory/*.md`.
 | Phase | Scope | Status | Commit range | Notes |
 |---|---|---|---|---|
 | B9.A | Infra + contracts | **CLOSED** (gate-close R1+R2+R3 absorbed) | `503cd7b..a114303` (13 commits) | C0-C14 + 3 gate-close absorptions |
-| B9.B | Tier A — 113 simple lookups | **OPEN — C1 (F4) landed** | C1 (this commit) | charter at `B9.B-charter.md`; C2+ adds Tier A specs |
+| B9.B | Tier A — 113 simple lookups | **OPEN — C1 (F4) + C2 (real-file parser) landed** | C1-C2 | charter at `B9.B-charter.md`; C3 needs canonical-list design |
 | B9.C | Tier B — 66 NDC/GCN joins | NOT STARTED | — | Blocked on B9.B |
 | B9.D | Tier C non-RNDC14 — 16 complex | NOT STARTED | — | Blocked on B9.C |
 | B9.E | RNDC14 standalone | NOT STARTED | — | Blocked on B9.D |
@@ -131,6 +131,29 @@ After F2-final, **every consult artifact named in `status.md` or
 reconstructible from the InfinityRx checkout alone.
 
 F1 / F3 / F4: all remained accepted across R1 → R2 → R3.
+
+---
+
+## B9.B C2 — Real-file lock-in (parser-format fix)
+
+**Surfaced 2026-05-12 while staging multi-agent dispatch.** B9.A C3 + C10 parsers assumed `RECORD_COUNTS.TXT` used `=` as the delimiter (per synthetic test fixtures). The REAL file at `data/reference/fdb/TEL251759D/Current/RECORD_COUNTS.TXT` uses `|`.
+
+**Defect impact (would have surfaced on first B9.B C3 row-count reconciliation):**
+- `_parse_record_counts` returned `{}` for every real-file invocation.
+- `assert_row_count_reconciles` would fail every B9.B+ contract test with "no entry for key" — masking the real assertion.
+- Preflight `load_expected_names` returned `[]`, so name-collision scan was vacuously PASS.
+
+**Fix shipped (same commit as B9.B C2):**
+- Both parsers (`_fdb_contract._parse_record_counts` and `preflight_b9_name_collision.load_expected_names`) now prefer `|`, fall back to `=` for synthetic-fixture compatibility.
+- New integration test `tests/integration/test_fdb_record_counts_real_file.py` (4 tests) runs against the live FDB drop when present; skips otherwise.
+
+**Discovery: 906 vs 220 — canonical list re-points to DB.zip.**
+- RECORD_COUNTS.TXT contains **906 entries**, NOT 220. It is a superset that includes archive snapshots (`AR*`), clinical surveillance (`CMCS*`), UPD-only variants, and vendor bookkeeping rows.
+- The canonical 220 B9 schema-driving tables live in `NDDF Plus DB.zip` namelist (220 files exactly).
+- **B9.B C3 design decision (deferred to next session):** re-point the preflight `load_expected_names` to source from DB.zip namelist instead of RECORD_COUNTS. RECORD_COUNTS remains the row-count reconciliation source for the 220 tables it DOES cover.
+- Lock-in test `test_db_zip_has_220_tables` confirms the canonical universe.
+
+This is the kind of defect the recon's "verify against real drop" gate is designed to catch. Surfaced before the multi-agent per-table dispatch could amplify it across 113 specs.
 
 ---
 
