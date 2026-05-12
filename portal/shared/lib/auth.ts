@@ -63,6 +63,42 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
     }),
     Credentials({
+      id: "b10-test",
+      name: "B10 Test Bypass (TEST-MODE ONLY)",
+      credentials: {
+        token: { label: "Token", type: "text" },
+      },
+      async authorize(creds) {
+        // Wave B10 W4.6: next start runtime probe bypass.
+        // BOTH env vars must be set AND token must match exactly via
+        // constant-time comparison. Hard-refuses if either is missing.
+        // 32-byte random token lives in .env.local (gitignored).
+        // security.md compliance: constant-time compare on secret.
+        if (process.env.B10_TEST_MODE !== "true") return null;
+        const expected = process.env.B10_TEST_TOKEN;
+        if (!expected || !creds?.token) return null;
+        const a = Buffer.from(String(creds.token));
+        const b = Buffer.from(expected);
+        if (a.length !== b.length) return null;
+        let diff = 0;
+        for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+        if (diff !== 0) return null;
+        const now = Math.floor(Date.now() / 1000);
+        return {
+          id: "b10-test-admin-00000000-0000-0000-0000-000000000001",
+          email: "b10-test@infinityrx.local",
+          name: "B10 Test Admin",
+          role: "platform_admin",
+          tenant_id: "00000000-0000-0000-0000-000000000001",
+          permissions: ["*"],
+          mfa_enrolled: true,
+          access_token: "b10-test-token",
+          refresh_token: "b10-test-refresh",
+          expires_at: now + 60 * 60, // 1 hour — test runs are short
+        };
+      },
+    }),
+    Credentials({
       id: "credentials",
       name: "Email & Password",
       credentials: {
