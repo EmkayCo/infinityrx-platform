@@ -15,7 +15,7 @@ this file; do not duplicate state in `~/.claude/.../memory/*.md`.
 | Phase | Scope | Status | Commit range | Notes |
 |---|---|---|---|---|
 | B9.A | Infra + contracts | **CLOSED** (gate-close R1+R2+R3 absorbed) | `503cd7b..a114303` (13 commits) | C0-C14 + 3 gate-close absorptions |
-| B9.B | Tier A — 113 simple lookups | **OPEN — C1 (F4) + C2 (real-file parser) landed** | C1-C2 | charter at `B9.B-charter.md`; C3 needs canonical-list design |
+| B9.B | Tier A — 113 simple lookups | **OPEN — C1–C4 prep landed** | `93c9d8b..353a04b` | Ready for multi-agent dispatch on per-table batches (C5+) |
 | B9.C | Tier B — 66 NDC/GCN joins | NOT STARTED | — | Blocked on B9.B |
 | B9.D | Tier C non-RNDC14 — 16 complex | NOT STARTED | — | Blocked on B9.C |
 | B9.E | RNDC14 standalone | NOT STARTED | — | Blocked on B9.D |
@@ -154,6 +154,40 @@ F1 / F3 / F4: all remained accepted across R1 → R2 → R3.
 - Lock-in test `test_db_zip_has_220_tables` confirms the canonical universe.
 
 This is the kind of defect the recon's "verify against real drop" gate is designed to catch. Surfaced before the multi-agent per-table dispatch could amplify it across 113 specs.
+
+---
+
+## B9.B prep ledger (C1–C4 — multi-agent dispatch enablement)
+
+| C | Commit | Scope |
+|---|---|---|
+| C1 | `93c9d8b` | F4 coverage canary — `fdb_specs.py` + `test_fdb_contract_coverage.py` |
+| C2 | `2d3e791` | RECORD_COUNTS parser format fix (`|` not `=`) + 906-vs-220 discovery |
+| C3 | `d8af39e` | Canonical 220-table namelist + preflight re-pointed to DB.zip source |
+| C4 | `353a04b` | Per-table DDL manifest (221 entries, 7 lock-in tests) |
+
+**Multi-agent dispatch readiness (C5+):**
+
+With C1–C4 landed, each B9.B per-table builder agent has authoritative inputs:
+- `infrastructure/scripts/lib/fdb_db_zip_namelist.txt` — 220 canonical table names
+- `infrastructure/scripts/lib/fdb_table_ddl_manifest.json` — per-table columns + types + nullable
+- `modules/drug-database/tests/_fdb_contract.py` — contract helpers (6 assertion fns + allowlist loader)
+- `modules/drug-database/drug_database/services/fdb_specs.py` — `REGISTERED_SPECS` registry to append to
+- `modules/drug-database/tests/unit/test_fdb_contract_coverage.py` — `CONTRACT_TESTED_SPECS` coverage registry
+
+**B9.B C5 design (next-session first commit):**
+
+Author ONE batch by hand (12 Tier A tables) as the canonical pattern.
+Pattern includes:
+- `drug_database/services/fdb_tier_a_batches/batch_01.py` with `BATCH_01: list[TableSpec] = [...]`
+- `drug_database/services/fdb_specs.py` aggregates batches
+- `tests/unit/test_fdb_tier_a_batch_01.py` wires each spec through the 6 contract helpers
+- Appends 12 names to `CONTRACT_TESTED_SPECS`
+
+**B9.B C6+ multi-agent dispatch (after template proven):**
+
+10 parallel `general-purpose` agents, each owning 1 batch (~12 tables).
+Per-agent isolation via per-batch file ownership — no merge conflicts on shared registries. Each agent commits independently.
 
 ---
 
