@@ -2,7 +2,6 @@ import type { NextConfig } from "next";
 import path from "path";
 
 const sharedDir = path.resolve(__dirname, "../shared");
-const operatorModules = path.resolve(__dirname, "node_modules");
 
 const nextConfig: NextConfig = {
   // Wave B10 (2026-05-12): @infinityrx/portal-shared is consumed as
@@ -18,14 +17,14 @@ const nextConfig: NextConfig = {
     },
   },
   webpack: (config) => {
+    // Wave B10 (2026-05-12 W1.12): the prior `config.resolve.modules` injection
+    // of `operatorModules` was a workaround for the missing-workspace bug
+    // (sibling portal/shared couldn't reach portal/operator/node_modules via
+    // Node's up-walk). The npm workspace conversion in W1.AB makes this
+    // unnecessary — npm hoists shared deps to portal/node_modules/, which
+    // Node finds via the standard up-walk from portal/{operator,shared}/.
+    // Keep only the @shared alias for the path-based imports.
     config.resolve.alias["@shared"] = sharedDir;
-    if (Array.isArray(config.resolve.modules)) {
-      if (!config.resolve.modules.includes(operatorModules)) {
-        config.resolve.modules = [operatorModules, ...config.resolve.modules];
-      }
-    } else {
-      config.resolve.modules = [operatorModules, "node_modules"];
-    }
     return config;
   },
   typedRoutes: false,

@@ -5,13 +5,14 @@
   "description": "Shared codebase for InfinityRx portal apps. Source-mode TypeScript package consumed by Next.js apps via `transpilePackages` in next.config.ts. Multi-app-ready: future portal apps (member, manufacturer) consume this same package via npm workspace symlink. See README.md for the source-mode pattern.",
   "main": "./index.ts",
   "types": "./index.ts",
+  "_comment_exports": "Subpath patterns include the .ts extension on the target side because consumers import without an extension (e.g. `@infinityrx/portal-shared/hooks/use-sse`). The wildcard captures the basename and the target reconstructs with .ts so TypeScript moduleResolution=bundler can resolve to a real file. Turbopack and webpack both honor this pattern.",
   "exports": {
     ".": "./index.ts",
-    "./components/*": "./components/*",
-    "./hooks/*": "./hooks/*",
-    "./lib/*": "./lib/*",
-    "./types/*": "./types/*",
-    "./design-system/*": "./design-system/*"
+    "./components/*": "./components/*.tsx",
+    "./hooks/*": "./hooks/*.ts",
+    "./lib/*": "./lib/*.ts",
+    "./types/*": "./types/*.ts",
+    "./design-system/*": "./design-system/*.ts"
   },
   "dependencies": {
     "@dnd-kit/utilities": "^3.2.2",

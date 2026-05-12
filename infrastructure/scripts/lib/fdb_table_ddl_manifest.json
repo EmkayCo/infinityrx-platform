@@ -1,0 +1,5882 @@
+{
+  "NDDF_PRODUCT_INFO": {
+    "columns": [
+      {
+        "name": "PRODUCTION_DATE",
+        "nullable": false,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RAHFSD1_DESC": {
+    "columns": [
+      {
+        "name": "AHFS8",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "AHFS_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(40)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RAHFSGC1_GCNSEQNO_LINK": {
+    "columns": [
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "AHFS8",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "AHFS_REL",
+        "nullable": true,
+        "sql_type": "NUMERIC(2)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RAPLR0_APPL_RELATION": {
+    "columns": [
+      {
+        "name": "APPL_RELATION_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "APPL_RELATION_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "APPL_NBR1",
+        "nullable": false,
+        "sql_type": "VARCHAR(20)"
+      },
+      {
+        "name": "APPL_TYPE_ID1",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "APPL_NBR2",
+        "nullable": false,
+        "sql_type": "VARCHAR(20)"
+      },
+      {
+        "name": "APPL_TYPE_ID2",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "APPL_RELATION_START_DT",
+        "nullable": false,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "APPL_RELATION_END_DT",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RAPLRT0_APPL_RELATION_TYPE": {
+    "columns": [
+      {
+        "name": "APPL_RELATION_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "APPL_RELATION_TYPE_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(40)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RAPLT0_APPL_TYPE": {
+    "columns": [
+      {
+        "name": "APPL_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "APPL_TYPE_ABBREV",
+        "nullable": false,
+        "sql_type": "VARCHAR(20)"
+      },
+      {
+        "name": "APPL_TYPE_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(200)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RAPPLNA0_FDA_NDC_APPL": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "APPL_NO",
+        "nullable": false,
+        "sql_type": "VARCHAR(25)"
+      },
+      {
+        "name": "APPL_TYPE_CD",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RAPPLSL0_FDA_NDC_NDA_ANDA": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "NDA_IND",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "ANDA_IND",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "LISTING_SEQ_NO",
+        "nullable": true,
+        "sql_type": "NUMERIC(7)"
+      },
+      {
+        "name": "TRADENAME",
+        "nullable": true,
+        "sql_type": "VARCHAR(125)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RAPPLTD0_FDA_APPL_TYPE": {
+    "columns": [
+      {
+        "name": "APPL_TYPE_CD",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "APPL_TYPE_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RATCD0_ATC_DESC": {
+    "columns": [
+      {
+        "name": "ATC",
+        "nullable": false,
+        "sql_type": "VARCHAR(7)"
+      },
+      {
+        "name": "ATC_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RATCGC0_ATC_GCNSEQNO_LINK": {
+    "columns": [
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "ATC",
+        "nullable": false,
+        "sql_type": "VARCHAR(7)"
+      },
+      {
+        "name": "ATC_VER",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RBLA0_BIOLOGICS_LICENSE_APPL": {
+    "columns": [
+      {
+        "name": "BLA_APPL_NBR",
+        "nullable": false,
+        "sql_type": "VARCHAR(25)"
+      },
+      {
+        "name": "APPL_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "BIOSIMILAR_IND",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "INTERCHANGEABLE_IND",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "PROPER_NAME",
+        "nullable": false,
+        "sql_type": "VARCHAR(200)"
+      },
+      {
+        "name": "SUBSTANCE_GROUP_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "BIOLOGIC_NAME_GROUPER_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "APPROVAL_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RBLAHIC0_INGREDIENTS": {
+    "columns": [
+      {
+        "name": "BLA_APPL_NBR",
+        "nullable": false,
+        "sql_type": "VARCHAR(25)"
+      },
+      {
+        "name": "APPL_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "BIOLOGICS_SN",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "MULTI_INGREDIENT_SN",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RBLANG0_NAME_GRP_DESC": {
+    "columns": [
+      {
+        "name": "BIOLOGIC_NAME_GROUPER_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "BIOLOGIC_NAME_GROUPER_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(200)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RBLAPN0_PROPRIETARY_NAME": {
+    "columns": [
+      {
+        "name": "PROPRIETARY_NAME_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "BLA_APPL_NBR",
+        "nullable": false,
+        "sql_type": "VARCHAR(25)"
+      },
+      {
+        "name": "APPL_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "PROPRIETARY_NAME",
+        "nullable": false,
+        "sql_type": "VARCHAR(200)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RBLASG0_SUBSTANCE_GRP_DESC": {
+    "columns": [
+      {
+        "name": "SUBSTANCE_GROUP_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "SUBSTANCE_GROUP_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(200)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RCQDNDC0_DISP_CLNQTY_NDC": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "CLNQTY_SUBUNIT_QTY",
+        "nullable": true,
+        "sql_type": "NUMERIC(34,17)"
+      },
+      {
+        "name": "CLNQTY_SUBUOM_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(70)"
+      },
+      {
+        "name": "CLNQTY_PKG_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "CLNQTY_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(255)"
+      },
+      {
+        "name": "ERX_QTY",
+        "nullable": false,
+        "sql_type": "NUMERIC(34,17)"
+      },
+      {
+        "name": "ERX_SCRIPT_UOM_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "ERX_SCRIPT_POTUNIT_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(10)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RCQMED0_CLNQTY_MEDID": {
+    "columns": [
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MEDID_SN",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "CLNQTY_SUBUNIT_QTY",
+        "nullable": true,
+        "sql_type": "NUMERIC(18,7)"
+      },
+      {
+        "name": "CLNQTY_SUBUOM_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(70)"
+      },
+      {
+        "name": "CLNQTY_PKG_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "CLNQTY_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(255)"
+      },
+      {
+        "name": "ERX_QTY",
+        "nullable": false,
+        "sql_type": "NUMERIC(18,7)"
+      },
+      {
+        "name": "ERX_SCRIPT_UOM_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "ERX_SCRIPT_POTUNIT_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(10)"
+      }
+    ],
+    "dataset": "NDDF XRF 1.0"
+  },
+  "RCQNDC0_CLNQTY_NDC": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "CLNQTY_SUBUNIT_QTY",
+        "nullable": true,
+        "sql_type": "NUMERIC(18,7)"
+      },
+      {
+        "name": "CLNQTY_SUBUOM_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(70)"
+      },
+      {
+        "name": "CLNQTY_PKG_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "CLNQTY_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(255)"
+      },
+      {
+        "name": "ERX_QTY",
+        "nullable": false,
+        "sql_type": "NUMERIC(18,7)"
+      },
+      {
+        "name": "ERX_SCRIPT_UOM_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "ERX_SCRIPT_POTUNIT_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(10)"
+      }
+    ],
+    "dataset": "NDDF XRF 1.0"
+  },
+  "RDCCD0_DRUG_CAT_DESC": {
+    "columns": [
+      {
+        "name": "DCC",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "DCC_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(40)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RDOSED2_DOSE_DESC": {
+    "columns": [
+      {
+        "name": "GCDF",
+        "nullable": false,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "DOSE",
+        "nullable": true,
+        "sql_type": "VARCHAR(10)"
+      },
+      {
+        "name": "GCDF_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(40)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RETCCTD0_ETC_CHANGE_TYPE_DESC": {
+    "columns": [
+      {
+        "name": "ETC_CHANGE_TYPE_CODE",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_CHANGE_TYPE_CODE_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(90)"
+      }
+    ],
+    "dataset": "NDDF ETC 1.0"
+  },
+  "RETCGC0_ETC_GCNSEQNO": {
+    "columns": [
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "ETC_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ETC_COMMON_USE_IND",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_DEFAULT_USE_IND",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      }
+    ],
+    "dataset": "NDDF ETC 1.0"
+  },
+  "RETCGCH0_ETC_GCNSEQNO_HIST": {
+    "columns": [
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "ETC_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ETC_REVISION_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "ETC_COMMON_USE_IND",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_DEFAULT_USE_IND",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_CHANGE_TYPE_CODE",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_EFFECTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF ETC 1.0"
+  },
+  "RETCHCH0_ETC_HICSEQN_HIST": {
+    "columns": [
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "ETC_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ETC_REVISION_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "ETC_CHANGE_TYPE_CODE",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_EFFECTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF ETC 1.0"
+  },
+  "RETCHCL0_ETC_HICLSEQNO": {
+    "columns": [
+      {
+        "name": "HICL_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "ETC_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF ETC 1.0"
+  },
+  "RETCHIC0_ETC_HICSEQN": {
+    "columns": [
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "ETC_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF ETC 1.0"
+  },
+  "RETCHLH0_ETC_HICLSEQNO_HIST": {
+    "columns": [
+      {
+        "name": "HICL_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "ETC_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ETC_REVISION_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "ETC_CHANGE_TYPE_CODE",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_EFFECTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF ETC 1.0"
+  },
+  "RETCMDH0_ETC_MEDID_HIST": {
+    "columns": [
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ETC_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ETC_REVISION_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "ETC_COMMON_USE_IND",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_DEFAULT_USE_IND",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_CHANGE_TYPE_CODE",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_EFFECTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF ETC 1.0"
+  },
+  "RETCMED0_ETC_MEDID": {
+    "columns": [
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ETC_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ETC_COMMON_USE_IND",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_DEFAULT_USE_IND",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      }
+    ],
+    "dataset": "NDDF ETC 1.0"
+  },
+  "RETCMNM0_ETC_MED_NAME_ID": {
+    "columns": [
+      {
+        "name": "MED_NAME_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ETC_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF ETC 1.0"
+  },
+  "RETCNDC0_ETC_NDC": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "ETC_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ETC_COMMON_USE_IND",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_DEFAULT_USE_IND",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      }
+    ],
+    "dataset": "NDDF ETC 1.0"
+  },
+  "RETCNDH0_ETC_NDC_HIST": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "ETC_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ETC_REVISION_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "ETC_COMMON_USE_IND",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_DEFAULT_USE_IND",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_CHANGE_TYPE_CODE",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_EFFECTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF ETC 1.0"
+  },
+  "RETCNMH0_ETC_MED_NAME_ID_HIST": {
+    "columns": [
+      {
+        "name": "MED_NAME_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ETC_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ETC_REVISION_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "ETC_CHANGE_TYPE_CODE",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_EFFECTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF ETC 1.0"
+  },
+  "RETCSCH0_ETC_SEARCH": {
+    "columns": [
+      {
+        "name": "ETC_SEARCH_ETC_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ETC_PRODUCT_RELATED_ETC_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF ETC 1.0"
+  },
+  "RETCTBL0_ETC_ID": {
+    "columns": [
+      {
+        "name": "ETC_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ETC_NAME",
+        "nullable": true,
+        "sql_type": "VARCHAR(70)"
+      },
+      {
+        "name": "ETC_ULTIMATE_CHILD_IND",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_DRUG_CONCEPT_LINK_IND",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_PARENT_ETC_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ETC_FORMULARY_LEVEL_IND",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_PRESENTATION_SEQNO",
+        "nullable": true,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "ETC_ULTIMATE_PARENT_ETC_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ETC_HIERARCHY_LEVEL",
+        "nullable": true,
+        "sql_type": "NUMERIC(2)"
+      },
+      {
+        "name": "ETC_SORT_NUMBER",
+        "nullable": true,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "ETC_RETIRED_IND",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ETC_RETIRED_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF ETC 1.0"
+  },
+  "RETCXRF0_ETC_HIC3_ETC": {
+    "columns": [
+      {
+        "name": "ETC_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "HIC3_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF ETC 1.0"
+  },
+  "RGCN0_GCN_GCNSEQNO_LINK": {
+    "columns": [
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "GCN",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RGCNINH0_GCNSEQNO_INACTV_LINK": {
+    "columns": [
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "INACTV_NOT_PRES_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "INACTV_PRES_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RGCNINS0_STUDY_TABLE": {
+    "columns": [
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "TOTAL_PRODUCTS_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "PRODUCTS_RESEARCHED_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RGCNSEQ4_GCNSEQNO_MSTR": {
+    "columns": [
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC3",
+        "nullable": true,
+        "sql_type": "VARCHAR(3)"
+      },
+      {
+        "name": "HICL_SEQNO",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "GCDF",
+        "nullable": true,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "GCRT",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "STR",
+        "nullable": true,
+        "sql_type": "VARCHAR(10)"
+      },
+      {
+        "name": "GTC",
+        "nullable": true,
+        "sql_type": "NUMERIC(2)"
+      },
+      {
+        "name": "TC",
+        "nullable": true,
+        "sql_type": "NUMERIC(2)"
+      },
+      {
+        "name": "DCC",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "GCNSEQ_GI",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "GENDER",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "HIC3_SEQN",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "STR60",
+        "nullable": true,
+        "sql_type": "VARCHAR(60)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RGCNSTR0_INGREDIENT_STRENGTH": {
+    "columns": [
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "STRENGTH_STATUS_CODE",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "STRENGTH",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "STRENGTH_UOM_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "STRENGTH_TYP_CODE",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "VOLUME",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "VOLUME_UOM_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ALT_STRENGTH",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "ALT_STRENGTH_UOM_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ALT_STRENGTH_TYP_CODE",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "TIME_VALUE",
+        "nullable": true,
+        "sql_type": "NUMERIC(6,3)"
+      },
+      {
+        "name": "TIME_UOM_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "RANGE_MAX",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "RANGE_MIN",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RGTCD0_GEN_THERAP_CLASS_DESC": {
+    "columns": [
+      {
+        "name": "GTC",
+        "nullable": false,
+        "sql_type": "NUMERIC(2)"
+      },
+      {
+        "name": "GTC_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RHIC1D2_HIC_ORGAN_SYS_DESC": {
+    "columns": [
+      {
+        "name": "HIC1_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC1",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "HIC1_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RHIC2D3_HIC_RX_CLASS_DESC": {
+    "columns": [
+      {
+        "name": "HIC2_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC2",
+        "nullable": false,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "HIC2_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "HIC2_ROOT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RHIC3D3_HIC_THERAP_CLASS_DESC": {
+    "columns": [
+      {
+        "name": "HIC3_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC3",
+        "nullable": false,
+        "sql_type": "VARCHAR(3)"
+      },
+      {
+        "name": "HIC3_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "HIC3_GRPN",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC3_ROOT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RHIC3L2_HIC3_HICLSEQNO_LINK": {
+    "columns": [
+      {
+        "name": "HICL_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC3_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC3",
+        "nullable": true,
+        "sql_type": "VARCHAR(3)"
+      },
+      {
+        "name": "HIC3_RELNO",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RHIC4D2_HIC_BASE_ING_DESC": {
+    "columns": [
+      {
+        "name": "HIC4_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC4",
+        "nullable": true,
+        "sql_type": "VARCHAR(4)"
+      },
+      {
+        "name": "HIC4_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "HIC4_ROOT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC4_POTENTIALLY_INACTV_IND",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "ING_STATUS_CD",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RHICCAS1_HIC_CAS_LINK": {
+    "columns": [
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "CAS9_TBL",
+        "nullable": true,
+        "sql_type": "NUMERIC(9)"
+      },
+      {
+        "name": "HIC",
+        "nullable": true,
+        "sql_type": "VARCHAR(6)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RHICD5_HIC_DESC": {
+    "columns": [
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC",
+        "nullable": true,
+        "sql_type": "VARCHAR(6)"
+      },
+      {
+        "name": "HIC_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "HIC_ROOT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC_POTENTIALLY_INACTV_IND",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "ING_STATUS_CD",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RHICHCR0_HIC_HIC_LINK": {
+    "columns": [
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "RELATED_HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RHICL1_HIC_HICLSEQNO_LINK": {
+    "columns": [
+      {
+        "name": "HICL_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC_REL_NO",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "HIC",
+        "nullable": true,
+        "sql_type": "VARCHAR(6)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RHICLSQ1_HICLSEQNO_MSTR": {
+    "columns": [
+      {
+        "name": "HICL_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "GNN",
+        "nullable": true,
+        "sql_type": "VARCHAR(30)"
+      },
+      {
+        "name": "GNN60",
+        "nullable": true,
+        "sql_type": "VARCHAR(60)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RHICLSQ2_HICLSEQNO_MSTR": {
+    "columns": [
+      {
+        "name": "HICL_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "GNN",
+        "nullable": false,
+        "sql_type": "VARCHAR(30)"
+      },
+      {
+        "name": "GNN60",
+        "nullable": false,
+        "sql_type": "VARCHAR(60)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RHICRH0_ING_HIST": {
+    "columns": [
+      {
+        "name": "REPL_HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "PREV_HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC_REPL_EFF_DT",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RHICSCD0_ING_STAT_CD_DESC": {
+    "columns": [
+      {
+        "name": "ING_STATUS_CD",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "ING_STATUS_CD_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RLBLRID3_LBLR_DESC": {
+    "columns": [
+      {
+        "name": "LBLRID",
+        "nullable": false,
+        "sql_type": "VARCHAR(6)"
+      },
+      {
+        "name": "MFG",
+        "nullable": true,
+        "sql_type": "VARCHAR(15)"
+      },
+      {
+        "name": "LBLRIND",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RMEDCD0_MED_CONCEPT_TYP_DESC": {
+    "columns": [
+      {
+        "name": "MED_CONCEPT_ID_TYP",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "MED_CONCEPT_ID_TYP_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDDIN0_RDFMID_INACTV_LINK": {
+    "columns": [
+      {
+        "name": "ROUTED_DOSAGE_FORM_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "INACTV_NOT_PRES_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "INACTV_PRES_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDDIS0_ROUTED_DF_STUDY_TABLE": {
+    "columns": [
+      {
+        "name": "ROUTED_DOSAGE_FORM_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "TOTAL_PRODUCTS_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "PRODUCTS_RESEARCHED_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDIN0_MEDID_INACTV_LINK": {
+    "columns": [
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "INACTV_NOT_PRES_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "INACTV_PRES_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDIS0_MEDID_STUDY_TABLE": {
+    "columns": [
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "TOTAL_PRODUCTS_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "PRODUCTS_RESEARCHED_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDMGL0_MED_GENERIC_MED_LINK": {
+    "columns": [
+      {
+        "name": "MED_CONCEPT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_CONCEPT_ID_TYP",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "GENERIC_MED_CONCEPT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_CONCEPT_OBSDATEC",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDMHL0_MED_HICLSEQNO_LINK": {
+    "columns": [
+      {
+        "name": "MED_CONCEPT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_CONCEPT_ID_TYP",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "HICL_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "MED_CONCEPT_HICL_SRC_CD",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "MED_CONCEPT_OBSDATEC",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDMRD0_MOVE_REASON_DESC": {
+    "columns": [
+      {
+        "name": "MOVE_REASON_CD",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "MOVE_REASON_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDNGH0_NDC_GEN_MEDID_HIST": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "PRODUCTION_DATE",
+        "nullable": false,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "PREV_MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "PREV_MEDID_NAME_SOURCE_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "PREV_MEDID_OLD_STATUS_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "PREV_MEDID_NEW_STATUS_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "PREV_MEDID_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(70)"
+      },
+      {
+        "name": "CURR_MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "CURR_MEDID_NAME_SOURCE_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "CURR_MEDID_OLD_STATUS_CD",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "CURR_MEDID_NEW_STATUS_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "CURR_MEDID_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(70)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDNGM0_NDC_GEN_MEDID": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDNGR0_NDC_GEN_MEDID_REASON": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "PRODUCTION_DATE",
+        "nullable": false,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "MOVE_REASON_CD",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDNIN0_MNID_INACTV_LINK": {
+    "columns": [
+      {
+        "name": "MED_NAME_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "INACTV_NOT_PRES_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "INACTV_PRES_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDNIS0_MED_NAME_STUDY_TABLE": {
+    "columns": [
+      {
+        "name": "MED_NAME_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "TOTAL_PRODUCTS_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "PRODUCTS_RESEARCHED_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDNMH0_NDC_MEDID_HIST": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "PRODUCTION_DATE",
+        "nullable": false,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "PREV_MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "PREV_MEDID_NAME_SOURCE_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "PREV_MEDID_OLD_STATUS_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "PREV_MEDID_NEW_STATUS_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "PREV_MEDID_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(70)"
+      },
+      {
+        "name": "CURR_MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "CURR_MEDID_NAME_SOURCE_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "CURR_MEDID_OLD_STATUS_CD",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "CURR_MEDID_NEW_STATUS_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "CURR_MEDID_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(70)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDNMR0_NDC_MEDID_REASON": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "PRODUCTION_DATE",
+        "nullable": false,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "MOVE_REASON_CD",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDRIN0_RMID_INACTV_LINK": {
+    "columns": [
+      {
+        "name": "ROUTED_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "INACTV_NOT_PRES_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "INACTV_PRES_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDRIS0_ROUTED_MED_STDY_TBL": {
+    "columns": [
+      {
+        "name": "ROUTED_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "TOTAL_PRODUCTS_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "PRODUCTS_RESEARCHED_CNT",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDSPC0_SPECIFICATION": {
+    "columns": [
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MEDID_SPECIFICATION_CODE",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDSPD0_SPECIFICATION_DESC": {
+    "columns": [
+      {
+        "name": "MEDID_SPECIFICATION_CODE",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MEDID_SPECIFICATION_CODE_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(120)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDST0_MEDID_SEARCH_TERM": {
+    "columns": [
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "SEARCH_TERM_TYPE_CD",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "SEARCH_TERM_TEXT",
+        "nullable": false,
+        "sql_type": "VARCHAR(150)"
+      },
+      {
+        "name": "MED_MEDID_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(70)"
+      },
+      {
+        "name": "MEDICAL_SUPPLY_IND",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMEDSTD0_SEARCH_TERM_TYPE_DESC": {
+    "columns": [
+      {
+        "name": "SEARCH_TERM_TYPE_CD",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "SEARCH_TERM_TYPE_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIDE2D1_REF_DESI2_IND_DESC": {
+    "columns": [
+      {
+        "name": "MED_REF_DESI2_IND",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_DESI2_IND_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(60)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIDEAD1_REF_FED_DEA_DESC": {
+    "columns": [
+      {
+        "name": "MED_REF_DEA_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_DEA_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(60)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIDESD1_REF_DESI_IND_DESC": {
+    "columns": [
+      {
+        "name": "MED_REF_DESI_IND",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_DESI_IND_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(60)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIDFD1_DOSE_FORM": {
+    "columns": [
+      {
+        "name": "MED_DOSAGE_FORM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "MED_DOSAGE_FORM_ABBR",
+        "nullable": false,
+        "sql_type": "VARCHAR(4)"
+      },
+      {
+        "name": "MED_DOSAGE_FORM_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(30)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIDFID1_ROUTED_DOSE_FORM_MED": {
+    "columns": [
+      {
+        "name": "ROUTED_DOSAGE_FORM_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ROUTED_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_DOSAGE_FORM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "MED_ROUTED_DF_MED_ID_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(60)"
+      },
+      {
+        "name": "MED_STATUS_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIDFRH1_ROUTED_DOSE_FORM_HIST": {
+    "columns": [
+      {
+        "name": "MED_REPL_ROUTED_DF_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_PREV_ROUTED_DF_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_ROUTED_DF_MED_ID_REP_EF_DT",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIGC1_MEDID_GCNSEQNO_LINK": {
+    "columns": [
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIGCND1_GCNSEQNO_ASSGN_DESC": {
+    "columns": [
+      {
+        "name": "MED_GCNSEQNO_ASSIGN_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_GCNSEQNO_ASSIGN_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(60)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIGECD1_REF_GEN_THERAP_DESC": {
+    "columns": [
+      {
+        "name": "MED_REF_GEN_THERA_EQU_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_GEN_THERA_EQU_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(90)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIGNCD1_REF_GEN_NAME_DESC": {
+    "columns": [
+      {
+        "name": "MED_REF_GEN_DRUG_NAME_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_GEN_DRUG_NAME_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(90)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIGPCD1_REF_GEN_PRC_DESC": {
+    "columns": [
+      {
+        "name": "MED_REF_GEN_COMP_PRICE_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_GEN_COMP_PRICE_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(90)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIGSCD1_REF_GEN_PRC_SPRD_DESC": {
+    "columns": [
+      {
+        "name": "MED_REF_GEN_SPREAD_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_GEN_SPREAD_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(90)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIID1_MED": {
+    "columns": [
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ROUTED_DOSAGE_FORM_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_STRENGTH",
+        "nullable": true,
+        "sql_type": "VARCHAR(15)"
+      },
+      {
+        "name": "MED_STRENGTH_UOM",
+        "nullable": true,
+        "sql_type": "VARCHAR(15)"
+      },
+      {
+        "name": "MED_MEDID_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(70)"
+      },
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "MED_GCNSEQNO_ASSIGN_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_NAME_SOURCE_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_FED_LEGEND_IND",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_DEA_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_MULTI_SOURCE_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_GEN_DRUG_NAME_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_GEN_COMP_PRICE_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_GEN_SPREAD_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_INNOV_IND",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_GEN_THERA_EQU_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_DESI_IND",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_DESI2_IND",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_STATUS_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "GENERIC_MEDID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIINND1_REF_INNOV_IND_DESC": {
+    "columns": [
+      {
+        "name": "MED_REF_INNOV_IND",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_INNOV_IND_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(90)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMILGND1_REF_FED_LGND_DESC": {
+    "columns": [
+      {
+        "name": "MED_REF_FED_LEGEND_IND",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_FED_LEGEND_IND_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(60)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIMLTD1_REF_MULTI_SRC_DESC": {
+    "columns": [
+      {
+        "name": "MED_REF_MULTI_SOURCE_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_REF_MULTI_SOURCE_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(90)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMINAMD1_NAME_SRC_DESC": {
+    "columns": [
+      {
+        "name": "MED_NAME_SOURCE_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_NAME_SOURCE_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(90)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMINDC1_NDC_MEDID": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMINMD1_MED_NAME_TYPE_DESC": {
+    "columns": [
+      {
+        "name": "MED_NAME_TYPE_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_NAME_TYPE_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(30)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMINMID1_MED_NAME": {
+    "columns": [
+      {
+        "name": "MED_NAME_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_NAME",
+        "nullable": false,
+        "sql_type": "VARCHAR(30)"
+      },
+      {
+        "name": "MED_NAME_TYPE_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_STATUS_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMINMRH1_MED_NAME_HIST": {
+    "columns": [
+      {
+        "name": "MED_REPL_NAME_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_PREV_NAME_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_NAME_ID_REPL_EFF_DT",
+        "nullable": false,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIRH1_MED_HIST": {
+    "columns": [
+      {
+        "name": "MED_REPL_MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_PREV_MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_MEDID_REPL_EFF_DT",
+        "nullable": false,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIRMID1_ROUTED_MED": {
+    "columns": [
+      {
+        "name": "ROUTED_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_NAME_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_ROUTE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "MED_ROUTED_MED_ID_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(60)"
+      },
+      {
+        "name": "MED_STATUS_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIRMRH1_ROUTED_MED_HIST": {
+    "columns": [
+      {
+        "name": "MED_REPL_ROUTED_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_PREV_ROUTED_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_ROUTED_MED_ID_REPL_EFF_DT",
+        "nullable": false,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMIRTD1_ROUTE": {
+    "columns": [
+      {
+        "name": "MED_ROUTE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "MED_ROUTE_ABBR",
+        "nullable": false,
+        "sql_type": "VARCHAR(4)"
+      },
+      {
+        "name": "MED_ROUTE_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(30)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMISCD1_STATUS_DESC": {
+    "columns": [
+      {
+        "name": "MED_STATUS_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MED_STATUS_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(30)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RMTLAID0_ANALYTE_ID": {
+    "columns": [
+      {
+        "name": "MTL_ANALYTE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MTL_ANALYTE_ID_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLEVL0_EXT_VOCAB_LINK": {
+    "columns": [
+      {
+        "name": "MTL_EXTRN_VOCAB_TYP_CODE",
+        "nullable": false,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "MTL_EXTRN_VOCAB_CODE",
+        "nullable": false,
+        "sql_type": "VARCHAR(20)"
+      },
+      {
+        "name": "MTL_FDB_ID_TYP_CODE",
+        "nullable": false,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "MTL_FDB_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLITD0_FDB_ID_TYP_DESC": {
+    "columns": [
+      {
+        "name": "MTL_FDB_ID_TYP_CODE",
+        "nullable": false,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "MTL_FDB_ID_TYP_CODE_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLLAB0_LAB_ID": {
+    "columns": [
+      {
+        "name": "LAB_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MTL_LAB_ID_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(100)"
+      },
+      {
+        "name": "MTL_ANALYTE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MTL_SPECIMEN_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "MTL_LAB_ID_STATUS",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLLRH0_LAB_ID_HIST": {
+    "columns": [
+      {
+        "name": "MTL_PREV_LAB_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MTL_REPL_LAB_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MTL_LAB_ID_REPL_EFF_DT",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLLSD0_LAB_ID_STATUS_DESC": {
+    "columns": [
+      {
+        "name": "MTL_LAB_ID_STATUS",
+        "nullable": false,
+        "sql_type": "CHAR(1)"
+      },
+      {
+        "name": "MTL_LAB_ID_STATUS_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLMID0_METHODOLOGY_ID": {
+    "columns": [
+      {
+        "name": "MTL_METHOD_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "MTL_METHOD_ID_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLPID0_PANEL_ID": {
+    "columns": [
+      {
+        "name": "MTL_PANEL_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "MTL_PANEL_ID_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "MTL_PANEL_ID_STATUS",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLPLB0_PANEL_LABID_LINK": {
+    "columns": [
+      {
+        "name": "MTL_PANEL_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "LAB_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLPRH0_PANEL_ID_HIST": {
+    "columns": [
+      {
+        "name": "MTL_PREV_PANEL_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "MTL_REPL_PANEL_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "MTL_PANEL_ID_REPL_EFF_DT",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLPSD0_PANEL_ID_STATUS_DESC": {
+    "columns": [
+      {
+        "name": "MTL_PANEL_ID_STATUS",
+        "nullable": false,
+        "sql_type": "CHAR(1)"
+      },
+      {
+        "name": "MTL_PANEL_ID_STATUS_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLSCD0_SPEC_LAB_STATUS_DESC": {
+    "columns": [
+      {
+        "name": "MTL_SPEC_LAB_ID_STATUS",
+        "nullable": false,
+        "sql_type": "CHAR(1)"
+      },
+      {
+        "name": "MTL_SPEC_LAB_ID_STATUS_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLSID0_SPECIMEN_ID": {
+    "columns": [
+      {
+        "name": "MTL_SPECIMEN_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "MTL_SPECIMEN_ID_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLSLT0_SPECIFIC_LAB_ID": {
+    "columns": [
+      {
+        "name": "MTL_SPEC_LAB_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "LAB_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MTL_METHOD_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "MTL_SPEC_LAB_ID_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(100)"
+      },
+      {
+        "name": "MTL_SPEC_LAB_ID_STATUS",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLSND0_LAB_ID_SYN_NMTYP_DESC": {
+    "columns": [
+      {
+        "name": "MTL_LAB_ID_SYN_NMTYP_CODE",
+        "nullable": false,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "MTL_LAB_ID_SYN_NMTYP_CODE_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLSRH0_SPECIFIC_LAB_ID_HIST": {
+    "columns": [
+      {
+        "name": "MTL_PREV_SPEC_LAB_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MTL_REPL_SPEC_LAB_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MTL_SPEC_LAB_ID_REPL_EFF_DT",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLSSD0_LABID_SYN_STATUS_DESC": {
+    "columns": [
+      {
+        "name": "MTL_LAB_ID_SYN_STATUS",
+        "nullable": false,
+        "sql_type": "CHAR(1)"
+      },
+      {
+        "name": "MTL_LAB_ID_SYN_STATUS_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLSYN0_LAB_ID_SYN": {
+    "columns": [
+      {
+        "name": "MTL_LAB_ID_SYNID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "LAB_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MTL_LAB_ID_SYN_NMTYP_CODE",
+        "nullable": false,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "MTL_LAB_ID_SYN_CODE_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(100)"
+      },
+      {
+        "name": "MTL_LAB_ID_SYN_STATUS",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RMTLVTD0_EXT_VOCAB_TYP_DESC": {
+    "columns": [
+      {
+        "name": "MTL_EXTRN_VOCAB_TYP_CODE",
+        "nullable": false,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "MTL_EXTRN_VOCAB_TYP_CODE_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF MTL 1.0"
+  },
+  "RNDC14_NDC_MSTR": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "LBLRID",
+        "nullable": true,
+        "sql_type": "VARCHAR(6)"
+      },
+      {
+        "name": "GCN_SEQNO",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "PS",
+        "nullable": true,
+        "sql_type": "NUMERIC(11,3)"
+      },
+      {
+        "name": "DF",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "AD",
+        "nullable": true,
+        "sql_type": "VARCHAR(20)"
+      },
+      {
+        "name": "LN",
+        "nullable": true,
+        "sql_type": "VARCHAR(30)"
+      },
+      {
+        "name": "BN",
+        "nullable": true,
+        "sql_type": "VARCHAR(30)"
+      },
+      {
+        "name": "PNDC",
+        "nullable": true,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "REPNDC",
+        "nullable": true,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "NDCFI",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "DADDNC",
+        "nullable": true,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "DUPDC",
+        "nullable": true,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "DESI",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "DESDTEC",
+        "nullable": true,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "DESI2",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "DES2DTEC",
+        "nullable": true,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "DEA",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "CL",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "GPI",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "HOSP",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "INNOV",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "IPI",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MINI",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "MAINT",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "OBC",
+        "nullable": true,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "OBSDTEC",
+        "nullable": true,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "PPI",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "STPK",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "REPACK",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "TOP200",
+        "nullable": true,
+        "sql_type": "VARCHAR(3)"
+      },
+      {
+        "name": "UD",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "CSP",
+        "nullable": true,
+        "sql_type": "NUMERIC(7)"
+      },
+      {
+        "name": "NDL_GDGE",
+        "nullable": true,
+        "sql_type": "NUMERIC(5,3)"
+      },
+      {
+        "name": "NDL_LNGTH",
+        "nullable": true,
+        "sql_type": "NUMERIC(5,3)"
+      },
+      {
+        "name": "SYR_CPCTY",
+        "nullable": true,
+        "sql_type": "NUMERIC(5,3)"
+      },
+      {
+        "name": "SHLF_PCK",
+        "nullable": true,
+        "sql_type": "NUMERIC(7)"
+      },
+      {
+        "name": "SHIPPER",
+        "nullable": true,
+        "sql_type": "NUMERIC(7)"
+      },
+      {
+        "name": "HCFA_FDA",
+        "nullable": true,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "HCFA_UNIT",
+        "nullable": true,
+        "sql_type": "VARCHAR(3)"
+      },
+      {
+        "name": "HCFA_PS",
+        "nullable": true,
+        "sql_type": "NUMERIC(11,3)"
+      },
+      {
+        "name": "HCFA_APPC",
+        "nullable": true,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "HCFA_MRKC",
+        "nullable": true,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "HCFA_TRMC",
+        "nullable": true,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "HCFA_TYP",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "HCFA_DESC1",
+        "nullable": true,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "HCFA_DESI1",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "UU",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "PD",
+        "nullable": true,
+        "sql_type": "VARCHAR(10)"
+      },
+      {
+        "name": "LN25",
+        "nullable": true,
+        "sql_type": "VARCHAR(25)"
+      },
+      {
+        "name": "LN25I",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "GPIDC",
+        "nullable": true,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "BBDC",
+        "nullable": true,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "HOME",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "INPCKI",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "OUTPCKI",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "OBC_EXP",
+        "nullable": true,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "PS_EQUIV",
+        "nullable": true,
+        "sql_type": "NUMERIC(11,3)"
+      },
+      {
+        "name": "PLBLR",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "TOP50GEN",
+        "nullable": true,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "OBC3",
+        "nullable": true,
+        "sql_type": "VARCHAR(3)"
+      },
+      {
+        "name": "GMI",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "GNI",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "GSI",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "GTI",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "NDCGI1",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "HCFA_DC",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "LN60",
+        "nullable": true,
+        "sql_type": "VARCHAR(60)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RNDCAT0_NDC_ATTRIBUTE": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "NDC_ATTRIBUTE_TYPE_CD",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "NDC_ATTRIBUTE_SN",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "NDC_ATTRIBUTE_VALUE",
+        "nullable": false,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RNDCDR0_NDC_DELETION_REASON": {
+    "columns": [
+      {
+        "name": "FDB_PRODUCT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(11)"
+      },
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "DADDNC",
+        "nullable": false,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "LBLRID",
+        "nullable": false,
+        "sql_type": "VARCHAR(6)"
+      },
+      {
+        "name": "MFG",
+        "nullable": false,
+        "sql_type": "VARCHAR(15)"
+      },
+      {
+        "name": "OBSDTEC",
+        "nullable": true,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "NDC_DELETE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "NDC_DELETE_REASON",
+        "nullable": true,
+        "sql_type": "VARCHAR(200)"
+      },
+      {
+        "name": "BN",
+        "nullable": false,
+        "sql_type": "VARCHAR(30)"
+      },
+      {
+        "name": "LN60",
+        "nullable": false,
+        "sql_type": "VARCHAR(60)"
+      },
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "GENERIC_MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "GENERIC_MEDID_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(70)"
+      },
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_MEDID_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(70)"
+      },
+      {
+        "name": "REPLACEMENT_FDB_PRODUCT_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(11)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RNDCINH0_NDC_INACTV_LINK": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RNDCINR0_INACTV_REVIEWED": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RNDCTD0_NDC_ATTRIBUTE_TYP_DSC": {
+    "columns": [
+      {
+        "name": "NDC_ATTRIBUTE_TYPE_CD",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "NDC_ATTRIBUTE_TYPE_DSC",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RNDCVD0_NDC_ATTRIBUTE_VALU_DSC": {
+    "columns": [
+      {
+        "name": "NDC_ATTRIBUTE_TYPE_CD",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "NDC_ATTRIBUTE_VALUE",
+        "nullable": false,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "NDC_ATTRIBUTE_VALUE_DSC",
+        "nullable": false,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RNP2_NDC_PRICE": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "NPT_TYPE",
+        "nullable": false,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "NPT_DATEC",
+        "nullable": false,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "NPT_PRICEX",
+        "nullable": true,
+        "sql_type": "NUMERIC(11,5)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RNP3_NDC_PRICE": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "PRICE_TYPE",
+        "nullable": false,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "PRICE_EFFECTIVE_DT",
+        "nullable": false,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "PRICE",
+        "nullable": false,
+        "sql_type": "NUMERIC(16,5)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RNPTYPD0_NDC_PRICE_TYPE_DESC": {
+    "columns": [
+      {
+        "name": "NPT_TYPE",
+        "nullable": false,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "NPT_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(6)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "ROBCD0_OBC_DESC": {
+    "columns": [
+      {
+        "name": "OBC",
+        "nullable": false,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "OBC_SN",
+        "nullable": false,
+        "sql_type": "NUMERIC(2)"
+      },
+      {
+        "name": "OBC_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(60)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "ROBCNDC0_OBC_NDC": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "OBC3",
+        "nullable": false,
+        "sql_type": "VARCHAR(3)"
+      },
+      {
+        "name": "GCN",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "GTI",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIAD0_ATTRIBUTE_DESC": {
+    "columns": [
+      {
+        "name": "ATTRIBUTE_CODE",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ATTRIBUTE_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      },
+      {
+        "name": "ATTRIBUTE_TYPE_CODE",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ATTRIBUTE_GROUP_CODE",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RPEIAL0_DF_ATTRIBUTE_LINK": {
+    "columns": [
+      {
+        "name": "DOSAGE_FORM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "DOSAGE_FORM_ATTRIBUTE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIAT0_ATTRIBUTE_TYPE_DESC": {
+    "columns": [
+      {
+        "name": "ATTRIBUTE_TYPE_CODE",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ATTRIBUTE_TYPE_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      },
+      {
+        "name": "ATTRIBUTE_TYPE_LENGTH",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ATTRIBUTE_TYPE_PRECISION",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RPEIAV0_ATTRIBUTE_VALUE_DESC": {
+    "columns": [
+      {
+        "name": "ATTRIBUTE_CODE",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ATTRIBUTE_VALUE",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      },
+      {
+        "name": "ATTRIBUTE_VALUE_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RPEIDFA0_DOSAGE_FORM_ATTRIBUTE": {
+    "columns": [
+      {
+        "name": "DOSAGE_FORM_ATTRIBUTE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "DOSAGE_FORM_ATTRIBUTE_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIDM0_DOSAGE_FORM_MSTR": {
+    "columns": [
+      {
+        "name": "DOSAGE_FORM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "DOSAGE_FORM_DESC_SHORT",
+        "nullable": true,
+        "sql_type": "VARCHAR(40)"
+      },
+      {
+        "name": "DOSAGE_FORM_DESC_LONG",
+        "nullable": false,
+        "sql_type": "VARCHAR(75)"
+      },
+      {
+        "name": "DOSAGE_FORM_RETIRE_DT",
+        "nullable": true,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "UOM_MSTR_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(6)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIDT0_DOSAGE_FORM_TYPE": {
+    "columns": [
+      {
+        "name": "DOSAGE_FORM_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "DOSAGE_FORM_TYPE_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIGA0_GCNSEQNO_ATTRIBUTE": {
+    "columns": [
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "ATTRIBUTE_CODE",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ATTRIBUTE_SN",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "ATTRIBUTE_VALUE",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      },
+      {
+        "name": "LINK_INACTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIGD0_GCNSEQNO_DF_LINK": {
+    "columns": [
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "DOSAGE_FORM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "DOSAGE_FORM_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "LINK_INACTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIGL0_GEN_DF_MSTR_LINK": {
+    "columns": [
+      {
+        "name": "DOSAGE_FORM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "GCDF",
+        "nullable": false,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "PREFERRED_DOSAGE_FORM_IND",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIGR0_GCNSEQNO_RT_RELATION": {
+    "columns": [
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "PARENT_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "CLINICAL_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "RELATION_INACTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIGRR0_GCNSEQNO_REP_RT": {
+    "columns": [
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "REPRESENTATIVE_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIGS0_GCNSEQNO_STR_LINK": {
+    "columns": [
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "STR_CONC_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "STR_SEQ",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "STRENGTH_STATUS_CODE",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "INGREDIENT_STR",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "INGREDIENT_UOM_MSTR_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "STRENGTH_TYP_CODE",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "VOLUME",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "VOLUME_UOM_MSTR_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ALT_STR",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "ALT_STR_UOM_MSTR_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ALT_STRENGTH_TYP_CODE",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "TIME_VALUE",
+        "nullable": true,
+        "sql_type": "NUMERIC(6,3)"
+      },
+      {
+        "name": "TIME_UOM_MSTR_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "RANGE_MAX",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "RANGE_MIN",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "DOSAGE_FORM_ATTRIBUTE_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "INGREDIENT_SORT_ORDER",
+        "nullable": true,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "LINK_INACTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIHR0_HICLSEQNO_RT_RELATION": {
+    "columns": [
+      {
+        "name": "HICL_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "PARENT_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "CLINICAL_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "RELATION_INACTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIMA0_MED_ATTRIBUTE": {
+    "columns": [
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ATTRIBUTE_CODE",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ATTRIBUTE_SN",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "ATTRIBUTE_VALUE",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      },
+      {
+        "name": "LINK_INACTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RPEIMD0_MED_DF_LINK": {
+    "columns": [
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "DOSAGE_FORM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "DOSAGE_FORM_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "LINK_INACTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RPEIML0_MED_DF_MSTR_LINK": {
+    "columns": [
+      {
+        "name": "DOSAGE_FORM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "MED_DOSAGE_FORM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "PREFERRED_DOSAGE_FORM_IND",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RPEIMNR0_MED_NAME_RT_RELATION": {
+    "columns": [
+      {
+        "name": "MED_NAME_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "PARENT_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "CLINICAL_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "RELATION_INACTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RPEIMRR0_MED_RT_RELATION": {
+    "columns": [
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "PARENT_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "CLINICAL_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "RELATION_INACTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RPEIMS0_MED_STR_LINK": {
+    "columns": [
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "STR_CONC_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "STR_SEQ",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "STRENGTH_STATUS_CODE",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "INGREDIENT_STR",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "INGREDIENT_UOM_MSTR_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "STRENGTH_TYP_CODE",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "VOLUME",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "VOLUME_UOM_MSTR_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ALT_STR",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "ALT_STR_UOM_MSTR_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ALT_STRENGTH_TYP_CODE",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "TIME_VALUE",
+        "nullable": true,
+        "sql_type": "NUMERIC(6,3)"
+      },
+      {
+        "name": "TIME_UOM_MSTR_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "RANGE_MAX",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "RANGE_MIN",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "DOSAGE_FORM_ATTRIBUTE_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "INGREDIENT_SORT_ORDER",
+        "nullable": true,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "LINK_INACTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RPEINA0_MED_NAME_ATTRIBUTE": {
+    "columns": [
+      {
+        "name": "MED_NAME_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ATTRIBUTE_CODE",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ATTRIBUTE_SN",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "ATTRIBUTE_VALUE",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      },
+      {
+        "name": "LINK_INACTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RPEIND0_NDC_DF_LINK": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "DOSAGE_FORM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "DOSAGE_FORM_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEINR0_NDC_RT_RELATION": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "PARENT_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "CLINICAL_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "RT_LABELED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEINS0_NDC_STR_LINK": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "STR_CONC_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "STRENGTH_STATUS_CODE",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "INGREDIENT_STR",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "INGREDIENT_UOM_MSTR_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "STRENGTH_TYP_CODE",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "VOLUME",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "VOLUME_UOM_MSTR_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ALT_STR",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "ALT_STR_UOM_MSTR_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ALT_STRENGTH_TYP_CODE",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "TIME_VALUE",
+        "nullable": true,
+        "sql_type": "NUMERIC(6,3)"
+      },
+      {
+        "name": "TIME_UOM_MSTR_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "RANGE_MAX",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "RANGE_MIN",
+        "nullable": true,
+        "sql_type": "NUMERIC(19,6)"
+      },
+      {
+        "name": "DOSAGE_FORM_ATTRIBUTE_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "INGREDIENT_SORT_ORDER",
+        "nullable": true,
+        "sql_type": "NUMERIC(4)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIOL0_OVW_DF_MSTR_LINK": {
+    "columns": [
+      {
+        "name": "DOSAGE_FORM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "OVW_DOSAGE_FORM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "PREFERRED_DOSAGE_FORM_IND",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIPP0_PATIENT_PARAM_REQ_DESC": {
+    "columns": [
+      {
+        "name": "PATIENT_PARAM_REQ_CD",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "PATIENT_PARAM_REQ_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIRA0_RT_DF_MED_ATTRIBUTE": {
+    "columns": [
+      {
+        "name": "ROUTED_DOSAGE_FORM_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ATTRIBUTE_CODE",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ATTRIBUTE_SN",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "ATTRIBUTE_VALUE",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      },
+      {
+        "name": "LINK_INACTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RPEIRD0_RTD_DF_MED_DF_LINK": {
+    "columns": [
+      {
+        "name": "ROUTED_DOSAGE_FORM_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "DOSAGE_FORM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "DOSAGE_FORM_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "LINK_INACTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RPEIRER0_RELATED_RT": {
+    "columns": [
+      {
+        "name": "CONTINUOUS_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "INTERMITTENT_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIRH0_RT_HIERARCHY": {
+    "columns": [
+      {
+        "name": "PARENT_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "CLINICAL_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIRL0_RT_LABELED_DESC": {
+    "columns": [
+      {
+        "name": "RT_LABELED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "RT_LABELED_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIRM0_RT_MSTR": {
+    "columns": [
+      {
+        "name": "RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "RT_DESC_SHORT",
+        "nullable": false,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "RT_DESC_LONG",
+        "nullable": false,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "RT_ADVERB",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "DR2_RT",
+        "nullable": true,
+        "sql_type": "VARCHAR(3)"
+      },
+      {
+        "name": "DRCM_SCREEN_RT_ID",
+        "nullable": true,
+        "sql_type": "VARCHAR(3)"
+      },
+      {
+        "name": "POEM_RT_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "MED_ROUTE_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "OVW_CLINICAL_RT_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "GCRT",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "DISC_RT_IND",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "DISC_RT_ADMIN_TEXT",
+        "nullable": true,
+        "sql_type": "VARCHAR(80)"
+      },
+      {
+        "name": "VALID_CNS_RT_IND",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIRMA0_RTD_MED_ATTRIBUTE": {
+    "columns": [
+      {
+        "name": "ROUTED_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ATTRIBUTE_CODE",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ATTRIBUTE_SN",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "ATTRIBUTE_VALUE",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      },
+      {
+        "name": "LINK_INACTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RPEIRMD0_RTD_MED_DF_LINK": {
+    "columns": [
+      {
+        "name": "ROUTED_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "DOSAGE_FORM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "DOSAGE_FORM_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "LINK_INACTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RPEIRMR0_RTD_MED_RT_RELATION": {
+    "columns": [
+      {
+        "name": "ROUTED_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "PARENT_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "CLINICAL_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "RELATION_INACTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RPEIRR0_RTD_DF_MED_RT_RELATION": {
+    "columns": [
+      {
+        "name": "ROUTED_DOSAGE_FORM_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "PARENT_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "CLINICAL_RT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "RELATION_INACTIVE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF MEDNAMES 3.0"
+  },
+  "RPEIST0_STR_CONC_TYPE": {
+    "columns": [
+      {
+        "name": "STR_CONC_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "STR_CONC_TYPE_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIUC0_UOM_CONVERSION": {
+    "columns": [
+      {
+        "name": "FROM_UOM_MSTR_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "TO_UOM_MSTR_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "UOM_CONVERSION_FACTOR",
+        "nullable": false,
+        "sql_type": "NUMERIC(16,6)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIUM0_UOM_MSTR": {
+    "columns": [
+      {
+        "name": "UOM_MSTR_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "UOM_MSTR_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(80)"
+      },
+      {
+        "name": "UOM_MSTR_PLURAL_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(80)"
+      },
+      {
+        "name": "UOM_MSTR_ABBR",
+        "nullable": false,
+        "sql_type": "VARCHAR(80)"
+      },
+      {
+        "name": "UOM_MSTR_PLURAL_ABBR",
+        "nullable": false,
+        "sql_type": "VARCHAR(80)"
+      },
+      {
+        "name": "UOM_MSTR_PREFERRED_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(80)"
+      },
+      {
+        "name": "UOM_MSTR_PLURAL_PREFERRED_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(80)"
+      },
+      {
+        "name": "UOM_STDS_ORG_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(80)"
+      },
+      {
+        "name": "UOM_PLURAL_STDS_ORG_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(80)"
+      },
+      {
+        "name": "UOM_STDS_ORG_ABBR",
+        "nullable": false,
+        "sql_type": "VARCHAR(80)"
+      },
+      {
+        "name": "UOM_PLURAL_STDS_ORG_ABBR",
+        "nullable": false,
+        "sql_type": "VARCHAR(80)"
+      },
+      {
+        "name": "UOM_MSTR_COMPONENT1_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "UOM_MSTR_COMPONENT2_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "UOM_MSTR_COMPONENT3_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "UOM_TYPE_CD",
+        "nullable": true,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "RATIO_IND",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "RATE_IND",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "DOSE_IND",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "INTERVAL_IND",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "PATIENT_PARAM_REQ_CD",
+        "nullable": true,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "PARAM_INCORP_UOM_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "PEDIATRIC_DOSE_TEXT_IND",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "COMPARISON_UOM_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "DR2_UNITS",
+        "nullable": true,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "POEUNITCDE",
+        "nullable": true,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "UOM_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "OVW_UOM_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPEIUT0_UOM_TYPE_DESC": {
+    "columns": [
+      {
+        "name": "UOM_TYPE_CD",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "UOM_TYPE_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPRD0_PRODUCT": {
+    "columns": [
+      {
+        "name": "FDB_PRODUCT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(11)"
+      },
+      {
+        "name": "FDB_PRODUCT_STATUS_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(8)"
+      },
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "LBLRID",
+        "nullable": false,
+        "sql_type": "VARCHAR(6)"
+      },
+      {
+        "name": "LABEL_NAME",
+        "nullable": false,
+        "sql_type": "VARCHAR(255)"
+      },
+      {
+        "name": "FDB_PRODUCT_FIRST_DELIVERY_DT",
+        "nullable": false,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "FDB_PRODUCT_OBSOLETE_DT",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPRDCC0_CURRENCY_CD_DESC": {
+    "columns": [
+      {
+        "name": "CURRENCY_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(3)"
+      },
+      {
+        "name": "CURRENCY_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPRDPA0_PRICE_ATTR": {
+    "columns": [
+      {
+        "name": "FDB_PRODUCT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(11)"
+      },
+      {
+        "name": "PRICE_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(3)"
+      },
+      {
+        "name": "PRICE_EFFECTIVE_DT",
+        "nullable": false,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "PRICE_ATTRIBUTE_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(8)"
+      },
+      {
+        "name": "PRICE_ATTRIBUTE_SN",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "PRICE_ATTRIBUTE_VALUE_SN",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "PRICE_ATTRIBUTE_VALUE",
+        "nullable": false,
+        "sql_type": "VARCHAR(255)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPRDPAD0_PRICE_ATTR_DESC": {
+    "columns": [
+      {
+        "name": "PRICE_ATTRIBUTE_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(8)"
+      },
+      {
+        "name": "PRICE_ATTRIBUTE_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      },
+      {
+        "name": "PRICE_ATTRIBUTE_TYPE_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(8)"
+      },
+      {
+        "name": "PRICE_ATTRIBUTE_GROUP_CD",
+        "nullable": true,
+        "sql_type": "VARCHAR(8)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPRDPAT0_PRICE_ATTR_TYPE_DESC": {
+    "columns": [
+      {
+        "name": "PRICE_ATTRIBUTE_TYPE_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(8)"
+      },
+      {
+        "name": "PRICE_ATTRIBUTE_TYPE_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      },
+      {
+        "name": "PRICE_ATTRIBUTE_TYPE_LENGTH",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "PRICE_ATTRIBUTE_TYPE_PRECISION",
+        "nullable": true,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPRDPAV0_PRICE_ATTR_VALUE_DESC": {
+    "columns": [
+      {
+        "name": "PRICE_ATTRIBUTE_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(8)"
+      },
+      {
+        "name": "PRICE_ATTRIBUTE_VALUE",
+        "nullable": false,
+        "sql_type": "VARCHAR(255)"
+      },
+      {
+        "name": "PRICE_ATTRIBUTE_VALUE_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(500)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPRDPC0_EXT_PRODUCT_CD": {
+    "columns": [
+      {
+        "name": "FDB_PRODUCT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(11)"
+      },
+      {
+        "name": "EXT_PRODUCT_CD_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "EXT_PRODUCT_CD_START_DT",
+        "nullable": false,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "EXT_PRODUCT_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      },
+      {
+        "name": "EXT_PRODUCT_CD_END_DT",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPRDPCD0_EXT_PRODUCT_CD_DESC": {
+    "columns": [
+      {
+        "name": "EXT_PRODUCT_CD_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "EXT_PRODUCT_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "EXT_PRODUCT_CD_DATA_TYPE",
+        "nullable": false,
+        "sql_type": "VARCHAR(20)"
+      },
+      {
+        "name": "EXT_PRODUCT_CD_FIELD_LENGTH",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "EXT_PRODUCT_CD_DEFINITION",
+        "nullable": true,
+        "sql_type": "VARCHAR(2000)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPRDPKD0_PACKAGE_DESC": {
+    "columns": [
+      {
+        "name": "PACKAGE_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "PKG_TYPE_LONG_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "PKG_TYPE_SHORT_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(10)"
+      },
+      {
+        "name": "ACTIVELY_USED_IND",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPRDPP0_PRODUCT_PRICE": {
+    "columns": [
+      {
+        "name": "FDB_PRODUCT_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(11)"
+      },
+      {
+        "name": "PRICE_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(3)"
+      },
+      {
+        "name": "PRICE_EFFECTIVE_DT",
+        "nullable": false,
+        "sql_type": "DATE"
+      },
+      {
+        "name": "PRICE",
+        "nullable": false,
+        "sql_type": "NUMERIC(18,7)"
+      },
+      {
+        "name": "PRICE_QTY",
+        "nullable": false,
+        "sql_type": "NUMERIC(18,7)"
+      },
+      {
+        "name": "PRICE_UOM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "CURRENCY_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(3)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPRDPTD0_PRICE_TYPE_DESC": {
+    "columns": [
+      {
+        "name": "PRICE_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(3)"
+      },
+      {
+        "name": "PRICE_TYPE_SHORT_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(10)"
+      },
+      {
+        "name": "PRICE_TYPE_LONG_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "NPT_TYPE",
+        "nullable": true,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "PRICE_TYPE_DEFINITION",
+        "nullable": true,
+        "sql_type": "VARCHAR(2000)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPRDSD0_PRODUCT_STATUS_DESC": {
+    "columns": [
+      {
+        "name": "FDB_PRODUCT_STATUS_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(8)"
+      },
+      {
+        "name": "FDB_PRODUCT_STATUS_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "FDB_PRODUCT_STATUS_DEFINITION",
+        "nullable": true,
+        "sql_type": "VARCHAR(2000)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RPRDUOM0_PRICE_QTY_UOM": {
+    "columns": [
+      {
+        "name": "PRICE_UOM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "PRICE_UOM_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RROUTED3_ROUTE_DESC": {
+    "columns": [
+      {
+        "name": "GCRT",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "RT",
+        "nullable": true,
+        "sql_type": "VARCHAR(10)"
+      },
+      {
+        "name": "GCRT2",
+        "nullable": true,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "GCRT_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(40)"
+      },
+      {
+        "name": "SYSTEMIC",
+        "nullable": true,
+        "sql_type": "VARCHAR(1)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RRTGN0_ROUTED_GEN_MSTR": {
+    "columns": [
+      {
+        "name": "ROUTED_GEN_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "ROUTED_GEN_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(100)"
+      },
+      {
+        "name": "GCRT",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "HICL_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "ROUTED_GEN_STATUS_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RRTGNGC0_RTD_GEN_GCNSEQNO_LNK": {
+    "columns": [
+      {
+        "name": "GCN_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "ROUTED_GEN_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RRTGNND0_ROUTED_GEN_NDC_LINK": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "ROUTED_GEN_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RRTGNSD0_RTD_GEN_STATUS_DSC": {
+    "columns": [
+      {
+        "name": "ROUTED_GEN_STATUS_CD",
+        "nullable": false,
+        "sql_type": "VARCHAR(1)"
+      },
+      {
+        "name": "ROUTED_GEN_STATUS_CD_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(30)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RSTR1_STRNGTH_DESC": {
+    "columns": [
+      {
+        "name": "STR60",
+        "nullable": false,
+        "sql_type": "VARCHAR(60)"
+      },
+      {
+        "name": "STRNUM",
+        "nullable": true,
+        "sql_type": "NUMERIC(11,3)"
+      },
+      {
+        "name": "VOLNUM",
+        "nullable": true,
+        "sql_type": "NUMERIC(7,3)"
+      },
+      {
+        "name": "STRUN50",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "VOLUN50",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RSTRSCD0_STRENGTH_STATUS_DESC": {
+    "columns": [
+      {
+        "name": "STRENGTH_STATUS_CODE",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "STRENGTH_STATUS_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(100)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RSTRTD0_STRENGTH_TYP_DESC": {
+    "columns": [
+      {
+        "name": "STRENGTH_TYP_CODE",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "STRENGTH_TYP_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(100)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RSTRUOM0_STRENGTH_UOM": {
+    "columns": [
+      {
+        "name": "UOM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "UOM_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "UOM_ABBR",
+        "nullable": true,
+        "sql_type": "VARCHAR(10)"
+      },
+      {
+        "name": "UOM_PREFERRED_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RTCD0_STD_THERAP_CLASS_DESC": {
+    "columns": [
+      {
+        "name": "TC",
+        "nullable": false,
+        "sql_type": "NUMERIC(2)"
+      },
+      {
+        "name": "TC_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RTMDFCG0_TM_RTD_DF_CNFSN_GRP": {
+    "columns": [
+      {
+        "name": "ROUTED_DOSAGE_FORM_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "TM_GROUP_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      }
+    ],
+    "dataset": "TALL MAN PLUS 2.0"
+  },
+  "RTMDFID1_TM_ROUTED_DF_MED": {
+    "columns": [
+      {
+        "name": "ROUTED_DOSAGE_FORM_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "TM_SOURCE_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "TM_IND",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "TM_ALT_ROUTED_DF_MED_ID_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(70)"
+      }
+    ],
+    "dataset": "TALL MAN PLUS 2.0"
+  },
+  "RTMDT0_TM_NAME_TYPE": {
+    "columns": [
+      {
+        "name": "TM_NAME_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "TM_NAME_TYPE_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(30)"
+      }
+    ],
+    "dataset": "TALL MAN PLUS 2.0"
+  },
+  "RTMGRPD1_TM_GROUP_DESC": {
+    "columns": [
+      {
+        "name": "TM_GROUP_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "TM_GROUP_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(250)"
+      }
+    ],
+    "dataset": "TALL MAN PLUS 2.0"
+  },
+  "RTMMICG0_TM_MED_CNFSN_GRP": {
+    "columns": [
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "TM_GROUP_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      }
+    ],
+    "dataset": "TALL MAN PLUS 2.0"
+  },
+  "RTMMID1_TM_MED": {
+    "columns": [
+      {
+        "name": "MEDID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "TM_SOURCE_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "TM_IND",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "TM_ALT_MEDID_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(70)"
+      }
+    ],
+    "dataset": "TALL MAN PLUS 2.0"
+  },
+  "RTMNCG0_TM_NDC_CNFSN_GRP": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "TM_GROUP_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      }
+    ],
+    "dataset": "TALL MAN PLUS 2.0"
+  },
+  "RTMNGN0_TM_GNN": {
+    "columns": [
+      {
+        "name": "HICL_SEQNO",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "TM_GNN_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "TM_SOURCE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "TM_IND",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "TM_ALT_GNN_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(60)"
+      }
+    ],
+    "dataset": "TALL MAN PLUS 2.0"
+  },
+  "RTMNGT0_TM_GNN_TYPE": {
+    "columns": [
+      {
+        "name": "TM_GNN_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "TM_GNN_TYPE_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(30)"
+      }
+    ],
+    "dataset": "TALL MAN PLUS 2.0"
+  },
+  "RTMNID0_TM_NDC": {
+    "columns": [
+      {
+        "name": "NDC",
+        "nullable": false,
+        "sql_type": "VARCHAR(11)"
+      },
+      {
+        "name": "TM_NAME_TYPE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "TM_SOURCE_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "TM_IND",
+        "nullable": false,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "TM_ALT_NDC_DESC",
+        "nullable": false,
+        "sql_type": "VARCHAR(60)"
+      }
+    ],
+    "dataset": "TALL MAN PLUS 2.0"
+  },
+  "RTMNMCG0_TM_MED_NAME_CNFSN_GRP": {
+    "columns": [
+      {
+        "name": "MED_NAME_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "TM_GROUP_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      }
+    ],
+    "dataset": "TALL MAN PLUS 2.0"
+  },
+  "RTMNMID1_TM_MED_NAME": {
+    "columns": [
+      {
+        "name": "MED_NAME_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "TM_SOURCE_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "TM_IND",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "TM_ALT_MED_NAME_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(70)"
+      }
+    ],
+    "dataset": "TALL MAN PLUS 2.0"
+  },
+  "RTMRMCG0_TM_RTD_MED_CNFSN_GRP": {
+    "columns": [
+      {
+        "name": "ROUTED_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "TM_GROUP_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      }
+    ],
+    "dataset": "TALL MAN PLUS 2.0"
+  },
+  "RTMRMID1_TM_ROUTED_MED": {
+    "columns": [
+      {
+        "name": "ROUTED_MED_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "TM_SOURCE_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "TM_IND",
+        "nullable": true,
+        "sql_type": "NUMERIC(1)"
+      },
+      {
+        "name": "TM_ALT_ROUTED_MED_ID_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(70)"
+      }
+    ],
+    "dataset": "TALL MAN PLUS 2.0"
+  },
+  "RTMSRCD1_TM_SOURCE_DESC": {
+    "columns": [
+      {
+        "name": "TM_SOURCE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "TM_SOURCE_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(120)"
+      }
+    ],
+    "dataset": "TALL MAN PLUS 2.0"
+  },
+  "RUNITSD0_UNITS_DESC": {
+    "columns": [
+      {
+        "name": "DOSING_MODULE_UNIT_ABBREV",
+        "nullable": false,
+        "sql_type": "VARCHAR(30)"
+      },
+      {
+        "name": "UNIT_DESC_ABBREV",
+        "nullable": true,
+        "sql_type": "VARCHAR(30)"
+      },
+      {
+        "name": "UNIT_DESC_EXPANDED",
+        "nullable": true,
+        "sql_type": "VARCHAR(60)"
+      }
+    ],
+    "dataset": "NDDF BASICS 3.0"
+  },
+  "RXRFAHX0_AGCSP_HICSEQN": {
+    "columns": [
+      {
+        "name": "DAM_AGCSP",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC_SEQN",
+        "nullable": false,
+        "sql_type": "NUMERIC(6)"
+      },
+      {
+        "name": "HIC",
+        "nullable": false,
+        "sql_type": "VARCHAR(6)"
+      }
+    ],
+    "dataset": "NDDF XRF 1.0"
+  },
+  "RXRFDDX0_DACN_AGCSP": {
+    "columns": [
+      {
+        "name": "DACN",
+        "nullable": false,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "DAM_AGCSP",
+        "nullable": false,
+        "sql_type": "NUMERIC(6,0)"
+      }
+    ],
+    "dataset": "NDDF XRF 1.0"
+  },
+  "RXRGDFQ0_GCDF_SCRIPT_QQ": {
+    "columns": [
+      {
+        "name": "GCDF",
+        "nullable": false,
+        "sql_type": "VARCHAR(2)"
+      },
+      {
+        "name": "SCRIPT_QQ_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF XRF 1.0"
+  },
+  "RXRMDFQ0_MEDDOSFM_SCRIPT_QQ": {
+    "columns": [
+      {
+        "name": "MED_DOSAGE_FORM_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(5)"
+      },
+      {
+        "name": "SCRIPT_QQ_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF XRF 1.0"
+  },
+  "RXRNCQQ0_QQ_MSTR": {
+    "columns": [
+      {
+        "name": "SCRIPT_QQ_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      },
+      {
+        "name": "SCRIPT_QQ_CD",
+        "nullable": true,
+        "sql_type": "VARCHAR(10)"
+      },
+      {
+        "name": "SCRIPT_QQ_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(50)"
+      },
+      {
+        "name": "XRF_SOURCE_ID",
+        "nullable": true,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "OBSOLETE_DATE",
+        "nullable": true,
+        "sql_type": "DATE"
+      }
+    ],
+    "dataset": "NDDF XRF 1.0"
+  },
+  "RXRNSRC0_SOURCE_DESC": {
+    "columns": [
+      {
+        "name": "XRF_SOURCE_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "XRF_SOURCE_DESC",
+        "nullable": true,
+        "sql_type": "VARCHAR(100)"
+      }
+    ],
+    "dataset": "NDDF XRF 1.0"
+  },
+  "RXRPDFQ0_POEMDOSFM_SCRIPT_QQ": {
+    "columns": [
+      {
+        "name": "POEUNITCDE",
+        "nullable": false,
+        "sql_type": "NUMERIC(4)"
+      },
+      {
+        "name": "SCRIPT_QQ_ID",
+        "nullable": false,
+        "sql_type": "NUMERIC(8)"
+      }
+    ],
+    "dataset": "NDDF XRF 1.0"
+  }
+}

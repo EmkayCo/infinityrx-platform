@@ -1,6 +1,10 @@
 /**
  * Wave B10 — W1.14a Next-runtime package-name canary route.
  *
+ * Path: /api/b10-canary (initially planned as /api/__b10_canary but renamed
+ * during W1.13 execute — Next.js App Router treats folders prefixed with `_`
+ * or `__` as PRIVATE and excludes them from routing, returning 404).
+ *
  * Hit by W1.13 dual-bundler canary under both `next dev --turbopack` and
  * `next dev --webpack` to prove `transpilePackages: ["@infinityrx/portal-shared"]`
  * actually works at Next runtime (not just at Vite/vitest layer per ER4 + codex
