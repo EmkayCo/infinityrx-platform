@@ -30,6 +30,7 @@ gets demoted to §3.
 | Console warning: `Image with src "..." has either width or height modified` | Next.js Image component | Tailwind responsive image styling occasionally trips this. Visual is correct; warning is advisory. Acceptable while next/image isn't tightened. |
 | Console warning: `Extra attributes from the server: data-darkreader-*` | Browser extension residue (only if test profile carries the ext) | Dark Reader and similar extensions inject attributes that cause hydration delta. Capture runs in a clean Playwright context so this should not appear; allowlisted defensively. |
 | Console warning: `[Fast Refresh] rebuilding` | Next.js dev mode only | Will NOT appear under `next start`. Allowlisted only as defense if someone accidentally captures against `npm run dev`. |
+| `requestfailed` event with `net::ERR_ABORTED` for page URLs (not /api/) | Next.js link prefetch cancellation | When Playwright navigates from page A to page B, all in-flight prefetches for sidebar nav links fire `requestfailed` with `net::ERR_ABORTED`. **Confirmed empirically in W5.6:** 3,488 of 3,488 `failed_requests` across all routes were prefetch cancellations. Zero real network failures. Allowlisted. |
 
 ## §2 Per-route-family allowlist
 
