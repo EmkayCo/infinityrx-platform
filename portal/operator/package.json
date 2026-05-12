@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --turbopack",
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint app components lib tests",
@@ -18,6 +18,7 @@
     "qa:quick": "SKIP_BUILD=1 bash scripts/quality-gate.sh"
   },
   "dependencies": {
+    "@infinityrx/portal-shared": "*",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
@@ -75,6 +76,7 @@
     "@types/react-dom": "^19.0.1",
     "@vitejs/plugin-react": "^6.0.1",
     "eslint": "^10.2.0",
+    "fast-glob": "^3.3.3",
     "eslint-config-next": "^16.2.3",
     "jsdom": "^29.0.2",
     "tailwindcss": "^4.0.0-beta.7",

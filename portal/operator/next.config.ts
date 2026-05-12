@@ -5,6 +5,12 @@ const sharedDir = path.resolve(__dirname, "../shared");
 const operatorModules = path.resolve(__dirname, "node_modules");
 
 const nextConfig: NextConfig = {
+  // Wave B10 (2026-05-12): @infinityrx/portal-shared is consumed as
+  // source-mode TypeScript via npm workspace symlink. Next must transpile
+  // it (otherwise it tries to load .ts from node_modules as if compiled
+  // and fails at runtime). Per Next docs:
+  // https://nextjs.org/docs/app/api-reference/config/next-config-js/transpilePackages
+  transpilePackages: ["@infinityrx/portal-shared"],
   turbopack: {
     root: path.resolve(__dirname, ".."),
     resolveAlias: {
