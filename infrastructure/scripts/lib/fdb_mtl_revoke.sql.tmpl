@@ -1,0 +1,93 @@
+-- B9.A C4 — DB-level guard for FDB MTL (Medical Test Lexicon) tables.
+--
+-- Charter v3.2 + ADVERSARIAL A8 mitigation: even when MTL schemas
+-- exist (B9.G lands them), the app roles MUST NOT be able to
+-- INSERT / UPDATE / DELETE on them unless the future MTL-activation
+-- wave explicitly restores the grants. This file is the SQL template
+-- that B9.G's grant migration applies AFTER `CREATE TABLE ... mtl_*`.
+--
+-- Layered with the app-side `filter_loadable_specs` in
+-- modules/drug-database/drug_database/services/fdb_loader_registry.py:
+-- the app filter is the fast path; this REVOKE is the slow path that
+-- catches any regression where the app filter mis-fires.
+--
+-- File extension `.sql.tmpl` (not `.sql`) signals this is NOT applied
+-- by `alembic` or `run_migrations.sh` directly — B9.G generates the
+-- concrete migration body from this template, substituting the
+-- per-tier MTL table list captured by `fdb_loader_registry.mtl_specs(...)`.
+--
+-- Substitution placeholders (replace before applying):
+--   {{SCHEMA}}      → typically "drug_database"
+--   {{MTL_TABLES}}  → comma-separated table list, e.g.
+--                     mtl_test_lex_master, mtl_test_lex_xref
+--   {{APP_ROLES}}   → ifx_dev_app, ifx_mock_app, IFX_APP_ROLE-from-env
+--                     (B7.3 env-driven pattern — see migrations under
+--                      modules/*/alembic/versions/)
+--
+-- Usage from a B9.G alembic migration:
+--   op.execute(text(
+--       Path("infrastructure/scripts/lib/fdb_mtl_revoke.sql.tmpl")
+--         .read_text(encoding="utf-8")
+--         .replace("{{SCHEMA}}", "drug_database")
+--         .replace("{{MTL_TABLES}}", ", ".join(mtl_table_names))
+--         .replace("{{APP_ROLES}}", ", ".join(_APP_ROLES))
+--   ))
+--
+-- Idempotent: re-running this script produces no error (REVOKE on
+-- already-revoked privileges is a no-op in Postgres). SELECT is NOT
+-- revoked — reads stay open for the app-layer filter to enforce its
+-- own contract.
+
+-- 1) Revoke writes on the MTL tables themselves
+REVOKE INSERT, UPDATE, DELETE
+    ON {{SCHEMA}}.{{MTL_TABLES}}
+    FROM {{APP_ROLES}};
+
+-- 2) Revoke USAGE on any per-table sequences (defense in depth — even
+--    if a row INSERT slipped past somehow, the sequence advance would
+--    fail). Postgres auto-creates sequences for SERIAL / IDENTITY
+--    columns; this loop only matters if a future MTL model uses one.
+DO $$
+DECLARE
+    seq_name text;
+BEGIN
+    FOR seq_name IN
+        SELECT c.relname
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = '{{SCHEMA}}'
+          AND c.relkind = 'S'
+          AND c.relname LIKE 'mtl_%'
+    LOOP
+        EXECUTE format(
+            'REVOKE USAGE, SELECT, UPDATE ON SEQUENCE {{SCHEMA}}.%I FROM {{APP_ROLES}}',
+            seq_name
+        );
+    END LOOP;
+END $$;
+
+-- 3) Verification block — fails loudly if any app role still has
+--    write privilege on an MTL table after the REVOKE.
+DO $$
+DECLARE
+    bad_count int;
+BEGIN
+    SELECT count(*) INTO bad_count
+    FROM information_schema.role_table_grants
+    WHERE table_schema = '{{SCHEMA}}'
+      AND table_name LIKE 'mtl_%'
+      AND privilege_type IN ('INSERT', 'UPDATE', 'DELETE')
+      AND grantee IN ({{APP_ROLES_QUOTED}});
+
+    IF bad_count > 0 THEN
+        RAISE EXCEPTION
+            'fdb_mtl_revoke: % residual write grants on mtl_* tables '
+            'after REVOKE — guard FAILED. Inspect with: '
+            'SELECT grantee, table_name, privilege_type '
+            'FROM information_schema.role_table_grants '
+            'WHERE table_schema = ''{{SCHEMA}}'' '
+            'AND table_name LIKE ''mtl_%'' '
+            'AND privilege_type IN (''INSERT'', ''UPDATE'', ''DELETE'');',
+            bad_count;
+    END IF;
+END $$;

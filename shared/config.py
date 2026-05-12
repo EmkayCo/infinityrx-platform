@@ -101,6 +101,17 @@ class Settings(BaseSettings):
 
     MAX_UPLOAD_BYTES: int = 100 * 1024 * 1024
 
+    # ── DLQ monitoring (event-bus rule: alert when depth > 0 for > 15 min) ──
+    # DLQ_ALERT_THRESHOLD=0 means "alert on any queued entry" — matches the
+    # event-bus rule wording exactly.  Override via env var to raise the floor
+    # and avoid alert fatigue during normal replay windows (W41.8 T1-B).
+    DLQ_ALERT_THRESHOLD: int = 0
+    DLQ_ALERT_WINDOW_MINUTES: int = 15
+    # Maximum retry attempts before a message is dead-lettered.  Mirrors the
+    # default in RetryingHandler; centralising here makes it configurable
+    # per deployment without code changes (closes G5).
+    DLQ_MAX_RETRIES: int = 3
+
     # ── CORS (M-06/M-16) ────────────────────────────────────────────────────
     # Explicit allow-list; empty list = no CORS headers (for APIs behind a
     # gateway) or set to ["*"] only in development. Never wildcard in prod.
@@ -110,6 +121,29 @@ class Settings(BaseSettings):
     # When set, the Key Vault stub can resolve secrets from AKV at startup.
     # Leave empty in development — local .env.local or env vars are used.
     AZURE_KEYVAULT_URL: str = ""
+
+    # ── B9 FDB MTL guard (charter v3.2 + ADVERSARIAL A8) ────────────────────
+    # MTL = Medical Test Lexicon. 19 FDB tables that clinical-screening users
+    # consume. B9 ships the schema (tables + alembic migrations) but does NOT
+    # ingest data into them by default — InfinityRx is not subscribed to the
+    # clinical-screening tier.
+    #
+    # When False (default):
+    #   * loader registry filters out specs with loader_group="fdb_mtl"
+    #   * FDW manifest excludes MTL tables (charter v3.2: MTL EXCLUDED
+    #     from default FDW to prevent silent false-negative joins)
+    #   * DB-level guard REVOKEs INSERT/UPDATE/DELETE on every mtl_* table
+    #     from the app roles (defense-in-depth — see
+    #     infrastructure/scripts/lib/fdb_mtl_revoke.sql.tmpl)
+    #
+    # When True (future MTL-activation wave):
+    #   * loader includes Tier D specs
+    #   * FDW manifest expands to 283 entries
+    #   * GRANT migration runs to restore writes
+    #
+    # B9.G ships the Tier D schema with the default-False flag. Flipping
+    # to True is a future wave with its own gate.
+    FDB_LOAD_MTL: bool = False
 
     @field_validator("JWT_ALGORITHM")
     @classmethod
