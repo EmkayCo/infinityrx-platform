@@ -12,6 +12,11 @@ export default defineConfig({
     include: [
       "tests/unit/**/*.test.{ts,tsx}",
       "tests/integration/**/*.test.{ts,tsx}",
+      // Wave B10 W1.14b: Vite-layer regression coverage for the
+      // @infinityrx/portal-shared package barrel + subpath imports.
+      // (NOT the SC #17 proof — that's the Next-served route at
+      // /api/b10-canary, hit by W1.13's run-canary-server.ps1.)
+      "tests/canary/**/*.test.{ts,tsx}",
     ],
     exclude: [
       "tests/e2e/**",
@@ -55,14 +60,18 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "."),
       "@shared": path.resolve(__dirname, "../shared"),
-      // Force all React imports through the single operator-level copy —
-      // shared/ has its own node_modules/react which causes
-      // "Cannot read properties of null (reading 'useState')" in jsdom.
-      "react": path.resolve(__dirname, "node_modules/react"),
-      "react/jsx-runtime": path.resolve(__dirname, "node_modules/react/jsx-runtime"),
-      "react/jsx-dev-runtime": path.resolve(__dirname, "node_modules/react/jsx-dev-runtime"),
-      "react-dom": path.resolve(__dirname, "node_modules/react-dom"),
-      "react-dom/client": path.resolve(__dirname, "node_modules/react-dom/client"),
+      // Wave B10 (2026-05-12): under npm workspaces, react/react-dom are
+      // hoisted to portal/node_modules/ (not portal/operator/node_modules/).
+      // Pre-B10 these aliases pointed to the operator-nested copy, which
+      // was a workaround for portal/shared/node_modules/react existing as
+      // a duplicate. W1 verified shared no longer has its own react copy
+      // (W1.10 single-instance check passed), so dedupe + workspace
+      // hoisting + the path correction below handle singleton correctness.
+      "react": path.resolve(__dirname, "../node_modules/react"),
+      "react/jsx-runtime": path.resolve(__dirname, "../node_modules/react/jsx-runtime"),
+      "react/jsx-dev-runtime": path.resolve(__dirname, "../node_modules/react/jsx-dev-runtime"),
+      "react-dom": path.resolve(__dirname, "../node_modules/react-dom"),
+      "react-dom/client": path.resolve(__dirname, "../node_modules/react-dom/client"),
     },
     dedupe: ["react", "react-dom"],
   },

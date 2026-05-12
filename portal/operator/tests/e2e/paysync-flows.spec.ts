@@ -7,7 +7,7 @@
  *
  * Backend integration tests live in modules/paysync/tests/integration/.
  */
-import { test, expect, Route, Page } from "@playwright/test";
+import { test, expect, Route } from "@playwright/test";
 import { authenticateDevBypass } from "../../tests/fixtures/mock-session";
 
 const TENANT = "11111111-1111-1111-1111-111111111111";

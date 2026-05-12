@@ -99,7 +99,7 @@ export default function CycleCloseWizardPage(
             setStep(5);
           }
         }
-      } catch (e) {
+      } catch {
         // poll failures are transient — surface only on stop
       }
     }, 2000);

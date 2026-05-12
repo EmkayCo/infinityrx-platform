@@ -13,7 +13,7 @@ import { toast } from "sonner";
 import * as Tabs from "@radix-ui/react-tabs";
 import {
   ArrowLeft, Calendar, FileText, Loader2, PlayCircle,
-  Receipt, AlertCircle, History,
+  AlertCircle,
 } from "lucide-react";
 
 import { ApiClientError } from "@shared/lib/api-client";

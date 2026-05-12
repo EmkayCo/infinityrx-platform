@@ -22,18 +22,17 @@
 // doesn't silently report success on a broken tool.
 const tsParser = require("@typescript-eslint/parser");
 const tsPlugin = require("@typescript-eslint/eslint-plugin");
-// react-hooks is vendored inside eslint-config-next; we load it only so
-// that existing `// eslint-disable-next-line react-hooks/exhaustive-deps`
-// directives in source files resolve without "Definition for rule not
-// found" errors. We don't enable the rule itself since Next's full preset
-// is currently broken (see comment above).
-const path = require("path");
-const reactHooksPlugin = require(
-  path.join(
-    __dirname,
-    "node_modules/eslint-config-next/node_modules/eslint-plugin-react-hooks"
-  )
-);
+// react-hooks is needed only so that existing
+// `// eslint-disable-next-line react-hooks/exhaustive-deps` directives in
+// source files resolve without "Definition for rule not found" errors.
+// We don't enable the rule itself since Next's full preset is currently
+// broken (see comment above).
+//
+// Wave B10 (2026-05-12): under npm workspaces, `eslint-plugin-react-hooks`
+// is hoisted to portal/node_modules/ rather than nested inside
+// eslint-config-next/node_modules/. Use standard Node resolution
+// (require by name) instead of the prior hardcoded relative path.
+const reactHooksPlugin = require("eslint-plugin-react-hooks");
 
 module.exports = [
   {

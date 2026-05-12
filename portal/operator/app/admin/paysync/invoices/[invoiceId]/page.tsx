@@ -5,7 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import * as Tabs from "@radix-ui/react-tabs";
 import {
-  ArrowLeft, CheckCircle2, DollarSign, FileText, Loader2, Mail,
+  ArrowLeft, CheckCircle2, DollarSign, Loader2, Mail,
   Receipt, RefreshCw, XCircle,
 } from "lucide-react";
 

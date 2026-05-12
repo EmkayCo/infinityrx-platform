@@ -10,7 +10,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Calendar, FileText, RefreshCw, Plus } from "lucide-react";
+import { Calendar, RefreshCw, Plus } from "lucide-react";
 
 import { ApiClientError } from "@shared/lib/api-client";
 import {
