@@ -1,0 +1,186 @@
+{
+  "generated_at": "2026-05-12T17:03:14.047Z",
+  "branch": "wave/B10-w5",
+  "total_dynamic_routes": 26,
+  "classified": 26,
+  "unclassified": [],
+  "entries": [
+    {
+      "route": "/accounting/cycles/[id]",
+      "classification": "seed",
+      "source": "BILLING_CYCLES",
+      "value": "a1b2c3d4-e5f6-7890-abcd-0000000003e8",
+      "field": "id"
+    },
+    {
+      "route": "/accounting/invoices/[id]",
+      "classification": "seed",
+      "source": "INVOICES",
+      "value": "a1b2c3d4-e5f6-7890-abcd-000000000fa0",
+      "field": "id"
+    },
+    {
+      "route": "/accounting/payments/[id]",
+      "classification": "seed",
+      "source": "PAYMENT_BATCHES",
+      "value": "a1b2c3d4-e5f6-7890-abcd-000000001b58",
+      "field": "id"
+    },
+    {
+      "route": "/admin/network/pay-to-entities/[entityId]",
+      "classification": "placeholder",
+      "value": "test-entity-id",
+      "rationale": "No dedicated pay-to-entity seed; W5.5 allowlist accepts 404"
+    },
+    {
+      "route": "/admin/paysync/bank-settlements/[settlementId]",
+      "classification": "placeholder",
+      "value": "test-settlement-id",
+      "rationale": "Bank settlements have no direct seed; paysync-api falls back"
+    },
+    {
+      "route": "/admin/paysync/batches/[batchId]",
+      "classification": "seed",
+      "source": "PAYMENT_BATCHES",
+      "value": "a1b2c3d4-e5f6-7890-abcd-000000001b58",
+      "field": "id"
+    },
+    {
+      "route": "/admin/paysync/cycles/[cycleId]",
+      "classification": "seed",
+      "source": "BILLING_CYCLES",
+      "value": "a1b2c3d4-e5f6-7890-abcd-0000000003e8",
+      "field": "id"
+    },
+    {
+      "route": "/admin/paysync/invoices/[invoiceId]",
+      "classification": "seed",
+      "source": "INVOICES",
+      "value": "a1b2c3d4-e5f6-7890-abcd-000000000fa0",
+      "field": "id"
+    },
+    {
+      "route": "/admin/paysync/reconciliations/[reconId]",
+      "classification": "placeholder",
+      "value": "test-recon-id",
+      "rationale": "Reconciliations are per-cycle, not by reconId; route falls back"
+    },
+    {
+      "route": "/api/auth/[...nextauth]",
+      "classification": "exclude",
+      "rationale": "NextAuth catch-all — not a page route"
+    },
+    {
+      "route": "/billing/cycles/[id]",
+      "classification": "seed",
+      "source": "BILLING_CYCLES",
+      "value": "a1b2c3d4-e5f6-7890-abcd-0000000003e8",
+      "field": "id"
+    },
+    {
+      "route": "/billing/invoices/[id]",
+      "classification": "seed",
+      "source": "INVOICES",
+      "value": "a1b2c3d4-e5f6-7890-abcd-000000000fa0",
+      "field": "id"
+    },
+    {
+      "route": "/claims/[id]",
+      "classification": "seed",
+      "source": "CLAIMS",
+      "value": "a1b2c3d4-e5f6-7890-abcd-000000000bb8",
+      "field": "id"
+    },
+    {
+      "route": "/clients/[id]",
+      "classification": "seed",
+      "source": "CLIENTS",
+      "value": "a1b2c3d4-e5f6-7890-abcd-000000011559",
+      "field": "id"
+    },
+    {
+      "route": "/directories/drugs/[ndc]",
+      "classification": "seed",
+      "source": "DRUGS",
+      "value": "40364723956",
+      "field": "ndc"
+    },
+    {
+      "route": "/directories/members/[id]",
+      "classification": "seed",
+      "source": "MEMBERS",
+      "value": "a1b2c3d4-e5f6-7890-abcd-0000000059d8",
+      "field": "id"
+    },
+    {
+      "route": "/directories/pharmacies/[npi]",
+      "classification": "seed",
+      "source": "PHARMACIES",
+      "value": "8084000017",
+      "field": "npi"
+    },
+    {
+      "route": "/directories/prescribers/[npi]",
+      "classification": "seed",
+      "source": "PRESCRIBERS",
+      "value": "1900100010",
+      "field": "npi"
+    },
+    {
+      "route": "/edi/partners/[id]",
+      "classification": "seed",
+      "source": "TRADING_PARTNERS",
+      "value": "a1b2c3d4-e5f6-7890-abcd-000000007530",
+      "field": "id"
+    },
+    {
+      "route": "/edi/transactions/[id]",
+      "classification": "seed",
+      "source": "EDI_TRANSACTIONS",
+      "value": "a1b2c3d4-e5f6-7890-abcd-000000007918",
+      "field": "id"
+    },
+    {
+      "route": "/medical-claims/claims/[id]",
+      "classification": "seed",
+      "source": "MEDICAL_CLAIMS",
+      "value": "a1b2c3d4-e5f6-7890-abcd-000000015f90",
+      "field": "id"
+    },
+    {
+      "route": "/payments/batches/[id]",
+      "classification": "seed",
+      "source": "PAYMENT_BATCHES",
+      "value": "a1b2c3d4-e5f6-7890-abcd-000000001b58",
+      "field": "id"
+    },
+    {
+      "route": "/programs/[id]",
+      "classification": "seed",
+      "source": "PROGRAMS",
+      "value": "a1b2c3d4-e5f6-7890-abcd-000000011171",
+      "field": "id"
+    },
+    {
+      "route": "/reclaimrx/investigations/[id]",
+      "classification": "seed",
+      "source": "INVESTIGATIONS",
+      "value": "a1b2c3d4-e5f6-7890-abcd-000000002ee0",
+      "field": "id"
+    },
+    {
+      "route": "/reporting/library/[templateId]",
+      "classification": "seed",
+      "source": "REPORT_TEMPLATES",
+      "value": "a1b2c3d4-e5f6-7890-abcd-000000009c40",
+      "field": "id"
+    },
+    {
+      "route": "/reporting/viewer/[reportId]",
+      "classification": "seed",
+      "source": "GENERATED_REPORTS",
+      "value": "a1b2c3d4-e5f6-7890-abcd-00000000a028",
+      "field": "id"
+    }
+  ]
+}
