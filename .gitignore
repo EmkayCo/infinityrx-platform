@@ -38,6 +38,31 @@ yarn-error.log*
 .claude/worktrees/
 .claude/skills/
 .worktrees/
+.claude.local.md
+.claude/hookify.*.local.md
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# Werkbench (personal agentic harness — lives at user level, never commits)
+# Mike's harness now lives at ~/Desktop/Code Projects/Werkbench/
+# (separate from project repo, synced via pCloud + private git repo).
+# These project-local overlays are gitignored:
+.werkbench-marker
+.werkbench-cache/
+# Legacy: keep the project-level Werkbench/ pattern as a safety net
+# in case anyone accidentally puts framework files in the project tree.
+Werkbench/
+
+# Personal scratch (downloads, screenshots, temp QA docs, review materials).
+# Local-only — never commits. Add `.misc/**` to pCloud Block Sync to keep
+# it off cloud sync as well.
+.misc/
+
+# Graphify
+graphify-out/cache/
+graphify-out/manifest.json
+graphify-out/cost.json
+graphify-out/graph.json
 
 # Test artifacts
 portal/operator/playwright-report/
@@ -73,3 +98,8 @@ data/demo/
 test-results/
 .gstack/
 var/
+graphify-out/
+
+# MemPalace per-project files (issue #185)
+mempalace.yaml
+entities.json

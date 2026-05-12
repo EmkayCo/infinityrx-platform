@@ -22,6 +22,8 @@ export const API_URLS = {
     process.env.NEXT_PUBLIC_DRUG_DATABASE_URL ?? "http://localhost:8011",
   memberManagement:
     process.env.NEXT_PUBLIC_MEMBER_MGMT_URL ?? "http://localhost:8012",
+  adjudicationEngine:
+    process.env.NEXT_PUBLIC_ADJ_ENGINE_URL ?? "http://localhost:8013",
 } as const;
 
 export type ApiModule = keyof typeof API_URLS;

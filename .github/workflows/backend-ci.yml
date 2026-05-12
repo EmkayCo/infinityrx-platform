@@ -82,7 +82,7 @@ jobs:
         run: |
           set -o pipefail
           FAILED=0
-          for mod in core-platform billing payment-processing reclaimrx reporting ai-nlp dataiq drug-database member-management pharmacy-directory prescriber-directory edi-compliance medical-claims; do
+          for mod in core-platform billing payment-processing reclaimrx reporting ai-nlp dataiq drug-database member-management pharmacy-directory prescriber-directory edi-compliance medical-claims adjudication-engine; do
             echo "::group::$mod"
             if [ -d "modules/$mod/tests" ]; then
               if ! (cd "modules/$mod" && uv run pytest tests/ -q --tb=short --junitxml="../../test-results/$mod.xml"); then

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Settings, ArrowLeft, ToggleLeft, ToggleRight, Globe, Lock, Bell, Database } from "lucide-react";
+import { Settings, ArrowLeft, ToggleLeft, ToggleRight, Globe, Lock, Bell, Database, FlaskConical } from "lucide-react";
 
 const FEATURE_FLAGS = [
   { key: "enable_340b_split_billing", label: "340B Split Billing", on: true, scope: "global" },
@@ -42,6 +42,25 @@ export default function AdminConfigPage() {
           <p className="text-sm text-muted-foreground">Platform-wide feature flags and system settings.</p>
         </div>
       </div>
+
+      <Link
+        href="/admin/config/change-sets"
+        className="mb-6 flex items-center justify-between gap-4 rounded-lg border bg-card p-4 transition hover:bg-muted/30"
+      >
+        <div className="flex items-center gap-3">
+          <div className="rounded-md bg-amber-500/10 p-2">
+            <FlaskConical className="h-4 w-4 text-amber-500" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold">Change-set workflow</h2>
+            <p className="text-xs text-muted-foreground">
+              Simulate staged configuration changes against recent claims,
+              then apply when ready.
+            </p>
+          </div>
+        </div>
+        <span className="text-xs text-muted-foreground">Open →</span>
+      </Link>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="rounded-lg border bg-card">
