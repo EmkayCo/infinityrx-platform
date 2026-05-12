@@ -16,31 +16,66 @@
 -- concrete migration body from this template, substituting the
 -- per-tier MTL table list captured by `fdb_loader_registry.mtl_specs(...)`.
 --
--- Substitution placeholders (replace before applying):
---   {{SCHEMA}}      → typically "drug_database"
---   {{MTL_TABLES}}  → comma-separated table list, e.g.
---                     mtl_test_lex_master, mtl_test_lex_xref
---   {{APP_ROLES}}   → ifx_dev_app, ifx_mock_app, IFX_APP_ROLE-from-env
---                     (B7.3 env-driven pattern — see migrations under
---                      modules/*/alembic/versions/)
+-- Substitution placeholders (ALL FOUR must be replaced before applying):
+--   {{SCHEMA}}            → typically "drug_database"
+--   {{MTL_TABLES}}        → COMMA-SEPARATED SCHEMA-QUALIFIED table list.
+--                           Caller is responsible for prefixing each table
+--                           with the schema (NOT just bare names) so the
+--                           REVOKE statement applies to every table, not
+--                           just the first. Example value:
+--                             drug_database.mtl_test_lex_master,
+--                             drug_database.mtl_test_lex_xref
+--                           (Previous versions of this template implied
+--                           `{{SCHEMA}}.{{MTL_TABLES}}` would broadcast
+--                           the prefix — Postgres syntax does NOT do that.
+--                           Codex GATE-CLOSE R1 HIGH 1 fix.)
+--   {{APP_ROLES}}         → comma-separated role names (unquoted), used
+--                           in REVOKE ... FROM <roles>. Example value:
+--                             ifx_dev_app, ifx_mock_app, ifx_app_role_from_env
+--                           (B7.3 env-driven pattern — see migrations
+--                            under modules/*/alembic/versions/)
+--   {{APP_ROLES_QUOTED}}  → SAME role list as {{APP_ROLES}} but with each
+--                           name wrapped in SQL string literals (single
+--                           quotes) for the information_schema lookup in
+--                           the verification block. Example value:
+--                             'ifx_dev_app', 'ifx_mock_app', 'ifx_app_role_from_env'
+--                           (information_schema.role_table_grants.grantee
+--                            is text; needs quoted literals, not unquoted
+--                            identifiers.)
 --
--- Usage from a B9.G alembic migration:
---   op.execute(text(
+-- Reference Python substitution body for the B9.G migration helper:
+--
+--   roles = ("ifx_dev_app", "ifx_mock_app", os.environ.get("IFX_APP_ROLE", "ifx_dev_app"))
+--   schema = "drug_database"
+--   tables_qualified = ", ".join(f"{schema}.{t}" for t in mtl_table_names)
+--   roles_unquoted   = ", ".join(roles)
+--   roles_quoted     = ", ".join(f"'{r}'" for r in roles)
+--   body = (
 --       Path("infrastructure/scripts/lib/fdb_mtl_revoke.sql.tmpl")
 --         .read_text(encoding="utf-8")
---         .replace("{{SCHEMA}}", "drug_database")
---         .replace("{{MTL_TABLES}}", ", ".join(mtl_table_names))
---         .replace("{{APP_ROLES}}", ", ".join(_APP_ROLES))
---   ))
+--         .replace("{{SCHEMA}}", schema)
+--         .replace("{{MTL_TABLES}}", tables_qualified)
+--         .replace("{{APP_ROLES}}", roles_unquoted)
+--         .replace("{{APP_ROLES_QUOTED}}", roles_quoted)
+--   )
+--   op.execute(text(body))
+--
+-- A unit test (see modules/drug-database/tests/unit/test_fdb_mtl_revoke_template.py)
+-- renders the template with two tables / two roles and asserts ZERO
+-- `{{...}}` placeholders survive — the migration cannot ship with an
+-- unsubstituted token.
 --
 -- Idempotent: re-running this script produces no error (REVOKE on
 -- already-revoked privileges is a no-op in Postgres). SELECT is NOT
 -- revoked — reads stay open for the app-layer filter to enforce its
 -- own contract.
 
--- 1) Revoke writes on the MTL tables themselves
+-- 1) Revoke writes on the MTL tables themselves.
+-- {{MTL_TABLES}} is already a schema-qualified comma list — DO NOT prefix
+-- with {{SCHEMA}}. here (Postgres won't broadcast the prefix across the
+-- comma list; only the first table would be qualified).
 REVOKE INSERT, UPDATE, DELETE
-    ON {{SCHEMA}}.{{MTL_TABLES}}
+    ON {{MTL_TABLES}}
     FROM {{APP_ROLES}};
 
 -- 2) Revoke USAGE on any per-table sequences (defense in depth — even

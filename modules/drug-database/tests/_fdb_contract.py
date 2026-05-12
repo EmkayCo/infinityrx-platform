@@ -59,6 +59,7 @@ The PARSE-WARNING-FAILS-TEST POLICY (charter v3.x):
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from decimal import Decimal
@@ -72,6 +73,16 @@ from drug_database.services.fdb_adapter import (
     TableSpec,
     Tier,
     _stream_pipe_rows,
+)
+
+
+# Repo path to the signed-off allowlist artifact. Per the parse-warning
+# policy (charter v3.x + codex GATE-CLOSE R1 MEDIUM 1), every per-tier
+# wrapper SHOULD source its allowlist from this file rather than inline
+# sets. See `load_parse_warning_allowlist` below.
+_PARSE_WARNING_ALLOWLIST_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "waves" / "B9" / "parse_warning_allowlist.md"
 )
 
 
@@ -295,6 +306,62 @@ def assert_row_count_reconciles(
 # ---------------------------------------------------------------------------
 # Parse-warning policy
 # ---------------------------------------------------------------------------
+
+
+def load_parse_warning_allowlist(
+    path: Path | None = None,
+) -> frozenset[str]:
+    """Load approved parse-warning messages from the signed-off artifact.
+
+    The artifact at `waves/B9/parse_warning_allowlist.md` is the SINGLE
+    SOURCE OF TRUTH for which `_log.warning` messages are accepted as
+    known-good silent-skip behavior. Per-tier wrappers should pass the
+    output of this loader into `assert_no_parse_warnings(allowlist=...)`
+    instead of building inline sets.
+
+    Approved entries live in a markdown table whose first column is the
+    quoted message-string the parser emits. Lines outside the approved
+    table — header text, rationale, process docs — are ignored. The
+    loader is intentionally LENIENT about the surrounding markdown so
+    operators can edit the doc freely; it is STRICT about what counts as
+    an entry (must be a row whose first column is a backtick-quoted
+    string, inside the "Approved allowlist entries" section).
+
+    Args:
+        path: override location (defaults to the in-repo artifact).
+
+    Returns:
+        Frozenset of message strings. Empty initial state (B9.A) means
+        the contract default of zero tolerance still applies.
+
+    Raises:
+        FileNotFoundError: artifact missing — every B9.B+ wave must
+        ship this file with at least the empty-initial header.
+    """
+    target = path or _PARSE_WARNING_ALLOWLIST_PATH
+    if not target.exists():
+        raise FileNotFoundError(
+            f"Parse-warning allowlist missing at {target}. The empty "
+            f"initial file ships in B9.A C3; restore it from "
+            f"Werkbench/projects/infinityrx-platform/waves/B9/."
+        )
+    body = target.read_text(encoding="utf-8")
+    # Look only inside the "Approved allowlist entries" section, terminated by
+    # the next markdown H2. Lines outside that block (header text, process
+    # docs, the THREE-MESSAGE class-table) are excluded by section anchoring.
+    approved_block = re.search(
+        r"##\s+Approved allowlist entries\s*\n(.*?)(?=\n##\s|\Z)",
+        body,
+        flags=re.DOTALL,
+    )
+    if approved_block is None:
+        return frozenset()
+    block = approved_block.group(1)
+    # Match `| `<message>` |` style rows. Skip the header row + separator.
+    entries: set[str] = set()
+    for row in re.finditer(r"^\|\s*`([^`]+)`\s*\|", block, flags=re.MULTILINE):
+        entries.add(row.group(1))
+    return frozenset(entries)
 
 
 def assert_no_parse_warnings(
@@ -542,6 +609,7 @@ __all__ = [
     "assert_no_parse_warnings",
     "assert_upd_transaction_codes",
     "assert_delta_semantics_acd_cycle",
+    "load_parse_warning_allowlist",
     "DeltaSimulationResult",
     "DeltaSimulator",
 ]

@@ -35,6 +35,7 @@ from _fdb_contract import (  # noqa: E402
     assert_row_count_reconciles,
     assert_schema_parity,
     assert_upd_transaction_codes,
+    load_parse_warning_allowlist,
 )
 
 
@@ -549,3 +550,63 @@ def test_delta_semantics_effective_date_expects_two_rows_after_C() -> None:
         simulator=eff_sim,
     )
     assert len(rows) >= 2
+
+
+# ---------------------------------------------------------------------------
+# Parse-warning allowlist loader (codex GATE-CLOSE R1 MEDIUM 1)
+# ---------------------------------------------------------------------------
+
+
+def test_allowlist_loader_returns_empty_on_repo_initial() -> None:
+    """B9.A C3 ships the file empty. B9.B+ may add signed-off entries."""
+    entries = load_parse_warning_allowlist()
+    # Empty initial state — no approved entries at B9.A close.
+    # If an entry appears here outside a consult-round, that's a process
+    # violation; the test fails and forces the question.
+    assert entries == frozenset(), (
+        f"Expected empty initial allowlist (B9.A C3 state); got: "
+        f"{sorted(entries)}. Each entry must have a CONSULT-ROUND "
+        f"sign-off documented in parse_warning_allowlist.md."
+    )
+
+
+def test_allowlist_loader_parses_approved_table_rows(tmp_path) -> None:
+    """Approved table rows yield message strings; surrounding doc text is ignored."""
+    fixture = tmp_path / "parse_warning_allowlist.md"
+    fixture.write_text(
+        "# header\n"
+        "Some intro text.\n\n"
+        "## Approved allowlist entries\n\n"
+        "| Message | Table(s) | %impact | Rationale | Consult sign-off |\n"
+        "|---|---|---|---|---|\n"
+        "| `fdb_table_field_count_mismatch` | RNP3 | 0.02% | sentinel | R7 |\n"
+        "| `fdb_table_row_invalid` | RBAR | 0.001% | NDC fmt | R8 |\n\n"
+        "## Process for adding an entry\n"
+        "(unrelated section)\n"
+        "| `not_a_real_entry` | x | y | z | w |\n",
+        encoding="utf-8",
+    )
+    entries = load_parse_warning_allowlist(path=fixture)
+    assert entries == frozenset({
+        "fdb_table_field_count_mismatch",
+        "fdb_table_row_invalid",
+    })
+    # Verify section anchoring — entries from the "Process" section
+    # are NOT returned.
+    assert "not_a_real_entry" not in entries
+
+
+def test_allowlist_loader_handles_missing_approved_section(tmp_path) -> None:
+    """File without the approved-entries section → empty set, not error."""
+    fixture = tmp_path / "parse_warning_allowlist.md"
+    fixture.write_text(
+        "# Just a policy doc with no approval section\n", encoding="utf-8"
+    )
+    assert load_parse_warning_allowlist(path=fixture) == frozenset()
+
+
+def test_allowlist_loader_raises_on_missing_file(tmp_path) -> None:
+    """Empty initial file MUST exist — every B9.B+ wave ships it."""
+    nonexistent = tmp_path / "absent.md"
+    with pytest.raises(FileNotFoundError, match="allowlist missing"):
+        load_parse_warning_allowlist(path=nonexistent)
