@@ -98,10 +98,59 @@ After F2-completion, B9.A close is reconstructible from the
 InfinityRx checkout — every wave artifact named in this file
 resolves to an actual in-repo path.
 
-R3 (verification of F2-completion) **not run** in this session —
-the residual was scope-bounded enough that re-running R2 within the
-same session is unnecessary. Next session opens by either running
-R3 to confirm or proceeding to B9.B with the deferral acknowledged.
+---
+
+## Codex GATE-CLOSE R3 — verdict & final absorption
+
+**Verdict:** GO-WITH-FIXES (1 MEDIUM residual — downgraded from R2 HIGH)
+**Round:** R3 (2026-05-12)
+**Artifacts:** `waves/B9/codex-gate-close-r3-prompt.md`,
+              `waves/B9/codex-gate-close-r3-result.md`
+
+R3 confirmed F2-completion substantially absorbed the R2 HIGH —
+charter/plan/baseline + R1/R2 prompt-result pairs are now in-repo.
+The residual flag: `status.md` (line 37) and `plan.md` named the
+PLAN-consult and ADVERSARIAL-consult artifacts (`codex-plan-consult-r1.md`,
+`codex-adversarial-r1.md`) which were still Werkbench-only.
+
+**F2-final absorption (same session):**
+
+Mirrored the full codex consult ladder into the repo:
+
+```
+waves/B9/codex-spec-consult-r1.md
+waves/B9/codex-spec-consult-r2.md
+waves/B9/codex-plan-consult-r1.md
+waves/B9/codex-plan-consult-r2.md
+waves/B9/codex-adversarial-r1.md
+waves/B9/codex-adversarial-r2.md
+```
+
+After F2-final, **every consult artifact named in `status.md` or
+`plan.md` resolves to an in-repo path.** B9.A close is fully
+reconstructible from the InfinityRx checkout alone.
+
+F1 / F3 / F4: all remained accepted across R1 → R2 → R3.
+
+---
+
+## Codex consult ladder summary (full B9 audit trail)
+
+| Round | Phase | Verdict | Artifact |
+|---|---|---|---|
+| SPEC R1 | Charter design | GO-WITH-FIXES | `codex-spec-consult-r1.md` |
+| SPEC R2 | Charter v3 | GO-WITH-FIXES (5/6 verified) | `codex-spec-consult-r2.md` |
+| PLAN R1 | Plan v1 | GO-WITH-FIXES | `codex-plan-consult-r1.md` |
+| PLAN R2 | Plan v3.1 | GO | `codex-plan-consult-r2.md` |
+| ADVERSARIAL R1 | Attack vectors | 20 attacks surfaced | `codex-adversarial-r1.md` |
+| ADVERSARIAL R2 | Mitigation verify | GO | `codex-adversarial-r2.md` |
+| GATE-CLOSE R1 | B9.A close v1 | GO-WITH-FIXES (2H + 2M) | `codex-gate-close-r1-result.md` |
+| GATE-CLOSE R2 | B9.A close v2 (F1+F3+F4 + partial F2) | GO-WITH-FIXES (1H residual) | `codex-gate-close-r2-result.md` |
+| GATE-CLOSE R3 | B9.A close v3 (F2-completion) | GO-WITH-FIXES (1M residual) | `codex-gate-close-r3-result.md` |
+| **GATE-CLOSE R3 F2-final absorption** | **mirror remaining consults → in-repo audit trail** | **complete** | this commit |
+
+B9.A closes after the F2-final absorption commit. Next session opens
+B9.B with the F4 pre-opening obligation as its first commit.
 
 ---
 
