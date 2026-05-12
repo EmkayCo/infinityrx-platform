@@ -27,7 +27,12 @@ export default defineConfig({
   webServer: {
     command: "npm run dev",
     port: 3000,
-    reuseExistingServer: true,
+    // Wave B10 (2026-05-12 W4.4): reuseExistingServer defaults to FALSE so
+    // every Playwright run boots a fresh server bound to the current commit
+    // (codex ADVERSARIAL R1 A5 + R2 N3 absorption). Opt back into reuse via
+    // PW_REUSE_SERVER=true for fast iteration when you know the dev server
+    // is already serving the right code.
+    reuseExistingServer: process.env.PW_REUSE_SERVER === "true",
     timeout: 60_000,
   },
 });
