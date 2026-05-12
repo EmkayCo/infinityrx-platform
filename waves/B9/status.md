@@ -53,9 +53,11 @@ this file; do not duplicate state in `~/.claude/.../memory/*.md`.
 
 **Verdict:** GO-WITH-FIXES (2 HIGH + 2 MEDIUM)
 **Round:** R1 (2026-05-12)
-**Artifacts:**
+**Artifacts (all in-repo after R2 F2-completion):**
 - `waves/B9/codex-gate-close-r1-prompt.md`
-- `waves/B9/codex-gate-close-r1-result.md` (Werkbench)
+- `waves/B9/codex-gate-close-r1-result.md`
+- `waves/B9/codex-gate-close-r2-prompt.md`
+- `waves/B9/codex-gate-close-r2-result.md`
 
 **Absorbed in same session as gate-close:**
 
@@ -72,6 +74,34 @@ spec lands, add `test_delta_contract_coverage` to assert
 {UPSERT_BY_NATURAL_KEY, UPSERT_WITH_EFFECTIVE_DATE, APPEND_ONLY}}
 == {spec covered by a contract-test wrapper}`. Failing this test
 forces a contract wiring per new spec.
+
+---
+
+## Codex GATE-CLOSE R2 — verdict & absorption
+
+**Verdict:** GO-WITH-FIXES (1 HIGH residual on F2)
+**Round:** R2 (2026-05-12)
+**Artifact:** `waves/B9/codex-gate-close-r2-result.md`
+
+R2 accepted F1, F3, F4 outright; flagged F2 as incomplete — the
+mirrored 5 artifacts referenced `charter.md`, `plan.md`,
+`baseline.md`, and the R1 prompt/result, but those were still
+Werkbench-only. F2-completion (same session as R2):
+
+- Mirrored `charter.md`, `plan.md`, `baseline.md` into `waves/B9/`.
+- Mirrored `codex-gate-close-r1-prompt.md` + `codex-gate-close-r1-result.md`
+  into `waves/B9/` so the R1 ladder is reviewable from the
+  InfinityRx checkout alone (no Werkbench dependency).
+- `status.md` "Artifacts" row updated to reflect in-repo paths.
+
+After F2-completion, B9.A close is reconstructible from the
+InfinityRx checkout — every wave artifact named in this file
+resolves to an actual in-repo path.
+
+R3 (verification of F2-completion) **not run** in this session —
+the residual was scope-bounded enough that re-running R2 within the
+same session is unnecessary. Next session opens by either running
+R3 to confirm or proceeding to B9.B with the deferral acknowledged.
 
 ---
 
