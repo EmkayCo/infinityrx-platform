@@ -806,6 +806,7 @@ def upgrade() -> None:
         sa.Column('ETC_REVISION_SEQNO', sa.Integer(), nullable=False),
         sa.Column('ETC_CHANGE_TYPE_CODE', sa.Text(), nullable=True),
         sa.Column('ETC_EFFECTIVE_DATE', sa.Date(), nullable=True),
+        sa.UniqueConstraint('HIC_SEQN', 'ETC_ID', 'ETC_REVISION_SEQNO', name="uq_retchch0_etc_hicseqn_hist"),
         schema='drug_database',
     )
 
@@ -817,6 +818,7 @@ def upgrade() -> None:
         sa.Column('ETC_REVISION_SEQNO', sa.Integer(), nullable=False),
         sa.Column('ETC_CHANGE_TYPE_CODE', sa.Text(), nullable=True),
         sa.Column('ETC_EFFECTIVE_DATE', sa.Date(), nullable=True),
+        sa.UniqueConstraint('HICL_SEQNO', 'ETC_ID', 'ETC_REVISION_SEQNO', name="uq_retchlh0_etc_hiclseqno_hist"),
         schema='drug_database',
     )
 
@@ -828,6 +830,7 @@ def upgrade() -> None:
         sa.Column('ETC_REVISION_SEQNO', sa.Integer(), nullable=False),
         sa.Column('ETC_CHANGE_TYPE_CODE', sa.Text(), nullable=True),
         sa.Column('ETC_EFFECTIVE_DATE', sa.Date(), nullable=True),
+        sa.UniqueConstraint('MED_NAME_ID', 'ETC_ID', 'ETC_REVISION_SEQNO', name="uq_retcnmh0_etc_med_name_id_hist"),
         schema='drug_database',
     )
 
@@ -837,6 +840,7 @@ def upgrade() -> None:
         sa.Column('REPL_HIC_SEQN', sa.Integer(), nullable=False),
         sa.Column('PREV_HIC_SEQN', sa.Integer(), nullable=False),
         sa.Column('HIC_REPL_EFF_DT', sa.Date(), nullable=True),
+        sa.UniqueConstraint('REPL_HIC_SEQN', 'PREV_HIC_SEQN', name="uq_rhicrh0_ing_hist"),
         schema='drug_database',
     )
 
@@ -846,6 +850,7 @@ def upgrade() -> None:
         sa.Column('MED_REPL_ROUTED_DF_MED_ID', sa.Integer(), nullable=False),
         sa.Column('MED_PREV_ROUTED_DF_MED_ID', sa.Integer(), nullable=False),
         sa.Column('MED_ROUTED_DF_MED_ID_REP_EF_DT', sa.Date(), nullable=True),
+        sa.UniqueConstraint('MED_REPL_ROUTED_DF_MED_ID', 'MED_PREV_ROUTED_DF_MED_ID', name="uq_rmidfrh1_routed_dose_form_hist"),
         schema='drug_database',
     )
 
@@ -855,6 +860,7 @@ def upgrade() -> None:
         sa.Column('MED_REPL_NAME_ID', sa.Integer(), nullable=False),
         sa.Column('MED_PREV_NAME_ID', sa.Integer(), nullable=False),
         sa.Column('MED_NAME_ID_REPL_EFF_DT', sa.Date(), nullable=False),
+        sa.UniqueConstraint('MED_REPL_NAME_ID', 'MED_PREV_NAME_ID', 'MED_NAME_ID_REPL_EFF_DT', name="uq_rminmrh1_med_name_hist"),
         schema='drug_database',
     )
 
@@ -864,6 +870,7 @@ def upgrade() -> None:
         sa.Column('MED_REPL_MEDID', sa.Integer(), nullable=False),
         sa.Column('MED_PREV_MEDID', sa.Integer(), nullable=False),
         sa.Column('MED_MEDID_REPL_EFF_DT', sa.Date(), nullable=False),
+        sa.UniqueConstraint('MED_REPL_MEDID', 'MED_PREV_MEDID', 'MED_MEDID_REPL_EFF_DT', name="uq_rmirh1_med_hist"),
         schema='drug_database',
     )
 
@@ -873,6 +880,7 @@ def upgrade() -> None:
         sa.Column('MED_REPL_ROUTED_MED_ID', sa.Integer(), nullable=False),
         sa.Column('MED_PREV_ROUTED_MED_ID', sa.Integer(), nullable=False),
         sa.Column('MED_ROUTED_MED_ID_REPL_EFF_DT', sa.Date(), nullable=False),
+        sa.UniqueConstraint('MED_REPL_ROUTED_MED_ID', 'MED_PREV_ROUTED_MED_ID', 'MED_ROUTED_MED_ID_REPL_EFF_DT', name="uq_rmirmrh1_routed_med_hist"),
         schema='drug_database',
     )
 

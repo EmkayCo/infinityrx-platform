@@ -201,6 +201,56 @@ def test_load_tier_group_upsert_requires_natural_key() -> None:
             )
 
 
+def test_append_only_replay_with_natural_key_does_not_duplicate(sqlite_engine) -> None:
+    """B9.B R2 HIGH: APPEND_ONLY with natural_key is replay-idempotent.
+
+    Constructs a SQLite table with a UNIQUE index over the natural_key
+    columns (mirroring what the migration emits for APPEND_ONLY specs).
+    First load inserts the row; second load is `INSERT ... ON CONFLICT
+    (natural_key) DO NOTHING` — row count must stay the same.
+    """
+    from sqlalchemy import Index
+    from drug_database.services.fdb_tier_loader import load_tier_group
+
+    hist_spec = TableSpec(
+        table_name="RFOO_HIST",
+        columns=("repl_id", "prev_id", "eff_dt"),
+        coercers={"repl_id": int, "prev_id": int, "eff_dt": str},
+        tier=Tier.A,
+        loader_group="fdb_tier_a",
+        delta_semantics=DeltaSemantics.APPEND_ONLY,
+        natural_key=("repl_id", "prev_id", "eff_dt"),
+    )
+    # Create the table WITH a UNIQUE index over natural_key (mirrors
+    # the UniqueConstraint the migration emits).
+    md = MetaData()
+    table = Table(
+        "rfoo_hist", md,
+        *(Column(c, String) for c in hist_spec.columns),
+    )
+    Index("uq_rfoo_hist", *(table.c[c] for c in hist_spec.natural_key), unique=True)
+    md.create_all(sqlite_engine)
+
+    adapter = _FakeAdapter({"RFOO_HIST": [{"repl_id": "42", "prev_id": "41", "eff_dt": "20260101"}]})
+    drop = adapter.discover_latest_drop()
+
+    # Run 1 — inserts the row.  schema="" matches the schemaless SQLite test table.
+    with Session(sqlite_engine) as session:
+        load_tier_group(session, adapter, drop, group="fdb_tier_a", specs=[hist_spec], schema="")
+        n1 = session.execute(select(table)).all()
+        assert len(n1) == 1
+
+    # Run 2 (same drop, same data) — must NOT add a duplicate.
+    with Session(sqlite_engine) as session:
+        load_tier_group(session, adapter, drop, group="fdb_tier_a", specs=[hist_spec], schema="")
+        n2 = session.execute(select(table)).all()
+        assert len(n2) == 1, (
+            f"APPEND_ONLY replay duplicated: row count went from {len(n1)} "
+            f"to {len(n2)} after second load. The ON CONFLICT DO NOTHING "
+            f"path is regressed."
+        )
+
+
 def test_load_tier_group_summary_aggregates_per_table(sqlite_engine) -> None:
     """TierLoadResult sums inserted/skipped across multiple specs."""
     from drug_database.services.fdb_tier_loader import load_tier_group

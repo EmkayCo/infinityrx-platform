@@ -135,7 +135,9 @@ def load_tier_group(
 
     result = TierLoadResult(group=group, drop_date=drop.drop_date, dry_run=dry_run)
 
-    md = MetaData(schema=schema)
+    # schema="" → no schema prefix (test seam for SQLite which has no real
+    # schemas). Production callers leave the default `drug_database`.
+    md = MetaData(schema=schema) if schema else MetaData()
     for spec in eligible:
         summary = TableLoadSummary(table_name=spec.table_name)
         result.table_summaries[spec.table_name] = summary
@@ -165,7 +167,17 @@ def load_tier_group(
             stmt = pg_insert(table).values(**row_str)
 
             if spec.delta_semantics is DeltaSemantics.APPEND_ONLY:
-                # Every row appends — no conflict resolution.
+                # B9.B R2 HIGH mitigation — same-drop replay must produce
+                # 0 net new rows for the SC-7 idempotency contract. If
+                # the spec declares natural_key, use ON CONFLICT DO
+                # NOTHING (matches the UniqueConstraint the migration
+                # emits for APPEND_ONLY specs). Legacy APPEND_ONLY specs
+                # without natural_key fall through to plain INSERT (will
+                # duplicate on replay — caller is responsible).
+                if spec.natural_key:
+                    stmt = stmt.on_conflict_do_nothing(
+                        index_elements=list(spec.natural_key)
+                    )
                 session.execute(stmt)
                 summary.inserted += 1
             elif spec.delta_semantics in {

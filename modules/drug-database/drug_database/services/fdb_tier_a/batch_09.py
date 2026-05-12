@@ -49,6 +49,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RETCHCH0",
         delta_semantics=DeltaSemantics.APPEND_ONLY,
+        natural_key=('HIC_SEQN', 'ETC_ID', 'ETC_REVISION_SEQNO'),
     ),
     # ETC change history — HICL_SEQNO-keyed
     TableSpec(
@@ -72,6 +73,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RETCHLH0",
         delta_semantics=DeltaSemantics.APPEND_ONLY,
+        natural_key=('HICL_SEQNO', 'ETC_ID', 'ETC_REVISION_SEQNO'),
     ),
     # ETC change history — MED_NAME_ID-keyed
     TableSpec(
@@ -95,6 +97,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RETCNMH0",
         delta_semantics=DeltaSemantics.APPEND_ONLY,
+        natural_key=('MED_NAME_ID', 'ETC_ID', 'ETC_REVISION_SEQNO'),
     ),
     # Ingredient renumber history
     TableSpec(
@@ -110,6 +113,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RHICRH0",
         delta_semantics=DeltaSemantics.APPEND_ONLY,
+        natural_key=('REPL_HIC_SEQN', 'PREV_HIC_SEQN'),
     ),
     # Routed dose-form med id replacement history
     TableSpec(
@@ -129,6 +133,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMIDFRH1",
         delta_semantics=DeltaSemantics.APPEND_ONLY,
+        natural_key=('MED_REPL_ROUTED_DF_MED_ID', 'MED_PREV_ROUTED_DF_MED_ID'),
     ),
     # Med name id replacement history
     TableSpec(
@@ -143,6 +148,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMINMRH1",
         delta_semantics=DeltaSemantics.APPEND_ONLY,
+        natural_key=('MED_REPL_NAME_ID', 'MED_PREV_NAME_ID', 'MED_NAME_ID_REPL_EFF_DT'),
     ),
     # MEDID replacement history
     TableSpec(
@@ -157,6 +163,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMIRH1",
         delta_semantics=DeltaSemantics.APPEND_ONLY,
+        natural_key=('MED_REPL_MEDID', 'MED_PREV_MEDID', 'MED_MEDID_REPL_EFF_DT'),
     ),
     # Routed med id replacement history
     TableSpec(
@@ -175,6 +182,7 @@ SPECS: list[TableSpec] = [
         loader_group="fdb_tier_a",
         record_counts_key="RMIRMRH1",
         delta_semantics=DeltaSemantics.APPEND_ONLY,
+        natural_key=('MED_REPL_ROUTED_MED_ID', 'MED_PREV_ROUTED_MED_ID', 'MED_ROUTED_MED_ID_REPL_EFF_DT'),
     ),
 ]
 

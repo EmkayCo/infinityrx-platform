@@ -37,7 +37,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from drug_database.services.fdb_adapter import TableSpec, Tier
+from drug_database.services.fdb_adapter import DeltaSemantics, TableSpec, Tier
 
 
 # ---------------------------------------------------------------------------
@@ -113,24 +113,39 @@ def _column_block(spec: TableSpec) -> str:
 def _create_table_block(spec: TableSpec, schema: str) -> str:
     """Generate the op.create_table(...) call for one table.
 
-    When `spec.natural_key` is non-empty, emits a PrimaryKeyConstraint
-    over those columns so Postgres `ON CONFLICT (natural_key)` upserts
-    have a unique surface to bind to.  Per codex B9.B GATE-CLOSE R1
-    HIGH 2.
+    When `spec.natural_key` is non-empty, emits a uniqueness surface
+    so Postgres `ON CONFLICT (natural_key)` resolves to a real
+    constraint:
+
+      * UPSERT_* semantics → PrimaryKeyConstraint (B9.B R1 HIGH 2)
+      * APPEND_ONLY        → UniqueConstraint  (B9.B R2 HIGH —
+                              gives same-drop replay idempotency
+                              via ON CONFLICT DO NOTHING)
+
+    UPSERT uses PK because the natural-key tuple uniquely identifies
+    the LIVE row; APPEND_ONLY uses UNIQUE because history rows are
+    immutable but the same logical fact may legitimately arrive
+    multiple times across drops and must be de-duped, not error.
     """
     table_name = spec.table_name.lower()  # FDB names are upper; DB tables snake_case
     rcounts_key = spec.record_counts_key or spec.table_name
-    pk_line = ""
+    constraint_line = ""
     if spec.natural_key:
-        pk_cols = ", ".join(repr(c) for c in spec.natural_key)
-        pk_line = (
-            f'\n        sa.PrimaryKeyConstraint({pk_cols}, '
-            f'name="pk_{table_name}"),'
-        )
+        cols = ", ".join(repr(c) for c in spec.natural_key)
+        if spec.delta_semantics is DeltaSemantics.APPEND_ONLY:
+            constraint_line = (
+                f'\n        sa.UniqueConstraint({cols}, '
+                f'name="uq_{table_name}"),'
+            )
+        else:
+            constraint_line = (
+                f'\n        sa.PrimaryKeyConstraint({cols}, '
+                f'name="pk_{table_name}"),'
+            )
     return f"""    # {spec.table_name} — tier={spec.tier.value} delta={spec.delta_semantics.value} record_counts_key={rcounts_key}
     op.create_table(
         "{table_name}",
-{_column_block(spec)}{pk_line}
+{_column_block(spec)}{constraint_line}
         schema={schema!r},
     )"""
 
@@ -233,11 +248,6 @@ def generate_tier_migration(
     """
     if not specs:
         raise ValueError("generate_tier_migration: empty specs list")
-    # Import here to avoid a circular: fdb_adapter imports nothing from
-    # this module, but `generate_tier_migration` is itself invoked by
-    # scripts that import fdb_adapter via the registry.
-    from drug_database.services.fdb_adapter import DeltaSemantics  # noqa: E402
-
     _checkable = {
         DeltaSemantics.UPSERT_BY_NATURAL_KEY,
         DeltaSemantics.UPSERT_WITH_EFFECTIVE_DATE,

@@ -154,7 +154,32 @@ F1 / F3 / F4: all remained accepted across R1 → R2 → R3.
 
 **Test result post-absorption:** 789 unit tests pass (784 B9 batches + adapter + helpers + 5 new tier loader). No regression.
 
-R2 (verification of R1 absorption) dispatched after this commit.
+R2 (verification of R1 absorption) returned GO-WITH-FIXES with 1 residual HIGH — see below.
+
+---
+
+## B9.B GATE-CLOSE R2 — verdict & absorption
+
+**Verdict:** GO-WITH-FIXES (1 HIGH residual)
+**Round:** R2 (2026-05-12)
+**Artifact:** `waves/B9/codex-b9b-gate-close-r2-result.md`
+
+R2 confirmed F1-F4 from R1 cleanly. The lone residual HIGH:
+APPEND_ONLY history specs in batch_09 had no PK/unique constraint —
+loader's plain-INSERT path would duplicate rows on same-drop replay,
+violating the SC-7 idempotency contract.
+
+**Absorbed in same session (single commit):**
+
+| Sev | Fix |
+|---|---|
+| HIGH | All 8 batch_09 APPEND_ONLY specs gained `natural_key=` covering their non-nullable columns (the immutable identifying tuple). Generator now emits `sa.UniqueConstraint` (not PK) for APPEND_ONLY specs with natural_key — history rows can repeat the same logical fact via DO NOTHING dedupe. Loader's APPEND_ONLY path applies `INSERT ... ON CONFLICT (natural_key) DO NOTHING` when natural_key is set, falling back to plain INSERT for legacy specs without it. |
+
+**Regenerated migration:** 99 PrimaryKeyConstraint + **8 UniqueConstraint** + 1 Numeric(16,6). Every Tier A table now has a uniqueness surface.
+
+**New replay-idempotency test** (`test_append_only_replay_with_natural_key_does_not_duplicate`): constructs SQLite table with UNIQUE index over natural_key, loads twice, asserts row count unchanged after second load. Green.
+
+787 unit tests pass. R3 (verification of R2 absorption) dispatched next.
 
 ---
 
