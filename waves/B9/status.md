@@ -15,7 +15,7 @@ this file; do not duplicate state in `~/.claude/.../memory/*.md`.
 | Phase | Scope | Status | Commit range | Notes |
 |---|---|---|---|---|
 | B9.A | Infra + contracts | **CLOSED** (gate-close R1+R2+R3 absorbed) | `503cd7b..a114303` (13 commits) | C0-C14 + 3 gate-close absorptions |
-| B9.B | Tier A — 113 simple lookups | **OPEN — C1–C4 prep landed** | `93c9d8b..353a04b` | Ready for multi-agent dispatch on per-table batches (C5+) |
+| B9.B | Tier A — **107 specs across 11 batches + migration + FDW manifest** | **READY FOR GATE-CLOSE** | `93c9d8b..<HEAD>` | 6 short of recon's 113 target; the 6 residual are NDC/GCN/MEDID-keyed → reclassified as Tier B (B9.C scope) |
 | B9.C | Tier B — 66 NDC/GCN joins | NOT STARTED | — | Blocked on B9.B |
 | B9.D | Tier C non-RNDC14 — 16 complex | NOT STARTED | — | Blocked on B9.C |
 | B9.E | RNDC14 standalone | NOT STARTED | — | Blocked on B9.D |
