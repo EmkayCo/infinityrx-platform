@@ -14,8 +14,8 @@ this file; do not duplicate state in `~/.claude/.../memory/*.md`.
 
 | Phase | Scope | Status | Commit range | Notes |
 |---|---|---|---|---|
-| B9.A | Infra + contracts | **IN PROGRESS — gate-close pending** | `503cd7b..9b61d6d` (9 commits) | C0-C14 below |
-| B9.B | Tier A — 113 simple lookups | NOT STARTED | — | Blocked on B9.A gate-close |
+| B9.A | Infra + contracts | **CLOSED** (gate-close R1+R2+R3 absorbed) | `503cd7b..a114303` (13 commits) | C0-C14 + 3 gate-close absorptions |
+| B9.B | Tier A — 113 simple lookups | **OPEN — C1 (F4) landed** | C1 (this commit) | charter at `B9.B-charter.md`; C2+ adds Tier A specs |
 | B9.C | Tier B — 66 NDC/GCN joins | NOT STARTED | — | Blocked on B9.B |
 | B9.D | Tier C non-RNDC14 — 16 complex | NOT STARTED | — | Blocked on B9.C |
 | B9.E | RNDC14 standalone | NOT STARTED | — | Blocked on B9.D |
