@@ -20,8 +20,12 @@ from drug_database.services.fdb_adapter import (
     TableSpec,
     Tier,
 )
-from tests._fdb_contract import assert_delta_semantics_acd_cycle
-from tests._fdb_delta_semantics import make_sqlite_simulator
+# See test_fdb_contract.py — same `tests` package-name collision fix.
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
+from _fdb_contract import assert_delta_semantics_acd_cycle  # noqa: E402
+from _fdb_delta_semantics import make_sqlite_simulator  # noqa: E402
 
 
 @pytest.fixture

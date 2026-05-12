@@ -22,7 +22,13 @@ from drug_database.services.fdb_adapter import (
     TableSpec,
     Tier,
 )
-from tests._fdb_contract import (
+# Importing the helper from `tests._fdb_contract` collides when pytest
+# also collects shared/tests/ in the same run (two `tests` packages).
+# Insert the tests dir on sys.path so the helper is reachable directly.
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
+from _fdb_contract import (  # noqa: E402
     assert_delta_semantics_acd_cycle,
     assert_latin1_decode_smoke,
     assert_no_parse_warnings,
