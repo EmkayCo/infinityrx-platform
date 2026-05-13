@@ -44,7 +44,7 @@ import logging
 import os
 import time
 from collections.abc import Iterator
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -68,8 +68,10 @@ def parse_retry_after(value: str | None) -> int | None:
         pass
     # HTTP-date form.
     try:
-        dt = datetime.strptime(value, "%a, %d %b %Y %H:%M:%S GMT")
-        delta = (dt - datetime.utcnow()).total_seconds()
+        # HTTP-date form is in GMT/UTC per RFC 7231; attach tzinfo so the
+        # subtraction with datetime.now(UTC) doesn't raise a naive/aware error.
+        dt = datetime.strptime(value, "%a, %d %b %Y %H:%M:%S GMT").replace(tzinfo=UTC)
+        delta = (dt - datetime.now(UTC)).total_seconds()
         return max(1, int(delta))
     except ValueError:
         return None
@@ -141,10 +143,14 @@ def get_db_connection():
     """
     import psycopg2  # local import so this module doesn't hard-depend on it
 
-    url = os.environ.get("DATABASE_URL_SYNC") or os.environ.get("DATABASE_URL")
+    url = (
+        os.environ.get("DATABASE_URL_SYNC_REFERENCE")
+        or os.environ.get("DATABASE_URL_SYNC")
+        or os.environ.get("DATABASE_URL")
+    )
     if not url:
         raise RuntimeError(
-            "DATABASE_URL_SYNC / DATABASE_URL not set — cannot connect to Postgres."
+            "DATABASE_URL_SYNC_REFERENCE / DATABASE_URL_SYNC / DATABASE_URL not set — cannot connect to Postgres."
         )
     url = url.replace("postgresql+psycopg2://", "postgresql://")
     url = url.replace("postgresql+asyncpg://", "postgresql://")

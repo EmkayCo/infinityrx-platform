@@ -56,7 +56,7 @@ _ALL_TABLES = [
 
 
 def _resolve_db_url() -> str:
-    url = os.environ.get("DATABASE_URL_SYNC") or os.environ.get("DATABASE_URL")
+    url = os.environ.get("DATABASE_URL_SYNC_REFERENCE") or os.environ.get("DATABASE_URL_SYNC") or os.environ.get("DATABASE_URL")
     if not url:
         logger.error(
             "DATABASE_URL_SYNC not set. "

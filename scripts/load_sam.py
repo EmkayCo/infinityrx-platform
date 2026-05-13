@@ -43,7 +43,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -125,7 +125,7 @@ def _submit_extract(api_key: str, since: date | None) -> str:
         # v4 requires MM/DD/YYYY and a closed range. End bound is "today"
         # in UTC so we don't miss records updated after the submit moment;
         # SAM.gov treats updateDate as update-day, not update-timestamp.
-        today = datetime.utcnow().date()
+        today = datetime.now(UTC).date()
         params["updateDate"] = f"[{since.strftime('%m/%d/%Y')},{today.strftime('%m/%d/%Y')}]"
 
     log.info("submitting extract job: since=%s", since)

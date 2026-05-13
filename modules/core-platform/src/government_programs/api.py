@@ -20,7 +20,7 @@ import io
 import logging
 import re
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any, Optional
 
 _BIN_PATTERN = re.compile(r"\A\d{6}\Z")
@@ -361,7 +361,7 @@ async def create_bin(
     entry = GovernmentProgramBin(
         id=uuid.uuid4(),
         **body.model_dump(),
-        updated_at=datetime.utcnow(),
+        updated_at=datetime.now(UTC),
     )
     db.add(entry)
     db.commit()
@@ -386,7 +386,7 @@ async def update_bin(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BIN entry not found")
     for field_name, value in body.model_dump(exclude_none=True).items():
         setattr(row, field_name, value)
-    row.updated_at = datetime.utcnow()
+    row.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(row)
     return GovernmentBinOut.model_validate(row)

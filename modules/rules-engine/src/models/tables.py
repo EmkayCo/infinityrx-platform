@@ -7,7 +7,7 @@ Every tenant-owned table inherits TenantScopedMixin.
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from decimal import Decimal
 
@@ -119,7 +119,7 @@ class RuleVersion(RulesBase, TenantScopedMixin):
     parameters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
 
     rule_instance: Mapped[RuleInstance] = relationship(back_populates="versions", lazy="selectin")
