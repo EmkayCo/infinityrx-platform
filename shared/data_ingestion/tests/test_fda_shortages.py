@@ -70,7 +70,7 @@ from shared.data_ingestion.sources.fda_drug_shortages import (
 )
 from shared.db.base import Base
 
-from src.models.fda_supplementary_tables import (  # type: ignore[import]
+from drug_database.models.fda_supplementary_tables import (  # type: ignore[import]
     DrugShortage,
     DrugShortageHistory,
     SupplementaryBase,
@@ -404,7 +404,7 @@ class TestNormalization:
 class TestBatchUpsertIdempotent:
     def test_batch_upsert_idempotent(self, db_session: Session) -> None:
         """Upserting same (drug_name_generic, application_number) twice → one row."""
-        from src.services.fda_supplementary_ingestion import (  # type: ignore[import]
+        from drug_database.services.fda_supplementary_ingestion import (  # type: ignore[import]
             DrugShortagesIngestionService,
         )
         svc = DrugShortagesIngestionService(db_session=db_session)
@@ -440,7 +440,7 @@ class TestBatchUpsertIdempotent:
 class TestStatusTransitions:
     def test_history_table_gets_new_row_on_each_run(self, db_session: Session) -> None:
         """Each run appends a history row even when current table just updates."""
-        from src.services.fda_supplementary_ingestion import (  # type: ignore[import]
+        from drug_database.services.fda_supplementary_ingestion import (  # type: ignore[import]
             DrugShortagesIngestionService,
         )
         svc = DrugShortagesIngestionService(db_session=db_session)
@@ -485,7 +485,7 @@ class TestStatusTransitions:
 
     def test_history_preserves_snapshot_date(self, db_session: Session) -> None:
         """Each history row has the snapshot_date of its run."""
-        from src.services.fda_supplementary_ingestion import (  # type: ignore[import]
+        from drug_database.services.fda_supplementary_ingestion import (  # type: ignore[import]
             DrugShortagesIngestionService,
         )
         svc = DrugShortagesIngestionService(db_session=db_session)
@@ -724,7 +724,7 @@ class TestFdaDrugShortagesIngesterDownload:
         mock_svc.load_records = AsyncMock(return_value=expected_result)
 
         with patch(
-            "src.services.fda_supplementary_ingestion.DrugShortagesIngestionService",
+            "drug_database.services.fda_supplementary_ingestion.DrugShortagesIngestionService",
             return_value=mock_svc,
         ):
             ingester = FdaDrugShortagesIngester(db_session=db_session)

@@ -71,7 +71,7 @@ from shared.data_ingestion.sources.fda_purple_book import (
 )
 from shared.db.base import Base
 
-from src.models.fda_supplementary_tables import (  # type: ignore[import]
+from drug_database.models.fda_supplementary_tables import (  # type: ignore[import]
     DrugPurpleBook,
     SupplementaryBase,
     SCHEMA as SUPP_SCHEMA,
@@ -391,7 +391,7 @@ class TestParseDate:
 class TestBatchUpsertIdempotent:
     def test_batch_upsert_idempotent(self, db_session: Session) -> None:
         """Upserting same bla_number twice → one row, updated data."""
-        from src.services.fda_supplementary_ingestion import (  # type: ignore[import]
+        from drug_database.services.fda_supplementary_ingestion import (  # type: ignore[import]
             PurpleBookIngestionService,
         )
         svc = PurpleBookIngestionService(db_session=db_session)
@@ -417,7 +417,7 @@ class TestBatchUpsertIdempotent:
 
     def test_batch_upsert_multiple_records(self, db_session: Session) -> None:
         """Multiple distinct BLAs all persisted correctly."""
-        from src.services.fda_supplementary_ingestion import (  # type: ignore[import]
+        from drug_database.services.fda_supplementary_ingestion import (  # type: ignore[import]
             PurpleBookIngestionService,
         )
         svc = PurpleBookIngestionService(db_session=db_session)
@@ -557,7 +557,7 @@ class TestFdaPurpleBookIngesterParse:
         mock_svc.load_records = AsyncMock(return_value=expected_result)
 
         with patch(
-            "src.services.fda_supplementary_ingestion.PurpleBookIngestionService",
+            "drug_database.services.fda_supplementary_ingestion.PurpleBookIngestionService",
             return_value=mock_svc,
         ):
             ingester = FdaPurpleBookIngester(db_session=db_session)

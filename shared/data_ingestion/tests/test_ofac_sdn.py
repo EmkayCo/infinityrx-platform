@@ -143,6 +143,7 @@ def test_parse_csv_positional_embedded_newline(tmp_path):
     p.write_text(
         '1,"Line one\nLine two",A,B,C,D,E,F,G,H,I,J\n',
         encoding="latin-1",
+        newline="\n",
     )
     rows = list(_parse_csv_positional(p, _SDN_COLUMNS))
     assert len(rows) == 1

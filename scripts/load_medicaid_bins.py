@@ -43,7 +43,7 @@ logger = logging.getLogger("load_medicaid_bins")
 
 
 def _resolve_db_url() -> str:
-    url = os.environ.get("DATABASE_URL_SYNC") or os.environ.get("DATABASE_URL")
+    url = os.environ.get("DATABASE_URL_SYNC_REFERENCE") or os.environ.get("DATABASE_URL_SYNC") or os.environ.get("DATABASE_URL")
     if not url:
         logger.error(
             "DATABASE_URL_SYNC not set. "
@@ -69,6 +69,10 @@ async def _run() -> None:
         ingester = MedicaidBinIngester(db_session=session)
         logger.info("Starting Medicaid BINs pipeline...")
         result = await ingester.run(run_type="manual_trigger")
+
+    if result.status == "failed":
+        logger.error("Ingest failed: %s", getattr(result, "error_message", "unknown"))
+        sys.exit(2)
 
     print(f"\n{'=' * 60}")
     print("Medicaid BINs Load Result")

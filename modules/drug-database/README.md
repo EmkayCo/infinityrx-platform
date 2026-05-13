@@ -15,7 +15,7 @@ FastAPI service providing NDC lookup, drug pricing, interaction checking, therap
 - **Drug Shortages** — FDA shortage tracking with status filter.
 - **FDA NDC Parser** — Ingests FDA NDC JSON/CSV exports.
 - **NADAC Parser** — Ingests CMS NADAC pricing CSV.
-- **FDB Adapter Stub** — `FDBAdapterStub` raises `NotImplementedError("FDB spec TBD")` on all methods; `FDBAdapter` ABC defines the interface for future First Databank integration.
+- **FDB Adapter** — `FDBLocalDropAdapter` reads operator-managed NDDF Plus drops at `data/reference/fdb/TEL251759D/`. Generic `TableSpec`-driven surface (SPEC §3.7.2): `discover_latest_drop` / `open_table` / `parse_table`. Phase 8 TableSpec values: `RNP3_NDC_PRICE` (+ UPD variant), `RPRDPTD0_PRICE_TYPE_DESC`, `RNPTYPD0_NDC_PRICE_TYPE_DESC`. Hot-path `parse_rnp3` typed wrapper for the ingester's main loop.
 - **Rate Limiting** — Token-bucket per-tenant rate limiter (`RateLimitMiddleware`), returns `429` with `Retry-After` header when exhausted.
 - **Security Headers** — `SecurityHeadersMiddleware` mounted on all responses.
 - **DLQ Router** — Dead-letter queue API mounted at `/api/v1/events/dlq`.
@@ -56,6 +56,27 @@ Coverage threshold: 99% branch coverage. Financial, PHI, security, and auth path
 ## Database Schema
 
 Schema: `drug_db` (PostgreSQL). Tables: `drug_products`, `drug_pricing`, `drug_pricing_history`, `drug_interactions`, `therapeutic_equivalence`, `tenant_pricing_overrides`, `data_refresh_logs`, `drug_shortages`, `rems_programs`.
+
+## Package layout
+
+The Python package under `modules/drug-database/` has been through one structural rename:
+
+| Era | Import path | Location |
+|---|---|---|
+| Pre-B8 (Phase 11A and earlier) | `from src.X import …` with module root on `sys.path` | `modules/drug-database/src/` |
+| Post-B8 (Phase 11B onward) | `from drug_database.X import …` | `modules/drug-database/drug_database/` |
+
+**Post-B8 details:**
+
+- `[tool.setuptools.packages.find]` in `pyproject.toml` uses `where = ["."]` and
+  `include = ["drug_database*"]` — all subpackages are discovered automatically.
+- The module root (`modules/drug-database/`) must be on `sys.path` for the package
+  to resolve; `conftest.py` and runtime callers inject this via `sys.path.insert`.
+- Cross-module consumers (e.g. `adjudication-engine/src/services/pricing_enrichment.py`)
+  import as `from drug_database.services.X import …` — no `type: ignore` shims required.
+- The `src/` directory no longer exists. Any `from src.X` import will fail with
+  `ModuleNotFoundError` at collection time — this is intentional (fail-fast over
+  silent dual-identity).
 
 ## Lessons Applied
 
