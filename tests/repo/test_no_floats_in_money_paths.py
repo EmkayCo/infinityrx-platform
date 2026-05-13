@@ -193,7 +193,10 @@ def _discover_money_files() -> list[Path]:
 # ---------------------------------------------------------------------------
 
 def _rel(path: Path) -> str:
-    return str(path.relative_to(_REPO_ROOT))
+    # POSIX form so allowlist keys (forward slashes) match cross-platform.
+    # On Windows, str(Path.relative_to(...)) uses backslashes and silently
+    # misses every allowlist entry; using as_posix() makes the lookup OS-agnostic.
+    return path.relative_to(_REPO_ROOT).as_posix()
 
 
 def _parse(path: Path) -> ast.Module | None:
