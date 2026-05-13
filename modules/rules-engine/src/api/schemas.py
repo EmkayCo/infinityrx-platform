@@ -18,7 +18,9 @@ from pydantic import BaseModel, Field
 class RuleTypeCreate(BaseModel):
     code: str = Field(..., max_length=100)
     name: str = Field(..., max_length=255)
-    category: str = Field(..., pattern=r"\A(pricing|coverage|authorization|specialty)\Z")
+    # \z (Rust-regex end-of-input) — pydantic-core rejects \Z; LESSON-004
+    # security guarantee is identical between \Z and \z.
+    category: str = Field(..., pattern=r"\A(pricing|coverage|authorization|specialty)\z")
     parameter_schema: dict[str, Any] = Field(default_factory=dict)
     description: str | None = None
 
@@ -47,7 +49,7 @@ class RuleInstanceCreate(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
     effective_date: date
     termination_date: date | None = None
-    status: str = Field(default="draft", pattern=r"\A(active|inactive|draft)\Z")
+    status: str = Field(default="draft", pattern=r"\A(active|inactive|draft)\z")
 
 
 class RuleInstanceUpdate(BaseModel):
@@ -55,7 +57,7 @@ class RuleInstanceUpdate(BaseModel):
     parameters: dict[str, Any] | None = None
     effective_date: date | None = None
     termination_date: date | None = None
-    status: str | None = Field(default=None, pattern=r"\A(active|inactive|draft)\Z")
+    status: str | None = Field(default=None, pattern=r"\A(active|inactive|draft)\z")
 
 
 class RuleInstanceResponse(BaseModel):

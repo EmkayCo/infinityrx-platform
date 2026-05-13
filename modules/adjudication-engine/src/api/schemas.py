@@ -17,7 +17,10 @@ class AdjudicateRequest(BaseModel):
 
     bin_number: str = Field(..., min_length=6, max_length=6)
     pcn: str = Field(..., max_length=20)
-    transaction_code: str = Field(..., pattern=r"\A(B1|B2|B3|E1)\Z")
+    # pydantic-core uses Rust regex which accepts \z (lowercase) for
+    # end-of-input. Python's re module uses \Z. LESSON-004's anchored-
+    # match security guarantee is identical between the two.
+    transaction_code: str = Field(..., pattern=r"\A(B1|B2|B3|E1)\z")
 
     # Patient
     cardholder_id: str = Field(..., min_length=1, max_length=20)

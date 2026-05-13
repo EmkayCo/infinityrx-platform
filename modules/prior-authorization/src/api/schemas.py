@@ -20,8 +20,10 @@ class PASubmitRequest(BaseModel):
     prescriber_npi: str = Field(min_length=10, max_length=10)
     drug_ndc: str = Field(min_length=11, max_length=11)
     drug_name: str = Field(min_length=1, max_length=255)
-    source: str = Field(pattern=r"\A(pharmacy_reject|epa|manual|phone|fhir)\Z")
-    priority: str = Field(default="routine", pattern=r"\A(routine|urgent)\Z")
+    # \z (lowercase) is the Rust-regex end-of-input anchor pydantic-core
+    # requires; semantically identical to Python's \Z for LESSON-004.
+    source: str = Field(pattern=r"\A(pharmacy_reject|epa|manual|phone|fhir)\z")
+    priority: str = Field(default="routine", pattern=r"\A(routine|urgent)\z")
     plan_id: uuid.UUID
     program_id: uuid.UUID | None = None
     clinical_data: dict | None = None
@@ -30,7 +32,7 @@ class PASubmitRequest(BaseModel):
 class PADecisionRequest(BaseModel):
     """Record a clinical reviewer decision."""
 
-    decision: str = Field(pattern=r"\A(approved|denied|pend|request_info)\Z")
+    decision: str = Field(pattern=r"\A(approved|denied|pend|request_info)\z")
     reviewer_id: uuid.UUID
     approved_duration_days: int | None = None
     approved_quantity: Decimal | None = None
@@ -49,7 +51,7 @@ class PAAppealRequest(BaseModel):
 
     appeal_level: int = Field(ge=1, le=5)
     appeal_type: str = Field(
-        pattern=r"\A(clinical_reviewer|medical_director|external)\Z"
+        pattern=r"\A(clinical_reviewer|medical_director|external)\z"
     )
     regulatory_deadline: date | None = None
 
