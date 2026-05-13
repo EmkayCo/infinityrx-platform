@@ -55,6 +55,7 @@ class ClaimContext:
     """
 
     claim_id: str = ""
+    tenant_id: str = ""
     member_id: str = ""
     member_age: int = 0
     member_state: str = ""
@@ -69,6 +70,18 @@ class ClaimContext:
     plan_id: str = ""
     program_id: str = ""
     network_tier: str = ""
+
+    # NCPDP wire fields — populated by build_context and referenced by
+    # shared.utils.ncpdp_field_lookup (NCPDP_FIELD_TO_CTX_ATTR). When the
+    # lookup mapping registers a field code, the corresponding attribute
+    # must exist here (test_every_mapping_targets_existing_attr enforces).
+    bin: str = ""                # 101-A1
+    pcn: str = ""                # 104-A4
+    group_number: str = ""       # 301-C1
+    occ_code: str = ""           # 308-C8 — Other Coverage Code
+    patient_dob: date | None = None              # 304-C4
+    date_of_service: date | None = None          # 401-D1
+    submission_clarification_codes: list[str] = field(default_factory=list)  # 420-DK
 
     # Pricing fields (mutated by MODIFY rules)
     ingredient_cost: Decimal = ZERO
