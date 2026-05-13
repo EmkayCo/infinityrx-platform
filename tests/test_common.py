@@ -33,10 +33,13 @@ def test_retry_after_seconds_integer_floor_at_one():
 
 def test_retry_after_http_date(monkeypatch):
     """HTTP-date form: compute delta against now."""
+    # parse_retry_after uses datetime.now(UTC) since the utcnow() retirement;
+    # the FrozenDT shim must intercept .now() and honor the tz argument.
     class FrozenDT(datetime):
         @classmethod
-        def utcnow(cls):
-            return datetime(2026, 4, 16, 0, 0, 0)
+        def now(cls, tz=None):
+            frozen = datetime(2026, 4, 16, 0, 0, 0)
+            return frozen.replace(tzinfo=tz) if tz else frozen
     monkeypatch.setattr(common, "datetime", FrozenDT)
     assert common.parse_retry_after("Fri, 17 Apr 2026 00:00:00 GMT") == 86400
 

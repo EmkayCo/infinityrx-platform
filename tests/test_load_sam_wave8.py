@@ -378,10 +378,14 @@ def test_submit_extract_with_since_formats_range(monkeypatch):
 
     monkeypatch.setattr(loader, "_get_with_retry", fake_get)
 
+    # loader uses datetime.now(UTC).date() since the utcnow() retirement;
+    # FrozenDT must intercept .now() and honor the tz argument so the
+    # frozen value carries forward into .date().
     class FrozenDT(datetime):
         @classmethod
-        def utcnow(cls):
-            return datetime(2026, 4, 16, 12, 0, 0)
+        def now(cls, tz=None):
+            frozen = datetime(2026, 4, 16, 12, 0, 0)
+            return frozen.replace(tzinfo=tz) if tz else frozen
     monkeypatch.setattr(loader, "datetime", FrozenDT)
 
     loader._submit_extract("KEY", date(2026, 4, 10))
