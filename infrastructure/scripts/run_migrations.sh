@@ -13,6 +13,14 @@ ENV_NAME="${1:-dev}"
 REPO_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
 cd "$REPO_ROOT"
 
+# Cross-platform venv bin path: Linux/macOS use .venv/bin/, Windows uses
+# .venv/Scripts/. Resolve once so the rest of the script is platform-agnostic.
+if [ -d "$REPO_ROOT/.venv/Scripts" ]; then
+  VENV_BIN="$REPO_ROOT/.venv/Scripts"
+else
+  VENV_BIN="$REPO_ROOT/.venv/bin"
+fi
+
 case "$ENV_NAME" in
   dev)  ENV_FILE=".env.dev"  ;;
   mock) ENV_FILE=".env.mock" ;;
@@ -91,12 +99,12 @@ for module in "${MODULES[@]}"; do
       ( cd "$module_dir" && \
         DATABASE_URL="$SYNC_URL" \
         DATABASE_URL_SYNC="$SYNC_URL" \
-        "$REPO_ROOT/.venv/bin/alembic" upgrade head ) || {
+        "$VENV_BIN/alembic" upgrade head ) || {
         echo "FAILED: $module"; exit 1
       }
       ;;
     *)
-      ( cd "$module_dir" && "$REPO_ROOT/.venv/bin/alembic" upgrade head ) || {
+      ( cd "$module_dir" && "$VENV_BIN/alembic" upgrade head ) || {
         echo "FAILED: $module"; exit 1
       }
       ;;
