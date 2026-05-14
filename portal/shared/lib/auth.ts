@@ -1,7 +1,41 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import { SignJWT } from "jose";
 import { API_URLS } from "./constants";
 import { authorizeB10TestBypass } from "./auth-b10-test-bypass";
+
+// Use Web Crypto's randomUUID (available in Edge + Node 19+) so this module
+// can be imported from middleware (Edge runtime) without bundle failures.
+// `node:crypto` would crash the Edge bundle even though authorize() only
+// runs at Node runtime — Next.js still has to compile auth.ts for both.
+
+// Seeded admin UUIDs from infrastructure/scripts/seed_admin.py.
+// The dev-bypass mints a JWT claiming these so backend modules (which
+// decode/verify against JWT_SECRET) accept requests end-to-end.
+const DEV_ADMIN_ID = "b0000000-0000-0000-0000-000000000001";
+const DEV_TENANT_ID = "a0000000-0000-0000-0000-000000000001";
+
+async function mintDevJwt(roles: string[]): Promise<string> {
+  const secretStr = process.env.JWT_SECRET;
+  if (!secretStr || secretStr.length < 32) {
+    throw new Error(
+      "JWT_SECRET must be set (≥32 chars) for dev-bypass JWT minting. " +
+        "Check portal/operator/.env.local."
+    );
+  }
+  const secret = new TextEncoder().encode(secretStr);
+  return await new SignJWT({
+    sub: DEV_ADMIN_ID,
+    tid: DEV_TENANT_ID,
+    roles,
+    typ: "access",
+    jti: crypto.randomUUID(),
+  })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime("8h")
+    .sign(secret);
+}
 
 interface LoginResponse {
   access_token: string;
@@ -54,16 +88,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (process.env.NODE_ENV === "production") return null;
         if (process.env.DEV_AUTH_BYPASS !== "true") return null;
         const now = Math.floor(Date.now() / 1000);
+        // Mint a REAL HS256 JWT signed with JWT_SECRET so backend modules
+        // (which decode against the same secret in shared/auth/jwt_tokens.py)
+        // accept the bearer token end-to-end. Without this, every backend
+        // call returns 401 "missing/invalid bearer token".
+        const accessToken = await mintDevJwt(["platform_admin"]);
+        const refreshToken = await mintDevJwt(["platform_admin"]); // typ still 'access'; refresh not used in dev path
         return {
-          id: "dev-admin-00000000-0000-0000-0000-000000000001",
-          email: "dev@infinityrx.local",
-          name: "Dev Admin",
+          id: DEV_ADMIN_ID,
+          email: "admin@infinityrx.com",
+          name: "Platform Admin",
           role: "platform_admin",
-          tenant_id: "00000000-0000-0000-0000-000000000001",
+          tenant_id: DEV_TENANT_ID,
           permissions: ["*"],
           mfa_enrolled: true,
-          access_token: "dev-bypass-token",
-          refresh_token: "dev-bypass-refresh",
+          access_token: accessToken,
+          refresh_token: refreshToken,
           expires_at: now + 60 * 60 * 8,
         };
       },
@@ -90,6 +130,46 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
           return null;
+        }
+
+        // Dev-only short-circuit for admin@infinityrx.com / admin.
+        //
+        // The core-platform auth subsystem currently runs against a SQLite
+        // shim (modules/core-platform/src/_shim/db.py) rather than the live
+        // Postgres `core` schema, so /api/v1/auth/login 500s in dev. Until
+        // that wiring is fixed, the dev environment accepts the seeded
+        // admin credentials here and mints the same real HS256 JWT (signed
+        // against the same JWT_SECRET the backends decode against) as the
+        // dev-bypass button. This means real password login works
+        // end-to-end against live backends without sitting behind the
+        // broken /api/v1/auth/login path.
+        //
+        // Hard-refuses in production builds. In dev, requires DEV_AUTH_BYPASS
+        // to be enabled — the same gate the dev-bypass button uses, so a
+        // single env var disables BOTH dev login paths.
+        const isProd = process.env.NODE_ENV === "production";
+        const devBypassEnabled = process.env.DEV_AUTH_BYPASS === "true";
+        if (
+          !isProd &&
+          devBypassEnabled &&
+          String(credentials.email).toLowerCase() === "admin@infinityrx.com" &&
+          String(credentials.password) === "admin"
+        ) {
+          const now = Math.floor(Date.now() / 1000);
+          const accessToken = await mintDevJwt(["platform_admin"]);
+          const refreshToken = await mintDevJwt(["platform_admin"]);
+          return {
+            id: DEV_ADMIN_ID,
+            email: "admin@infinityrx.com",
+            name: "Platform Admin",
+            role: "platform_admin",
+            tenant_id: DEV_TENANT_ID,
+            permissions: ["*"],
+            mfa_enrolled: true,
+            access_token: accessToken,
+            refresh_token: refreshToken,
+            expires_at: now + 60 * 60 * 8,
+          };
         }
 
         try {

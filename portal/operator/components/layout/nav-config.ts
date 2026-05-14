@@ -184,7 +184,9 @@ export const NAV_MODULES: NavModule[] = [
     ],
   },
   {
-    label: "Network",
+    // Renamed from "Network" to avoid duplicate React key with the operator
+    // "Network" group above (Sidebar keys ModuleRow by mod.label).
+    label: "Network Admin",
     icon: Building2,
     href: "/admin/network/pay-to-entities",
     permission: Permission.AdminFull,

@@ -29,15 +29,19 @@ interface FetchOptions extends RequestInit {
 }
 
 type TokenProvider = () => Promise<string | null | undefined>;
+type TenantProvider = () => Promise<string | null | undefined>;
 
 let _tokenProvider: TokenProvider | null = null;
+let _tenantProvider: TenantProvider | null = null;
 let _refreshCallback: (() => Promise<void>) | null = null;
 
 export function configureApiClient(opts: {
   tokenProvider: TokenProvider;
+  tenantProvider?: TenantProvider;
   onUnauthorized?: () => Promise<void>;
 }): void {
   _tokenProvider = opts.tokenProvider;
+  _tenantProvider = opts.tenantProvider ?? null;
   _refreshCallback = opts.onUnauthorized ?? null;
 }
 
@@ -47,6 +51,24 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
     const token = await _tokenProvider();
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
+    }
+  }
+  // Every backend route validates x-tenant-id as a required UUID header.
+  // Without it the request fails at FastAPI validation (422) before the
+  // handler runs — which presents to the user as "no data, no error."
+  // Resolve from the configured provider (typically the NextAuth session's
+  // tenant_id), else fall back to NEXT_PUBLIC_DEFAULT_TENANT_ID for unauthed
+  // calls during early page load.
+  if (_tenantProvider) {
+    const tenant = await _tenantProvider();
+    if (tenant) {
+      headers["x-tenant-id"] = tenant;
+    }
+  }
+  if (!headers["x-tenant-id"]) {
+    const fallback = process.env.NEXT_PUBLIC_DEFAULT_TENANT_ID;
+    if (fallback) {
+      headers["x-tenant-id"] = fallback;
     }
   }
   return headers;
