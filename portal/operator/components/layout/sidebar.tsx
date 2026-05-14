@@ -15,13 +15,16 @@ import { IfxLogo } from "@/components/ui/ifx-logo";
 import { NAV_MODULES, type NavModule, findActiveModule } from "./nav-config";
 
 const COLLAPSED_KEY = "ifx-sidebar-collapsed";
-const EXPANDED_KEY = "ifx-sidebar-expanded-modules";
+const EXPANDED_KEY = "ifx-sidebar-expanded-module";
 
 export function Sidebar({ className }: { className?: string }) {
   const pathname = usePathname();
   const { user, hasPermission } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
-  const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({});
+  // B11 w4: single-open accordion. At most ONE module is expanded at a time.
+  // null = all collapsed. Previously a Record<string, boolean> let every
+  // clicked module stay open simultaneously (B11 F-009).
+  const [expandedModule, setExpandedModule] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
@@ -29,23 +32,32 @@ export function Sidebar({ className }: { className?: string }) {
     if (storedCollapsed === "true") setCollapsed(true);
     const storedExpanded = localStorage.getItem(EXPANDED_KEY);
     if (storedExpanded) {
+      // Forward-compat: tolerate the legacy Record<string, boolean> blob by
+      // picking the first truthy label. Plain strings pass through as-is.
       try {
-        setExpandedModules(JSON.parse(storedExpanded));
+        const parsed: unknown = JSON.parse(storedExpanded);
+        if (typeof parsed === "string") {
+          setExpandedModule(parsed);
+        } else if (parsed && typeof parsed === "object") {
+          const firstOpen = Object.entries(parsed as Record<string, unknown>)
+            .find(([, v]) => v === true)?.[0];
+          setExpandedModule(firstOpen ?? null);
+        }
       } catch {
-        // ignore
+        // ignore — wrong format, leave null
       }
     }
     setHydrated(true);
   }, []);
 
-  // Auto-expand the module that contains the active path
+  // Auto-expand the module that contains the active path.
+  // Only fires when no module is open yet — never overrides a user click.
   useEffect(() => {
     if (!hydrated) return;
     const active = findActiveModule(pathname);
-    if (active?.children && !expandedModules[active.label]) {
-      const next = { ...expandedModules, [active.label]: true };
-      setExpandedModules(next);
-      localStorage.setItem(EXPANDED_KEY, JSON.stringify(next));
+    if (active?.children && expandedModule === null) {
+      setExpandedModule(active.label);
+      localStorage.setItem(EXPANDED_KEY, JSON.stringify(active.label));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, hydrated]);
@@ -59,9 +71,13 @@ export function Sidebar({ className }: { className?: string }) {
   }
 
   function toggleExpand(label: string) {
-    setExpandedModules((prev) => {
-      const next = { ...prev, [label]: !prev[label] };
-      localStorage.setItem(EXPANDED_KEY, JSON.stringify(next));
+    setExpandedModule((prev) => {
+      const next = prev === label ? null : label;
+      if (next === null) {
+        localStorage.removeItem(EXPANDED_KEY);
+      } else {
+        localStorage.setItem(EXPANDED_KEY, JSON.stringify(next));
+      }
       return next;
     });
   }
@@ -104,7 +120,7 @@ export function Sidebar({ className }: { className?: string }) {
               module={mod}
               collapsed={collapsed}
               isActive={activeModule?.label === mod.label}
-              isExpanded={!!expandedModules[mod.label]}
+              isExpanded={expandedModule === mod.label}
               onToggleExpand={() => toggleExpand(mod.label)}
               pathname={pathname}
               hasPermission={hasPermission}
