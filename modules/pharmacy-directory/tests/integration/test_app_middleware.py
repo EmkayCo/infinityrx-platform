@@ -88,6 +88,17 @@ class TestCorsPreflight:
     — verified in production by the 2026-05-13 'no data in directories'
     incident."""
 
+    @pytest.fixture(autouse=True)
+    def _set_cors_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """app.py mounts CORSMiddleware conditionally — only when
+        CORS_ALLOW_ORIGINS (settings) or CORS_ORIGINS (env) yields a
+        non-empty origin list. The test env sets neither by default, so
+        without this fixture create_app() correctly mounts NO CORS and
+        test_create_app_mounts_cors_middleware fails. Provide the env so
+        the conditional fires and the mount is exercised."""
+        monkeypatch.setenv("CORS_ALLOW_ORIGINS", '["http://localhost:3000"]')
+        monkeypatch.setenv("CORS_ORIGINS", "http://localhost:3000")
+
     def test_options_preflight_returns_cors_headers(self) -> None:
         from src.app import create_app  # noqa: PLC0415 — defer import to avoid lifespan
 
