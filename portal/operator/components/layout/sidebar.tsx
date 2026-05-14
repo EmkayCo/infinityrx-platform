@@ -51,11 +51,16 @@ export function Sidebar({ className }: { className?: string }) {
   }, []);
 
   // Auto-expand the module that contains the active path.
-  // Only fires when no module is open yet — never overrides a user click.
+  // Codex adversarial R1 CONCERN: previously only fired when expandedModule
+  // was null, which left users confused when navigation landed inside
+  // module A while module B was manually open ("the sidebar didn't follow
+  // my navigation"). Updated behavior: active route ALWAYS wins on
+  // navigation, but the user can still toggle modules open/close manually
+  // afterward (the toggle handler isn't called by this effect).
   useEffect(() => {
     if (!hydrated) return;
     const active = findActiveModule(pathname);
-    if (active?.children && expandedModule === null) {
+    if (active?.children && expandedModule !== active.label) {
       setExpandedModule(active.label);
       localStorage.setItem(EXPANDED_KEY, JSON.stringify(active.label));
     }

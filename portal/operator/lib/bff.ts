@@ -27,15 +27,52 @@ export interface BffSession {
 }
 
 /**
+ * Decode a HS256 JWT body without verification — for cross-claim checks
+ * only (e.g., confirming session.tenant_id matches JWT.tid). The token
+ * was already minted by us; we re-extract the tid claim to detect
+ * session-vs-token drift where a stale session could carry a tenant
+ * the JWT was never signed for.
+ *
+ * NOT a security boundary — backends still verify the JWT signature
+ * with JWT_SECRET. This is a portal-side defense-in-depth check.
+ */
+function readJwtClaim(jwt: string, claim: string): string | null {
+  try {
+    const parts = jwt.split(".");
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(
+      Buffer.from(parts[1], "base64url").toString("utf-8")
+    ) as Record<string, unknown>;
+    const v = payload[claim];
+    return typeof v === "string" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function logBff(event: string, fields: Record<string, unknown>): void {
+  // Structured single-line log so observability platforms can ingest
+  // BFF telemetry without sampling free-form messages. Keep PHI out.
+  // eslint-disable-next-line no-console
+  console.log(JSON.stringify({ svc: "bff", event, ...fields }));
+}
+
+/**
  * Resolve the active NextAuth session and extract the bits a BFF route
  * handler needs. Returns either a usable session or a NextResponse the
  * caller should return directly.
+ *
+ * Defense-in-depth: verifies session.tenant_id matches JWT.tid claim
+ * before forwarding. Mismatch → 403, logged with the discrepancy. Stops
+ * a stale/malformed session from telling the BFF to inject a tenant
+ * header the JWT doesn't authorize.
  */
 export async function resolveSession(): Promise<
   { ok: true; session: BffSession } | { ok: false; response: NextResponse }
 > {
   const session = await auth();
   if (!session) {
+    logBff("session_missing", {});
     return {
       ok: false,
       response: NextResponse.json(
@@ -52,6 +89,11 @@ export async function resolveSession(): Promise<
   const roles = (u["permissions"] as string[] | undefined) ?? [];
 
   if (!jwt || !tenantId || !userId) {
+    logBff("session_incomplete", {
+      has_jwt: !!jwt,
+      has_tenant_id: !!tenantId,
+      has_user_id: !!userId,
+    });
     return {
       ok: false,
       response: NextResponse.json(
@@ -59,6 +101,29 @@ export async function resolveSession(): Promise<
           error: {
             code: "INCOMPLETE_SESSION",
             message: "Session is missing required claims (jwt/tenant_id/user_id)",
+          },
+        },
+        { status: 403, headers: { "Cache-Control": "no-store" } }
+      ),
+    };
+  }
+  // Defense-in-depth: session.tenant_id MUST match JWT.tid. If they
+  // disagree, the session was tampered with or refresh-token rotation
+  // crossed tenants. Either way: 403 immediately and log.
+  const jwtTid = readJwtClaim(jwt, "tid");
+  if (jwtTid && jwtTid !== tenantId) {
+    logBff("session_jwt_tenant_mismatch", {
+      session_tenant_id: tenantId,
+      jwt_tid: jwtTid,
+      user_id: userId,
+    });
+    return {
+      ok: false,
+      response: NextResponse.json(
+        {
+          error: {
+            code: "TENANT_CLAIM_MISMATCH",
+            message: "Session tenant_id does not match JWT tid claim",
           },
         },
         { status: 403, headers: { "Cache-Control": "no-store" } }
@@ -97,20 +162,47 @@ export function phiJson(
 }
 
 /**
- * Forward a request to an upstream backend with a timeout. Returns either
- * the parsed JSON or a "degraded state" marker so callers can distinguish
- * empty-from-backend vs backend-unreachable.
+ * Typed failure reasons surfaced by forwardJson. Lets callers
+ * distinguish a backend that's down (TIMEOUT/NETWORK) from a backend
+ * that responded with a non-2xx status (UPSTREAM_ERROR) from a backend
+ * that returned a body the client couldn't parse (PARSE_ERROR).
+ *
+ * Pre-w2.x this collapsed everything into `{ degraded: true }` which
+ * hid backend contract regressions as data-unavailability. Codex
+ * adversarial R1 flagged it as a BLOCK.
+ */
+export type ForwardFailure =
+  | { reason: "TIMEOUT"; status: 0; url: string }
+  | { reason: "NETWORK"; status: 0; url: string; error: string }
+  | { reason: "UPSTREAM_ERROR"; status: number; url: string }
+  | { reason: "PARSE_ERROR"; status: number; url: string; error: string };
+
+/**
+ * Forward a request to an upstream backend with a typed failure envelope.
+ *
+ * Recommended `timeoutMs`:
+ *   - 3000 (3s)  read/dashboard convenience calls
+ *   - 8000 (8s)  write paths (claim submit, audit-bearing operations)
+ *   - 15000      long-running upstreams (avoid in user-facing paths)
+ *
+ * Default is 5000. Callers SHOULD set it explicitly when the call is
+ * audit-bearing or PHI-write.
  */
 export async function forwardJson<T>(
   url: string,
   session: BffSession,
   options: { method?: string; body?: unknown; timeoutMs?: number } = {}
-): Promise<{ ok: true; data: T } | { ok: false; status: number; degraded: true }> {
+): Promise<{ ok: true; data: T } | { ok: false; failure: ForwardFailure }> {
   const { method = "GET", body, timeoutMs = 5000 } = options;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let didTimeout = false;
+  const timer = setTimeout(() => {
+    didTimeout = true;
+    controller.abort();
+  }, timeoutMs);
+  let resp: Response;
   try {
-    const resp = await fetch(url, {
+    resp = await fetch(url, {
       method,
       headers: {
         ...backendHeaders(session),
@@ -120,15 +212,42 @@ export async function forwardJson<T>(
       signal: controller.signal,
       cache: "no-store",
     });
-    if (!resp.ok) {
-      return { ok: false, status: resp.status, degraded: true };
-    }
+  } catch (err) {
+    clearTimeout(timer);
+    const failure: ForwardFailure = didTimeout
+      ? { reason: "TIMEOUT", status: 0, url }
+      : { reason: "NETWORK", status: 0, url, error: String(err) };
+    logBff("forward_failed", { ...failure, method, tenant: session.tenantId });
+    return { ok: false, failure };
+  }
+  clearTimeout(timer);
+  if (!resp.ok) {
+    const failure: ForwardFailure = {
+      reason: "UPSTREAM_ERROR",
+      status: resp.status,
+      url,
+    };
+    logBff("forward_upstream_error", { ...failure, method, tenant: session.tenantId });
+    return { ok: false, failure };
+  }
+  try {
     const data = (await resp.json()) as T;
     return { ok: true, data };
-  } catch {
-    return { ok: false, status: 0, degraded: true };
-  } finally {
-    clearTimeout(timer);
+  } catch (err) {
+    const failure: ForwardFailure = {
+      reason: "PARSE_ERROR",
+      status: resp.status,
+      url,
+      error: String(err),
+    };
+    logBff("forward_parse_error", {
+      reason: failure.reason,
+      status: failure.status,
+      url: failure.url,
+      method,
+      tenant: session.tenantId,
+    });
+    return { ok: false, failure };
   }
 }
 

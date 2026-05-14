@@ -17,6 +17,12 @@ export interface KpiCardProps {
   icon?: React.ReactNode;
   loading?: boolean;
   className?: string;
+  // B11 w2.x — when the BFF reports a field's source is unreachable
+  // or not yet aggregated, render "Unavailable" with a muted style
+  // instead of the literal value (which would otherwise be 0/empty).
+  // Distinguishes "true zero" from "data not yet wired" for the
+  // operator. Trend is suppressed when unavailable.
+  unavailable?: boolean;
 }
 
 function renderValue(value: string | number, format: KpiCardProps["format"]): string {
@@ -38,6 +44,7 @@ export function KpiCard({
   icon,
   loading = false,
   className,
+  unavailable = false,
 }: KpiCardProps) {
   const content = (
     <div
@@ -46,6 +53,11 @@ export function KpiCard({
         href && "cursor-pointer hover:-translate-y-0.5 ifx-card-shadow-lift",
         className,
       )}
+      aria-label={
+        unavailable
+          ? `${label}: data unavailable (backend source not yet wired)`
+          : undefined
+      }
     >
       <span
         className="absolute inset-x-0 top-0 h-[3px] rounded-t-lg"
@@ -60,12 +72,21 @@ export function KpiCard({
       </div>
       {loading ? (
         <div className="h-7 w-24 rounded shimmer" />
+      ) : unavailable ? (
+        <div className="text-[18px] font-semibold leading-tight text-ifx-gray-400 italic">
+          Unavailable
+        </div>
       ) : (
         <div className="text-[28px] font-bold leading-tight text-ifx-gray-900 tabular-nums">
           {renderValue(value, format)}
         </div>
       )}
-      {trend && !loading && (
+      {unavailable && !loading && (
+        <span className="text-[10px] uppercase tracking-wide text-ifx-gray-400">
+          backend source not yet wired
+        </span>
+      )}
+      {trend && !loading && !unavailable && (
         <div className="flex items-center gap-1 text-xs">
           <span
             className={cn(

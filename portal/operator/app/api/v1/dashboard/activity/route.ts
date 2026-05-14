@@ -20,13 +20,17 @@ export async function GET() {
   if (!r.ok) return r.response;
   const { session } = r;
 
+  // Real core-platform endpoint is GET /api/v1/audit (list, paginated).
+  // Query params: date_from, date_to, action, module, entity_type,
+  // user_id, correlation_id, limit, offset. Response is AuditPage shape.
+  // See modules/core-platform/src/audit/api.py:38.
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const audit = await forwardJson<{ entries?: DashboardActivityEvent[] }>(
-    `${BACKENDS.corePlatform}/api/v1/audit/query?since=${encodeURIComponent(since)}&limit=20`,
+  const audit = await forwardJson<{ items?: DashboardActivityEvent[] }>(
+    `${BACKENDS.corePlatform}/api/v1/audit?date_from=${encodeURIComponent(since)}&limit=20`,
     session,
     { timeoutMs: 3000 }
   );
-  const activity = audit.ok ? audit.data.entries ?? [] : [];
+  const activity = audit.ok ? audit.data.items ?? [] : [];
 
   return phiJson({
     activity,

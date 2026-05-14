@@ -28,30 +28,78 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // B11 w2 routing decision: forward to billing/claims (the ledger-entry
-  // endpoint). Manual claim entry is fundamentally creating a ledger row
-  // that downstream consumers (adjudication-engine, medical-claims for
-  // medical-type, reclaimrx for FWA scan) react to. A future slice should
-  // split on body.claim_type: "pharmacy" → adjudication, "medical" →
-  // medical-claims/claims, "compound" → adjudication. For w2 acceptance
-  // gate purposes (b11-w0_1 F-W03), billing/claims is the most defensible
-  // single target — every claim type ultimately needs a billing record.
-  const result = await forwardJson<unknown>(
-    `${BACKENDS.billing}/api/v1/billing/claims`,
-    session,
-    { method: "POST", body, timeoutMs: 8000 }
-  );
+  // B11 w2.x routing — branches on body.claim_type:
+  //   pharmacy + compound → adjudication-engine /claims/adjudicate
+  //                          (these need clinical adjudication first; the
+  //                           billing ledger is created by adjudication's
+  //                           downstream event consumers, not the portal)
+  //   medical            → medical-claims /api/v1/medical-claims/claims
+  //                          (medical claims have their own validation
+  //                           and crosswalk pipeline)
+  //   unknown / missing  → 400 with explicit code so the operator sees
+  //                          which field was wrong — better than
+  //                          silently misrouting to a ledger that won't
+  //                          reflect a clinically-processed claim
+  //
+  // Codex adversarial R1 BLOCKED the prior "everything → billing/claims"
+  // shape because the system-of-record consequence of misrouting is real:
+  // an audit later sees a ledger artifact rather than a clinically/
+  // adjudicatively processed claim.
+  const claimType = (body && typeof body === "object"
+    ? ((body as Record<string, unknown>).claim_type as string | undefined)
+    : undefined
+  )?.toLowerCase();
+
+  let upstreamUrl: string;
+  switch (claimType) {
+    case "pharmacy":
+    case "compound":
+      upstreamUrl = `${BACKENDS.adjudicationEngine}/claims/adjudicate`;
+      break;
+    case "medical":
+      upstreamUrl = `${BACKENDS.medicalClaims}/api/v1/medical-claims/claims`;
+      break;
+    default:
+      return phiJson(
+        {
+          error: {
+            code: "INVALID_CLAIM_TYPE",
+            message:
+              "body.claim_type must be one of: pharmacy, medical, compound",
+            received: claimType ?? null,
+          },
+        },
+        { status: 400 }
+      );
+  }
+
+  const result = await forwardJson<unknown>(upstreamUrl, session, {
+    method: "POST",
+    body,
+    timeoutMs: 8000,
+  });
 
   if (!result.ok) {
+    const f = result.failure;
     return phiJson(
       {
         error: {
-          code: "UPSTREAM_UNAVAILABLE",
-          message: "Medical claims service rejected or did not respond",
-          upstream_status: result.status,
+          code: f.reason,
+          message: `billing/claims upstream ${f.reason.toLowerCase().replace("_", " ")}`,
+          upstream_status: f.status,
         },
       },
-      { status: result.status >= 400 ? result.status : 502 }
+      // Propagate the upstream 4xx (so the operator sees real validation
+      // errors), 502 for backend down (TIMEOUT/NETWORK), 500 for upstream
+      // 5xx, 500 for parse errors (backend contract drift).
+      {
+        status:
+          f.reason === "UPSTREAM_ERROR" && f.status >= 400 && f.status < 500
+            ? f.status
+            : f.reason === "TIMEOUT" || f.reason === "NETWORK"
+              ? 502
+              : 500,
+      }
     );
   }
   return phiJson(result.data);

@@ -40,6 +40,11 @@ interface DashboardKpi {
   gtn_ratio: string;
   active_investigations: number;
   pending_payments: number;
+  // B11 w2 — BFF flags fields whose backend source is unreachable or
+  // not yet wired. UI renders "Unavailable" instead of zero when a
+  // field is listed here. Without this, zero is indistinguishable
+  // from "real value is zero" and the dashboard lies.
+  unavailable_fields?: string[];
 }
 
 interface ProgramHealthCard {
@@ -503,6 +508,14 @@ export default function DashboardPage() {
     staleTime: 60_000,
   });
 
+  // B11 w2.x — honest unavailable rendering. If the BFF reports a field
+  // in unavailable_fields, show "Unavailable" instead of "0" so an
+  // operator can distinguish "real zero" from "data not yet wired".
+  // Removes the pre-w2 lie that the dashboard always rendered zeros
+  // alongside hardcoded fake-trend subtext.
+  const unavailable = new Set(kpiData?.unavailable_fields ?? []);
+  const isUnavailable = (field: string) => unavailable.has(field);
+
   const kpiCards = [
     {
       label: "Active Programs",
@@ -512,6 +525,7 @@ export default function DashboardPage() {
       accentColor: "var(--ifx-navy)",
       icon: <Layers className="h-4 w-4" />,
       loading: kpiLoading,
+      unavailable: isUnavailable("active_programs"),
     },
     {
       label: "Total Claims YTD",
@@ -521,6 +535,7 @@ export default function DashboardPage() {
       accentColor: "var(--ifx-blue)",
       icon: <ClipboardList className="h-4 w-4" />,
       loading: kpiLoading,
+      unavailable: isUnavailable("total_claims_ytd"),
     },
     {
       label: "Total Copay Spend",
@@ -530,6 +545,7 @@ export default function DashboardPage() {
       accentColor: "var(--ifx-success)",
       icon: <CreditCard className="h-4 w-4" />,
       loading: kpiLoading,
+      unavailable: isUnavailable("total_copay_spend_ytd"),
     },
     {
       label: "GTN Ratio",
@@ -539,11 +555,12 @@ export default function DashboardPage() {
       accentColor: "var(--ifx-pink)",
       icon: <TrendingUp className="h-4 w-4" />,
       loading: kpiLoading,
-      trend: {
-        value: 1.4,
-        direction: "down" as const,
-        label: "vs last month",
-      },
+      unavailable: isUnavailable("gtn_ratio"),
+      // B11 w2.x: removed hardcoded trend={value:1.4, direction:"down",
+      // label:"vs last month"}. That subtext was a fabricated "compared
+      // to nothing" lie. Real trend computation belongs to a backend
+      // aggregation slice; until that exists, show no trend rather than
+      // a fake one.
     },
     {
       label: "Active Investigations",
@@ -553,6 +570,7 @@ export default function DashboardPage() {
       accentColor: "var(--ifx-warning)",
       icon: <AlertCircle className="h-4 w-4" />,
       loading: kpiLoading,
+      unavailable: isUnavailable("active_investigations"),
     },
     {
       label: "Pending Payments",
@@ -562,6 +580,7 @@ export default function DashboardPage() {
       accentColor: "var(--ifx-error)",
       icon: <LayoutDashboard className="h-4 w-4" />,
       loading: kpiLoading,
+      unavailable: isUnavailable("pending_payments"),
     },
   ];
 
