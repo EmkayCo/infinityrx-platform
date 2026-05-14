@@ -80,3 +80,56 @@ class TestDlqRouterMounted:
         # DLQ router is mounted at /api/v1/events/dlq — not 404
         resp = client.get("/api/v1/events/dlq")
         assert resp.status_code != 404
+
+
+class TestCorsPreflight:
+    """create_app() must mount CORSMiddleware. Without it the browser
+    preflight OPTIONS returns 405 and every portal→backend call is blocked
+    — verified in production by the 2026-05-13 'no data in directories'
+    incident."""
+
+    def test_options_preflight_returns_cors_headers(self) -> None:
+        from src.app import create_app  # noqa: PLC0415 — defer import to avoid lifespan
+
+        # We can't easily start lifespan in a test (it expects a real DB/bus).
+        # Build a minimal app exercising only the CORS contract.
+        from fastapi import FastAPI
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app = FastAPI()
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["http://localhost:3000"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+        @app.get("/probe")
+        def probe() -> dict:
+            return {"ok": True}
+
+        client = TestClient(app)
+        resp = client.options(
+            "/probe",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization,x-tenant-id",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.headers.get("access-control-allow-origin") == "http://localhost:3000"
+
+    def test_create_app_mounts_cors_middleware(self) -> None:
+        """The real create_app() must mount CORSMiddleware so browser
+        preflights succeed against the live process."""
+        from src.app import create_app  # noqa: PLC0415
+
+        # Inspect middleware stack — CORSMiddleware should be present.
+        # Build app without exercising lifespan (we only inspect the stack).
+        app = create_app()
+        middleware_classes = [m.cls.__name__ for m in app.user_middleware]
+        assert "CORSMiddleware" in middleware_classes, (
+            f"CORSMiddleware not mounted. Stack: {middleware_classes}"
+        )

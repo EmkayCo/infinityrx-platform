@@ -99,6 +99,22 @@ def create_app() -> FastAPI:
         )
     )
 
+    # Wire the production DB session factory into each route's _get_db
+    # fail-loud placeholder. Without this, every route that depends on
+    # _get_db() raises NotImplementedError at request time.
+    from .db.session import production_get_db  # noqa: PLC0415
+    from .api.routes import cob as _cob_mod  # noqa: PLC0415
+    from .api.routes import coverage as _coverage_mod  # noqa: PLC0415
+    from .api.routes import enrollment as _enrollment_mod  # noqa: PLC0415
+    from .api.routes import groups as _groups_mod  # noqa: PLC0415
+    from .api.routes import members as _members_mod  # noqa: PLC0415
+
+    app.dependency_overrides[_cob_mod._get_db] = production_get_db
+    app.dependency_overrides[_coverage_mod._get_db] = production_get_db
+    app.dependency_overrides[_enrollment_mod._get_db] = production_get_db
+    app.dependency_overrides[_groups_mod._get_db] = production_get_db
+    app.dependency_overrides[_members_mod._get_db] = production_get_db
+
     @app.get("/health")
     async def health() -> dict:
         return {"status": "ok", "module": "member-management"}

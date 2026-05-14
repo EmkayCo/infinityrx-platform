@@ -43,7 +43,8 @@ async def _get_dlq_permissions() -> set[str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Startup: install slow-query logger on prescriber-directory sync engine (M-04)."""
+    """Startup: install slow-query logger on prescriber-directory sync engine (M-04)
+    and configure auth so Depends(get_current_user) can resolve incoming JWTs."""
     try:
         from src.db.session import _get_engine  # noqa: PLC0415
         from shared.observability.slow_query import install_slow_query_logger  # noqa: PLC0415
@@ -51,6 +52,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         install_slow_query_logger(_get_engine(), threshold_ms=threshold)
     except Exception:  # pragma: no cover — best-effort; missing DB is fine in tests
         pass
+    # Directory backends own reference data, not identity — wire the dev
+    # JWT-trusting loader so get_current_user() doesn't crash. Refuses to
+    # run when INFINITYRX_ENV=production; prod deployments must supply a
+    # real UserLoader.
+    try:
+        from shared.auth.dev_trust_jwt import configure_auth_trust_jwt  # noqa: PLC0415
+        configure_auth_trust_jwt()
+    except RuntimeError as exc:  # production guard fired
+        logger.warning("auth_trust_jwt_skipped", extra={"svc_reason": str(exc)})
     yield
 
 
