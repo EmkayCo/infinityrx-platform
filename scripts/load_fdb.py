@@ -81,13 +81,25 @@ def _resolve_root() -> Path:
     return _REPO_ROOT / "data" / "reference" / "fdb" / "TEL251759D"
 
 
-def main() -> int:
+def _build_parser() -> argparse.ArgumentParser:
+    """Build the CLI argument parser.
+
+    Extracted from ``main()`` so the --mode contract is unit-testable
+    without spinning up a DB engine (see scripts/test_load_fdb.py). The
+    extraction was prompted by B12 codex P1: b561900 silently dropped
+    ``fdb_tier_a`` from the choices and nothing caught it.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=["fdb_initial", "fdb_weekly", "fdb_rebase"],
+        choices=["fdb_initial", "fdb_weekly", "fdb_rebase", "fdb_tier_a"],
         required=True,
-        help="ingestion mode (SPEC §4.7)",
+        help=(
+            "ingestion mode. Phase 09: fdb_initial / fdb_weekly / "
+            "fdb_rebase (pricing-only via FDBPricingIngester). B9.B+: "
+            "fdb_tier_a (generic TableSpec-driven loader; reads "
+            "fdb_specs.REGISTERED_SPECS filtered by loader_group='fdb_tier_a')."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -108,7 +120,11 @@ def main() -> int:
         default=None,
         help="optional shared.ingestion_runs FK to record on each inserted row",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> int:
+    args = _build_parser().parse_args()
 
     # Imports deferred until after sys.path setup so module imports resolve.
     from sqlalchemy import create_engine
@@ -141,6 +157,32 @@ def main() -> int:
 
     try:
         adapter = FDBLocalDropAdapter(root)
+
+        if args.mode == "fdb_tier_a":
+            # B9.B C19: generic TableSpec-driven loader. Reads
+            # fdb_specs.REGISTERED_SPECS filtered by loader_group and
+            # loads each registered Tier A table. Distinct from the
+            # Phase 09 pricing-only path below. The `return 0` still
+            # runs the `finally` block (session.close + engine.dispose).
+            from drug_database.services.fdb_tier_loader import load_tier_group
+            drop = adapter.discover_latest_drop()
+            tier_result = load_tier_group(
+                session, adapter, drop,
+                group="fdb_tier_a", dry_run=args.dry_run,
+            )
+            logger.info(
+                "fdb_ingest_summary mode=%s drop_date=%s "
+                "tables_loaded=%d total_inserted=%d total_skipped=%d "
+                "dry_run=%s",
+                args.mode, tier_result.drop_date,
+                len(tier_result.table_summaries),
+                tier_result.total_inserted,
+                tier_result.total_skipped,
+                tier_result.dry_run,
+            )
+            return 0
+
+        # Phase 09 modes — fdb_initial / fdb_weekly / fdb_rebase
         ingester = FDBPricingIngester(
             adapter=adapter,
             session=session,
