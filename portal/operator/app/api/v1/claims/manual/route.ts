@@ -81,11 +81,19 @@ export async function POST(req: NextRequest) {
 
   if (!result.ok) {
     const f = result.failure;
+    // Operator-facing error message names the actual upstream that
+    // failed, not the legacy "billing/claims" wording. Codex R2 #4.
+    const upstreamLabel =
+      upstreamUrl.includes("/medical-claims/")
+        ? "medical-claims service"
+        : upstreamUrl.includes("/claims/adjudicate")
+          ? "adjudication-engine service"
+          : "upstream claim service";
     return phiJson(
       {
         error: {
           code: f.reason,
-          message: `billing/claims upstream ${f.reason.toLowerCase().replace("_", " ")}`,
+          message: `${upstreamLabel} ${f.reason.toLowerCase().replace("_", " ")}`,
           upstream_status: f.status,
         },
       },
