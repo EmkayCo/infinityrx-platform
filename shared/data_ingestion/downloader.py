@@ -121,8 +121,12 @@ async def download_to_file(
             )
             continue
 
-        # Success: atomically rename .part -> final
-        part_path.rename(final_path)
+        # Success: atomically rename .part -> final. Use os.replace (not
+        # Path.rename) because Path.rename inherits POSIX semantics — it fails
+        # on Windows when the target already exists (WinError 183). os.replace
+        # is atomic AND overwrites cross-platform.
+        import os as _os
+        _os.replace(part_path, final_path)
         logger.info(
             "Download complete",
             extra={

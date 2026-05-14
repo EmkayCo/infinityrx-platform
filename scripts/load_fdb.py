@@ -43,7 +43,26 @@ logging.basicConfig(
 logger = logging.getLogger("load_fdb")
 
 
-def _resolve_db_url() -> str:
+def _resolve_db_url(*, require_reference_db: bool = False) -> str:
+    """Pick the DB URL — Phase 09 fallback chain by default; B9 strict mode opt-in.
+
+    B9.A C9: when `require_reference_db=True` (set by B9.B-G loaders),
+    only DATABASE_URL_SYNC_REFERENCE is honored. The legacy fallback
+    chain (DATABASE_URL_SYNC → DATABASE_URL) is REMOVED to prevent
+    writing reference tables into an operational DB. Phase 09 modes
+    (fdb_initial / fdb_weekly / fdb_rebase) keep the legacy chain for
+    backward compatibility with existing operator runbooks.
+    """
+    if require_reference_db:
+        # Strict B9 path — defers to shared.db.write_path_guard so the
+        # error message names the env var + switch_env.sh fix-it.
+        from shared.db.write_path_guard import resolve_reference_db_url
+        try:
+            return resolve_reference_db_url()
+        except RuntimeError as e:
+            logger.error("%s", e)
+            sys.exit(1)
+
     url = os.environ.get("DATABASE_URL_SYNC_REFERENCE") or os.environ.get("DATABASE_URL_SYNC") or os.environ.get("DATABASE_URL")
     if not url:
         logger.error(
@@ -66,19 +85,23 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=["fdb_initial", "fdb_weekly", "fdb_rebase", "fdb_tier_a"],
+        choices=["fdb_initial", "fdb_weekly", "fdb_rebase"],
         required=True,
-        help=(
-            "ingestion mode. Phase 09: fdb_initial / fdb_weekly / "
-            "fdb_rebase (pricing-only via FDBPricingIngester). B9.B+: "
-            "fdb_tier_a (generic TableSpec-driven loader; reads "
-            "fdb_specs.REGISTERED_SPECS filtered by loader_group='fdb_tier_a')."
-        ),
+        help="ingestion mode (SPEC §4.7)",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="parse + count rows; do not write to the DB",
+    )
+    parser.add_argument(
+        "--require-reference-db",
+        action="store_true",
+        help=(
+            "B9.A C9 strict mode: require DATABASE_URL_SYNC_REFERENCE "
+            "(no fallback) and assert current_database()='infinityrx_reference' "
+            "before any write. Set by B9.B-G tier loaders."
+        ),
     )
     parser.add_argument(
         "--ingestion-run-id",
@@ -91,8 +114,9 @@ def main() -> int:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from drug_database.services.fdb_adapter import FDBLocalDropAdapter
+    from drug_database.services.fdb_pricing_ingester import FDBPricingIngester
 
-    db_url = _resolve_db_url()
+    db_url = _resolve_db_url(require_reference_db=args.require_reference_db)
     root = _resolve_root()
     if not root.exists():
         logger.error("FDB drop root not found: %s", root)
@@ -102,31 +126,21 @@ def main() -> int:
     session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     session = session_factory()
 
+    # B9.A C9: SQL-level write-path guard. Fires for any caller that
+    # opted into strict mode. Failure here means env var pointed at
+    # the wrong DB — we refuse to load before INSERT touches a row.
+    if args.require_reference_db:
+        from shared.db.write_path_guard import assert_reference_db_write_path
+        try:
+            assert_reference_db_write_path(session)
+        except RuntimeError as e:
+            logger.error("%s", e)
+            session.close()
+            engine.dispose()
+            return 3
+
     try:
         adapter = FDBLocalDropAdapter(root)
-
-        if args.mode == "fdb_tier_a":
-            # B9.B C19: generic TableSpec-driven loader.
-            from drug_database.services.fdb_tier_loader import load_tier_group
-            drop = adapter.discover_latest_drop()
-            tier_result = load_tier_group(
-                session, adapter, drop,
-                group="fdb_tier_a", dry_run=args.dry_run,
-            )
-            logger.info(
-                "fdb_ingest_summary mode=%s drop_date=%s "
-                "tables_loaded=%d total_inserted=%d total_skipped=%d "
-                "dry_run=%s",
-                args.mode, tier_result.drop_date,
-                len(tier_result.table_summaries),
-                tier_result.total_inserted,
-                tier_result.total_skipped,
-                tier_result.dry_run,
-            )
-            return 0
-
-        # Phase 09 modes — fdb_initial / fdb_weekly / fdb_rebase
-        from drug_database.services.fdb_pricing_ingester import FDBPricingIngester
         ingester = FDBPricingIngester(
             adapter=adapter,
             session=session,
