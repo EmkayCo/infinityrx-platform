@@ -55,10 +55,18 @@ export default function LoginPage() {
 
       if (result?.url?.includes("mfa_required")) {
         router.push("/mfa");
+        router.refresh();
         return;
       }
 
+      // B11 w3 fix for F-010 — after signIn succeeds the session cookie
+      // is set but the RSC tree was server-rendered with no session, so
+      // RootLayout's auth-gated children (the Sidebar) won't appear until
+      // we force a re-fetch. router.refresh() invalidates the RSC cache
+      // and re-renders with the new cookie. Without this, users see the
+      // page-body chrome but no sidebar until they hard-refresh the URL.
       router.push(callbackUrl);
+      router.refresh();
     } catch {
       setAuthError("An unexpected error occurred. Please try again.");
     } finally {
@@ -204,7 +212,9 @@ export default function LoginPage() {
                       );
                       return;
                     }
+                    // B11 w3 fix for F-010 — see onSubmit() above.
                     router.push(callbackUrl);
+                    router.refresh();
                   } finally {
                     setIsLoading(false);
                   }
