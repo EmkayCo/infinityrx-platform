@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Search, AlertTriangle } from "lucide-react";
 import { ErrorBoundary } from "@shared/components/error-boundary";
@@ -77,19 +77,67 @@ const columns: ColDef<Prescriber>[] = [
   },
 ];
 
+// Backend has /api/v1/prescribers/search (slow ILIKE on display_name) and
+// /api/v1/prescribers/lookup/{npi} (fast — primary key). To keep the page
+// responsive on the 9.5M-row NPPES table we (a) don't auto-query on mount,
+// (b) route 10-digit numeric inputs to the fast lookup, (c) call /search
+// only when the user types non-numeric text. The response is mapped from
+// the backend's PrescriberSearchResult shape into the columns' Prescriber
+// shape (display_name → full_name, primary_specialty → specialty, etc.).
+const NPI_PATTERN = /^\d{10}$/;
+
+interface BackendSearchHit {
+  npi: string;
+  display_name: string;
+  primary_specialty?: string | null;
+  dea_status?: string | null;
+  status: string;
+  practice_city?: string | null;
+  practice_state?: string | null;
+}
+
+interface BackendSearchResponse {
+  results: BackendSearchHit[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+function mapHitToRow(hit: BackendSearchHit): Prescriber {
+  return {
+    npi: hit.npi,
+    full_name: hit.display_name,
+    specialty: hit.primary_specialty ?? "—",
+    dea_status: (hit.dea_status as DEAStatus | undefined) ?? "none",
+    state_license_status: "active" as LicenseStatus, // backend doesn't track in search payload
+    credential_alerts: [] as string[],
+  } as unknown as Prescriber;
+}
+
 export default function PrescribersPage() {
   const router = useRouter();
   const [search, setSearch] = useState("");
+  const trimmed = search.trim();
+  const isNpi = NPI_PATTERN.test(trimmed);
+
+  // NPI shortcut: jump straight to the detail page when the user pastes a
+  // 10-digit NPI. Avoids the slow search round-trip entirely.
+  useEffect(() => {
+    if (isNpi) router.push(`/directories/prescribers/${trimmed}`);
+  }, [isNpi, trimmed, router]);
 
   const { data: prescribers = [], isLoading } = useQuery<Prescriber[]>({
-    queryKey: ["prescribers", search],
-    queryFn: () =>
-      apiGet<Prescriber[]>(
-        buildUrl(`${API_URLS.prescriberDirectory}/api/v1/prescribers`, {
-          q: search || undefined,
-          limit: 100,
+    queryKey: ["prescribers", trimmed],
+    enabled: trimmed.length >= 2 && !isNpi,
+    queryFn: async () => {
+      const resp = await apiGet<BackendSearchResponse>(
+        buildUrl(`${API_URLS.prescriberDirectory}/api/v1/prescribers/search`, {
+          name: trimmed,
+          page_size: 50,
         })
-      ),
+      );
+      return resp.results.map(mapHitToRow);
+    },
     staleTime: 60_000,
   });
 
@@ -107,11 +155,16 @@ export default function PrescribersPage() {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
         <input
           type="search"
-          placeholder="Search NPI, name, specialty..."
+          placeholder="Enter NPI (10 digits) or name..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full pl-9 pr-4 py-2 rounded-lg border border-ifx-border-dark bg-ifx-surface-dark text-white text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
         />
+        {trimmed.length === 0 && (
+          <p className="mt-2 text-xs text-slate-500">
+            Type an NPI to jump to a record, or 2+ letters of a name to search.
+          </p>
+        )}
       </div>
 
       <ErrorBoundary>

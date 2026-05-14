@@ -96,11 +96,34 @@ async def search_prescribers(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> SearchResponse:
+    """Index-friendly prescriber search.
+
+    Performance contract (see tests/integration/test_router_search_perf.py):
+    - `name` is treated as a prefix match against ``last_name`` (and
+      ``first_name`` when two tokens are supplied), which hits
+      ``idx_prescriber_last_name_first``. A leading-wildcard ILIKE on
+      ``display_name`` would force a sequential scan over ~9.5M NPPES
+      rows.
+    - We never run ``COUNT(*) FROM (filtered subquery)``; on a 9.5M-row
+      table that is the killer cost. Instead we ``LIMIT page_size + 1``
+      and report ``total`` as a lower bound — exact when the page is
+      not full, ``page * page_size + 1`` when there are more rows.
+    """
     stmt = select(Prescriber)
     if name:
-        stmt = stmt.where(
-            Prescriber.display_name.ilike(f"%{name}%")
-        )
+        # Two-token form: "John Smith" → first_name prefix + last_name prefix.
+        # Single-token form: prefix-match last_name (most NPPES queries are
+        # last-name-first). Both forms use the existing btree index.
+        tokens = [t for t in name.strip().split() if t]
+        if len(tokens) >= 2:
+            first_tok, last_tok = tokens[0], tokens[-1]
+            stmt = stmt.where(
+                Prescriber.last_name.ilike(f"{last_tok}%"),
+                Prescriber.first_name.ilike(f"{first_tok}%"),
+            )
+        elif tokens:
+            tok = tokens[0]
+            stmt = stmt.where(Prescriber.last_name.ilike(f"{tok}%"))
     if specialty:
         stmt = stmt.where(
             Prescriber.primary_specialty.ilike(f"%{specialty}%")
@@ -112,14 +135,17 @@ async def search_prescribers(
     if status_filter:
         stmt = stmt.where(Prescriber.status == status_filter)
 
-    count_stmt = select(func.count()).select_from(stmt.subquery())
-    total = db.execute(count_stmt).scalar_one()
-
+    # LIMIT n+1 trick — one extra row tells us "more pages exist" without
+    # paying for COUNT(*) over the filtered set.
     offset = (page - 1) * page_size
-    stmt = stmt.offset(offset).limit(page_size)
-    rows = db.execute(stmt).scalars().all()
+    stmt = stmt.offset(offset).limit(page_size + 1)
+    rows = list(db.execute(stmt).scalars().all())
+    has_more = len(rows) > page_size
+    if has_more:
+        rows = rows[:page_size]
+    total = (page * page_size + 1) if has_more else (offset + len(rows))
 
-    return SearchResponse(results=list(rows), total=total, page=page, page_size=page_size)
+    return SearchResponse(results=rows, total=total, page=page, page_size=page_size)
 
 
 @router.get("/batch", response_model=BatchLookupResponse)
