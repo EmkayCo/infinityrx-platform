@@ -1712,11 +1712,21 @@ import { $inspectorEntries, clearEntries } from "./inspector-store.js";
 import type { InspectorEntry } from "./types.js";
 
 /**
+ * InspectorPanel takes no props — it reads state directly from the
+ * $inspectorEntries nanostores atom. The exported type is explicit
+ * so index.ts can re-export it without TS errors.
+ */
+// Exported so consumers can type wrappers (e.g. lazy-load boundaries).
+export interface InspectorPanelProps {
+  // No props — panel reads from $inspectorEntries atom directly.
+}
+
+/**
  * Client-side slide-out inspector panel.
  * Subscribes to $inspectorEntries and renders a table of captured requests.
  * Only rendered in non-production builds (gated by the parent route/layout).
  */
-export function InspectorPanel() {
+export function InspectorPanel(_props: InspectorPanelProps = {}) {
   const entries = useStore($inspectorEntries);
   const [open, setOpen] = useState(false);
 
@@ -1920,7 +1930,8 @@ import "server-only";
 import type { BaseClient } from "@infinityrx/contract";
 import { ServicesHealth } from "@infinityrx/qa-harness";
 
-interface QaHarnessPageProps {
+// Exported so portals can type their mounting wrappers.
+export interface QaHarnessPageProps {
   /**
    * Registered clients to probe. Passed by the portal that mounts this page
    * (it knows which clients are configured for this instance).
@@ -1983,7 +1994,8 @@ import "server-only";
 import type { BaseClient } from "@infinityrx/contract";
 import { MockToggle } from "@infinityrx/qa-harness";
 
-interface MockTogglePageProps {
+// Exported so portals can type their mounting wrappers.
+export interface MockTogglePageProps {
   clients: readonly BaseClient[];
   onToggle: (clientName: string, mode: "real" | "mock") => void;
 }
@@ -2008,7 +2020,8 @@ import "server-only";
 import { FactoryBindings } from "@infinityrx/qa-harness";
 import type { SeedKind } from "@infinityrx/qa-harness";
 
-interface FactoryPageProps {
+// Exported so portals can type their mounting wrappers.
+export interface FactoryPageProps {
   onSeed: (kind: SeedKind) => Promise<void>;
 }
 
