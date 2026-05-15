@@ -192,7 +192,17 @@ class KeyVaultSecretLoader:
         self,
         name: str,
         *,
-        required: Literal[False] = ...,
+        required: Literal[False],
+        default: str | None = ...,
+        caller_module: str | None = ...,
+    ) -> str | None: ...
+
+    @overload
+    def get(
+        self,
+        name: str,
+        *,
+        required: bool = ...,
         default: str | None = ...,
         caller_module: str | None = ...,
     ) -> str | None: ...
@@ -339,26 +349,28 @@ class KeyVaultSecretLoader:
     def _get_from_vault_optional(self, name: str, caller_module: str) -> str | None:
         """Dev/mock path: try vault, return None on any failure.
 
-        Called WITHOUT self._lock (dev path only; lock is released before
-        this call so other threads can proceed with their own env-var lookups).
+        Holds self._lock for the entire client-init → fetch → store cycle,
+        matching the production path. This prevents concurrent dev vault calls
+        from duplicating fetches for the same key.
         """
+        _fetched: str | None = None
         try:
             with self._lock:
                 client = self._get_client()
-            kv_name = name.replace("_", "-").lower()
-            bundle = client.get_secret(kv_name)
-            value = bundle.value
-            if value is not None:
-                with self._lock:
-                    self._store_cache(name, value)
-                self._log_access(name, source="vault", caller_module=caller_module, outcome="success")
-            return value
+                kv_name = name.replace("_", "-").lower()
+                bundle = client.get_secret(kv_name)
+                _fetched = bundle.value
+                if _fetched is not None:
+                    self._store_cache(name, _fetched)
         except Exception as exc:  # noqa: BLE001
             self._log_access(
                 name, source="vault", caller_module=caller_module,
                 outcome=f"error:{type(exc).__name__}"
             )
             return None
+        if _fetched is not None:
+            self._log_access(name, source="vault", caller_module=caller_module, outcome="success")
+        return _fetched
 
     def _get_client(self) -> SecretClient:
         """Return the SecretClient singleton, creating it on first call.
@@ -513,7 +525,17 @@ def get_secret(
 def get_secret(
     name: str,
     *,
-    required: Literal[False] = ...,
+    required: Literal[False],
+    default: str | None = ...,
+    caller_module: str | None = ...,
+) -> str | None: ...
+
+
+@overload
+def get_secret(
+    name: str,
+    *,
+    required: bool = ...,
     default: str | None = ...,
     caller_module: str | None = ...,
 ) -> str | None: ...
