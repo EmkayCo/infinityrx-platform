@@ -858,7 +858,7 @@ export interface AppShellProps {
   children: React.ReactNode;
   /** Optional top header (logo, user menu, etc.). */
   header?: React.ReactNode;
-  /** Optional side nav (typically the registered-modules nav from Plan D's shell). */
+  /** Optional side nav (typically the registered-modules nav from Plan C-shell). */
   nav?: React.ReactNode;
   className?: string;
 }
