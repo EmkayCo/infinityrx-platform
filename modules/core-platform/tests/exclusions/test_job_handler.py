@@ -26,7 +26,7 @@ async def test_run_exclusion_refresh_pipeline(db_session, monkeypatch):
             text="LASTNAME,FIRSTNAME,NPI,STATE\nSMITH,JOHN,1234567890,NY\n",
         )
     )
-    respx.get("https://api.sam.gov/entity-information/v3/exclusions").mock(
+    respx.get("https://api.sam.gov/entity-information/v4/exclusions").mock(
         return_value=httpx.Response(200, json={"exclusionDetails": []})
     )
 

@@ -157,7 +157,7 @@ class OIGIngestionClient:
 class SAMIngestionClient:
     """Queries the SAM.gov entity exclusions endpoint."""
 
-    DEFAULT_URL = "https://api.sam.gov/entity-information/v3/exclusions"
+    DEFAULT_URL = "https://api.sam.gov/entity-information/v4/exclusions"
 
     def __init__(self, http_client: httpx.AsyncClient, *, api_key: str, url: str | None = None) -> None:
         self._http = http_client

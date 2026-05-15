@@ -109,7 +109,7 @@ async def test_sam_ingest_upsert(db_session):
             {"name": None},  # malformed
         ]
     }
-    respx.get("https://api.sam.gov/entity-information/v3/exclusions").mock(
+    respx.get("https://api.sam.gov/entity-information/v4/exclusions").mock(
         return_value=httpx.Response(200, json=body)
     )
     async with httpx.AsyncClient() as http:
@@ -119,7 +119,7 @@ async def test_sam_ingest_upsert(db_session):
     assert report.skipped_malformed == 1
 
     # Idempotent
-    respx.get("https://api.sam.gov/entity-information/v3/exclusions").mock(
+    respx.get("https://api.sam.gov/entity-information/v4/exclusions").mock(
         return_value=httpx.Response(200, json=body)
     )
     async with httpx.AsyncClient() as http:
@@ -141,7 +141,7 @@ async def test_sam_ingest_list_body(db_session):
 
 @respx.mock
 async def test_sam_ingest_unknown_body_shape(db_session):
-    respx.get("https://api.sam.gov/entity-information/v3/exclusions").mock(
+    respx.get("https://api.sam.gov/entity-information/v4/exclusions").mock(
         return_value=httpx.Response(200, json="something")
     )
     async with httpx.AsyncClient() as http:
@@ -152,7 +152,7 @@ async def test_sam_ingest_unknown_body_shape(db_session):
 
 @respx.mock
 async def test_sam_normalize_error_counted(db_session, monkeypatch):
-    respx.get("https://api.sam.gov/entity-information/v3/exclusions").mock(
+    respx.get("https://api.sam.gov/entity-information/v4/exclusions").mock(
         return_value=httpx.Response(200, json={"exclusionDetails": [{"name": "x"}]})
     )
     from src.exclusions import ingestion as ing
