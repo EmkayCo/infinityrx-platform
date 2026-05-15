@@ -72,7 +72,7 @@ All four sub-decisions are committed and codex-verified. Their artifacts are aut
 
 | This spec section | Superseded by | What changed |
 |---|---|---|
-| §6.2 `packages/auth` | SD-1 §3–§8 | Concrete JWT shape, refresh semantics, revocation repo, single-flight portal handling, MFA gate hand-off |
+| §6.2 `packages/auth` | SD-1 §2 (access claims) + §3 (refresh claims) + §4–§8 | Concrete JWT shape, refresh semantics, revocation repo, single-flight portal handling, MFA gate hand-off |
 | §6.10 The deployment manifest | SD-4 §3 | Richer YAML schema with 12 `required_*` axes, JSON Schema gate, transitive-closure validator |
 | §7.2 Auth token flow | SD-1 §5 + §6 + §8.6 | Atomic-consume refresh, REFRESH_REPLAY handling, env-claim enforcement |
 | §7.5 Build-time composition | SD-4 §2 + §5 | Generated artifact mechanism, module-graph audit, content-hash staleness |
@@ -134,13 +134,15 @@ The existing `@infinityrx/portal-shared` is the seed of the shared-package patte
 
 ### 5.3 Per-client instance composition (the "modules as products" mechanism)
 
-A **deployment manifest** per customer instance declares the modules included:
+> **SUPERSEDED BY** SD-4 §2 + §5 (`0b3c9d7`). The original wording below relied on tree-shaking — codex BLOCK #1 invalidated that. The current mechanism is manifest-driven codegen with module-graph audit, not tree-shaking. Diagram retained for shape; SD-4 is authoritative.
 
-```json
-{ "modules": ["reclaimrx", "paysync"] }
+A **deployment manifest** per customer instance (`infrastructure/manifests/<instance>.yml`, full schema in SD-4 §3) declares the modules included:
+
+```yaml
+modules: [reclaimrx, paysync]
 ```
 
-At build time, the build reads the manifest, the shell imports only the listed module packages, their routes register, their BFF handlers mount, their contract clients initialize. Modules **not** in the manifest are tree-shaken out — their code, routes, BFF handlers, contract clients all absent from the built artifact. A standalone-ReclaimRx instance ships zero PaySync code.
+At build time, `scripts/generate-composition.ts` reads the manifest and emits static imports for ONLY the listed modules into `packages/shell/src/_generated/module-imports.ts`. Modules not in the manifest are **never imported** — there is no central registry or barrel export they could leak through, the workspace-root ESLint rule (SD-4 §4) forbids any other code from importing `@infinityrx/module-*` outside `_generated/`, and `scripts/audit-composition.ts` reads Next.js `.nft.json` + `.next/trace` to verify omitted modules are absent from the server module graph and from the client bundle. A standalone-ReclaimRx instance ships zero PaySync code by construction, not by tree-shaking.
 
 Operator portal in dev = manifest with all modules. Standalone-product instances = subset.
 
@@ -224,10 +226,10 @@ Each module is a vertical product slice:
 - Components (module-specific UI, importing from `packages/ui`).
 - Hooks (data fetching via TanStack Query backed by contract clients).
 - Tests (unit, integration, contract).
-- **A `module.config.ts`** exporting metadata: name, routes, nav entry, required backends, required entitlements.
+- **A `module.config.ts`** exporting metadata per SD-4 §3: `name`, `routes`, `navEntry`, `requires.{backends, sharedServices, schemas, migrations, env, health, seedData, queues, jobs, buckets, integrations, secrets}`, `shellSurfaces.{navOrderSlots, cacheTagPrefixes, commandPaletteScopes, routePrefixes, cacheKeyNamespaces, redisKeyPrefixes, rabbitExchanges}`, and `surfaceKinds: ["server"|"client", ...]`. Runtime `entitlements` is out of SP-0 scope per D7 + SD-1 §10 + SD-4 — composition decides "what's deployed" at build time; runtime sub-tenant feature flags are deferred.
 - **The module's portion of the BFF** — its `app/api/<module>/...` route handlers, owned by the module package and mounted by the shell.
 
-When a module is omitted from the deployment manifest, its routes, components, hooks, BFF handlers, and contract-client wiring all vanish from the built artifact.
+When a module is omitted from the deployment manifest, its routes, components, hooks, BFF handlers, and contract-client wiring all vanish from the built artifact (verified by SD-4 §5 module-graph audit, not by tree-shaking).
 
 ### 6.7 Portal apps (`portal/operator`, future `client`, `provider`)
 
@@ -282,8 +284,10 @@ GET /api/directories/prescribers/search?q=...
         │
         ▼
 BFF route handler          ← lives WITH the module package, mounted by shell into app/api/
-   • unpacks auth context from packages/auth: { tenantId, userId, scopes, moduleEntitlements }
-   • entitlement guard: this instance has 'directories' enabled?
+   • unpacks auth context from packages/auth: { tid, sub, roles } (per SD-1 §2 access claims)
+   • authz check: required role for this route is present in `roles`
+   • (module availability is settled at build time by the deployment manifest — SD-4 §2;
+      no runtime entitlement guard here. If the route exists, the module is in the build.)
    • cache lookup per contract's declared policy (Next cache / Redis read-through)
         │ miss
         ▼
@@ -306,7 +310,7 @@ TanStack Query caches client-side → component renders virtualized list
 
 > **SUPERSEDED BY** SD-1 §5 (refresh rotation) + §6 (cookie + session) + §8.6 (refresh endpoint). The summary below is the high-level shape; SD-1 (`b876c3b`) is authoritative for the concrete protocol.
 
-Login (operator portal) → `next-auth` issues canonical JWT per `packages/auth` contract (mint primitives shared with backend, per-env JWT secret keyed by `env` claim) → access token in httpOnly cookie (15-min TTL), refresh token in separate httpOnly cookie (rotate-on-use) → every BFF request `proxy.ts` extracts/validates → BFF forwards as `Authorization: Bearer …` to backend → backend validates against the per-env JWT secret AND checks `auth:revoked:<jti>` AND checks `tokens_valid_since:<sub>:<tid>`. On 401, the portal makes a single-flight `POST /api/auth/refresh` call (SD-1 §8.6) which atomically consumes the current refresh JTI (Redis `SET NX`), mints a new access+refresh pair, and returns. Replay attempts return REFRESH_REPLAY → portal forces re-login. **One contract definition, one mint/validate primitive, used in three places — `packages/auth` is the single source of truth.**
+Login (operator portal) → `next-auth` issues canonical JWT per `packages/auth` contract (mint primitives shared with backend, per-env JWT secret keyed by `env` claim) → access token in httpOnly cookie (15-min TTL), refresh token in separate httpOnly cookie (rotate-on-use) → every BFF request `proxy.ts` extracts/validates → BFF forwards as `Authorization: Bearer …` to backend → backend validates against the per-env JWT secret AND checks `auth:revoked:<jti>` AND checks `tokens_valid_since:<sub>`. On 401, the portal's single-flight refresh adapter (SD-1 §11) calls the backend's `POST /api/v1/auth/token/refresh` endpoint (SD-1 §8.6) with the refresh JWT in the `Authorization: Bearer` header; the backend atomically consumes the refresh JTI (Redis `SET NX`), mints a new access+refresh pair, and returns both. Replay attempts return REFRESH_REPLAY → portal forces re-login. **One contract definition, one mint/validate primitive, used in three places — `packages/auth` is the single source of truth.**
 
 ### 7.3 Cache + invalidation
 
@@ -472,7 +476,7 @@ Load/perf benchmarking, visual regression, mutation testing. They become their o
 Per D9, the first internal task within SP-0 execution was a formal framework re-evaluation. Criteria were **portfolio-level**, not single-app:
 
 - **Real data inputs:** measured hydration-bug rate in the existing portal (B10.1 audit, B12 S7 login hydration mismatch, the `.env.local` notes about RSC); RSC complexity tax; build/dev-loop times.
-- **Portfolio fit:** the chosen framework must serve operator + client + provider portals coherently, support per-customer build-time composition, and support tree-shaking of unused module packages.
+- **Portfolio fit:** the chosen framework must serve operator + client + provider portals coherently and support per-customer build-time composition. (Historical wording said "tree-shaking of unused module packages"; the spike replaced that mechanism with manifest-driven codegen + module-graph audit per SD-4 §2 + §5, so this criterion no longer reads as a literal tree-shake requirement.)
 - **Codex consult** required (Werkbench L3 decision-gate policy).
 - **Gateway decision:** with three confirmed portal consumers, the re-evaluation must explicitly decide whether to extract the contract layer into a **standalone API gateway service** (Approach B from brainstorming) *now*, or defer.
 - Candidates evaluated: Next.js (current), Vite + TanStack Router/Start as SPA + thin BFF, Remix/React Router 7.
@@ -486,13 +490,15 @@ Per D9, the first internal task within SP-0 execution was a formal framework re-
 ## 11. Scope discipline
 
 SP-0 builds:
-- The shared packages (`contract`, `auth`, `ui`, `qa-harness`, `shell`).
+- The shared packages (`contract`, `auth`, `ui`, `qa-harness`, `shell`) per SD-1 + SD-2.
 - The first portal app (`portal/operator`) as the reference consumer / dev target.
-- **One reference module package** scaffolded end-to-end (proposed: ReclaimRx, since it's already a working backend with rich behavior) — proving `module.config.ts`, BFF route mounting, contract-client usage, mock/real toggle, tests, and tree-shaking against the composition manifest all work. SP-1…SP-5 create their own module packages following the established pattern; SP-0 does **not** pre-scaffold all 13.
-- The deployment manifest mechanism + CI cross-composition matrix exercising `["reclaimrx"]` standalone vs `["all"]` operator-full vs one minimal subset.
+- **One reference module package** scaffolded end-to-end (proposed: ReclaimRx, since it's already a working backend with rich behavior) — proving the full SD-4 stack: `module.config.ts` with the complete `requires.*` + `shellSurfaces` + `surfaceKinds` shape, BFF route mounting, contract-client usage, mock/real toggle, tests, AND the manifest-driven composition mechanism (codegen + ESLint zones + module-graph audit). SP-1…SP-5 create their own module packages following the established pattern; SP-0 does **not** pre-scaffold all 13.
+- The composition machinery per SD-4 §2–§6: `scripts/generate-composition.ts`, `scripts/generate-eslint-zones.ts`, `scripts/generate-ci-matrix.ts`, `scripts/validate-manifest.ts`, `scripts/audit-composition.ts`, `scripts/lint-tsconfig.ts`, `scripts/validate-secret-references.ts`, the YAML manifest schema at `schemas/instance-manifest.schema.json`, the workspace-root ESLint config with per-module `import/no-restricted-paths` zones, and the scoped pairwise CI matrix across 11 collision axes.
+- The CI cross-composition matrix exercising `[]`, `["all"]`, every single-module standalone (driven by the modules SP-0 ships, i.e., at minimum `["reclaimrx"]`), every declared dependency bundle, and scoped pairwise pairs computed from `shellSurfaces ∪ requires.*` overlap.
+- Auth machinery per SD-1: per-env JWT secret + `env` claim + atomic-consume refresh + shared Redis revocation repo (`auth:revoked` + `auth:consumed` + `tokens_valid_since`) + `POST /api/v1/auth/token/refresh` endpoint + portal single-flight refresh adapter.
 - Backend run/health story + standardized `/health` + `services-health` aggregator.
 - The test harness (both pillars).
-- The framework re-evaluation outcome (§10).
+- (The §10 framework re-evaluation outcome is already committed — D11 / SD-2 keeps Next.js with a framework-agnostic spine and named tripwires.)
 
 SP-0 does **not** build:
 - Client or provider portal apps.
