@@ -57,6 +57,39 @@ SP-0 closes the gap between today's skin-without-spine state and a foundation th
 
 These decisions are inputs to the plan; if any are revisited, this spec must be revised first.
 
+### 4.1 Decision spike closure (added 2026-05-15)
+
+Codex's pass-1 gate review of this spec returned 5 BLOCKs, 8 CONCERNs, 4 NITs. The spec held except for 4 areas that were too thin to support honest plan-writing. A focused decision spike resolved all 5 BLOCKs across 4 sub-decisions, each codex-verified clean:
+
+| # | Sub-decision | Final commit | Closes original BLOCK | Codex passes |
+|---|---|---|---|---|
+| **SD-1** | Auth interface contract — JWT shape (HS256, `sub/tid/roles/typ/iat/exp/jti/iss/aud/env` per env), 15-min access TTL, rotate-on-use refresh with atomic Redis consume, single-`infinityrx` audience, mandatory `env` claim, single-flight portal refresh, shared revocation repo (`auth:revoked` + `auth:consumed` + `tokens_valid_since`) | `b876c3b` | #4 | 4 passes (v4 clean) |
+| **SD-2** | Framework — stay Next.js for SP-0, framework-agnostic spine (`packages/contract`/`auth`/`ui`/`qa-harness`/`modules/*` have zero `next/*` imports), thin adapter at `portal/operator/app/api/*/route.ts`, defined tripwires for re-evaluation | `14d847a` | #2 (framework half) | 3 passes (v3 clean) |
+| **SD-3** | Gateway extraction — **defer** for SP-0; `packages/contract` stays a shared TypeScript package consumed by each portal's BFF. Trigger conditions defined (non-TS client, cross-portal versioning pain, etc.) | `daffdb0` | #2 (gateway half) | pass-1 clean |
+| **SD-4** | Composition mechanism — generated artifact at `packages/shell/src/_generated/`, content-hash staleness, richer manifest schema (12 `required_*` axes + `migration_policy`), workspace-root ESLint with explicit per-module zones (`import/no-restricted-paths`), Next.js module-graph audit (`.nft.json` + `.next/trace` + stats JSON) split by `surfaceKinds`, scoped pairwise CI matrix across 11 collision axes, secret validation split PR-CI offline vs deploy/boot environment-bound | `0b3c9d7` | #1, #3, #5 | 5 passes (v5 clean) |
+
+All four sub-decisions are committed and codex-verified. Their artifacts are authoritative — sections below that they touch are now SUPERSEDED by the sub-decision spec referenced inline. Specifically:
+
+| This spec section | Superseded by | What changed |
+|---|---|---|
+| §6.2 `packages/auth` | SD-1 §3–§8 | Concrete JWT shape, refresh semantics, revocation repo, single-flight portal handling, MFA gate hand-off |
+| §6.10 The deployment manifest | SD-4 §3 | Richer YAML schema with 12 `required_*` axes, JSON Schema gate, transitive-closure validator |
+| §7.2 Auth token flow | SD-1 §5 + §6 + §8.6 | Atomic-consume refresh, REFRESH_REPLAY handling, env-claim enforcement |
+| §7.5 Build-time composition | SD-4 §2 + §5 | Generated artifact mechanism, module-graph audit, content-hash staleness |
+| §9.5 CI integration | SD-4 §4 + §5 + §6 | Workspace-root ESLint with `import/no-restricted-paths` zones, scoped pairwise matrix, audit gates |
+| §10 Framework re-evaluation | SD-2 | Re-evaluation completed; Next.js stays with explicit tripwires |
+
+Locked decisions D10–D13 codifying the spike outputs:
+
+| # | Decision | Choice |
+|---|---|---|
+| D10 | Auth contract | Per SD-1 (`b876c3b`). Concrete; portal and backend both adopt this in SP-0 |
+| D11 | Framework | Per SD-2 (`14d847a`). Stay Next.js; framework-agnostic spine; tripwires defined |
+| D12 | Gateway | Per SD-3 (`daffdb0`). Defer; `packages/contract` stays a shared package |
+| D13 | Composition | Per SD-4 (`0b3c9d7`). Generated artifact + manifest schema + ESLint zones + module-graph audit + scoped pairwise CI matrix |
+
+D10–D13 are inputs to the plan; if any are revisited, this spec AND the corresponding sub-decision artifact must be revised first.
+
 ---
 
 ## 5. Architecture
@@ -138,13 +171,15 @@ Owns the entire frontend↔backend contract surface.
 
 ### 6.2 `packages/auth`
 
-Owns the canonical end-state auth/token contract (D4). **B12's `_shim/auth` refactor (B12 S1) and b10-test JWT minting (B12 S3) fold here once B12 lands its tactical fixes.**
+> **SUPERSEDED BY** `2026-05-15-sp0-decision-spike-auth-interface.md` (v4, `b876c3b`). The contract below is the canonical end-state per D4 + D10; SD-1 §3–§8 is now the authoritative spec for JWT shape, refresh semantics, single-flight portal handling, MFA gate hand-off, and revocation repo. **B12's `_shim/auth` refactor (B12 S1) and b10-test JWT minting (B12 S3) fold here once B12 lands its tactical fixes.** Original outline retained below for cross-reference only:
 
-- JWT shape and claims (`tenant_id`, `user_id`, `scopes`, `module_entitlements`), expiry, refresh model.
-- Token mint and validate primitives — single source shared with backend's JWT secret.
+- JWT shape and claims (`sub`, `tid`, `roles`, `typ`, `iat`, `exp`, `jti`, `iss`, `aud`, `env` — per SD-1 §4), expiry (15-min access TTL, refresh rotate-on-use), refresh model (atomic Redis consume).
+- Token mint and validate primitives — single source shared with backend's JWT secret per env.
 - MFA gate contract (per `.claude/rules/hipaa-2026.md`).
 - Session model (timeout, concurrent-session limits per `.claude/rules/hipaa-2026.md`).
-- Dev-JWT path (the `mintDevJwt` currently in `portal/operator`, formalized here).
+- Dev-JWT path (the `mintDevJwt` currently in `portal/operator`, formalized here; gated by `env` claim per SD-1 §4).
+- Shared revocation repository (Redis): `auth:revoked:<jti>`, `auth:consumed:<jti>`, `tokens_valid_since:<sub>:<tid>`.
+- Refresh endpoint protocol (SD-1 §8.6) — `POST /api/auth/refresh`, atomic consume, REFRESH_REPLAY error semantics, retry UX.
 
 ### 6.3 `packages/ui`
 
@@ -216,7 +251,7 @@ See Section 9 for the full testing model. Concretely SP-0 delivers:
 
 ### 6.10 The deployment manifest
 
-A small declarative file per customer instance:
+> **SUPERSEDED BY** `2026-05-15-sp0-decision-spike-composition.md` (v5, `0b3c9d7`) §3. The toy JSON below was insufficient (codex BLOCK #3) — it doesn't derive deployable infra. SD-4 §3 replaces it with a richer YAML schema covering 12 `required_*` axes plus `migration_policy`, validated against a strict JSON Schema (Ajv `additionalProperties: false`) before transitive-closure checks run. Format moves to `infrastructure/manifests/<instance>.yml`. Toy version retained for reference:
 
 ```json
 {
@@ -228,7 +263,7 @@ A small declarative file per customer instance:
 }
 ```
 
-Tracked in the project's existing environment-config pattern (alongside `.env.dev`, `.env.mock`, `.env.prod`). The build system reads it to compose `shell + selected module packages + their backend services + their DB schemas` into the deployable artifact for that customer's instance.
+Per SD-4 §3, the production manifest schema is YAML with `instance_name`, `audience`, `auth_profile`, `branding`, `modules` plus derived `required_backends`, `required_shared_services`, `required_schemas`, `required_migrations`, `required_env`, `required_health`, `required_seed_data`, `required_queues`, `required_jobs`, `required_buckets`, `required_integrations`, `required_secrets`, and `migration_policy`. Per-module `module.config.ts` is the source of truth for those `requires.*`. `scripts/validate-manifest.ts` enforces transitive closure and refuses builds that omit transitive requirements.
 
 ---
 
@@ -269,7 +304,9 @@ TanStack Query caches client-side → component renders virtualized list
 
 ### 7.2 Auth token flow
 
-Login (operator portal) → `next-auth` issues canonical JWT per `packages/auth` contract (mint primitives shared with backend) → token in httpOnly cookie → every BFF request `proxy.ts` extracts/validates → BFF forwards as `Authorization: Bearer …` to backend → backend validates against the same shared JWT secret. **One contract definition, one mint/validate primitive, used in three places — `packages/auth` is the single source of truth.**
+> **SUPERSEDED BY** SD-1 §5 (refresh rotation) + §6 (cookie + session) + §8.6 (refresh endpoint). The summary below is the high-level shape; SD-1 (`b876c3b`) is authoritative for the concrete protocol.
+
+Login (operator portal) → `next-auth` issues canonical JWT per `packages/auth` contract (mint primitives shared with backend, per-env JWT secret keyed by `env` claim) → access token in httpOnly cookie (15-min TTL), refresh token in separate httpOnly cookie (rotate-on-use) → every BFF request `proxy.ts` extracts/validates → BFF forwards as `Authorization: Bearer …` to backend → backend validates against the per-env JWT secret AND checks `auth:revoked:<jti>` AND checks `tokens_valid_since:<sub>:<tid>`. On 401, the portal makes a single-flight `POST /api/auth/refresh` call (SD-1 §8.6) which atomically consumes the current refresh JTI (Redis `SET NX`), mints a new access+refresh pair, and returns. Replay attempts return REFRESH_REPLAY → portal forces re-login. **One contract definition, one mint/validate primitive, used in three places — `packages/auth` is the single source of truth.**
 
 ### 7.3 Cache + invalidation
 
@@ -281,24 +318,37 @@ Per-domain config (per module, set in the deployment manifest or env) selects be
 
 ### 7.5 Build-time composition
 
+> **SUPERSEDED BY** SD-4 §2 (generated artifact) + §5 (build-time audit). The diagram below was wrong about tree-shaking — codex BLOCK #1 surfaced that Next.js App Router does NOT naturally tree-shake server route handlers, so a central registry could leak any module into a "just ReclaimRx" build. SD-4 replaces tree-shaking with a generated composition artifact: codegen writes static imports for selected modules only, so omitted modules are never imported in the first place. Diagram retained for shape reference:
+
 ```
-Deployment manifest  →  { "modules": ["reclaimrx", "paysync"] }
+Deployment manifest  →  infrastructure/manifests/<instance>.yml
+                        modules: [reclaimrx, paysync]
         │
         ▼
-Build reads manifest  →  shell imports listed module packages only
+scripts/generate-composition.ts (pre-build, hermetic, content-hash sealed)
+        │  writes packages/shell/src/_generated/
+        │    ├── module-imports.ts   (static imports for listed modules ONLY)
+        │    ├── route-mounts.ts
+        │    ├── nav.ts
+        │    └── manifest.json
+        ▼
+Workspace ESLint enforces: nothing outside _generated/ may import
+@infinityrx/module-* (15 selectors × 3 specifier shapes + per-module
+import/no-restricted-paths zones — see SD-4 §4)
         │
         ▼
-   Module packages' routes register
-   Module packages' BFF handlers mount
-   Module packages' contract clients initialize
-   Module packages' nav entries appear
+next build  →  reads ONLY the imports the codegen emitted
         │
         ▼
-Modules not in manifest are tree-shaken out — their code, routes,
-BFF handlers, contract clients all absent from the built artifact
+scripts/audit-composition.ts (post-build) verifies:
+  - Server-graph (.nft.json + .next/trace): omitted modules absent;
+    server-bearing required modules present
+  - Client-bundle (stats JSON): same, for surfaceKinds.includes("client")
+  - String-search backstop
+  - Generated-file content-hash matches current inputs
 ```
 
-That is the "customer buys just ReclaimRx" mechanic, concretely: tree-shaking against a declarative manifest, no runtime entitlements gating, no dead code shipped to a standalone customer.
+That is the "customer buys just ReclaimRx" mechanic, concretely: codegen against a declarative manifest, ESLint zones preventing bypass paths, module-graph audit verifying absence. No tree-shaking dependence, no runtime entitlements gating, no dead code shipped to a standalone customer. Cross-composition CI matrix (SD-4 §6) exercises `[]`, `["all"]`, every single-module, every declared dependency bundle, and scoped pairwise pairs across 11 collision axes.
 
 ---
 
@@ -400,10 +450,14 @@ Detailed in §6.4. SP-0 ships the package; each portal includes it in dev/stagin
 
 ### 9.5 CI integration
 
-- **Per-PR (fast lane):** lint, type-check, unit tests, contract tests against docker-compose backends.
+> **Cross-composition matrix portion SUPERSEDED BY** SD-4 §6. The "at minimum 3 manifests" minimum was insufficient (codex BLOCK #5) — pairwise collisions, shared-state collisions, and nav/route conflicts go undetected. SD-4 §6 replaces it with a mechanically generated matrix.
+
+- **Per-PR (fast lane):** lint (workspace-root ESLint with import-boundary enforcement per SD-4 §4), type-check, unit tests, contract tests against docker-compose backends.
 - **Per-PR (medium lane):** integration tests through the BFF.
+- **Per-PR (composition lane):** the generated cross-composition matrix from `packages/shell/src/_generated/composition-matrix.yml` (SD-4 §6) — `["all"]`, `[]`, every single-module build, every declared dependency bundle, scoped pairwise pairs computed from overlap across 11 collision axes (shellSurfaces ∪ requires.{backends, schemas, queues, jobs, buckets, integrations, env} ∪ cache-key/redis/rabbit namespaces). Each composition runs `next build` + `scripts/audit-composition.ts` (SD-4 §5).
 - **Pre-merge (slow lane):** Playwright E2E + coverage report against the existing auto-gate.
-- **Cross-composition matrix:** representative deployment manifests build + smoke-test in CI — at minimum `["all"]` (operator full), `["reclaimrx"]` (standalone), and one minimal subset — proves the composition mechanic actually works.
+- **Manifest validation:** `scripts/validate-manifest.ts` (SD-4 §3) runs on every PR touching `infrastructure/manifests/*` or `packages/modules/*/module.config.ts`.
+- **Generated-artifact freshness:** `scripts/generate-composition.ts` + `scripts/generate-ci-matrix.ts` + `scripts/generate-eslint-zones.ts` re-run in CI; bytes diff'd against checked-in `_generated/`; `input_hash` headers recomputed and compared (SD-4 §5.3).
 
 ### 9.6 Explicitly NOT in SP-0
 
@@ -413,15 +467,19 @@ Load/perf benchmarking, visual regression, mutation testing. They become their o
 
 ## 10. Early SP-0 internal task: framework re-evaluation
 
-Per D9, the first internal task within SP-0 execution is a formal framework re-evaluation. Criteria are now **portfolio-level**, not single-app:
+> **COMPLETED 2026-05-15** — re-evaluation outcomes are recorded in SD-2 (`14d847a`) and SD-3 (`daffdb0`). Section retained as historical record of the criteria.
+
+Per D9, the first internal task within SP-0 execution was a formal framework re-evaluation. Criteria were **portfolio-level**, not single-app:
 
 - **Real data inputs:** measured hydration-bug rate in the existing portal (B10.1 audit, B12 S7 login hydration mismatch, the `.env.local` notes about RSC); RSC complexity tax; build/dev-loop times.
 - **Portfolio fit:** the chosen framework must serve operator + client + provider portals coherently, support per-customer build-time composition, and support tree-shaking of unused module packages.
 - **Codex consult** required (Werkbench L3 decision-gate policy).
 - **Gateway decision:** with three confirmed portal consumers, the re-evaluation must explicitly decide whether to extract the contract layer into a **standalone API gateway service** (Approach B from brainstorming) *now*, or defer.
-- Candidates to evaluate: Next.js (current), Vite + TanStack Router/Start as SPA + thin BFF, Remix/React Router 7.
+- Candidates evaluated: Next.js (current), Vite + TanStack Router/Start as SPA + thin BFF, Remix/React Router 7.
 
-Outputs of this task feed back into the SP-0 plan before further structural work commences.
+**Outcomes (recorded in D11 + D12):**
+- D11 (Framework, SD-2): **Stay Next.js for SP-0**, with framework-agnostic spine (zero `next/*` imports outside `portal/operator/app/`), thin adapter at route handlers, and named tripwires for re-evaluation in the future.
+- D12 (Gateway, SD-3): **Defer extraction**. `packages/contract` stays a shared TypeScript package consumed by each portal's BFF; trigger conditions defined for revisiting (non-TS client, cross-portal versioning pain, etc.).
 
 ---
 
@@ -447,20 +505,26 @@ SP-0 does **not** build:
 
 ## 12. Open questions / known unknowns
 
-These are unresolved or deferred to plan time / future SPs. The codex spec-review gate (§13) is expected to surface more.
+Codex pass-1 spec review (2026-05-15) drove the §4.1 decision spike which RESOLVED items 1, 2, 5, 6 below. Items 3, 4, 7, 8 remain open.
 
-1. **Framework re-evaluation outcome.** Whether SP-0 stays Next.js or migrates to a Vite-SPA shape. Resolved by the §10 task before further plan work commences.
-2. **Gateway extraction timing.** Whether the contract layer becomes a standalone API gateway in SP-0 or after the second portal consumer materializes.
+1. ~~**Framework re-evaluation outcome.**~~ **RESOLVED** in D11 / SD-2 (`14d847a`) — Next.js stays, framework-agnostic spine, tripwires defined.
+2. ~~**Gateway extraction timing.**~~ **RESOLVED** in D12 / SD-3 (`daffdb0`) — defer; trigger conditions named.
 3. **Boundary with existing `@infinityrx/portal-shared`.** Does SP-0 grow that package into the proposed structure, or start new packages alongside? Determined at plan time.
 4. **Per-domain cache TTLs and invalidation tag designs.** Declared as data in `packages/contract`; concrete values set during the verticals (SP-1+) — SP-0 ships the *mechanism*.
-5. **Module entitlement claim shape in the JWT.** Build-time composition handles the "what's deployed" question; whether runtime auth-claim entitlements add anything (e.g., for sub-tenant feature flags within a customer's instance) is open.
-6. **Deployment manifest schema details.** Beyond `{modules: [...]}`, what else does it carry — branding, audience, auth profile, backend endpoints? Plan time.
-7. **Where the standalone product's branding lives.** Per-instance branding likely lives in the deployment manifest; whether `packages/ui` exposes a theme contract or each module brings branding hooks is open.
+5. ~~**Module entitlement claim shape in the JWT.**~~ **PARTIALLY RESOLVED** — D10 / SD-1 (`b876c3b`) defines the canonical claim shape (`sub/tid/roles/typ/iat/exp/jti/iss/aud/env`); runtime `module_entitlements` for sub-tenant feature flags within a single customer's instance remains deferred (not in SP-0 scope — D7 says composition happens at build/deploy time).
+6. ~~**Deployment manifest schema details.**~~ **RESOLVED** in D13 / SD-4 §3 (`0b3c9d7`) — full YAML schema with `instance_name`, `audience`, `auth_profile`, `branding`, `modules`, plus 12 `required_*` axes and `migration_policy`.
+7. **Where the standalone product's branding lives.** Per-instance branding lives in the deployment manifest (per SD-4 §3 — `branding: { primary_color, logo_url }`); whether `packages/ui` exposes a theme contract or each module brings branding hooks is still open.
 8. **The pre-existing legacy paths in the graphify graph** (`/Users/Dev/...`, Desktop-rooted) — orthogonal to SP-0 but flagged as cleanup at some point.
 
 ---
 
 ## 13. Cross-references
+
+**Decision spike sub-decisions (binding, codex-verified):**
+- `docs/superpowers/specs/2026-05-15-sp0-decision-spike-auth-interface.md` — SD-1 auth interface contract (v4, `b876c3b`)
+- `docs/superpowers/specs/2026-05-15-sp0-decision-spike-framework.md` — SD-2 framework decision (v3, `14d847a`)
+- `docs/superpowers/specs/2026-05-15-sp0-decision-spike-gateway.md` — SD-3 gateway defer (`daffdb0`)
+- `docs/superpowers/specs/2026-05-15-sp0-decision-spike-composition.md` — SD-4 composition mechanism (v5, `0b3c9d7`)
 
 **Project rules (binding):**
 - `CLAUDE.md` — project principles, module table, environment architecture, auto-gate
@@ -493,11 +557,11 @@ These are unresolved or deferred to plan time / future SPs. The codex spec-revie
 
 ## 14. Next steps
 
-1. **Codex spec review** (task #11) — Sections 5–9 especially (architecture, components, data flow, error handling, testing). Mike accepted Sections 4 and 5 of brainstorming provisionally; the codex gate is the substantive review for those. Run via gstack `/codex` (or `/codex:review`).
-2. **Fold revisions** if codex flags anything; iterate until concerns are addressed or accepted as open.
-3. **Invoke writing-plans** to produce the SP-0 implementation plan. The framework re-evaluation (§10) is the plan's first task.
+1. ~~**Codex spec review**~~ ✅ **DONE** — pass-1 returned 5 BLOCK + 8 CONCERN + 4 NIT (2026-05-15). Triaged into the §4.1 decision spike.
+2. ~~**Fold revisions**~~ ✅ **DONE** — 4 sub-decisions resolved all 5 BLOCKs across multiple codex-verification passes; main spec revised in this commit to incorporate sub-decision outputs.
+3. **Invoke writing-plans** to produce the SP-0 implementation plan. The plan's first internal task is no longer "framework re-evaluation" (that's done) — it's scaffolding the package structure plus the one reference module per §11.
 4. **Pre-execution:** B12 lingering bug fixes land (task #9) — B12's auth-shim slices feed into `packages/auth` rather than persisting.
-5. **Execute SP-0** with the spec as the authoritative input.
+5. **Execute SP-0** with the spec + sub-decisions as the authoritative inputs.
 
 ---
 
