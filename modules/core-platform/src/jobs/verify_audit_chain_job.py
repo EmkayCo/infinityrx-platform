@@ -107,8 +107,8 @@ async def handle_verify_audit_chain(payload: dict[str, Any]) -> dict[str, Any]:
                 "entries_checked": entries_checked,
             },
         )
-        # Emit one event per broken chain link — each event carries only the
-        # entry_id and hash metadata, never audit entry content (PHI-adjacent).
+        # Emit one event per broken chain link — only entry_id and hash
+        # metadata; no audit entry content (action, entity data) in the payload.
         for failure in failures:
             event_bus.publish(
                 et.AUDIT_CHAIN_BROKEN,
@@ -117,8 +117,6 @@ async def handle_verify_audit_chain(payload: dict[str, Any]) -> dict[str, Any]:
                     "entry_id": failure["entry_id"],
                     "expected_hash": failure["expected_hash"],
                     "stored_hash": failure["stored_hash"],
-                    "action": failure["action"],
-                    "severity": "CRITICAL",
                 },
             )
     else:
@@ -184,9 +182,21 @@ def _verify_tenant_chain(
         entries_checked += 1
         row_id, tid, action, entity_type, entity_id, created_at, stored_prev_hash, stored_entry_hash = row
 
-        # The stored previous_hash must match what we tracked from the prior entry.
-        # A genesis entry has previous_hash == GENESIS_HASH (or None).
+        # Two-part chain check:
+        #   1. The stored previous_hash must equal the hash we tracked from the
+        #      prior row (prev_hash). Without this check an attacker can rewrite
+        #      both previous_hash and entry_hash for a row, making the
+        #      recomputed entry_hash match while silently breaking chain
+        #      continuity.
+        #   2. The stored entry_hash must equal the hash recomputed from the
+        #      row's own fields.
+        #
+        # For the genesis entry prev_hash == GENESIS_HASH; a None stored value
+        # is treated as GENESIS_HASH for backward compatibility.
         effective_prev = stored_prev_hash if stored_prev_hash else GENESIS_HASH
+
+        # Check 1: previous_hash continuity
+        prev_hash_broken = (effective_prev != prev_hash)
 
         expected_hash = compute_entry_hash(
             tenant_id=UUID(str(tid)),
@@ -197,13 +207,15 @@ def _verify_tenant_chain(
             previous_hash=effective_prev,
         )
 
-        if expected_hash != stored_entry_hash:
+        # Check 2: entry_hash integrity
+        entry_hash_broken = (expected_hash != stored_entry_hash)
+
+        if prev_hash_broken or entry_hash_broken:
             failure = {
                 "tenant_id": tenant_id,
                 "entry_id": row_id,
                 "expected_hash": expected_hash,
                 "stored_hash": stored_entry_hash,
-                "action": action,
             }
             failures.append(failure)
             logger.critical(
@@ -212,7 +224,8 @@ def _verify_tenant_chain(
                     "svc_name": "verify_audit_chain_job",
                     "audit_entry_id": row_id,
                     "audit_tenant_id": tenant_id,
-                    "audit_action": action,
+                    "audit_prev_hash_broken": prev_hash_broken,
+                    "audit_entry_hash_broken": entry_hash_broken,
                 },
             )
             if stop_on_first:

@@ -153,13 +153,15 @@ class TestAuditChainJobIntegration:
             assert run.status == "succeeded"
             assert run.result["status"] == "failed"  # handler result shows failure
 
-        # Verify CRITICAL event emitted
+        # Verify CRITICAL event emitted with hash metadata only (no audit content)
         broken_events = [e for e in event_bus.published_events() if e.topic == et.AUDIT_CHAIN_BROKEN]
         assert len(broken_events) == 1
         assert broken_events[0].payload["tenant_id"] == tenant_id
         assert broken_events[0].payload["entry_id"] == 42
-        assert broken_events[0].payload["severity"] == "CRITICAL"
-        # No audit content in payload
+        # Severity implied by event type — not in payload
+        assert "severity" not in broken_events[0].payload
+        # Action/entity content excluded from payload (PHI-adjacent)
+        assert "action" not in broken_events[0].payload
         assert "message" not in broken_events[0].payload
         assert "entity_name" not in broken_events[0].payload
 

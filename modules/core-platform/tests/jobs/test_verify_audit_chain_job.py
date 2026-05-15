@@ -150,6 +150,35 @@ class TestVerifyTenantChainTamperedEntries:
         assert result["failures"][0]["entry_id"] == 2
         assert result["failures"][1]["entry_id"] == 3
 
+    def test_tampered_previous_hash_detected_even_if_entry_hash_recomputed(self) -> None:
+        """Attack: attacker rewrites previous_hash AND recomputes a valid entry_hash.
+
+        Without the prev_hash continuity check this row would pass — the
+        recomputed entry_hash matches the stored entry_hash. The check that
+        stored_prev_hash == tracked prev_hash catches it.
+        """
+        ts1 = _now()
+        ts2 = _now()
+        h1 = _compute_hash(_TENANT_ID, "login", ts1, GENESIS_HASH)
+        # Attacker sets row 2's previous_hash to a different value ("evil") and
+        # recomputes a valid entry_hash against that fake previous_hash.
+        evil_prev = "e" * 64
+        evil_h2 = _compute_hash(_TENANT_ID, "logout", ts2, evil_prev)
+
+        rows = [
+            (1, uuid.UUID(_TENANT_ID), "login", None, None, ts1, GENESIS_HASH, h1),
+            # Row 2: entry_hash is self-consistent with evil_prev but breaks chain
+            (2, uuid.UUID(_TENANT_ID), "logout", None, None, ts2, evil_prev, evil_h2),
+        ]
+        db = MagicMock()
+        db.execute.return_value.fetchall.return_value = rows
+        result = _verify_tenant_chain(db, tenant_id=_TENANT_ID, stop_on_first=False)
+
+        assert result["entries_checked"] == 2
+        # Row 1 valid; row 2 caught by prev_hash continuity check
+        assert len(result["failures"]) == 1
+        assert result["failures"][0]["entry_id"] == 2
+
     def test_stop_on_first_failure_stops_early(self) -> None:
         ts1 = _now()
         ts2 = _now()
@@ -295,8 +324,9 @@ class TestHandlerEventEmission:
         assert payload["tenant_id"] == _TENANT_ID
         assert payload["entry_id"] == 1
         assert payload["stored_hash"] == tampered_hash
-        assert payload["severity"] == "CRITICAL"
-        # Verify no audit entry CONTENT is leaked — only entry_id and hashes
+        # Verify no audit entry CONTENT is leaked — only entry_id and hash fields
+        assert "action" not in payload   # audit action is audit content — excluded
+        assert "severity" not in payload  # severity implied by event type
         assert "message" not in payload
         assert "entity_name" not in payload
         assert "member" not in payload
