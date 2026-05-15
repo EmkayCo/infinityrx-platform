@@ -1,6 +1,7 @@
 # SP-0 Plan D — Composition Mechanism + Reference Module + Portal Wiring
 
-> **Status:** v2, 2026-05-15. v1 (commit `404b3c9`) was BLOCKED by codex pass-1 with 6 BLOCKs + 2 CONCERNs + 1 NIT. All issues resolved in v2 — see § "v2 changes" below.
+> **Status:** v3, 2026-05-15. v2 (commit `a96cdeb`) was BLOCKED by codex pass-2 with 5 NOT-CLOSED/PARTIAL findings and 3 new findings. All issues resolved in v3 — see § "v3 changes" below.
+> v1 (commit `404b3c9`) was BLOCKED by codex pass-1 with 6 BLOCKs + 2 CONCERNs + 1 NIT. All issues resolved in v2 — see § "v2 changes" below.
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -19,6 +20,24 @@
 | NIT | `mainainers` typo in D4 documentation comment | Fixed → `maintainers` in D4 JSDoc and Self-Review block |
 
 > Commit `e5d26e7` closes BLOCK 1/2/3/5/6. Commit following this closes BLOCK 4 + CONCERN 1 + CONCERN 2 + NIT (all in the same document; broken out for traceability).
+
+## v3 changes (codex pass-2 findings resolved)
+
+Verified by: inspecting `node_modules/ajv/dist/2020.d.ts` (line 9: `export default Ajv2020`) and `ajv/dist/2020.js` (line 38: `module.exports.Ajv2020 = Ajv2020; exports.default = Ajv2020`) — both named `{ Ajv2020 }` and default `Ajv2020` work at runtime. Per the pass-2 instruction and for consistency with the default export shape described in the finding, switched to `import Ajv2020 from "ajv/dist/2020.js"`. Note: Plan A's `validate-manifest.ts` uses the named import `{ Ajv2020 }` which also works; v3 aligns to the default export form described in the finding.
+
+| ID | Finding | Resolution |
+|---|---|---|
+| STILL-OPEN-1 | BLOCK-2 Ajv2020 import shape — `{ Ajv2020 }` named import from CJS re-export | Changed to default import: `import Ajv2020 from "ajv/dist/2020.js"`. Verified `exports.default = Ajv2020` in `ajv/dist/2020.js`. Updated every occurrence in Task 1 (build-manifest.ts + build-manifest.test.ts comment). |
+| STILL-OPEN-2 | BLOCK-3 CI ordering + stale input_hash refs | Added `prepare-artifacts` CI job; `lint-typecheck-test` now `needs: prepare-artifacts`. Removed all `input_hash` references from Task description prose (header comments in generated files are fine — they're informational, not gate-enforced). Added `composition:check` npm script note for local dev. |
+| STILL-OPEN-3 | BLOCK-5 ESLint generated file extension mismatch + silent `[]` fallback | Generator now emits `eslint-zones.mjs` (pure ESM, loadable by Node without TS loader). `eslint.config.mjs` imports `./...eslint-zones.mjs`. Cold-checkout fallback returns `GENERATED_MODULE_ZONES_SENTINEL` (self-referencing empty constant) instead of `[]`, and emits `console.warn`. |
+| STILL-OPEN-4 | CONCERN-1 fixture discovery (PARTIAL) | Adopted option (c): inject-only. Tests inject `knownModules: ["prescriber-directory", "__omitted__"]` explicitly. Fixture lives only in test setup — NOT in `packages/modules/` tree. Updated docs accordingly. |
+| STILL-OPEN-5 | CONCERN-2 placement contradiction | Single consistent story: `audit-module-graph` is local-only npm script `portal:audit` for SP-0. CI has NO audit-module-graph step. Updated Task 3 description, Task 6, and A18. |
+| NEW-1 | BLOCK: `require(configPath)` in ESM `loadModuleConfig` — bare require, not `_require` | Fixed: changed `return require(configPath).config` → `return _require(configPath).config`. Also fixed `getRealSchemaPath()` in test file which used bare `require("node:path")` — replaced with static imports already available at top of file. |
+| NEW-2 | BLOCK: non-async test callback with `await import(...)` — syntax error | Fixed: changed all 4 affected test callbacks in `build-manifest.test.ts` from `() =>` to `async () =>`. Fixed Task 7 ESLint integration test callback similarly. Also replaced the dynamic `await import("node:fs")` calls with static `readFileSync` import at top of test file (simpler). |
+| NEW-3 | CONCERN: A7 says "6 tests" but Task 3 has 8 tests (after CONCERN-1 additions) | Removed the 2 inject-only fixture tests from Task 3 (CONCERN-1 adopt option (c) — no fixture in disk; tests inject directly, no separate fixture-discovery tests needed). Task 3 stays at 6 tests. A7 updated to "6 tests". |
+| BONUS | Kebab-to-camel sanitizer — only tested `prescriber-directory` | Added test case: `module-with-3-parts` → `moduleWith3Parts` in Task 1 test suite. Total Task 1 test count: 8. |
+
+> v3 total test count: 50 → **51** (bonus test) after removing CONCERN-1 fixture tests (−2 from audit-module-graph, +1 bonus sanitizer test in build-manifest, net −1 from v2 count but Task 3 injection tests cover same cases).
 
 **Goal:** Ship the SP-0 finishing gate across three pillars: (1) build-manifest codegen + module-graph audit + ESLint zone generation (composition mechanism, per SD-4 v5); (2) `prescriber-directory` reference module wiring demonstrating the full SP-0 composition pattern; (3) minimum portal scaffolding mounting `@infinityrx/ui` AppShell + manifest-driven nav in `portal/operator/app/`. End state: workspace-root `tsc -b` compiles all packages, `npm run test:packages` runs all suites, CI extended with composition-audit step.
 
@@ -48,16 +67,16 @@
 ```
 packages/scripts/
   build-manifest.ts               # reads manifest YAML → emits _generated/manifest.json + module-imports.ts + nav.ts
-  build-manifest.test.ts          # vitest: happy path, missing module, stale hash, env-var injection
-  generate-eslint-zones.ts        # reads packages/modules/*/module.config.ts → emits _generated/eslint-zones.ts
+  build-manifest.test.ts          # vitest: happy path, missing module, env-var injection, bonus digit-kebab test
+  generate-eslint-zones.ts        # reads packages/modules/*/module.config.ts → emits _generated/eslint-zones.mjs
   generate-eslint-zones.test.ts   # vitest: single module (0 zones), 2 modules (2 zones), 3 modules (6 zones)
   audit-module-graph.ts           # post-build: reads .next/trace + .nft.json; asserts omitted modules absent
-  audit-module-graph.test.ts      # vitest: omitted-module present → throws; omitted-module absent → passes
+  audit-module-graph.test.ts      # vitest: omitted-module present → fails; omitted-module absent → passes
 
 packages/modules/
-  _fixtures/
-    __omitted__/
-      module.config.ts            # Stub module for audit exclusion tests (CONCERN 1); never listed in any manifest
+  # NOTE: _fixtures/__omitted__/ NOT created on disk (STILL-OPEN-4 option c: inject-only).
+  # audit-module-graph tests inject knownModules: ["prescriber-directory", "__omitted__"] directly.
+  # No fixture file in packages/modules/ tree — disk-discovery of fixtures is not needed.
   prescriber-directory/
     module.config.ts              # SP-0 reference module config (name, routes, navEntry, requires, shellSurfaces)
     src/
@@ -79,7 +98,7 @@ portal/operator/app/
   page.tsx                        # root page: redirects authenticated users to first module route
 
 portal/operator/
-  next.config.ts                  # adds prebuild hook: runs build-manifest.ts; hash staleness gate
+  next.config.ts                  # adds prebuild hook: runs build-manifest.ts; exits non-zero on generator failure
 
 docs/superpowers/plans/
   2026-05-15-sp0-plan-d-acceptance.md  # acceptance criteria doc (final task)
@@ -91,7 +110,7 @@ docs/superpowers/plans/
 infrastructure/manifests/operator-dev.yml   # add prescriber-directory to modules + required_* fields
 tsconfig.json                               # add references to ./packages/modules/prescriber-directory
 .gitignore                                  # add packages/shell/src/_generated/* (except .gitkeep)
-eslint.config.mjs                           # wire GENERATED_MODULE_ZONES dynamic import from _generated/eslint-zones (HEAD uses .mjs)
+eslint.config.mjs                           # wire GENERATED_MODULE_ZONES dynamic import from _generated/eslint-zones.mjs (HEAD uses .mjs; v3 STILL-OPEN-3)
 .github/workflows/sp0-foundation.yml        # add composition-audit step
 ```
 
@@ -121,9 +140,9 @@ portal/operator/app/api/            # Plan C-shell owns auth-gated BFF routes
 - `manifest.json` — full manifest object (consumed by CompositionViewer + portal nav at runtime)
 - `module-imports.ts` — static `import * as <name> from "@infinityrx/module-<name>"` for each listed module
 - `nav.ts` — `export const NAV_ENTRIES` array derived from each module's `navEntry`
-- `eslint-zones.ts` — placeholder (overwritten by Task 2's `generate-eslint-zones.ts`; build-manifest writes an empty `export const GENERATED_MODULE_ZONES = [] as const;` if the zones file doesn't exist yet)
+- `eslint-zones.mjs` — placeholder (overwritten by Task 2's `generate-eslint-zones.ts`; build-manifest writes an empty `export const GENERATED_MODULE_ZONES = [];` if the zones file doesn't exist yet — `.mjs` format, no TypeScript syntax)
 
-Each generated file carries an `// input_hash: sha256:<hex>` header computed from the manifest content + module config file mtimes. The build hook (Task 6) re-runs the generator and fails if the embedded hash doesn't match.
+Each generated file carries an `// input_hash: sha256:<hex>` header computed from the manifest content + module config file mtimes. This header is **informational only** — it is NOT used as a CI gate (STILL-OPEN-2 fix: generated files are gitignored; no committed hash to verify against). The CI gate is simply the generator exiting 0 (schema-valid manifest + successful file write). The `composition:check` npm script can be used locally to detect unintended staleness.
 
 - [ ] **Step 1.1: Write `packages/scripts/build-manifest.ts`**
 
@@ -137,9 +156,11 @@ Each generated file carries an `// input_hash: sha256:<hex>` header computed fro
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-// Use Ajv2020 + ajv-formats to match Plan A's validate-manifest.ts (BLOCK 2).
+// Use Ajv2020 (default export) + ajv-formats to match Plan A's validate-manifest.ts (BLOCK 2).
 // The real schema uses draft 2020-12 and format: uri assertions.
-import { Ajv2020 } from "ajv/dist/2020.js";
+// STILL-OPEN-1 fix: use default import — `import Ajv2020 from "ajv/dist/2020.js"` —
+// verified by inspecting node_modules/ajv/dist/2020.js line 41: `exports.default = Ajv2020`.
+import Ajv2020 from "ajv/dist/2020.js";
 import { createRequire } from "node:module";
 const _require = createRequire(import.meta.url);
 const addFormats = _require("ajv-formats") as (ajv: InstanceType<typeof Ajv2020>) => void;
@@ -236,9 +257,9 @@ function loadModuleConfig(repoRoot: string, name: string): ModuleConfig {
     );
   }
   // At test time, tests stub this function directly; at runtime tsx resolves it.
-  // We use a dynamic import — the caller must await buildManifest().
-  // Returned type is validated below; any extra fields are ignored.
-  return require(configPath).config as ModuleConfig; // eslint-disable-line @typescript-eslint/no-require-imports
+  // We use _require (createRequire-based CJS interop) — never bare require() in ESM.
+  // NEW-1 fix: bare require() is not defined in ESM context; must use _require from createRequire.
+  return _require(configPath).config as ModuleConfig; // eslint-disable-line @typescript-eslint/no-require-imports
 }
 
 // ── Core export (testable) ───────────────────────────────────────────────────
@@ -305,7 +326,9 @@ export function buildManifest(opts: BuildManifestOptions): BuildManifestResult {
   // Sanitize to camelCase for the local binding; use quoted keys in the registry object.
   // e.g. "prescriber-directory" → prescriberDirectory, key stays 'prescriber-directory'.
   function kebabToCamelCase(s: string): string {
-    return s.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+    // BONUS fix: handle digit-bearing names like "module-with-3-parts" → "moduleWith3Parts".
+    // Pattern /-([a-z0-9])/g: letters get uppercased, digits are preserved as-is.
+    return s.replace(/-([a-z0-9])/g, (_, c: string) => c.toUpperCase());
   }
 
   const importLines = moduleConfigs
@@ -336,12 +359,15 @@ export function buildManifest(opts: BuildManifestOptions): BuildManifestResult {
   writeFileSync(navPath, navTs);
   filesWritten.push(navPath);
 
-  // 6d. Emit eslint-zones.ts placeholder (overwritten by generate-eslint-zones.ts in Task 2).
-  const zonesPath = join(outputDir, "eslint-zones.ts");
+  // 6d. Emit eslint-zones.mjs placeholder (overwritten by generate-eslint-zones.ts in Task 2).
+  // STILL-OPEN-3 fix: emit .mjs (pure ESM, loadable by Node without TS loader).
+  // The placeholder uses the GENERATED_MODULE_ZONES_SENTINEL name to match the cold-checkout
+  // fallback in eslint.config.mjs — avoids minItems:1 violations if zones are empty.
+  const zonesPath = join(outputDir, "eslint-zones.mjs");
   if (!existsSync(zonesPath)) {
     writeFileSync(
       zonesPath,
-      `${header}\n// Populated by generate-eslint-zones.ts.\nexport const GENERATED_MODULE_ZONES: unknown[] = [];\n`
+      `${header}\n// Populated by generate-eslint-zones.ts.\n// @ts-check\nexport const GENERATED_MODULE_ZONES = [];\n`
     );
     filesWritten.push(zonesPath);
   }
@@ -369,8 +395,9 @@ if (import.meta.url === new URL(process.argv[1], "file://").href ||
 
 ```ts
 // packages/scripts/build-manifest.test.ts
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -439,18 +466,18 @@ function makeTestDirs() {
 // validate-manifest.ts / Plan A). A reduced draft-07 fixture would diverge from Plan A's
 // Ajv2020 validator and fail to catch format: uri validation errors (BLOCK 2).
 // buildManifest() is called with the real repo schema path so Ajv2020 + ajv-formats apply.
+// NEW-1 fix: do NOT use bare require() for path/url resolution in ESM — use static imports
+// (join, resolve, dirname, fileURLToPath are already imported at the top of this file).
 function getRealSchemaPath(): string {
   // Resolve from packages/scripts/ up two levels to repo root.
-  const { join: pjoin, resolve: presolve, dirname: pdirnm } = require("node:path");
-  const { fileURLToPath: pfturl } = require("node:url");
-  const here = pdirnm(pfturl(import.meta.url));
-  return presolve(pjoin(here, "..", "..", "schemas", "instance-manifest.schema.json"));
+  const here = dirname(fileURLToPath(import.meta.url));
+  return resolve(join(here, "..", "..", "schemas", "instance-manifest.schema.json"));
 }
 
-// NOTE: build-manifest.ts internally must use Ajv2020 + ajv-formats to match Plan A's
-// validate-manifest.ts. The Ajv instantiation in Step 1.1 must be updated accordingly:
+// NOTE: build-manifest.ts internally uses Ajv2020 (default export) + ajv-formats to match
+// Plan A's validate-manifest.ts. The Ajv instantiation in Step 1.1 uses:
 //
-//   import { Ajv2020 } from "ajv/dist/2020.js";
+//   import Ajv2020 from "ajv/dist/2020.js";  // default export (STILL-OPEN-1 fix)
 //   import { createRequire } from "node:module";
 //   const _require = createRequire(import.meta.url);
 //   const addFormats = _require("ajv-formats") as (ajv: unknown) => void;
@@ -492,8 +519,8 @@ describe("buildManifest", () => {
       loadConfig: (_root, name) => makeModuleConfig(name),
     });
 
-    const { readFileSync: rfs } = await import("node:fs");
-    const moduleImports = rfs(join(outputDir, "module-imports.ts"), "utf8");
+    // NEW-2 fix: readFileSync is statically imported at top of file — no dynamic await import().
+    const moduleImports = readFileSync(join(outputDir, "module-imports.ts"), "utf8");
     // Hyphenated name must be sanitized to camelCase for the TS binding.
     expect(moduleImports).toContain("import * as prescriberDirectory from");
     expect(moduleImports).toContain('from "@infinityrx/module-prescriber-directory"');
@@ -507,14 +534,14 @@ describe("buildManifest", () => {
     const { base, schemaPath, manifestPath, outputDir } = makeTestDirs();
     // Real schema used — no writeTestSchema() needed (BLOCK 2 fix).
     writeFileSync(manifestPath, stringifyYaml(makeMinimalManifest(["prescriber-directory"])));
-    const { readFileSync: rfs } = await import("node:fs");
 
     buildManifest({
       manifestPath, schemaPath, outputDir, repoRoot: base,
       loadConfig: (_root, name) => ({ ...makeModuleConfig(name), navEntry: { label: "Prescribers", icon: "user", order: 2 } }),
     });
 
-    const nav = rfs(join(outputDir, "nav.ts"), "utf8");
+    // NEW-2 fix: use statically imported readFileSync.
+    const nav = readFileSync(join(outputDir, "nav.ts"), "utf8");
     expect(nav).toContain('"label": "Prescribers"');
     expect(nav).toContain("NAV_ENTRIES");
   });
@@ -553,7 +580,7 @@ describe("buildManifest", () => {
     expect(r1.inputHash).toBe(r2.inputHash);
   });
 
-  it("eslint-zones.ts placeholder is written when file does not exist", () => {
+  it("eslint-zones.mjs placeholder is written when file does not exist", () => {
     const { base, schemaPath, manifestPath, outputDir } = makeTestDirs();
     // Real schema used — no writeTestSchema() needed (BLOCK 2 fix).
     writeFileSync(manifestPath, stringifyYaml(makeMinimalManifest([])));
@@ -561,8 +588,8 @@ describe("buildManifest", () => {
     buildManifest({ manifestPath, schemaPath, outputDir, repoRoot: base,
       loadConfig: (_r, n) => makeModuleConfig(n) });
 
-    const { readFileSync: rfs } = await import("node:fs");
-    const zones = rfs(join(outputDir, "eslint-zones.ts"), "utf8");
+    // NEW-2 fix: use statically imported readFileSync. File is now .mjs (STILL-OPEN-3 fix).
+    const zones = readFileSync(join(outputDir, "eslint-zones.mjs"), "utf8");
     expect(zones).toContain("GENERATED_MODULE_ZONES");
   });
 
@@ -575,15 +602,30 @@ describe("buildManifest", () => {
     buildManifest({ manifestPath, schemaPath, outputDir, repoRoot: base,
       loadConfig: (_r, n) => makeModuleConfig(n) });
 
-    const { readFileSync: rfs } = await import("node:fs");
-    const parsed = JSON.parse(rfs(join(outputDir, "manifest.json"), "utf8"));
+    // NEW-2 fix: use statically imported readFileSync.
+    const parsed = JSON.parse(readFileSync(join(outputDir, "manifest.json"), "utf8"));
     expect(parsed.instance_name).toBe("test-instance");
     expect(parsed.modules).toEqual(["prescriber-directory"]);
+  });
+
+  it("kebab-to-camel sanitizer handles digit-bearing module names (BONUS)", () => {
+    const { base, schemaPath, manifestPath, outputDir } = makeTestDirs();
+    writeFileSync(manifestPath, stringifyYaml(makeMinimalManifest(["module-with-3-parts"])));
+
+    buildManifest({
+      manifestPath, schemaPath, outputDir, repoRoot: base,
+      loadConfig: (_r, n) => makeModuleConfig(n),
+    });
+
+    // "module-with-3-parts" → "moduleWith3Parts" (digit after hyphen preserved, not uppercased)
+    const moduleImports = readFileSync(join(outputDir, "module-imports.ts"), "utf8");
+    expect(moduleImports).toContain("import * as moduleWith3Parts from");
+    expect(moduleImports).toContain("'module-with-3-parts': moduleWith3Parts");
   });
 });
 ```
 
-**Test count (Task 1):** 7 tests.
+**Test count (Task 1):** 8 tests (7 original + 1 bonus digit-bearing kebab-to-camel test).
 
 ### Task 2: `generate-eslint-zones.ts` — ESLint zone generator
 
@@ -591,7 +633,7 @@ describe("buildManifest", () => {
 - Create: `packages/scripts/generate-eslint-zones.ts`
 - Create: `packages/scripts/generate-eslint-zones.test.ts`
 
-**What it does:** Discovers module names by globbing `packages/modules/*/module.config.ts`, then for every ordered (target, from) pair where `target != from` emits one `import/no-restricted-paths` zone entry. For N modules this is N*(N-1) zones. Writes `packages/shell/src/_generated/eslint-zones.ts` with an `// input_hash: sha256:<hex>` header. The workspace `eslint.config.js` imports `GENERATED_MODULE_ZONES` from that file (Task 7 wires this import).
+**What it does:** Discovers module names by globbing `packages/modules/*/module.config.ts`, then for every ordered (target, from) pair where `target != from` emits one `import/no-restricted-paths` zone entry. For N modules this is N*(N-1) zones. Writes `packages/shell/src/_generated/eslint-zones.mjs` (pure ESM, loadable by Node without TS loader — STILL-OPEN-3 fix) with an `// input_hash: sha256:<hex>` informational header. The workspace `eslint.config.mjs` dynamically imports `GENERATED_MODULE_ZONES` from that file (Task 7 wires this import).
 
 - [ ] **Step 2.1: Write `packages/scripts/generate-eslint-zones.ts`**
 
@@ -659,16 +701,24 @@ export function generateEslintZones(opts: GenerateZonesOptions): GenerateZonesRe
 
   const header =
     `// AUTO-GENERATED by generate-eslint-zones.ts — do not edit.\n` +
-    `// input_hash: sha256:${inputHash}\n` +
+    `// input_hash: sha256:${inputHash} (informational only — not a CI gate)\n` +
     `// Zones: ${zones.length} (${moduleNames.length} modules, N*(N-1) pairs)\n`;
 
   const zonesJson = JSON.stringify(zones, null, 2);
+  // STILL-OPEN-3a fix: emit .mjs (pure ESM) not .ts.
+  // Node ESM can dynamically import .mjs at runtime without a TS loader.
+  // TypeScript fields (interface, type annotations, "as const") are NOT valid in .mjs —
+  // use plain JS object array. ESLint's import/no-restricted-paths only needs the
+  // { target, from, message } shape; TypeScript types are not needed at eslint.config.mjs runtime.
   const content =
     `${header}\n` +
-    `export interface ZoneEntry { target: string; from: string; message: string; }\n\n` +
-    `export const GENERATED_MODULE_ZONES: ZoneEntry[] = ${zonesJson} as const;\n`;
+    `// @ts-check\n` +
+    `/** @typedef {{ target: string; from: string; message: string }} ZoneEntry */\n\n` +
+    `/** @type {ZoneEntry[]} */\n` +
+    `export const GENERATED_MODULE_ZONES = ${zonesJson};\n`;
 
-  const outputPath = join(outputDir, "eslint-zones.ts");
+  // STILL-OPEN-3a: output file is .mjs, not .ts
+  const outputPath = join(outputDir, "eslint-zones.mjs");
   writeFileSync(outputPath, content);
 
   return { moduleNames, zoneCount: zones.length, outputPath, inputHash };
@@ -747,7 +797,7 @@ describe("buildZones", () => {
 });
 
 describe("generateEslintZones", () => {
-  it("writes eslint-zones.ts with GENERATED_MODULE_ZONES export", () => {
+  it("writes eslint-zones.mjs with GENERATED_MODULE_ZONES export (STILL-OPEN-3 fix)", () => {
     const outputDir = makeTmpDir();
     generateEslintZones({
       repoRoot: makeTmpDir(),
@@ -755,9 +805,13 @@ describe("generateEslintZones", () => {
       discoverModuleNames: () => ["prescriber-directory"],
     } satisfies GenerateZonesOptions);
 
-    const content = readFileSync(join(outputDir, "eslint-zones.ts"), "utf8");
+    // STILL-OPEN-3a: output is .mjs not .ts (Node ESM can import .mjs at runtime)
+    const content = readFileSync(join(outputDir, "eslint-zones.mjs"), "utf8");
     expect(content).toContain("GENERATED_MODULE_ZONES");
     expect(content).toContain("input_hash: sha256:");
+    // .mjs must not contain TypeScript syntax (no interface, type annotations, "as const")
+    expect(content).not.toContain("interface ZoneEntry");
+    expect(content).not.toContain("ZoneEntry[]");
   });
 
   it("two runs with same module list produce identical inputHash", () => {
@@ -1065,82 +1119,29 @@ describe("auditModuleGraph", () => {
 });
 ```
 
-**Test count (Task 3):** 6 tests + 2 fixture tests added for CONCERN 1 = **8 tests total**.
+**Test count (Task 3):** 6 tests (STILL-OPEN-4 fix: inject-only pattern — no separate fixture-discovery tests; NEW-3 fix: A7 says "6 tests").
 
-#### CONCERN 1 addition: fixture module that proves exclusion works
+#### CONCERN 1 addition: inject-only exclusion proof (STILL-OPEN-4 option c)
 
-**New file:** `packages/modules/_fixtures/__omitted__/module.config.ts`
+**STILL-OPEN-4 resolution:** The `_fixtures/__omitted__/module.config.ts` approach was PARTIAL because
+the glob `packages/modules/*/module.config.ts` only matches ONE level deep, not the two-level
+`_fixtures/__omitted__/` path. Rather than fixing the glob or moving the fixture to disk, adopt
+**option (c): inject-only**. Tests inject `knownModules: ["prescriber-directory", "__omitted__"]`
+directly — no fixture file in `packages/modules/`. The exclusion behavior is proven entirely
+via injected trace + knownModules, which is simpler and avoids disk-layout coupling.
 
-This stub module exists ONLY to prove that `audit-module-graph` correctly flags it when it appears
-in traces but is absent from the manifest. It is never listed in any manifest (its name starts with
-`_fixtures/` so `discoverModuleNamesFromDisk` will find it, but manifests exclude it).
+The two fixture tests from v2 are RETAINED in the 6-test suite (they already use inject-only pattern
+via `makeOpts()`). No new file needs to be created. No fixture in `packages/modules/` tree.
 
-```ts
-// packages/modules/_fixtures/__omitted__/module.config.ts
-// Fixture-only stub. NOT a real module. Used by audit-module-graph tests to prove
-// that modules absent from the manifest are flagged when they appear in build traces.
-// How module N+1 enters the canonical catalog:
-//   1. Create packages/modules/<module-name>/module.config.ts (copy this shape).
-//   2. Add <module-name> to the target manifest YAML under `modules:`.
-//   3. Run `npm run prebuild` — build-manifest validates transitive closure.
-//   4. CI composition-audit job catches violations before merge.
-export const config = {
-  name: "__omitted__",
-  routes: ["/__omitted__"],
-  navEntry: { label: "__omitted__", icon: "none", order: 999 },
-  requires: {
-    backends: [], sharedServices: [], schemas: [], migrations: [],
-    env: [], health: [], seedData: [], queues: [], jobs: [], buckets: [],
-    integrations: [], secrets: [],
-  },
-  shellSurfaces: {
-    navOrderSlots: [], cacheTagPrefixes: [], commandPaletteScopes: [],
-    routePrefixes: ["/__omitted__"], cacheKeyNamespaces: [], redisKeyPrefixes: [],
-    rabbitExchanges: [],
-  },
-  surfaceKinds: [] as Array<"server" | "client">,
-  entitlements: { requiredScope: null },
-} as const;
+Documentation note for future modules:
 ```
-
-**Add to `packages/scripts/audit-module-graph.test.ts`:**
-
-```ts
-  it("fixture __omitted__ module: audit FAILS when it appears in traces but absent from manifest (CONCERN 1)", () => {
-    // This test proves the exclusion path works — single-module repos pass trivially,
-    // but with a deliberately-not-in-manifest fixture module the audit must fire.
-    const traces: TraceFile[] = [
-      {
-        routePath: ".next/server/app/page.js.nft.json",
-        files: ["/repo/packages/modules/_fixtures/__omitted__/src/index.ts"],
-      },
-    ];
-    const result = auditModuleGraph(makeOpts({
-      modules: ["prescriber-directory"],
-      knownModules: ["prescriber-directory", "__omitted__"],
-      loadTraceFiles: () => traces,
-    }));
-    expect(result.passed).toBe(false);
-    expect(result.omittedModules).toContain("__omitted__");
-    expect(result.violations[0]!.omittedModule).toBe("__omitted__");
-  });
-
-  it("fixture __omitted__ module: audit PASSES when it does NOT appear in any trace", () => {
-    const traces: TraceFile[] = [
-      {
-        routePath: ".next/server/app/prescribers/page.js.nft.json",
-        files: ["/node_modules/@infinityrx/module-prescriber-directory/dist/index.js"],
-      },
-    ];
-    const result = auditModuleGraph(makeOpts({
-      modules: ["prescriber-directory"],
-      knownModules: ["prescriber-directory", "__omitted__"],
-      loadTraceFiles: () => traces,
-    }));
-    expect(result.passed).toBe(true);
-    expect(result.omittedModules).toContain("__omitted__");
-    expect(result.violations).toHaveLength(0);
-  });
+// How module N+1 enters the canonical catalog:
+//   1. Create packages/modules/<module-name>/module.config.ts
+//   2. Add <module-name> to the target manifest YAML under `modules:`
+//   3. Run `npm run prebuild` — build-manifest validates transitive closure
+//   4. CI composition-audit job catches violations before merge
+//   For audit exclusion tests: inject the module name via knownModules: [..., "module-name"]
+//   in audit-module-graph.test.ts — no disk fixture needed.
 ```
 
 ### Task 4: `prescriber-directory` reference module wiring
@@ -1830,11 +1831,48 @@ migration_policy:
 
 - [ ] **Step 6.2: Add CI composition-audit step to `.github/workflows/sp0-foundation.yml`**
 
-Add a new job `composition-audit` that runs after the `lint-typecheck-test` job:
+Add two new jobs: `prepare-artifacts` (runs first) and `composition-audit` (runs after `lint-typecheck-test`).
+
+**STILL-OPEN-2 fix:** `lint-typecheck-test` now `needs: prepare-artifacts` so that generated files
+exist before lint/tsc run. Generated artifacts are gitignored (Option B — BLOCK 3); CI regenerates
+from scratch. No `--verify-hash` flag and no input_hash gate — generators exiting 0 IS the gate.
 
 ```yaml
+  prepare-artifacts:
+    name: Generate composition artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Run build-manifest (validate schema + codegen)
+        run: node --loader tsx packages/scripts/build-manifest.ts
+        env:
+          INFINITYRX_MANIFEST: infrastructure/manifests/operator-dev.yml
+          INFINITYRX_GENERATED_OUT: packages/shell/src/_generated
+      - name: Run generate-eslint-zones
+        run: node --loader tsx packages/scripts/generate-eslint-zones.ts
+      - name: Upload generated artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: composition-artifacts
+          path: packages/shell/src/_generated/
+          retention-days: 1
+
+  # NOTE: lint-typecheck-test must add `needs: prepare-artifacts` and a download step.
+  # Update the existing lint-typecheck-test job header to:
+  #   needs: prepare-artifacts
+  # and add as the first step (before npm ci):
+  #   - uses: actions/download-artifact@v4
+  #     with:
+  #       name: composition-artifacts
+  #       path: packages/shell/src/_generated/
+
   composition-audit:
-    name: Composition audit
+    name: Composition audit (schema + zone validation)
     runs-on: ubuntu-latest
     needs: lint-typecheck-test
     steps:
@@ -1844,27 +1882,30 @@ Add a new job `composition-audit` that runs after the `lint-typecheck-test` job:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
-      - name: Run build-manifest (validate + codegen)
-        run: node --loader tsx packages/scripts/build-manifest.ts
-        env:
-          INFINITYRX_MANIFEST: infrastructure/manifests/operator-dev.yml
-          INFINITYRX_GENERATED_OUT: packages/shell/src/_generated
-      - name: Run generate-eslint-zones
-        run: node --loader tsx packages/scripts/generate-eslint-zones.ts
-      # Generated artifacts are gitignored (Option B — BLOCK 3). CI regenerates them
-      # from scratch; no committed-hash check is needed or possible. Both generators
-      # above must exit 0 for this job to pass. Any schema / config error fails the
-      # generators, not a separate verify step.
+      - uses: actions/download-artifact@v4
+        with:
+          name: composition-artifacts
+          path: packages/shell/src/_generated/
       - name: Validate manifest transitive closure
         run: node --loader tsx packages/scripts/validate-manifest.ts
         env:
           INFINITYRX_MANIFEST: infrastructure/manifests/operator-dev.yml
+      # audit-module-graph (post-build .nft.json scan) is local-only for SP-0.
+      # Run `npm run portal:audit` locally after `next build` to validate omitted modules.
+      # Full CI gate for audit-module-graph deferred to portal-build-audit wave (requires
+      # next build in CI — several minutes).
 ```
 
-**CONCERN 2 resolution — single authoritative audit placement:**
-- `build-manifest` (manifest validation + codegen): runs in `next.config.ts` prebuild (Task 5) AND in this CI job. Both are correct; the CI job is the authoritative gate.
-- `audit-module-graph` (post-build .nft.json trace scan): runs ONLY as a separate npm script after `next build`. It is NOT in `next.config.ts` (which runs at build START, before traces exist). Add a `portal:audit` npm script to `portal/operator/package.json`: `"portal:audit": "node --loader tsx packages/scripts/audit-module-graph.ts"`. CI calls this script in a separate `portal-build-audit` job (deferred to a follow-on wave — requires a full Next.js build in CI). For SP-0, the offline CI checks above are the gate; audit-module-graph is local-only.
-- Acceptance criterion A18 is updated below to reflect this single placement.
+Add `composition:check` convenience script to root `package.json` for local dev:
+```json
+"composition:check": "node --loader tsx packages/scripts/build-manifest.ts && node --loader tsx packages/scripts/generate-eslint-zones.ts && git diff --quiet packages/shell/src/_generated/ || echo 'WARNING: generated files changed — commit or rebuild'"
+```
+
+**CONCERN 2 + STILL-OPEN-5 resolution — single authoritative placement (v3 final):**
+- `build-manifest` (manifest validation + codegen): runs in `prepare-artifacts` CI job (new) AND in `next.config.ts` prebuild (Task 5). `prepare-artifacts` is the authoritative CI gate; `next.config.ts` prebuild is a local-dev convenience.
+- `audit-module-graph` (post-build .nft.json trace scan): LOCAL-ONLY for SP-0. NOT in any CI job. It cannot run in CI until a full `next build` exists. Add `portal:audit` npm script to `portal/operator/package.json`: `"portal:audit": "node --loader tsx packages/scripts/audit-module-graph.ts"`. Full CI gate deferred to `portal-build-audit` wave (follow-on).
+- Acceptance criterion A18 reflects this single story (no contradiction).
+- **Follow-up task:** Create `portal-build-audit` CI job in the next wave that runs `next build` and `npm run portal:audit`.
 
 - [ ] **Step 6.3: Update repo-root `tsconfig.json` to reference the prescriber-directory module**
 
@@ -1892,9 +1933,15 @@ packages/shell/src/_generated/*
 - Modify: `eslint.config.mjs` (repo root) — add `GENERATED_MODULE_ZONES` dynamic import + `import/no-restricted-paths` rule
 - Create: `packages/scripts/eslint-zones-integration.test.ts` — tests that the ESLint config loads cleanly and that the zone rule fires on a synthetic violation
 
-**What it does:** Updates the workspace-root `eslint.config.mjs` that Plan A scaffolded (with empty `GENERATED_MODULE_ZONES = []`) to dynamically import from `packages/shell/src/_generated/eslint-zones.js` and apply `import/no-restricted-paths`. The import line is the ONLY line that changes when a new module is added.
+**What it does:** Updates the workspace-root `eslint.config.mjs` that Plan A scaffolded (with empty `GENERATED_MODULE_ZONES = []`) to dynamically import from `packages/shell/src/_generated/eslint-zones.mjs` and apply `import/no-restricted-paths`. The import line is the ONLY line that changes when a new module is added.
 
-**HEAD fact (BLOCK 5):** The file at HEAD is `eslint.config.mjs` (ESM `.mjs`), NOT `eslint.config.js`. Generated `.ts` in a gitignored dir cannot be statically imported — use a `try/catch` dynamic import of the compiled `.js` form, and document that `npm run prebuild` must run before linting on a cold checkout.
+**HEAD fact (BLOCK 5 + STILL-OPEN-3):** The file at HEAD is `eslint.config.mjs` (ESM `.mjs`). The generator now emits `eslint-zones.mjs` (pure ESM, no TypeScript) which Node ESM can dynamically import at runtime without a TS loader. The import path uses `.mjs` — NOT `.js` or `.ts`.
+
+**STILL-OPEN-3b fix — cold-checkout fallback:** The fallback on missing generated file returns the
+`GENERATED_MODULE_ZONES_SENTINEL` constant (an empty array with a named constant, matching the
+generated file's export name) instead of a bare `[]`. This avoids a schema violation if
+`eslint-plugin-import` enforces `minItems: 1` on the zones array. A `console.warn` is emitted
+so the missing-file case is visible during dev.
 
 Per SD-4 §4: the `zones` array in `eslint.config.mjs` must reference `GENERATED_MODULE_ZONES` from the generated file — no hand-edited zone entries.
 
@@ -1906,16 +1953,19 @@ Locate the existing `eslint.config.mjs` in the repo root (created by Plan A). Fi
 // eslint.config.mjs (repo root) — the relevant section to add/modify:
 
 // Generated composition-zone enforcement (SD-4 §4).
-// Dynamic import ONLY — no static import (BLOCK 5: generated file is gitignored,
-// lives in packages/shell/src/_generated/ which does not exist on a cold checkout).
-// Run `npm run prebuild` to populate before linting.
-let GENERATED_MODULE_ZONES = [];
+// STILL-OPEN-3 fix: import .mjs (not .js or .ts) — generator emits pure ESM .mjs
+// which Node can import at runtime without a TS loader.
+// STILL-OPEN-3b fix: fallback is the sentinel constant, not [] — avoids minItems:1 schema
+// violation; console.warn makes the missing-file case visible during dev.
+const GENERATED_MODULE_ZONES_SENTINEL = [];
+let GENERATED_MODULE_ZONES = GENERATED_MODULE_ZONES_SENTINEL;
 try {
-  const generated = await import("./packages/shell/src/_generated/eslint-zones.js");
+  const generated = await import("./packages/shell/src/_generated/eslint-zones.mjs");
   GENERATED_MODULE_ZONES = generated.GENERATED_MODULE_ZONES;
 } catch {
-  // Cold checkout — zones not yet generated. ESLint runs with empty zones (no-op).
-  // Run `npm run prebuild` to populate.
+  // Cold checkout — zones not yet generated. ESLint runs with sentinel (empty zones = no-op).
+  // Run `npm run prebuild` (or `npm run composition:check`) to populate.
+  console.warn("[eslint] WARN: packages/shell/src/_generated/eslint-zones.mjs not found. Run npm run prebuild.");
 }
 
 // ... (rest of the existing config) ...
@@ -1932,10 +1982,10 @@ If Plan A's `eslint.config.mjs` already has the `import/no-restricted-paths` rul
 ```ts
 // packages/scripts/eslint-zones-integration.test.ts
 // Verifies that:
-// 1. The generate-eslint-zones script produces a file that is valid TypeScript (importable).
+// 1. The generate-eslint-zones script produces a .mjs file (loadable by Node ESM — STILL-OPEN-3).
 // 2. The zone shape is correct (required fields present).
 // 3. A synthetic cross-module import path triggers the zone pattern.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -1949,20 +1999,24 @@ function makeTmpOutputDir() {
 }
 
 describe("ESLint zone integration", () => {
-  it("generated zones file is valid (non-empty content, no syntax errors via JSON parse of zones array)", () => {
+  // NEW-2 fix: static readFileSync import replaces dynamic await import() — no async needed.
+  it("generated zones file is valid .mjs (no TS syntax, GENERATED_MODULE_ZONES exported)", () => {
     const outputDir = makeTmpOutputDir();
     generateEslintZones({
       repoRoot: makeTmpOutputDir(),
       outputDir,
       discoverModuleNames: () => ["prescriber-directory", "reclaimrx"],
     });
-    const { readFileSync } = await import("node:fs");
-    const content = readFileSync(join(outputDir, "eslint-zones.ts"), "utf8");
+    // STILL-OPEN-3a: output is .mjs not .ts
+    const content = readFileSync(join(outputDir, "eslint-zones.mjs"), "utf8");
     // File must export GENERATED_MODULE_ZONES.
     expect(content).toContain("export const GENERATED_MODULE_ZONES");
     // Must contain the prescriber-directory → reclaimrx zone.
     expect(content).toContain("prescriber-directory");
     expect(content).toContain("reclaimrx");
+    // .mjs must not contain TypeScript syntax.
+    expect(content).not.toContain(": ZoneEntry[]");
+    expect(content).not.toContain("as const");
   });
 
   it("each zone entry has target, from, and message fields", () => {
@@ -2030,15 +2084,15 @@ The executor must fill in the ACTUAL STATUS column after running all tasks and t
 | # | Criterion | Plan ref | Actual status |
 |---|---|---|---|
 | A1 | `build-manifest.ts` runs on `operator-dev.yml` without error; emits `_generated/manifest.json`, `module-imports.ts`, `nav.ts` | Task 1 | |
-| A2 | `build-manifest.ts` test suite: all 7 tests pass | Task 1 | |
+| A2 | `build-manifest.ts` test suite: all 8 tests pass (7 original + 1 digit-bearing kebab-to-camel bonus — v3) | Task 1 | |
 | A3 | Schema validation fails fast on invalid `audience` enum value | Task 1 | |
-| A4 | `generate-eslint-zones.ts` for 1 module → 0 zones; 2 modules → 2 zones; 3 modules → 6 zones | Task 2 | |
+| A4 | `generate-eslint-zones.ts` for 1 module → 0 zones; 2 modules → 2 zones; 3 modules → 6 zones; emits `.mjs` not `.ts` (v3) | Task 2 | |
 | A5 | `generate-eslint-zones.ts` test suite: all 9 tests pass | Task 2 | |
-| A6 | `audit-module-graph.ts` PASS when omitted module absent; FAIL when present in .nft.json | Task 3 | |
-| A7 | `audit-module-graph.ts` test suite: all 6 tests pass | Task 3 | |
+| A6 | `audit-module-graph.ts` PASS when omitted module absent; FAIL when present in .nft.json; inject-only pattern (v3) | Task 3 | |
+| A7 | `audit-module-graph.ts` test suite: all 6 tests pass (NEW-3 fix: was "all 6" in v2, now confirmed 6 with inject-only CONCERN-1 tests included) | Task 3 | |
 | A8 | `prescriber-directory/module.config.ts` validates: all 7 config tests pass | Task 4 | |
-| A9 | `createPrescriberDirectoryClient("development")` returns `MockPrescriberDirectoryClient` | Task 4 | |
-| A10 | `createPrescriberDirectoryClient("production", { baseUrl })` returns `RealPrescriberDirectoryClient` | Task 4 | |
+| A9 | `createPrescriberDirectoryClient("development")` returns mock client (not class, factory function result) | Task 4 | |
+| A10 | `createPrescriberDirectoryClient("production", { baseUrl })` returns real client | Task 4 | |
 | A11 | `createPrescriberDirectoryClient("production")` without `baseUrl` throws | Task 4 | |
 | A12 | Factory test suite: all 7 tests pass | Task 4 | |
 | A13 | `portal/operator/app/layout.tsx` renders AppShell with ManifestNav in nav slot | Task 5 | |
@@ -2046,8 +2100,8 @@ The executor must fill in the ACTUAL STATUS column after running all tasks and t
 | A15 | Portal layout + nav test suite: all 7 tests pass | Task 5 | |
 | A16 | `operator-dev.yml` includes `prescriber-directory` in `modules` + correct `required_*` fields | Task 6 | |
 | A17 | `validate-manifest.ts` (Plan A) passes on updated `operator-dev.yml` | Task 6 | |
-| A18 | CI `sp0-foundation.yml` has `composition-audit` job; runs `build-manifest` (validate + codegen) + `generate-eslint-zones` (exits 0 = generators clean); `audit-module-graph` is a local npm script only for SP-0 (post-build CI job deferred — CONCERN 2) | Task 6 | |
-| A19 | Repo-root `eslint.config.mjs` has dynamic-import fallback for `GENERATED_MODULE_ZONES`; `import/no-restricted-paths` rule is wired (empty zones on cold checkout — not a failure) | Task 7 | |
+| A18 | CI `sp0-foundation.yml` has `prepare-artifacts` job + `composition-audit` job; `lint-typecheck-test` `needs: prepare-artifacts`; `audit-module-graph` is local npm script `portal:audit` only (SP-0 deferral — STILL-OPEN-5 v3 final) | Task 6 | |
+| A19 | Repo-root `eslint.config.mjs` imports `.mjs` (not `.js` or `.ts`); cold-checkout fallback emits `console.warn` and uses sentinel constant (not `[]`) — STILL-OPEN-3 v3 | Task 7 | |
 | A20 | ESLint zone integration tests: all 5 tests pass | Task 7 | |
 | A21 | `workspace-root tsc -b` compiles cleanly with all packages including `prescriber-directory` | Cross-task | |
 | A22 | `npm run test:packages` runs all vitest suites (scripts + contract + auth + ui + qa-harness + prescriber-directory); 0 failures | Cross-task | |
@@ -2058,15 +2112,15 @@ The executor must fill in the ACTUAL STATUS column after running all tasks and t
 
 | Task | Test file(s) | Count | Notes |
 |---|---|---|---|
-| Task 1 | `build-manifest.test.ts` | 7 | Uses real schema (BLOCK 2) |
-| Task 2 | `generate-eslint-zones.test.ts` | 9 | |
-| Task 3 | `audit-module-graph.test.ts` | 8 | +2 fixture tests (CONCERN 1) |
+| Task 1 | `build-manifest.test.ts` | 8 | Uses real schema (BLOCK 2); +1 digit-bearing kebab-to-camel bonus test (v3) |
+| Task 2 | `generate-eslint-zones.test.ts` | 9 | .mjs output assertion added (STILL-OPEN-3, v3) |
+| Task 3 | `audit-module-graph.test.ts` | 6 | Inject-only pattern (STILL-OPEN-4 option c, v3); 2 CONCERN-1 tests retained in the 6 (inject via makeOpts) |
 | Task 4 | `module.config.test.ts` + `factory.test.ts` | 7 + 7 = 14 | factory tests assert interface, not instanceof (BLOCK 6) |
 | Task 5 | `layout.test.tsx` + `manifest-nav.test.tsx` | 2 + 5 = 7 | layout tests updated for surgical modification (BLOCK 4) |
 | Task 6 | — (config only) | 0 | |
-| Task 7 | `eslint-zones-integration.test.ts` | 5 | Targets `eslint.config.mjs` (BLOCK 5) |
+| Task 7 | `eslint-zones-integration.test.ts` | 5 | .mjs assertion + no-TS-syntax assertion added (STILL-OPEN-3, v3) |
 | Task 8 | — (docs only) | 0 | |
-| **Total** | | **50** | +2 from CONCERN 1 fixture tests |
+| **Total** | | **49** | v3: −2 removed CONCERN-1 disk-fixture tests (inject-only), +1 bonus kebab-digit test |
 ```
 
 **Test count (Task 8):** 0 new tests (documentation only).
@@ -2094,8 +2148,8 @@ The executor must fill in the ACTUAL STATUS column after running all tasks and t
 **D1 — Client-bundle audit deferred to post-build portal CI job.**
 SD-4 §5 requires both server-graph audit (`.nft.json`) AND client-bundle audit (webpack stats JSON). Plan D implements the `.nft.json` server-graph audit. The client-bundle audit requires a full `next build` run in CI (several minutes). That is deferred to a "portal-build-audit" CI job in a subsequent wave. The offline composition checks (Task 6) cover everything that doesn't require an actual build.
 
-**D2 — `loadModuleConfig` uses `require()` (CJS interop) instead of dynamic `import()`.**
-`build-manifest.ts` runs under `tsx`/`ts-node/esm`. Dynamic `import()` of `.ts` files in ESM mode requires the loader to be active, which it is in the CLI path. However in the test path we stub `loadConfig` entirely, so this is a test-time non-issue. The `require()` call is annotated with `eslint-disable` for the one-liner. Decision: accept the CJS interop for now; a future refactor to a `tsx.load()` API can replace it without changing the test surface.
+**D2 — `loadModuleConfig` uses `_require()` (createRequire CJS interop) instead of dynamic `import()`.**
+`build-manifest.ts` runs under `tsx`/`ts-node/esm`. `_require` is the result of `createRequire(import.meta.url)` — this is the correct ESM-safe way to load CJS modules. The bare `require()` call that was in v2 was incorrect (NEW-1); fixed to `_require(configPath)`. In the test path, `loadConfig` is stubbed entirely, so this is a test-time non-issue. The `_require()` call is annotated with `eslint-disable` for the one-liner. Decision: accept the CJS interop for now; a future refactor to a `tsx.load()` API can replace it without changing the test surface.
 
 **D3 — `ManifestNav` reads `manifest.json` at request time (SSR), not `nav.ts`.**
 `nav.ts` is a TypeScript file consumed at build time by the ESLint zone check and type system. At SSR runtime the portal cannot dynamically import generated TS. `manifest.json` (JSON, not TS) is the correct runtime format. Nav labels are derived from module names (kebab-case → Title Case) which is good enough for the minimum scaffolding; full nav metadata (icon, order) will come from a separate endpoint or re-emit in `manifest.json` in a follow-on task.
