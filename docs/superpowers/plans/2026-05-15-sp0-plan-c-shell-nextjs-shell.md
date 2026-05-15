@@ -2063,7 +2063,7 @@ export { $inspectorEntries, addEntry, clearEntries } from "./qa/inspector/inspec
 export { InspectorPanel } from "./qa/inspector/inspector-panel.js";
 ```
 
-Note: `nanostores` and `@nanostores/react` must be added to `packages/shell/package.json` dependencies. Add `"nanostores": "0.11.3"` and `"@nanostores/react": "0.8.0"` to the `dependencies` block in Step 1.1's `package.json`.
+Note: `nanostores` and `@nanostores/react` are already declared in `packages/shell/package.json` dependencies (added in Task 1 Step 1.1). Verify they are present before building.
 
 - [ ] **Step 5.8: Verification**
 
@@ -2484,7 +2484,7 @@ export { CorrelationPage } from "./routes/qa-harness/correlation/page.js";
 ```bash
 npm --workspace=@infinityrx/shell run build
 npm --workspace=@infinityrx/shell run test
-# Expected: 60 tests pass (54 prior + 6 qa-harness-pages)
+# Expected: 58 tests pass (52 prior + 6 qa-harness-pages)
 # portal/operator: typecheck must pass after layout modifications
 cd portal/operator && npx tsc --noEmit
 ```
@@ -2503,18 +2503,18 @@ portal/operator/app/(public)/login/page.tsx: stub created (public group, ungated
 portal/operator/app/(authenticated)/layout.tsx: RequireAuth + AppShellMount here;
 all routes under (authenticated)/ require valid session. navEntries deferred to
 Plan D module registration.
-60 tests (54 prior + 6 qa-harness-pages).
+58 tests (52 prior + 6 qa-harness-pages).
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ```
 
 ---
 
-### Task 7: Framework-bound enforcement test + CI + package.json nanostores addition
+### Task 7: Framework-bound enforcement test + CI
 
 **Files:**
 - Create: `packages/shell/src/__tests__/framework-bound.test.ts`
-- Modify: `packages/shell/package.json` — add nanostores + @nanostores/react
+- Verify: `packages/shell/package.json` — nanostores + @nanostores/react present (added in Task 1)
 - Modify: `.github/workflows/sp0-foundation.yml` — extend to include packages/shell
 
 This task closes the framework-boundary contract: a grep-based test asserts that the four framework-agnostic packages (`packages/ui`, `packages/contract`, `packages/auth`, `packages/qa-harness`) import zero `next/*`, `next-auth/*`, or `@auth/*` symbols in their `src/` directories. The same test verifies that `packages/shell` is the sole permitted importer (positive assertion on `packages/shell/src/middleware.ts`).
@@ -2636,7 +2636,7 @@ npx tsc -b
 
 # All packages tests
 npm run test:packages
-# Expected: exit 0, ~61 tests across packages/contract, packages/auth, packages/ui, packages/qa-harness, packages/shell
+# Expected: exit 0, ~63 tests in packages/shell + Plan B/C package tests
 
 # lint
 npm run lint
@@ -2677,7 +2677,7 @@ Create `docs/superpowers/plans/2026-05-15-sp0-plan-c-shell-status.md`:
 - Python backend auth refactor — separate wave
 
 ## Test count
-61 tests (packages/shell only; does not include Plan B/C tests)
+63 tests (packages/shell only; does not include Plan B/C tests)
 
 ## Decision log
 - `wrapFetch` wraps `ClientConfig.fetch` at injection time rather than
@@ -2699,12 +2699,12 @@ Create `docs/superpowers/plans/2026-05-15-sp0-plan-c-shell-status.md`:
 
 Commit message:
 ```
-feat(sp-0): Plan C-shell Task 7 — framework-bound test + CI + nanostores
+feat(sp-0): Plan C-shell Task 7 — framework-bound test + CI
 
 framework-bound.test.ts: grep-based enforcement of SD-2 §6 mandate —
 packages/contract, auth, ui, qa-harness src/ contain zero next/* imports;
 packages/shell is the sole permitted framework importer.
-packages/shell/package.json: nanostores 0.11.3 + @nanostores/react 0.8.0.
+packages/shell/package.json: nanostores present (added in Task 1 Step 1.1).
 CI: sp0-foundation.yml extended to lint/typecheck/test packages/shell.
 acceptance status doc created.
 
@@ -2783,11 +2783,11 @@ The two items explicitly deferred from Plan C §6.4 (QA mode toggle, request/res
 | `app-shell-mount.test.tsx` | 5 |
 | `qa-mode-cookie.test.ts` | 7 |
 | `qa-mode-middleware.test.ts` | 4 |
-| `wrap-fetch.test.ts` | 9 |
+| `wrap-fetch.test.ts` | 13 |
 | `inspector-store.test.ts` | 3 |
 | `qa-harness-pages.test.tsx` | 6 |
 | `framework-bound.test.ts` | 5 |
-| **Total** | **59** |
+| **Total** | **63** |
 
 Coverage gate: 100% on auth paths (`require-auth`, `require-role`, `get-session-user`, `qa-mode-middleware`'s prod-enforcement branch). 99%+ branch on all other active code.
 
