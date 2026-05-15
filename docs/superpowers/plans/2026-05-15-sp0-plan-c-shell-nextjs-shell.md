@@ -511,7 +511,8 @@ import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { getSessionUser } from "./get-session-user.js";
 
-interface RequireAuthProps {
+// Exported so consumers can type wrappers without reaching into src/.
+export interface RequireAuthProps {
   children: ReactNode;
   /** Path to redirect unauthenticated requests to. Default: "/login" */
   loginPath?: string;
@@ -617,7 +618,8 @@ import "server-only";
 import type { ReactNode } from "react";
 import { getSessionUser } from "./get-session-user.js";
 
-interface RequireRoleProps {
+// Exported so consumers can type wrappers without reaching into src/.
+export interface RequireRoleProps {
   /**
    * Role names the authenticated user must possess ALL of.
    * An empty array means "any authenticated user is allowed."
@@ -1028,7 +1030,9 @@ import { AppShell } from "@infinityrx/ui";
 import { ModuleNav } from "./module-nav.js";
 import type { NavEntry, InstanceManifestShape } from "./nav-types.js";
 
-interface AppShellMountProps {
+// Exported so consumers (e.g. portal layouts) can type wrappers without
+// reaching into src/ paths directly.
+export interface AppShellMountProps {
   children: ReactNode;
   /** Optional top-bar content. Passed directly to AppShell's header slot. */
   header?: ReactNode;
@@ -2199,11 +2203,16 @@ The actual login form implementation is out of scope for Plan C-shell (it is the
 
 export type { UserIdentity, SessionUser } from "./auth/types.js";
 export { getSessionUser } from "./auth/get-session-user.js";
+// Component prop types — exported so consumers can type their wrappers
+// without reaching into src/ paths directly (CONCERN 2 closure).
+export type { RequireAuthProps } from "./auth/require-auth.js";
 export { RequireAuth } from "./auth/require-auth.js";
+export type { RequireRoleProps } from "./auth/require-role.js";
 export { RequireRole } from "./auth/require-role.js";
 
 export type { NavEntry, InstanceManifestShape } from "./shell/nav-types.js";
 export { ModuleNav } from "./shell/module-nav.js";
+export type { AppShellMountProps } from "./shell/app-shell-mount.js";
 export { AppShellMount } from "./shell/app-shell-mount.js";
 
 export type { QaMode } from "./qa/qa-mode-cookie.js";
@@ -2212,17 +2221,24 @@ export { QA_MODE_HEADER, applyQaModeMiddleware } from "./qa/qa-mode-middleware.j
 export { SHELL_MIDDLEWARE_MATCHER } from "./middleware.js";
 
 export type { InspectorEntry } from "./qa/inspector/types.js";
+export type { InspectorPanelProps } from "./qa/inspector/inspector-panel.js";
 export { wrapFetch } from "./qa/inspector/wrap-fetch.js";
 export { $inspectorEntries, addEntry, clearEntries } from "./qa/inspector/inspector-store.js";
 export { InspectorPanel } from "./qa/inspector/inspector-panel.js";
 
 // QA Harness route page components (portals mount these at app/qa-harness/...)
+// Prop types exported so portals can type their mounting wrappers.
+export type { QaHarnessPageProps } from "./routes/qa-harness/page.js";
 export { QaHarnessPage } from "./routes/qa-harness/page.js";
 export { CompositionPage } from "./routes/qa-harness/composition/page.js";
+export type { MockTogglePageProps } from "./routes/qa-harness/mock-toggle/page.js";
 export { MockTogglePage } from "./routes/qa-harness/mock-toggle/page.js";
+export type { FactoryPageProps } from "./routes/qa-harness/factory/page.js";
 export { FactoryPage } from "./routes/qa-harness/factory/page.js";
 export { CorrelationPage } from "./routes/qa-harness/correlation/page.js";
 ```
+
+> **Note on internal-only components:** `CompositionPage` has no props (reads manifest via static import). `CorrelationPage` has no props (self-contained). Neither needs a prop type export. All other page components' prop interfaces are exported above.
 
 - [ ] **Step 6.10: Verification**
 
