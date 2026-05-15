@@ -1,3 +1,5 @@
 // Public surface of @infinityrx/qa-harness.
-// Re-exports added as components are built in Tasks 5-6.
-// IMPORTANT: This package is a dev/staging tool. Omit from prod builds.
+// IMPORTANT: This package is a dev/staging tool. Omit from production builds.
+
+export { ServicesHealth, type ServicesHealthProps } from "./services-health.js";
+export { MockToggle, type MockToggleProps, type ClientMode } from "./mock-toggle.js";

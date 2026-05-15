@@ -5,6 +5,9 @@
     "rootDir": "./src",
     "jsx": "react-jsx"
   },
+  "references": [
+    { "path": "../contract" }
+  ],
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/__tests__/**", "dist", "node_modules"]
 }
