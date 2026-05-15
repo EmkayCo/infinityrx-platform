@@ -90,7 +90,7 @@ packages/shell/
       module-nav.test.tsx                        # 5 tests: manifest ordering, role filter, empty manifest
       qa-mode-cookie.test.ts                     # 4 tests: getQaMode default "real", cookie "stub", invalid value fallback
       qa-mode-middleware.test.ts                 # 4 tests: sets cookie on first request, preserves existing, strips in prod
-      wrap-fetch.test.ts                         # 6 tests: emits entry, latency measured, correlationId threaded, mock flag, error path
+      wrap-fetch.test.ts                         # 9 tests: emits entry, latency measured, correlationId threaded, mock flag, error path, prod no-op, PHI redaction, body truncation
       inspector-store.test.ts                    # 3 tests: addEntry, clearEntries, maxEntries eviction
       qa-harness-pages.test.tsx                  # 6 tests: each page renders its Plan C component (composition, health, mock, factory, correlation)
       framework-bound.test.ts                    # 1 test: packages/ui/contract/auth/qa-harness src dirs contain zero next/* imports (grep-based)
@@ -1479,16 +1479,45 @@ import type { InspectorEntry } from "./types.js";
 
 type EmitFn = (entry: InspectorEntry) => void;
 
+/** Maximum body size captured per entry (bytes as JSON string length). */
+const BODY_CAPTURE_LIMIT = 4096;
+
+/**
+ * Header names redacted from captured entries — MUST include auth and
+ * PHI-adjacent names. Compared case-insensitively.
+ */
+const REDACTED_HEADERS = new Set([
+  "authorization",
+  "cookie",
+  "set-cookie",
+  "x-api-key",
+]);
+
+/**
+ * Body key pattern for PHI-adjacent fields. Any top-level key matching
+ * this pattern is replaced with "[REDACTED]" in the captured body.
+ */
+const PHI_KEY_PATTERN = /ssn|dob|member.*name|patient/i;
+
 /**
  * Wraps a fetch implementation to emit an InspectorEntry after each call.
  * The wrapper is transparent: it returns the same Response the underlying
  * fetch returns, and only clones for body reading (so the caller still
  * gets a readable body).
+ *
+ * PRODUCTION GUARD: returns `inner` unchanged when NODE_ENV === "production".
+ * No instrumentation overhead, no body captures, no PHI risk in prod.
  */
 export function wrapFetch(
   inner: typeof globalThis.fetch,
   emit: EmitFn
 ): typeof globalThis.fetch {
+  // Non-prod runtime guard — MUST be first. In production this factory is a
+  // no-op: returns the unwrapped inner fetch. Zero overhead, zero PHI risk.
+  if (process.env.NODE_ENV === "production") {
+    return inner;
+  }
+
   return async function wrappedFetch(
     input: RequestInfo | URL,
     init?: RequestInit
@@ -1511,7 +1540,8 @@ export function wrapFetch(
       // Clone before reading body so the caller's body is not consumed.
       const clone = res.clone();
       try {
-        responseBody = await clone.json();
+        const raw = await clone.json();
+        responseBody = redactBody(capBody(raw));
       } catch {
         // Non-JSON response bodies are not captured.
       }
@@ -1526,14 +1556,14 @@ export function wrapFetch(
         isMock: false,
         cacheHit: false,
         timestamp,
-        requestBody: init?.body ? tryParseJson(init.body) : undefined,
+        requestBody: init?.body ? redactBody(capBody(tryParseJson(init.body))) : undefined,
       });
       throw err;
     }
 
     const latencyMs = Math.round(performance.now() - start);
     let requestBody: unknown;
-    if (init?.body) requestBody = tryParseJson(init.body);
+    if (init?.body) requestBody = redactBody(capBody(tryParseJson(init.body)));
 
     emit({
       id: crypto.randomUUID(),
@@ -1558,6 +1588,35 @@ function tryParseJson(body: BodyInit): unknown {
     try { return JSON.parse(body); } catch { return body; }
   }
   return undefined;
+}
+
+/**
+ * Cap body size: if JSON.stringify(body) exceeds BODY_CAPTURE_LIMIT,
+ * replace with a truncation marker.
+ */
+function capBody(body: unknown): unknown {
+  if (body === undefined) return undefined;
+  const serialized = JSON.stringify(body);
+  if (serialized.length > BODY_CAPTURE_LIMIT) {
+    return `<TRUNCATED:${serialized.length} bytes>`;
+  }
+  return body;
+}
+
+/**
+ * Redact PHI-adjacent top-level keys from a parsed JSON object.
+ * Keys matching PHI_KEY_PATTERN are replaced with "[REDACTED]".
+ * Non-object bodies are returned unchanged.
+ */
+function redactBody(body: unknown): unknown {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return body;
+  }
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
+    result[key] = PHI_KEY_PATTERN.test(key) ? "[REDACTED]" : value;
+  }
+  return result;
 }
 ```
 
@@ -1628,6 +1687,42 @@ describe("wrapFetch", () => {
     const body = await res.json();
     expect(body).toEqual({ result: "data" });
     expect(entries[0]!.responseBody).toEqual({ result: "data" });
+  });
+
+  // PHI + production guard tests (CONCERN 3 closure)
+  it("returns inner fetch unchanged when NODE_ENV=production (no-op factory)", () => {
+    const originalEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = "production";
+      const innerFetch = vi.fn();
+      const wrapped = wrapFetch(innerFetch, vi.fn());
+      // In production, wrapFetch returns the inner function reference directly.
+      expect(wrapped).toBe(innerFetch);
+    } finally {
+      process.env.NODE_ENV = originalEnv;
+    }
+  });
+
+  it("redacts PHI-adjacent body keys matching /ssn|dob|member.*name|patient/i", async () => {
+    const body = { memberId: "123", memberName: "John Doe", ssn: "123-45-6789", amount: 50 };
+    const innerFetch = vi.fn().mockResolvedValue(makeJsonResponse(body));
+    const entries: InspectorEntry[] = [];
+    await wrapFetch(innerFetch, (e) => entries.push(e))("https://x.test/");
+    const captured = entries[0]!.responseBody as Record<string, unknown>;
+    expect(captured["memberName"]).toBe("[REDACTED]");
+    expect(captured["ssn"]).toBe("[REDACTED]");
+    expect(captured["memberId"]).toBe("123"); // non-PHI key preserved
+    expect(captured["amount"]).toBe(50);
+  });
+
+  it("truncates response body exceeding 4KB with <TRUNCATED:n bytes> marker", async () => {
+    // Build a body that serializes to > 4096 chars.
+    const largeBody = { data: "x".repeat(5000) };
+    const innerFetch = vi.fn().mockResolvedValue(makeJsonResponse(largeBody));
+    const entries: InspectorEntry[] = [];
+    await wrapFetch(innerFetch, (e) => entries.push(e))("https://x.test/");
+    expect(typeof entries[0]!.responseBody).toBe("string");
+    expect(entries[0]!.responseBody as string).toMatch(/^<TRUNCATED:\d+ bytes>$/);
   });
 });
 ```
@@ -1860,7 +1955,7 @@ Note: `nanostores` and `@nanostores/react` must be added to `packages/shell/pack
 ```bash
 npm --workspace=@infinityrx/shell run build
 npm --workspace=@infinityrx/shell run test
-# Expected: 51 tests pass (36 prior + 6 wrap-fetch + 3 inspector-store + [inspector-panel not directly unit-tested here: covered in Task 6 qa-harness page tests])
+# Expected: 54 tests pass (36 prior + 9 wrap-fetch + 3 inspector-store + [inspector-panel not directly unit-tested here: covered in Task 6 qa-harness page tests])
 # Note: InspectorPanel is a "use client" component; its integration is tested via Task 6's qa-harness pages test.
 ```
 
@@ -2258,7 +2353,7 @@ export { CorrelationPage } from "./routes/qa-harness/correlation/page.js";
 ```bash
 npm --workspace=@infinityrx/shell run build
 npm --workspace=@infinityrx/shell run test
-# Expected: 57 tests pass (51 prior + 6 qa-harness-pages)
+# Expected: 60 tests pass (54 prior + 6 qa-harness-pages)
 # portal/operator: typecheck must pass after layout modifications
 cd portal/operator && npx tsc --noEmit
 ```
@@ -2277,7 +2372,7 @@ portal/operator/app/(public)/login/page.tsx: stub created (public group, ungated
 portal/operator/app/(authenticated)/layout.tsx: RequireAuth + AppShellMount here;
 all routes under (authenticated)/ require valid session. navEntries deferred to
 Plan D module registration.
-57 tests (51 prior + 6 qa-harness-pages).
+60 tests (54 prior + 6 qa-harness-pages).
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ```
@@ -2410,7 +2505,7 @@ npx tsc -b
 
 # All packages tests
 npm run test:packages
-# Expected: exit 0, ~58 tests across packages/contract, packages/auth, packages/ui, packages/qa-harness, packages/shell
+# Expected: exit 0, ~61 tests across packages/contract, packages/auth, packages/ui, packages/qa-harness, packages/shell
 
 # lint
 npm run lint
@@ -2451,7 +2546,7 @@ Create `docs/superpowers/plans/2026-05-15-sp0-plan-c-shell-status.md`:
 - Python backend auth refactor — separate wave
 
 ## Test count
-58 tests (packages/shell only; does not include Plan B/C tests)
+61 tests (packages/shell only; does not include Plan B/C tests)
 
 ## Decision log
 - `wrapFetch` wraps `ClientConfig.fetch` at injection time rather than
@@ -2557,11 +2652,11 @@ The two items explicitly deferred from Plan C §6.4 (QA mode toggle, request/res
 | `app-shell-mount.test.tsx` | 5 |
 | `qa-mode-cookie.test.ts` | 7 |
 | `qa-mode-middleware.test.ts` | 4 |
-| `wrap-fetch.test.ts` | 6 |
+| `wrap-fetch.test.ts` | 9 |
 | `inspector-store.test.ts` | 3 |
 | `qa-harness-pages.test.tsx` | 6 |
 | `framework-bound.test.ts` | 5 |
-| **Total** | **56** |
+| **Total** | **59** |
 
 Coverage gate: 100% on auth paths (`require-auth`, `require-role`, `get-session-user`, `qa-mode-middleware`'s prod-enforcement branch). 99%+ branch on all other active code.
 
