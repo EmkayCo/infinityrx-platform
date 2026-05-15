@@ -12,7 +12,7 @@ Codex pass-1 returned BLOCKED with 3 BLOCKs + 3 CONCERNs + 1 NIT. All closed in 
 | BLOCK 2 — coexistence (Tasks 6.2 + 6.8) | CLOSED | (1) Task 6.2 path fixed: `../../_generated` → `../../../_generated` (file is 3 levels deep). (2) Task 6.8 manifest import changed from unresolvable `@infinityrx/shell/src/_generated/manifest.json` to `@infinityrx/shell/manifest` backed by new `"./manifest"` entry in package.json exports map. (3) `assert { type: "json" }` → `with { type: "json" }` throughout (TS 5.6.3 NodeNext uses TC39 import attributes). Test mock path updated to match. |
 | BLOCK 3 — auth-reuse routes (Tasks 6.7 + 6.8) | CLOSED | Root `app/layout.tsx` is UNGATED — `RequireAuth` in root layout causes infinite redirect loop for `/login`. `RequireAuth` moved exclusively to `app/(authenticated)/layout.tsx`. Login page stub added at `app/(public)/login/page.tsx`. Route-group tree in File Structure section corrected. Step 6.7 rewritten (verify root is ungated). Step 6.8 adds `RequireAuth` wrapping `AppShellMount`. Step 6.8b adds `(public)/login` stub. Decision log updated. |
 | CONCERN 1 — nanostores dep ordering | CLOSED | `nanostores 0.11.3` + `@nanostores/react 0.8.0` moved from Task 7 Step 7.2 into Task 1 Step 1.1 `package.json` dependencies. `npm install` in Step 1.7 runs before Task 5 imports them. Step 7.2 updated to verify-not-add. |
-| CONCERN 2 — prop type exports | CLOSED | All component prop interfaces changed to `export interface`: `RequireAuthProps`, `RequireRoleProps` (Task 2), `AppShellMountProps` (Task 3), `InspectorPanelProps` (Task 5 — explicit empty interface), `QaHarnessPageProps`, `MockTogglePageProps`, `FactoryPageProps` (Task 6). `CompositionPage` and `CorrelationPage` take no props — noted in index.ts comment. Final index.ts (Step 6.9) updated with all type exports. |
+| CONCERN 2 — prop type exports | CLOSED | All component prop interfaces changed to `export interface`: `RequireAuthProps`, `RequireRoleProps` (Task 2), `AppShellMountProps` (Task 3), `InspectorPanelProps` (Task 5 — type alias `Record<string,never>`, fixed in v3 per NEW-2), `QaHarnessPageProps`, `MockTogglePageProps`, `FactoryPageProps` (Task 6). `CompositionPage` and `CorrelationPage` take no props — noted in index.ts comment. Final index.ts (Step 6.9) updated with all type exports. |
 | CONCERN 3 — forward-readiness / PHI (Task 5) | CLOSED | `wrapFetch` updated: (1) production no-op guard at top — returns `inner` unchanged when `NODE_ENV === 'production'`; (2) `REDACTED_HEADERS` set (Authorization, Cookie, Set-Cookie, x-api-key); (3) `PHI_KEY_PATTERN` regex (`/ssn\|dob\|member.*name\|patient/i`) redacts matching top-level body keys; (4) `capBody()` truncates bodies >4 KB with `<TRUNCATED:n bytes>` marker. Three new tests added: prod no-op, PHI redaction, body truncation. wrap-fetch test count 6→9, total plan test count 56→59. |
 | NIT — placeholder manifest shape | CLOSED | Task 1.5 placeholder `manifest.json` extended with `_generated` object: `input_hash` (all-zeros sentinel), `inputs` ([]), `generated_at` (epoch), `generator` ("placeholder"). `InstanceManifestShape` type in `nav-types.ts` extended with optional `_generated` field. Plan D overwrites the same shape; staleness check identifies placeholder via all-zeros `input_hash`. qa-harness test mock updated to include `_generated` sentinel values. |
 
@@ -1848,20 +1848,18 @@ import type { InspectorEntry } from "./types.js";
 
 /**
  * InspectorPanel takes no props — it reads state directly from the
- * $inspectorEntries nanostores atom. The exported type is explicit
- * so index.ts can re-export it without TS errors.
+ * $inspectorEntries nanostores atom. Type alias (not interface) avoids
+ * @typescript-eslint/no-empty-object-type lint error (same pattern as
+ * packages/ui Input.tsx). Re-exported from index.ts for consumer typing.
  */
-// Exported so consumers can type wrappers (e.g. lazy-load boundaries).
-export interface InspectorPanelProps {
-  // No props — panel reads from $inspectorEntries atom directly.
-}
+export type InspectorPanelProps = Record<string, never>;
 
 /**
  * Client-side slide-out inspector panel.
  * Subscribes to $inspectorEntries and renders a table of captured requests.
  * Only rendered in non-production builds (gated by the parent route/layout).
  */
-export function InspectorPanel(_props: InspectorPanelProps = {}) {
+export function InspectorPanel(_props: InspectorPanelProps = {} as InspectorPanelProps) {
   const entries = useStore($inspectorEntries);
   const [open, setOpen] = useState(false);
 
