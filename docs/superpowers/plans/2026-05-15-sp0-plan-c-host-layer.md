@@ -1,6 +1,10 @@
 # SP-0 Plan C — packages/ui + packages/qa-harness Implementation Plan
 
-> **Status:** v1, 2026-05-15. Initial draft.
+> **Status:** v2, 2026-05-15. v1 BLOCKED codex pass-1 with 1 BLOCK + 2 CONCERN + 1 NIT. v2 closes:
+> - **BLOCK (dnd-kit/utilities undeclared):** packages/ui/package.json now lists `@dnd-kit/utilities` 3.2.2 in dependencies; DragHandle's `import { CSS } from "@dnd-kit/utilities"` resolves cleanly.
+> - **CONCERN (AppShell API):** Changed from `{header, sidebar, main}` props to `{children, header?, nav?}` per Plan C-shell's forward-readiness contract. Children render in `<main>`; Plan C-shell mounts the dynamic module nav into the `nav` slot. Tests updated to match.
+> - **CONCERN (spec-coverage table dishonest):** §6.4 qa-harness row reworded from "YES — all 7 covered" to "PARTIAL — 5 of 7 covered; QA mode toggle + request/response inspector explicitly deferred to Plan C-shell."
+> - **NIT (qa-harness contract dep ordering):** Task 5.1's tsconfig `references` to `../contract` is the load-bearing edit; Task 1 only scaffolds packages/qa-harness without the reference. Acceptable because qa-harness does not import from `@infinityrx/contract` until Task 5 starts. Documented in self-review.
 >
 > **Scope clarification:** Plan C originally covered ui + qa-harness + shell. Shell split out to **Plan C-shell** after a sizing reality check — shell requires Next.js-specific App Router wiring and depends on Plan C's framework-agnostic packages landing first. Plan C covers ONLY `packages/ui` and `packages/qa-harness`, both of which are framework-agnostic (zero `next/*` imports). Plan C-shell is written and executed after Plan C is complete.
 >
@@ -48,7 +52,7 @@ packages/ui/
       Form.tsx                            # react-hook-form FormProvider + zod resolver wrapper
       FormField.tsx                       # Controller wrapper with label + error message slot
     shells/
-      AppShell.tsx                        # header slot + sidebar slot + main content slot
+      AppShell.tsx                        # children (main) + optional header + optional nav slot (Plan C-shell mounts the dynamic module nav here)
     dnd/
       DragHandle.tsx                      # dnd-kit sortable handle — foundation for SP-6 program builder
     charts/
@@ -148,6 +152,7 @@ modules/, shared/, scripts/               # backend Python untouched
   "dependencies": {
     "@dnd-kit/core": "6.3.1",
     "@dnd-kit/sortable": "8.0.0",
+    "@dnd-kit/utilities": "3.2.2",
     "@radix-ui/react-dialog": "1.1.4",
     "@radix-ui/react-dropdown-menu": "2.1.4",
     "@radix-ui/react-select": "2.1.4",
@@ -805,32 +810,40 @@ import { render, screen } from "@testing-library/react";
 import { AppShell } from "../shells/AppShell.js";
 
 describe("AppShell", () => {
-  it("renders header slot content", () => {
+  it("renders header content", () => {
     render(
-      <AppShell header={<div>My Header</div>} sidebar={null} main={<p>Main</p>} />,
+      <AppShell header={<div>My Header</div>}>
+        <p>Main</p>
+      </AppShell>,
     );
     expect(screen.getByText("My Header")).toBeDefined();
   });
 
-  it("renders main slot content", () => {
+  it("renders children as the main content", () => {
     render(
-      <AppShell header={null} sidebar={null} main={<p>Page content</p>} />,
+      <AppShell>
+        <p>Page content</p>
+      </AppShell>,
     );
     expect(screen.getByText("Page content")).toBeDefined();
   });
 
-  it("renders sidebar slot when provided", () => {
+  it("renders nav slot when provided", () => {
     render(
-      <AppShell header={null} sidebar={<nav>Nav</nav>} main={<p>M</p>} />,
+      <AppShell nav={<nav>Nav</nav>}>
+        <p>M</p>
+      </AppShell>,
     );
     expect(screen.getByText("Nav")).toBeDefined();
   });
 
-  it("renders without sidebar slot when null", () => {
+  it("omits nav region when nav prop is not provided", () => {
     const { container } = render(
-      <AppShell header={null} sidebar={null} main={<p>M</p>} />,
+      <AppShell>
+        <p>M</p>
+      </AppShell>,
     );
-    expect(container.querySelector(".irx-app-shell__sidebar")).toBeNull();
+    expect(container.querySelector(".irx-app-shell__nav")).toBeNull();
   });
 });
 ```
@@ -841,24 +854,27 @@ describe("AppShell", () => {
 import * as React from "react";
 
 export interface AppShellProps {
-  header: React.ReactNode;
-  sidebar: React.ReactNode;
-  main: React.ReactNode;
+  /** Main page content. Mounted inside <main>. */
+  children: React.ReactNode;
+  /** Optional top header (logo, user menu, etc.). */
+  header?: React.ReactNode;
+  /** Optional side nav (typically the registered-modules nav from Plan D's shell). */
+  nav?: React.ReactNode;
   className?: string;
 }
 
 /**
- * Page-level layout shell. Provides named slots: header, sidebar, main.
- * Portals apply layout / spacing via Tailwind utilities via className.
- * Plan C-shell wires auth + navigation; this component is layout-only.
+ * Page-level layout shell. Children render in <main>; nav + header are
+ * optional slots. Plan C-shell wires auth + the dynamic module nav into
+ * the `nav` slot; this component is layout-only.
  */
-export function AppShell({ header, sidebar, main, className }: AppShellProps) {
+export function AppShell({ children, header, nav, className }: AppShellProps) {
   return (
     <div className={["irx-app-shell", className].filter(Boolean).join(" ")}>
       {header && <header className="irx-app-shell__header">{header}</header>}
       <div className="irx-app-shell__body">
-        {sidebar && <aside className="irx-app-shell__sidebar">{sidebar}</aside>}
-        <main className="irx-app-shell__main">{main}</main>
+        {nav && <aside className="irx-app-shell__nav">{nav}</aside>}
+        <main className="irx-app-shell__main">{children}</main>
       </div>
     </div>
   );
@@ -996,8 +1012,9 @@ git commit -m "feat(ui): Plan C Task 3 — Form, FormField, AppShell, DragHandle
 Form: react-hook-form FormProvider + zodResolver. Thin wrapper keeps
 the form schema type-safe while hiding the hook setup boilerplate.
 FormField: Controller wrapper with label + zod error message slot.
-AppShell: header/sidebar/main slot layout. sidebar is optional;
-null sidebar renders no aside element.
+AppShell: children + optional header + optional nav slots. Children
+render in <main>; nav slot is where Plan C-shell will mount the
+dynamic module-nav. Omitting nav omits the aside region entirely.
 DragHandle: dnd-kit useSortable handle — foundation for SP-6's
 no-code program builder. Renders as a button with a11y aria-label.
 
@@ -2198,7 +2215,7 @@ Plan C-shell scope: `packages/shell` — Next.js App Router host layer (routing,
 | Main spec §6.3 — dnd-kit primitives (SP-6 foundation) | YES | DragHandle uses @dnd-kit/sortable, is tested, ships in index.ts |
 | Main spec §6.3 — chart/table/form wrappers | YES — reference set | KPICard + LineChart (charts), Form + FormField (form), DataTable (table). TanStack Table full integration is future. |
 | Main spec §6.3 — command palette host | YES | CommandPalette wraps cmdk; Plan C-shell wires the Cmd+K keyboard shortcut |
-| Main spec §6.4 packages/qa-harness | YES | All 7 tool categories from the spec table covered (health dashboard, mock/real toggle, composition viewer, factory bindings, correlation_id quick-jump). QA mode toggle + request/response inspector are Plan C-shell concerns (they need Next.js route context). |
+| Main spec §6.4 packages/qa-harness | PARTIAL — 5 of 7 tool categories covered | Covered in Plan C: services-health dashboard, mock/real toggle, composition viewer (prop-driven), factory-bindings, correlation_id quick-jump. **Explicitly deferred to Plan C-shell** (need Next.js route context): QA mode toggle (which mounts inside a Next.js route), request/response inspector (needs request lifecycle hooks). The shell plan will add these as additional qa-harness components or as shell-owned panels that consume qa-harness primitives. |
 | SD-2 framework-agnostic mandate | YES | Zero next/* in both packages. Enforced by ESLint Block B + framework-agnostic.test.ts in both. |
 | SD-4 §4 workspace ESLint Block B | INHERITED | No per-package ESLint config needed; workspace-root config already covers packages/**. |
 
