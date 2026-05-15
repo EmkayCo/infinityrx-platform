@@ -31,6 +31,10 @@ export default tseslint.config(
       "**/playwright-report/**",
       "**/test-results/**",
       "**/.venv/**",
+      // Agent-tool worktrees live under .claude/worktrees/agent-*/ and contain
+      // a full repo checkout — linting them double-counts every file and
+      // surfaces stale findings from in-flight subagent work.
+      ".claude/worktrees/**",
       "portal/operator/**",
       // portal/shared is a workspace with its own linting concerns (next-auth
       // imports are intentional there — see Block B comment). Root config
