@@ -106,6 +106,6 @@ mempalace.yaml
 entities.json
 
 # SP-0 additions
-packages/*/node_modules
-packages/*/dist
-packages/*/*.tsbuildinfo
+packages/**/node_modules
+packages/**/dist
+packages/**/*.tsbuildinfo
