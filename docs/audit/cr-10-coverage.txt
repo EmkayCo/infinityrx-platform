@@ -1,0 +1,32 @@
+CR-10 Key Vault Adapter — Test Coverage Report
+Generated: 2026-05-15
+Branch: wave/B10-w5-cr-10-key-vault (v2)
+Run: uv run pytest shared/tests/test_key_vault.py --cov=shared.key_vault --cov-report=term-missing
+
+=== Test Session ===
+Platform: win32, Python 3.13.13-final-0
+Test file: shared/tests/test_key_vault.py
+Collected: 50 items, 1 deselected (integration tests excluded — no Azure access in CI)
+Result: 49 passed, 1 deselected
+
+=== Coverage Summary ===
+Name                  Stmts   Miss Branch BrPart  Cover   Missing
+-----------------------------------------------------------------
+shared\key_vault.py     139      0     36      1    99%   547->553
+-----------------------------------------------------------------
+TOTAL                   139      0     36      1    99%
+Required test coverage of 95.0% reached. Total coverage: 99.43%
+
+=== Notes ===
+- 547->553: The except branch in module-level get_secret() inspect.stack() is marked
+  `# pragma: no cover` — this branch fires only if the Python inspect module itself
+  raises an exception, which is a defensive guard that cannot be triggered in practice.
+- All security paths (credential chain, MissingSecretError, HIPAA audit logging): 100%
+- All cache paths: 100%
+- Concurrency (lock): covered by test_concurrent_get_secret_fetches_vault_once
+- Credential chain: covered by test_production_credential_chain_excludes_cli_credential
+  and test_dev_credential_chain_includes_cli_credential
+
+=== Test Count Comparison ===
+v1 (committed): 40 tests
+v2 (this run): 49 tests (+9 new tests for BLOCKs/CONCERNs)

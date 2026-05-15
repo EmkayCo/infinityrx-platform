@@ -1,0 +1,27 @@
+CR-10 Key Vault Adapter — pip-audit Report
+Generated: 2026-05-15
+Branch: wave/B10-w5-cr-10-key-vault (v2)
+Run: uv run --with pip-audit pip-audit --desc
+
+=== Summary ===
+4 known vulnerabilities found in 3 packages (110 packages scanned total)
+NONE of the vulnerabilities are in packages added by CR-10 (azure-identity, azure-keyvault-secrets)
+
+=== Findings (pre-existing, NOT introduced by CR-10) ===
+Package           Version ID              Fix Version  Category
+mako              1.3.10  CVE-2026-44307  1.3.12       Directory traversal via backslash on Windows
+python-multipart  <0.0.27 CVE-2026-44321  0.0.27       CPU exhaustion via malformed multipart headers
+urllib3           2.6.3   CVE-2026-44431  2.7.0        Sensitive header leak via low-level redirect
+urllib3           2.6.3   CVE-2026-44432  2.7.0        Excessive decompression in streaming API
+
+=== CR-10 New Packages ===
+azure-identity>=1.19        — 0 vulnerabilities
+azure-keyvault-secrets>=4.9 — 0 vulnerabilities
+
+=== Action Required ===
+The 4 findings above are pre-existing platform vulnerabilities not introduced by CR-10.
+They should be addressed in a separate dependency-upgrade task (tracked separately).
+Severity assessment:
+- mako: Windows-only path traversal, severity depends on template usage pattern
+- python-multipart: DoS via upload — MEDIUM, upgrade to >=0.0.27 recommended
+- urllib3: LOW-MEDIUM for the platform's internal use pattern (not direct proxy use)
