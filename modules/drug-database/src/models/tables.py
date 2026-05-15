@@ -32,7 +32,7 @@ class DrugBase(DeclarativeBase):
     """Declarative base for drug-database module."""
 
 
-SCHEMA = "drug_db"
+SCHEMA = "drug_database"
 
 
 class DrugProduct(DrugBase):

@@ -55,7 +55,7 @@ Coverage threshold: 99% branch coverage. Financial, PHI, security, and auth path
 
 ## Database Schema
 
-Schema: `drug_db` (PostgreSQL). Tables: `drug_products`, `drug_pricing`, `drug_pricing_history`, `drug_interactions`, `therapeutic_equivalence`, `tenant_pricing_overrides`, `data_refresh_logs`, `drug_shortages`, `rems_programs`.
+Schema: `drug_database` (PostgreSQL). Tables: `drug_products`, `drug_pricing`, `drug_pricing_history`, `drug_interactions`, `therapeutic_equivalence`, `tenant_pricing_overrides`, `data_refresh_logs`, `drug_shortages`, `rems_programs`.
 
 ## Package layout
 

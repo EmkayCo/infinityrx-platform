@@ -56,21 +56,19 @@ def test_drugbase_imports_without_circular_errors() -> None:
     )
 
 
-def test_drugbase_metadata_schema_is_drug_db() -> None:
-    """Phase 09 schema invariant — DrugBase tables live in drug_db schema.
+def test_drugbase_metadata_schema_is_drug_database() -> None:
+    """S8 schema-drift fix — DrugBase tables must use drug_database schema.
 
-    When the tier-scoped pattern lands, the new FDBBase metadata uses
-    `drug_database` schema (per the recon doc). The two schemas
-    coexist in the same physical DB. This test pins the Phase 09
-    side so a B9 refactor cannot accidentally move existing tables.
+    After S8 (F-006 schema name drift fix), DrugBase.SCHEMA was corrected
+    from 'drug_db' to 'drug_database' to match the alembic-managed schema.
+    This test pins that all DrugBase tables resolve to drug_database.
     """
     from drug_database.models.tables import DrugBase
 
     schemas = {tbl.schema for tbl in DrugBase.metadata.tables.values()}
-    # Phase 09 uses 'drug_db'; the FDB pricing layer (already shipped
-    # in Phase 09) uses 'drug_database'. Both are legitimate; assert
-    # we are not picking up some THIRD schema unexpectedly.
-    assert schemas <= {"drug_db", "drug_database"}, (
+    # After S8, all DrugBase tables must be in drug_database (the canonical
+    # alembic-managed schema). drug_db must no longer appear.
+    assert schemas <= {"drug_database"}, (
         f"DrugBase tables span unexpected schemas: {sorted(schemas)}; "
-        f"expected subset of {{'drug_db', 'drug_database'}}."
+        f"expected only {{'drug_database'}} after S8 schema-drift fix."
     )

@@ -1,7 +1,7 @@
 """FDA NDC Directory ORM models for the drug-database module.
 
-Schema: ``drug_database`` (separate from ``drug_db`` used by the legacy
-DrugProduct/DrugPricing models in tables.py).
+Schema: ``drug_database`` (canonical schema; tables.py DrugBase models
+also use ``drug_database`` after S8 schema-drift fix).
 
 Tables:
   drug_database.drugs                   — product-level records from product.txt
