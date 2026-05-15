@@ -2,6 +2,22 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## v3 changes (codex pass-2 remediation, 2026-05-15)
+
+Codex pass-2 returned NEEDS-V3 with 2 CONCERN findings. Both closed in v3.
+
+| Finding | Status | How closed |
+|---|---|---|
+| NEW-1 — double verify-call (NIT) | LEFT-AS-IS | Optional optimization; no correctness risk. Not worth touching per codex grading. |
+| NEW-2 — empty `InspectorPanelProps` interface | CLOSED | Changed `export interface InspectorPanelProps {}` to `export type InspectorPanelProps = Record<string, never>`. Same fix already applied to `packages/ui`'s `Input.tsx`. `@typescript-eslint/no-empty-object-type` is `error` in the repo eslint config — this would have failed lint. Function default updated to `{} as InspectorPanelProps`. |
+| NEW-3 — shallow `redactBody` misses nested PHI | CLOSED | `redactBody` redesigned as bounded recursive walk: depth limit 6 (returns `<REDACTED:depth-exceeded>` beyond), cycle detection via WeakSet, array traversal added. `PHI_KEY_PATTERN` extended to cover `date.of.birth`, `first.name`, `last.name`, `phone`, `email`, `address`. Redaction marker changed from `[REDACTED]` to `<REDACTED>` for consistency with depth/cap markers. 4 new tests added (nested-array, nested-object, depth-limit, cycle); wrap-fetch test count 9→13. |
+| Cosmetic — Task 7 stale "add nanostores" wording | CLOSED | Title, Files list, Step 5.8 note, and Task 7 commit message all updated to "verify nanostores present (added in Task 1)". |
+| Cosmetic — test count discrepancy | CLOSED | All five count locations reconciled to 63 (Step 6.10: 58, Task 6 commit: 58, Step 7.4: ~63, status doc: 63, self-review table: 63). Counts were 59/60/61 in v2 due to wrap-fetch expansion. |
+
+**Status:** v3 complete, 2026-05-15. Ready for codex pass-3 (or execution).
+
+---
+
 ## v2 changes (codex pass-1 remediation, 2026-05-15)
 
 Codex pass-1 returned BLOCKED with 3 BLOCKs + 3 CONCERNs + 1 NIT. All closed in v2.
