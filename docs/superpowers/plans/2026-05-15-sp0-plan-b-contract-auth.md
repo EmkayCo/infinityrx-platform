@@ -2,7 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship `packages/contract` and `packages/auth` as the SP-0 TypeScript spine, on top of the Plan A foundation (commit `a7b838c`). Each package builds, typechecks, lints, and ships its own vitest suite. End state: workspace-root `tsc -b` compiles both packages, `npm run test` runs both suites, CI workflow extends to lint/typecheck/test the new packages.
+**Status:** v2, 2026-05-15. v1 (`4eb93d8`) BLOCKED codex pass-1 with 1 BLOCK + 4 CONCERNs + 1 NIT. v2 closes:
+- **BLOCK (`.strict()` zod claims):** `AccessClaimsSchema` + `RefreshClaimsSchema` now use `.strict()` so unknown keys are REJECTED, not stripped. Tests asserting tid/roles rejection on refresh claims now actually fail-when-broken.
+- **CONCERN (jose typed errors):** `verifyTokenRaw` now imports `JWTExpired`, `JWTInvalid`, `JWTClaimValidationFailed`, `JWSSignatureVerificationFailed` from `jose/errors` and maps via `instanceof`, not substring.
+- **CONCERN (RealImpl test coverage):** Task 3.6 adds 6 RealImpl tests via injected `fetch` (bearer header, correlation propagation, success parse, 404 → null, error envelope mapping, invalid response rejection).
+- **CONCERN (missing tests):** Task 5.4 adds refresh-after-password-reset + Redis-unreachable tests. The transport header-vs-body test is noted as Plan C's integration boundary (Plan B's `performRefresh` doesn't own HTTP transport).
+- **CONCERN (orphan files):** `telemetry.ts` and `health.ts` removed from the file-structure section — `BaseClient.probeHealth()` in `client-base.ts` already covers the health model, and telemetry hooks are folded into `ClientConfig` (no separate file needed).
+- **NIT (goal wording):** Goal now says `npm run test:packages` runs both suites.
+
+**Goal:** Ship `packages/contract` and `packages/auth` as the SP-0 TypeScript spine, on top of the Plan A foundation (commit `a7b838c`). Each package builds, typechecks, lints, and ships its own vitest suite. End state: workspace-root `tsc -b` compiles both packages, `npm run test:packages` runs all suites (scripts + contract + auth), CI workflow extends to lint/typecheck/test the new packages.
 
 **Architecture:** Two new workspaces under `packages/`. Both are framework-agnostic (zero `next/*`, `next-auth/*`, `@auth/*` imports — enforced by Plan A's eslint Block B). `packages/contract` owns the typed-client interface contract (one base interface + one reference impl for the prescriber-directory backend; the other 12 backends ship in their respective verticals SP-1+). `packages/auth` owns the canonical JWT contract per SD-1: claim type definitions, mint/verify primitives, dev JWT path, revocation-repo client interface, refresh adapter shape, portal single-flight refresh helper. Python backend implementation (refresh endpoint, Redis revocation repo) is **out of scope** — Plan B's tests use mock backends; backend Python work is a parallel track outside SP-0's TypeScript-package phase.
 
@@ -37,9 +45,7 @@ packages/contract/
     index.ts                          # public surface re-exports
     error-envelope.ts                 # { error: { code, message, field?, correlation_id } } + zod schema
     cache-policy.ts                   # TTL / cache-key / invalidation-tags types
-    client-base.ts                    # BaseClient interface (Real + Mock common contract)
-    telemetry.ts                      # OnRequest / OnError / OnRetry hooks
-    health.ts                         # ProbeDefinition + HealthSnapshot types
+    client-base.ts                    # BaseClient interface (Real + Mock common contract); includes probeHealth() (health model) and ClientConfig telemetry hooks
     impls/
       prescriber-directory/
         types.ts                      # zod schemas: Prescriber, PrescriberSearchRequest/Response
@@ -920,6 +926,90 @@ describe("MockPrescriberDirectoryClient", () => {
     expect(PRESCRIBER_DIRECTORY_CACHE_POLICIES).toHaveProperty("getByNpi");
   });
 });
+
+// ── RealImpl tests via injected fetch (no network) ──
+import { createRealPrescriberDirectoryClient } from "../impls/prescriber-directory/real.js";
+
+describe("RealPrescriberDirectoryClient (injected fetch)", () => {
+  function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
+    return new Response(JSON.stringify(body), {
+      ...init,
+      headers: { "content-type": "application/json", ...(init.headers ?? {}) },
+    });
+  }
+
+  it("attaches Bearer token + correlation header on every request", async () => {
+    const captured: { headers: Headers; url: string }[] = [];
+    const fakeFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
+      captured.push({ headers: new Headers(init?.headers), url });
+      return jsonResponse({ results: [], total: 0 });
+    };
+    const client = createRealPrescriberDirectoryClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok-abc",
+      fetch: fakeFetch,
+    });
+    await client.search({ q: "Smith", limit: 20 });
+    expect(captured[0]?.headers.get("authorization")).toBe("Bearer tok-abc");
+    expect(captured[0]?.headers.get("x-correlation-id")).toMatch(/^[0-9a-f-]{36}$/);
+    expect(captured[0]?.url).toContain("/prescribers/search");
+  });
+
+  it("parses a successful search response via zod", async () => {
+    const fakeFetch: typeof fetch = async () => jsonResponse({
+      results: [{
+        npi: "1234567893", first_name: "Jane", last_name: "Smith", credential: "MD",
+        primary_specialty: "Internal Medicine", state: "NY", zip: "10001", active: true,
+      }],
+      total: 1,
+    });
+    const client = createRealPrescriberDirectoryClient({
+      baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch,
+    });
+    const res = await client.search({ q: "Smith", limit: 20 });
+    expect(res.results[0]?.last_name).toBe("Smith");
+    expect(res.total).toBe(1);
+  });
+
+  it("getByNpi returns null on HTTP 404", async () => {
+    const fakeFetch: typeof fetch = async () => new Response(null, { status: 404 });
+    const client = createRealPrescriberDirectoryClient({
+      baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch,
+    });
+    const p = await client.getByNpi("9999999999");
+    expect(p).toBeNull();
+  });
+
+  it("rejects responses that do not match the zod schema", async () => {
+    const fakeFetch: typeof fetch = async () => jsonResponse({ wrong: "shape" });
+    const client = createRealPrescriberDirectoryClient({
+      baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch,
+    });
+    await expect(client.search({ q: "S", limit: 20 })).rejects.toThrow();
+  });
+
+  it("maps an error envelope from a 4xx/5xx response to an AuthError-ish exception", async () => {
+    const fakeFetch: typeof fetch = async () => jsonResponse(
+      { error: { code: "RATE_LIMITED", message: "Slow down", correlation_id: "550e8400-e29b-41d4-a716-446655440099" } },
+      { status: 429 },
+    );
+    const client = createRealPrescriberDirectoryClient({
+      baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch,
+    });
+    await expect(client.search({ q: "S", limit: 20 })).rejects.toMatchObject({ code: "RATE_LIMITED" });
+  });
+
+  it("probeHealth pings /health and reports latency", async () => {
+    const fakeFetch: typeof fetch = async () => new Response("OK", { status: 200 });
+    const client = createRealPrescriberDirectoryClient({
+      baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch,
+    });
+    const h = await client.probeHealth();
+    expect(h.ok).toBe(true);
+    expect(typeof h.latency_ms).toBe("number");
+  });
+});
 ```
 
 - [ ] **Step 3.7: Update index.ts**
@@ -974,7 +1064,7 @@ npm --workspace=@infinityrx/contract test
 npm run lint:root
 ```
 
-Expected: typecheck exit 0, 19/19 tests pass (10 prior + 9 prescriber-directory), lint exit 0.
+Expected: typecheck exit 0, 25/25 tests pass (10 prior + 9 MockImpl + 6 RealImpl), lint exit 0.
 
 - [ ] **Step 3.9: Commit**
 
@@ -1090,7 +1180,7 @@ export function resolveEnvClaim(env: string | undefined): EnvClaim {
 import { z } from "zod";
 import { EnvClaimSchema } from "./env-claim.js";
 
-/** Per SD-1 §2. */
+/** Per SD-1 §2. `.strict()` rejects unknown keys (Ajv-equivalent additionalProperties:false). */
 export const AccessClaimsSchema = z.object({
   sub: z.string().uuid(),
   tid: z.string().uuid(),
@@ -1102,10 +1192,10 @@ export const AccessClaimsSchema = z.object({
   iss: z.literal("infinityrx"),
   aud: z.literal("infinityrx-backend"),
   env: EnvClaimSchema,
-});
+}).strict();
 export type AccessClaims = z.infer<typeof AccessClaimsSchema>;
 
-/** Per SD-1 §3. No tid, no roles on refresh. */
+/** Per SD-1 §3. No tid, no roles on refresh. `.strict()` REJECTS tid/roles — non-strict z.object would silently strip them. */
 export const RefreshClaimsSchema = z.object({
   sub: z.string().uuid(),
   typ: z.literal("refresh"),
@@ -1115,7 +1205,7 @@ export const RefreshClaimsSchema = z.object({
   iss: z.literal("infinityrx"),
   aud: z.literal("infinityrx-backend"),
   env: EnvClaimSchema,
-});
+}).strict();
 export type RefreshClaims = z.infer<typeof RefreshClaimsSchema>;
 
 export const ISSUER = "infinityrx" as const;
@@ -1194,6 +1284,14 @@ describe("RefreshClaimsSchema", () => {
 
 ```ts
 import { SignJWT, jwtVerify, type JWTPayload } from "jose";
+import {
+  JWTExpired,
+  JWTClaimValidationFailed,
+  JWSSignatureVerificationFailed,
+  JWSInvalid,
+  JWTInvalid,
+  JOSEError,
+} from "jose/errors";
 import { AccessClaimsSchema, RefreshClaimsSchema, ISSUER, AUDIENCE, type AccessClaims, type RefreshClaims } from "./claims.js";
 import { resolveEnvClaim, type EnvClaim } from "./env-claim.js";
 import { AuthError, AUTH_ERROR_MESSAGES } from "./errors.js";
@@ -1263,7 +1361,19 @@ export async function signRefreshToken(claims: RefreshClaims, secret: string): P
     .sign(key);
 }
 
-/** Throws AuthError for any §8 check failure. Caller still runs §8.5 revocation checks. */
+/**
+ * Throws AuthError for any §8 check failure. Caller still runs §8.5 revocation checks.
+ * Maps jose's typed errors via instanceof (NOT substring matching on .message — that
+ * was brittle; codex pass-1 BLOCK).
+ *
+ * jose error hierarchy (from `jose/errors`):
+ *   - JOSEError (base)
+ *     - JWTExpired                        → EXPIRED_TOKEN
+ *     - JWTClaimValidationFailed          → WRONG_ISSUER / WRONG_AUDIENCE (check `claim` field)
+ *     - JWSSignatureVerificationFailed    → INVALID_TOKEN
+ *     - JWSInvalid / JWTInvalid           → MALFORMED_TOKEN
+ *     - other JOSEError subclasses        → INVALID_TOKEN (fallback)
+ */
 export async function verifyTokenRaw(token: string, secret: string, env: EnvClaim): Promise<JWTPayload> {
   const key = secretKey(secret);
   try {
@@ -1279,12 +1389,27 @@ export async function verifyTokenRaw(token: string, secret: string, env: EnvClai
     return payload;
   } catch (e) {
     if (e instanceof AuthError) throw e;
-    const msg = (e as Error).message ?? "";
-    if (msg.includes("expired")) throw new AuthError("EXPIRED_TOKEN", AUTH_ERROR_MESSAGES.EXPIRED_TOKEN);
-    if (msg.includes("issuer")) throw new AuthError("WRONG_ISSUER", AUTH_ERROR_MESSAGES.WRONG_ISSUER);
-    if (msg.includes("audience")) throw new AuthError("WRONG_AUDIENCE", AUTH_ERROR_MESSAGES.WRONG_AUDIENCE);
-    if (msg.includes("signature")) throw new AuthError("INVALID_TOKEN", AUTH_ERROR_MESSAGES.INVALID_TOKEN);
-    throw new AuthError("INVALID_TOKEN", AUTH_ERROR_MESSAGES.INVALID_TOKEN);
+    if (e instanceof JWTExpired) {
+      throw new AuthError("EXPIRED_TOKEN", AUTH_ERROR_MESSAGES.EXPIRED_TOKEN);
+    }
+    if (e instanceof JWTClaimValidationFailed) {
+      // jose attaches the failed-claim name to e.claim (e.g. 'iss', 'aud')
+      const claim = (e as JWTClaimValidationFailed).claim;
+      if (claim === "iss") throw new AuthError("WRONG_ISSUER", AUTH_ERROR_MESSAGES.WRONG_ISSUER);
+      if (claim === "aud") throw new AuthError("WRONG_AUDIENCE", AUTH_ERROR_MESSAGES.WRONG_AUDIENCE);
+      throw new AuthError("MALFORMED_TOKEN", AUTH_ERROR_MESSAGES.MALFORMED_TOKEN);
+    }
+    if (e instanceof JWSSignatureVerificationFailed) {
+      throw new AuthError("INVALID_TOKEN", AUTH_ERROR_MESSAGES.INVALID_TOKEN);
+    }
+    if (e instanceof JWSInvalid || e instanceof JWTInvalid) {
+      throw new AuthError("MALFORMED_TOKEN", AUTH_ERROR_MESSAGES.MALFORMED_TOKEN);
+    }
+    if (e instanceof JOSEError) {
+      throw new AuthError("INVALID_TOKEN", AUTH_ERROR_MESSAGES.INVALID_TOKEN);
+    }
+    // Unknown error — re-throw to preserve diagnostics
+    throw e;
   }
 }
 
@@ -1787,6 +1912,55 @@ describe("InMemoryRevocationRepo consumeRefresh atomicity", () => {
     expect(await repo.consumeRefresh(jti, "rotation", 1000)).toBe(false);
   });
 });
+
+// SD-1 §11 contract test #e — refresh token rejected after password reset.
+describe("refresh after password reset", () => {
+  it("a refresh token whose iat <= tokens_valid_since[sub] is rejected with REVOKED_TOKEN", async () => {
+    const { repo, sub, tid, roles } = setup();
+    const now = Math.floor(Date.now() / 1000);
+    const tokens = await mintTokenPair({ sub, tid, roles, env: "production", secret: SECRET, repo, now });
+    // Pretend admin / password-reset just disabled this user, setting cutoff at `now` (same second as token iat).
+    await repo.setTokensValidSince(sub, now);
+    await expect(
+      verifyRefreshToken({ token: tokens.refresh_token, secret: SECRET, env: "production", repo }),
+    ).rejects.toMatchObject({ code: "REVOKED_TOKEN" });
+  });
+});
+
+// SD-1 §11 contract test #f — Redis-unreachable maps to REVOCATION_CHECK_FAILED.
+// We use a throwing RevocationRepo to simulate Redis being down.
+class UnreachableRevocationRepo {
+  async isRevoked(): Promise<boolean> { throw new Error("ECONNREFUSED"); }
+  async consumeRefresh(): Promise<boolean> { throw new Error("ECONNREFUSED"); }
+  async getTokensValidSince(): Promise<number | null> { throw new Error("ECONNREFUSED"); }
+  async setTokensValidSince(): Promise<void> { throw new Error("ECONNREFUSED"); }
+  async revoke(): Promise<void> { throw new Error("ECONNREFUSED"); }
+}
+
+describe("Redis unreachable", () => {
+  it("verifyAccessToken returns REVOCATION_CHECK_FAILED when repo throws", async () => {
+    // Mint with a working repo first, then verify with a broken repo.
+    const workingRepo = new InMemoryRevocationRepo();
+    const sub = "550e8400-e29b-41d4-a716-446655440000";
+    const tid = "550e8400-e29b-41d4-a716-446655440001";
+    const tokens = await mintTokenPair({ sub, tid, roles: [], env: "production", secret: SECRET, repo: workingRepo });
+    const brokenRepo = new UnreachableRevocationRepo();
+    await expect(
+      verifyAccessToken({ token: tokens.access_token, secret: SECRET, env: "production", repo: brokenRepo }),
+    ).rejects.toMatchObject({ code: "REVOCATION_CHECK_FAILED" });
+  });
+
+  it("verifyRefreshToken returns REVOCATION_CHECK_FAILED when repo throws", async () => {
+    const workingRepo = new InMemoryRevocationRepo();
+    const sub = "550e8400-e29b-41d4-a716-446655440000";
+    const tid = "550e8400-e29b-41d4-a716-446655440001";
+    const tokens = await mintTokenPair({ sub, tid, roles: [], env: "production", secret: SECRET, repo: workingRepo });
+    const brokenRepo = new UnreachableRevocationRepo();
+    await expect(
+      verifyRefreshToken({ token: tokens.refresh_token, secret: SECRET, env: "production", repo: brokenRepo }),
+    ).rejects.toMatchObject({ code: "REVOCATION_CHECK_FAILED" });
+  });
+});
 ```
 
 - [ ] **Step 5.5: Update `packages/auth/src/index.ts`**
@@ -1810,7 +1984,7 @@ npm --workspace=@infinityrx/auth test
 npm run lint:root
 ```
 
-Expected: typecheck exit 0, ~25 tests pass (17 from Task 4 + 8 from Task 5), lint exit 0.
+Expected: typecheck exit 0, ~28 tests pass (17 from Task 4 + 8 atomic-consume/typ/revocation from Task 5 + 3 password-reset/Redis-unreachable added in v2), lint exit 0.
 
 - [ ] **Step 5.7: Commit**
 
@@ -2214,7 +2388,7 @@ npm --workspace=@infinityrx/auth test
 npm run lint:root
 ```
 
-Expected: typecheck exit 0, ~36 tests pass (25 + 4 refresh + 4 single-flight + 3 dev-jwt = 36), lint exit 0.
+Expected: typecheck exit 0, ~39 tests pass (28 from prior + 4 refresh + 4 single-flight + 3 dev-jwt = 39), lint exit 0.
 
 - [ ] **Step 6.9: Commit**
 
@@ -2348,7 +2522,7 @@ npm run manifest:validate:standalone
 npm run test:packages
 ```
 
-Expected: all exit 0. test:packages runs scripts (10) + contract (19) + auth (~36) tests = 65+ total. All pass.
+Expected: all exit 0. test:packages runs scripts (10) + contract (25) + auth (~39) tests = ~74 total. All pass.
 
 - [ ] **Step 7.6: Write acceptance status doc**
 
