@@ -1522,7 +1522,7 @@ Plan B (packages/contract + packages/auth) gets written next using the establish
 | Spec section | Plan A covers? | Notes |
 |---|---|---|
 | §4.1 D10 auth contract | NO — Plan B | Per Plan A's scope boundary |
-| §4.1 D11 framework | PARTIAL — config guardrails only | tsconfig.base.json + workspace-root ESLint scoping framework-imports to packages/** + portal/shared/**. Actual framework/shell enforcement lands in Plan C/D when the shell mounts and the operator portal consumes it |
+| §4.1 D11 framework | PARTIAL — config guardrails only | tsconfig.base.json + workspace-root ESLint scoping framework-imports to packages/** only in Plan A (portal/shared still legally uses next-auth until Plan C migrates it). Actual framework/shell enforcement lands in Plan C/D when the shell mounts and the operator portal consumes it |
 | §4.1 D12 gateway | YES (by omission) | No gateway service created — SD-3 defer is honored |
 | §4.1 D13 composition mechanism | PARTIAL | Schema + validator (Task 2, 4), ESLint scaffold (Task 5); codegen scripts deferred to Plan D |
 | §5.2 repo structure | YES | packages/, schemas/, infrastructure/manifests/ created |
@@ -1533,7 +1533,7 @@ Gaps are intentional and documented in Task 7's status doc.
 
 **2. Placeholder scan:** Searched for "TBD", "TODO", "implement later", "fill in", "Add appropriate", "similar to" — none found in the plan tasks. The validator code is complete; the ESLint config has empty arrays in named locations (`GENERATED_MODULE_ZONES = []`) with explicit comments tying them to Plan D's codegen.
 
-**3. Type consistency:** `validateManifest` signature is `(manifestYaml: string, inputs: ValidatorInputs) => ValidationResult` in both the test file and the implementation. `ValidatorInputs` shape (`{ secretCatalogYaml, integrationsAllowlistYaml }`) is consistent across all 8 tests.
+**3. Type consistency:** `validateManifest` signature is `(manifestYaml: string, inputs: ValidatorInputs) => ValidationResult` in both the test file and the implementation. `ValidatorInputs` shape (`{ secretCatalogYaml, integrationsAllowlistYaml }`) is consistent across all 10 tests.
 
 No issues found.
 
