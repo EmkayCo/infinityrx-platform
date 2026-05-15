@@ -16,7 +16,9 @@
 | BLOCK 6 | Task 4 `factory.ts` imported `MockPrescriberDirectoryClient`/`RealPrescriberDirectoryClient` classes; Plan B HEAD exports factory functions, not classes | Use actual exports: `createRealPrescriberDirectoryClient(config)` and `createMockPrescriberDirectoryClient()`. Tests assert interface/behavior, not `instanceof`. |
 | CONCERN 1 | Single-module repo → audit passes trivially; no fixture proves exclusion works | Added `packages/modules/_fixtures/__omitted__/` stub module + test asserting audit FAILS when that fixture is referenced; documented module catalog entry process |
 | CONCERN 2 | Audit placement contradictory across Task 5 + Task 6 | Single authoritative placement: `build-manifest` in `next.config.ts` prebuild; `audit-module-graph` as separate npm script run by CI after build. Acceptance criteria updated. |
-| NIT | `mainainers` typo in D4 documentation comment | Fixed → `maintainers` |
+| NIT | `mainainers` typo in D4 documentation comment | Fixed → `maintainers` in D4 JSDoc and Self-Review block |
+
+> Commit `e5d26e7` closes BLOCK 1/2/3/5/6. Commit following this closes BLOCK 4 + CONCERN 1 + CONCERN 2 + NIT (all in the same document; broken out for traceability).
 
 **Goal:** Ship the SP-0 finishing gate across three pillars: (1) build-manifest codegen + module-graph audit + ESLint zone generation (composition mechanism, per SD-4 v5); (2) `prescriber-directory` reference module wiring demonstrating the full SP-0 composition pattern; (3) minimum portal scaffolding mounting `@infinityrx/ui` AppShell + manifest-driven nav in `portal/operator/app/`. End state: workspace-root `tsc -b` compiles all packages, `npm run test:packages` runs all suites, CI extended with composition-audit step.
 
