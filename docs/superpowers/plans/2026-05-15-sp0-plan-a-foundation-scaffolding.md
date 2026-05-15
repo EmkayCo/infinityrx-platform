@@ -1,10 +1,21 @@
 # SP-0 Plan A — Foundation Scaffolding Implementation Plan
 
+> **Status:** v2, 2026-05-15. v1 (`4b41f4e`) failed codex review with 4 BLOCKs + 3 CONCERNs + 2 NITs. v2 closes them:
+> - Validator Ajv imports fixed to ESM-correct shape (`new Ajv2020(...)`, `addFormats(ajv)` — no `.default`).
+> - Validator CLI entrypoint check switched to `pathToFileURL(process.argv[1]).href === import.meta.url` so Windows paths with spaces match.
+> - Root `npm run lint` now COMPOSES `lint:root` + `lint:portal-operator` — root ESLint does NOT silently subsume the existing operator config.
+> - Root `no-restricted-imports` framework-ban scoped to `packages/**`, `portal/shared/**`, `packages/scripts/**` only (not `portal/operator/**` where `next/*` is allowed).
+> - TS tooling moved from top-level `scripts/` (which is already the Python-loaders directory) to `packages/scripts/` — no more mixed-language workspace directory.
+> - Validator gains 2 new tests for malformed `secret-catalog.yml` / `integrations.yml` shapes; validator code adds `Array.isArray` guards.
+> - ESLint-config load-verification step added (proves `import/no-restricted-paths` with empty zones is a no-op, not a config error).
+> - Self-review D11 reworded to PARTIAL (config guardrails only).
+> - Lockfile-authority model documented in Task 1.
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Establish the SP-0 monorepo structure (`packages/*` workspaces), strict-mode YAML deployment-manifest schema, manifest-validator script, baseline workspace-root TypeScript + ESLint config, and CI shell — all green and committed, with no implementation code yet. Subsequent plans (B/C/D) layer the actual packages on top.
 
-**Architecture:** Adds `packages/` as a new npm-workspaces root alongside existing `portal/operator` + `portal/shared`. New top-level dirs: `packages/` (workspace), `schemas/` (JSON Schemas), `infrastructure/manifests/` (per-instance YAML), `infrastructure/secret-catalog.yml`, `infrastructure/integrations.yml`. Existing `portal/shared` stays untouched for now — it gets migrated into `packages/contract`/`packages/auth`/etc in Plans B/C. Workspace-root `tsconfig.base.json` + `eslint.config.js` are added at the **repo root** (not inside `portal/`) so they cover both `portal/*` and `packages/*` workspaces.
+**Architecture:** Adds `packages/` as a new npm-workspaces root alongside existing `portal/operator` + `portal/shared`. New top-level dirs: `packages/` (workspace, including the new `packages/scripts/` for TS tooling — leaves the existing Python `scripts/` directory untouched), `schemas/` (JSON Schemas), `infrastructure/manifests/` (per-instance YAML), `infrastructure/secret-catalog.yml`, `infrastructure/integrations.yml`. Existing `portal/shared` stays untouched for now — it gets migrated into `packages/contract`/`packages/auth`/etc in Plans B/C. Workspace-root `tsconfig.base.json` + `eslint.config.js` are added at the **repo root** (not inside `portal/`) so they cover both `portal/*` and `packages/*` workspaces. Root `npm run lint` explicitly composes `lint:root` (root ESLint over `packages/**` + `portal/shared/**` + `packages/scripts/**`) + `lint:portal-operator` (the operator portal's existing local ESLint config). Root `package-lock.json` is the authoritative install for CI; `portal/package-lock.json` remains for portal-only local workflows but is not used by CI.
 
 **Tech Stack:** Node 22 LTS, npm workspaces (existing convention — not pnpm), TypeScript 5.6, ESLint 9 (flat config), Ajv 8 (JSON Schema validation), YAML via `yaml` package, Vitest 2 for the validator tests, GitHub Actions for CI.
 
@@ -40,12 +51,12 @@ infrastructure/
 packages/
   .gitkeep                               # makes the empty workspace root committable
   README.md                              # explains what goes here in plans B/C/D
-
-scripts/
-  validate-manifest.ts                   # Ajv-based validator per SD-4 §3 (offline checks only)
-  validate-manifest.test.ts              # vitest unit tests
-  package.json                           # scripts workspace (its own tsconfig)
-  tsconfig.json
+  scripts/
+    validate-manifest.ts                 # Ajv-based validator per SD-4 §3 (offline checks only)
+    validate-manifest.test.ts            # vitest unit tests
+    package.json                         # @infinityrx/scripts workspace
+    tsconfig.json
+    vitest.config.ts
 
 # Repo-root config (NEW — currently no config at this level)
 tsconfig.base.json                       # shared TS config (verbatimModuleSyntax true)
@@ -68,8 +79,13 @@ package.json                             # add scripts/ + packages/* to workspac
 
 ```
 portal/                                  # entire portal/ tree untouched in Plan A
+                                         #   - portal/package.json + portal/package-lock.json remain
+                                         #     for portal-only local workflows; CI uses repo-root lockfile
 modules/                                 # Python backend modules untouched
 shared/                                  # Python shared code untouched
+scripts/                                 # existing top-level Python loaders (apply_rls.py,
+                                         #   load_fdb.py, etc.) — DELIBERATELY untouched
+                                         #   TS tooling lives in packages/scripts/
 infrastructure/docker/, infrastructure/scripts/   # existing infra untouched
 .claude/, docs/                          # untouched
 ```
@@ -81,14 +97,14 @@ infrastructure/docker/, infrastructure/scripts/   # existing infra untouched
 ### Task 1: Repo-root workspace + scripts/ package scaffold
 
 **Files:**
-- Modify: `package.json` (repo root — currently doesn't have a root-level one for the whole repo; the existing `portal/package.json` covers portal workspaces only)
+- Create: `package.json` (repo root — currently doesn't exist; `portal/package.json` covers portal workspaces only and remains in place)
 - Create: `tsconfig.base.json`
 - Create: `tsconfig.json`
 - Create: `.npmrc`
 - Create: `packages/.gitkeep`
 - Create: `packages/README.md`
-- Create: `scripts/package.json`
-- Create: `scripts/tsconfig.json`
+- Create: `packages/scripts/package.json`
+- Create: `packages/scripts/tsconfig.json`
 
 - [ ] **Step 1.1: Verify there is no repo-root `package.json`**
 
@@ -111,14 +127,16 @@ If a root `package.json` already exists, STOP and surface it — Plan A assumes 
   "workspaces": [
     "portal/operator",
     "portal/shared",
-    "packages/*",
-    "scripts"
+    "packages/*"
   ],
   "scripts": {
-    "lint": "eslint .",
+    "lint": "npm run lint:root && npm run lint:portal-operator",
+    "lint:root": "eslint . --ignore-pattern \"portal/operator/**\" --ignore-pattern \"node_modules/**\" --ignore-pattern \"**/dist/**\" --ignore-pattern \"**/.next/**\"",
+    "lint:portal-operator": "npm --workspace=ifx-operator-portal run lint",
     "typecheck": "tsc -b",
-    "manifest:validate": "npm --workspace=scripts run validate-manifest -- infrastructure/manifests/operator-dev.yml",
-    "test": "npm --workspace=scripts test"
+    "manifest:validate": "npm --workspace=@infinityrx/scripts run validate-manifest -- infrastructure/manifests/operator-dev.yml",
+    "manifest:validate:standalone": "npm --workspace=@infinityrx/scripts run validate-manifest -- infrastructure/manifests/example-reclaimrx-standalone.yml",
+    "test": "npm --workspace=@infinityrx/scripts test"
   },
   "devDependencies": {
     "typescript": "5.6.3",
@@ -130,6 +148,8 @@ If a root `package.json` already exists, STOP and surface it — Plan A assumes 
   }
 }
 ```
+
+**Lockfile authority:** root `package.json` + root `package-lock.json` is the source of truth for CI and SP-0 plan execution. `portal/package.json` + `portal/package-lock.json` remain in place for portal-only local workflows (anyone running `cd portal && npm install` directly). CI runs `npm ci` from the repo root only. If a dependency version diverges between the two lockfiles, the root lockfile wins; the discrepancy is resolved by Plan C when `portal/shared` migrates into `packages/*` and `portal/package.json` is reduced or removed.
 
 - [ ] **Step 1.3: Write `tsconfig.base.json`**
 
@@ -164,12 +184,12 @@ If a root `package.json` already exists, STOP and surface it — Plan A assumes 
 {
   "files": [],
   "references": [
-    { "path": "./scripts" }
+    { "path": "./packages/scripts" }
   ]
 }
 ```
 
-(`portal/*` and `packages/*` references get added as those workspaces gain TypeScript code in Plans B/C/D. `scripts/` is the only workspace with TS code in Plan A.)
+(`portal/*` and other `packages/*` references get added as those workspaces gain TypeScript code in Plans B/C/D. `packages/scripts/` is the only workspace with TS code in Plan A.)
 
 - [ ] **Step 1.5: Write `.npmrc`**
 
@@ -202,7 +222,7 @@ SP-0 workspace root for shared TypeScript packages.
 All packages here are framework-agnostic per SD-2 (`14d847a`) — zero `next/*` imports. Next.js usage lives ONLY in `portal/operator/app/`.
 ```
 
-- [ ] **Step 1.7: Write `scripts/package.json`**
+- [ ] **Step 1.7: Write `packages/scripts/package.json`**
 
 ```json
 {
@@ -210,8 +230,6 @@ All packages here are framework-agnostic per SD-2 (`14d847a`) — zero `next/*` 
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -b",
     "validate-manifest": "tsx validate-manifest.ts",
@@ -231,11 +249,11 @@ All packages here are framework-agnostic per SD-2 (`14d847a`) — zero `next/*` 
 }
 ```
 
-- [ ] **Step 1.8: Write `scripts/tsconfig.json`**
+- [ ] **Step 1.8: Write `packages/scripts/tsconfig.json`**
 
 ```json
 {
-  "extends": "../tsconfig.base.json",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "."
@@ -254,9 +272,6 @@ Append:
 packages/*/node_modules
 packages/*/dist
 packages/*/*.tsbuildinfo
-scripts/node_modules
-scripts/dist
-scripts/*.tsbuildinfo
 ```
 
 - [ ] **Step 1.10: Install dependencies**
@@ -268,15 +283,19 @@ Expected: clean install, no peer-dep warnings, `package-lock.json` updated. If `
 - [ ] **Step 1.11: Commit**
 
 ```bash
-git add package.json package-lock.json tsconfig.base.json tsconfig.json .npmrc .gitignore packages/.gitkeep packages/README.md scripts/package.json scripts/tsconfig.json
-git commit -m "feat(sp-0): scaffold packages/ + scripts/ workspaces and root TS config
+git add package.json package-lock.json tsconfig.base.json tsconfig.json .npmrc .gitignore packages/.gitkeep packages/README.md packages/scripts/package.json packages/scripts/tsconfig.json
+git commit -m "feat(sp-0): scaffold packages/ workspace and root TS config
 
 Adds repo-root npm-workspaces config alongside the existing
-portal/ workspace root. Introduces packages/ (empty in Plan A;
-populated by Plans B/C/D) and scripts/ (Plan A populates the
-manifest validator). Adds workspace-root tsconfig.base.json
-with verbatimModuleSyntax true per SD-4 §4 closing pass-1
-type-only import bypass.
+portal/ workspace root. Introduces packages/ (containing
+packages/scripts/ for TS tooling in Plan A; packages/contract,
+auth, ui, qa-harness, shell, modules/* arrive in Plans B/C/D).
+Adds workspace-root tsconfig.base.json with verbatimModuleSyntax
+true per SD-4 §4 closing pass-1 type-only import bypass.
+
+Top-level scripts/ (existing Python loaders) is untouched —
+TS tooling lives in packages/scripts/ to keep workspace
+boundaries clean.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```
@@ -595,13 +614,13 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ### Task 4: Manifest validator script + tests (TDD)
 
 **Files:**
-- Create: `scripts/validate-manifest.ts`
-- Create: `scripts/validate-manifest.test.ts`
-- Create: `scripts/vitest.config.ts`
+- Create: `packages/scripts/validate-manifest.ts`
+- Create: `packages/scripts/validate-manifest.test.ts`
+- Create: `packages/scripts/vitest.config.ts`
 
 This is TDD: write the failing tests first, then implement.
 
-- [ ] **Step 4.1: Write `scripts/vitest.config.ts`**
+- [ ] **Step 4.1: Write `packages/scripts/vitest.config.ts`**
 
 ```ts
 import { defineConfig } from "vitest/config";
@@ -614,7 +633,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 4.2: Write `scripts/validate-manifest.test.ts` (failing tests)**
+- [ ] **Step 4.2: Write `packages/scripts/validate-manifest.test.ts` (failing tests)**
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -624,7 +643,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(here, "..");
+const repoRoot = join(here, "..", "..");
 
 function loadFixture(rel: string): string {
   return readFileSync(join(repoRoot, rel), "utf8");
@@ -788,6 +807,68 @@ migration_policy:
     expect(result.errors.some((e) => e.includes("unknown-scope"))).toBe(true);
   });
 
+  it("returns a graceful error for a malformed secret-catalog.yml (non-array scopes)", () => {
+    const yaml = `
+instance_name: malformed-catalog-test
+audience: operator
+auth_profile: development
+modules: []
+required_backends: []
+required_shared_services: []
+required_schemas: []
+required_migrations: []
+required_env: []
+required_health: []
+required_seed_data: []
+required_queues: []
+required_jobs: []
+required_buckets: []
+required_integrations: []
+required_secrets: []
+migration_policy:
+  ordering: explicit
+  rollback: none
+  pre_check: dry_run_required
+`;
+    const result = validateManifest(yaml, {
+      secretCatalogYaml: "scopes: not-an-array\n",
+      integrationsAllowlistYaml: "allowed_integrations: []\n",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.toLowerCase().includes("catalog"))).toBe(true);
+  });
+
+  it("returns a graceful error for a malformed integrations.yml (non-array allowed_integrations)", () => {
+    const yaml = `
+instance_name: malformed-allowlist-test
+audience: operator
+auth_profile: development
+modules: []
+required_backends: []
+required_shared_services: []
+required_schemas: []
+required_migrations: []
+required_env: []
+required_health: []
+required_seed_data: []
+required_queues: []
+required_jobs: []
+required_buckets: []
+required_integrations: []
+required_secrets: []
+migration_policy:
+  ordering: explicit
+  rollback: none
+  pre_check: dry_run_required
+`;
+    const result = validateManifest(yaml, {
+      secretCatalogYaml: "scopes: []\n",
+      integrationsAllowlistYaml: "allowed_integrations: not-an-array\n",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.toLowerCase().includes("integration"))).toBe(true);
+  });
+
   it("rejects required_integrations entries not in the allow-list", () => {
     const yaml = `
 instance_name: bad-integration
@@ -824,10 +905,10 @@ migration_policy:
 
 - [ ] **Step 4.3: Run tests to verify they fail**
 
-Run: `cd scripts && npm test`
-Expected: ALL tests FAIL with "validateManifest is not defined" or import error. This confirms the test file imports the function that does not exist yet.
+Run: `npm --workspace=@infinityrx/scripts test`
+Expected: ALL 10 tests FAIL with "validateManifest is not defined" or import error. This confirms the test file imports the function that does not exist yet.
 
-- [ ] **Step 4.4: Write `scripts/validate-manifest.ts`**
+- [ ] **Step 4.4: Write `packages/scripts/validate-manifest.ts`**
 
 ```ts
 #!/usr/bin/env node
@@ -835,7 +916,7 @@ Expected: ALL tests FAIL with "validateManifest is not defined" or import error.
  * Manifest validator per SD-4 §3 (PR-CI offline checks only).
  *
  * Performs:
- *   1. JSON Schema gate (Ajv strict mode, additionalProperties:false)
+ *   1. JSON Schema gate (Ajv 2020 strict mode, additionalProperties:false)
  *   2. Secret-reference scope catalog ownership check
  *   3. Required-integrations allow-list check
  *
@@ -847,44 +928,37 @@ Expected: ALL tests FAIL with "validateManifest is not defined" or import error.
  *
  * Authority: SD-4 (`0b3c9d7`) §3.
  */
-import Ajv from "ajv/dist/2020.js";
+import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { parse as parseYaml } from "yaml";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { dirname, join, resolve } from "node:path";
 import process from "node:process";
+import type { ValidateFunction } from "ajv";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(here, "..");
+const repoRoot = join(here, "..", "..");
 
-interface ValidatorInputs {
+export interface ValidatorInputs {
   /** Raw YAML of infrastructure/secret-catalog.yml */
   secretCatalogYaml: string;
   /** Raw YAML of infrastructure/integrations.yml */
   integrationsAllowlistYaml: string;
 }
 
-interface ValidationResult {
+export interface ValidationResult {
   ok: boolean;
   errors: string[];
 }
 
-interface SecretCatalog {
-  scopes: Array<{ name: string; description: string; owner: string }>;
-}
-
-interface IntegrationsAllowlist {
-  allowed_integrations: string[];
-}
-
 const SECRET_URI_RE = /^secret:\/\/([a-z][a-z0-9-]*)\/([a-z0-9][a-z0-9-]*)$/;
 
-let cachedValidator: ReturnType<typeof buildSchemaValidator> | null = null;
+let cachedValidator: ValidateFunction | null = null;
 
-function buildSchemaValidator() {
-  const ajv = new Ajv.default({ strict: true, allErrors: true });
-  addFormats.default(ajv);
+function buildSchemaValidator(): ValidateFunction {
+  const ajv = new Ajv2020({ strict: true, allErrors: true });
+  addFormats(ajv);
   const schemaJson = readFileSync(
     join(repoRoot, "schemas/instance-manifest.schema.json"),
     "utf8",
@@ -922,13 +996,29 @@ export function validateManifest(
   };
 
   // 2. Secret-reference catalog ownership
-  let catalog: SecretCatalog;
+  let catalogRaw: unknown;
   try {
-    catalog = parseYaml(inputs.secretCatalogYaml) as SecretCatalog;
+    catalogRaw = parseYaml(inputs.secretCatalogYaml);
   } catch (e) {
     return { ok: false, errors: [`secret-catalog YAML parse error: ${(e as Error).message}`] };
   }
-  const knownScopes = new Set(catalog.scopes?.map((s) => s.name) ?? []);
+  if (
+    catalogRaw === null ||
+    typeof catalogRaw !== "object" ||
+    !Array.isArray((catalogRaw as { scopes?: unknown }).scopes)
+  ) {
+    errors.push(
+      "secret-catalog: expected an object with a `scopes:` array. " +
+      "Check infrastructure/secret-catalog.yml shape.",
+    );
+    return { ok: false, errors };
+  }
+  const knownScopes = new Set<string>(
+    ((catalogRaw as { scopes: Array<{ name?: unknown }> }).scopes)
+      .filter((s) => s && typeof s.name === "string")
+      .map((s) => s.name as string),
+  );
+
   for (const ref of m.required_secrets) {
     const match = SECRET_URI_RE.exec(ref);
     if (!match) {
@@ -942,13 +1032,27 @@ export function validateManifest(
   }
 
   // 3. Integrations allow-list
-  let allowlist: IntegrationsAllowlist;
+  let allowlistRaw: unknown;
   try {
-    allowlist = parseYaml(inputs.integrationsAllowlistYaml) as IntegrationsAllowlist;
+    allowlistRaw = parseYaml(inputs.integrationsAllowlistYaml);
   } catch (e) {
     return { ok: false, errors: [`integrations YAML parse error: ${(e as Error).message}`] };
   }
-  const allowed = new Set(allowlist.allowed_integrations ?? []);
+  if (
+    allowlistRaw === null ||
+    typeof allowlistRaw !== "object" ||
+    !Array.isArray((allowlistRaw as { allowed_integrations?: unknown }).allowed_integrations)
+  ) {
+    errors.push(
+      "integrations: expected an object with an `allowed_integrations:` array. " +
+      "Check infrastructure/integrations.yml shape.",
+    );
+    return { ok: false, errors };
+  }
+  const allowed = new Set<string>(
+    (allowlistRaw as { allowed_integrations: unknown[] })
+      .allowed_integrations.filter((v): v is string => typeof v === "string"),
+  );
   for (const integration of m.required_integrations) {
     if (!allowed.has(integration)) {
       errors.push(`required_integrations: "${integration}" not in infrastructure/integrations.yml allow-list`);
@@ -958,8 +1062,13 @@ export function validateManifest(
   return { ok: errors.length === 0, errors };
 }
 
-// CLI entrypoint: `tsx validate-manifest.ts <path-to-manifest.yml>`
-if (import.meta.url === `file://${process.argv[1]}`) {
+// CLI entrypoint: `tsx validate-manifest.ts <path-to-manifest.yml>`.
+// Portable invocation check (handles Windows paths with spaces correctly).
+const invokedDirectly =
+  typeof process.argv[1] === "string" &&
+  pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
+
+if (invokedDirectly) {
   const manifestPath = process.argv[2];
   if (!manifestPath) {
     console.error("usage: validate-manifest <path-to-manifest.yml>");
@@ -985,8 +1094,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
 - [ ] **Step 4.5: Run tests to verify they pass**
 
-Run: `cd scripts && npm test`
-Expected: all 8 tests PASS.
+Run: `npm --workspace=@infinityrx/scripts test`
+Expected: all 10 tests PASS.
 
 - [ ] **Step 4.6: Run the CLI against the dev manifest end-to-end**
 
@@ -995,22 +1104,31 @@ Expected: `✓ infrastructure/manifests/operator-dev.yml validates clean` and ex
 
 - [ ] **Step 4.7: Run the CLI against the reclaimrx-standalone example**
 
-Run (from repo root): `npm --workspace=scripts run validate-manifest -- infrastructure/manifests/example-reclaimrx-standalone.yml`
+Run (from repo root): `npm run manifest:validate:standalone`
 Expected: `✓ infrastructure/manifests/example-reclaimrx-standalone.yml validates clean` and exit 0.
 
 - [ ] **Step 4.8: Commit**
 
 ```bash
-git add scripts/validate-manifest.ts scripts/validate-manifest.test.ts scripts/vitest.config.ts
-git commit -m "feat(sp-0): manifest validator with 8 vitest tests (TDD)
+git add packages/scripts/validate-manifest.ts packages/scripts/validate-manifest.test.ts packages/scripts/vitest.config.ts
+git commit -m "feat(sp-0): manifest validator with 10 vitest tests (TDD)
 
-scripts/validate-manifest.ts performs the SD-4 §3 PR-CI offline
-checks: JSON Schema gate (Ajv strict mode), secret-reference
-scope catalog ownership, required_integrations allow-list. Does
-NOT perform transitive-closure (Plan D) or live secret-manager
-calls (deploy/boot only). 8 vitest tests cover happy path,
-missing required keys, additionalProperties:false, audience
-enum, malformed secret URIs, unknown scopes, unknown integrations.
+packages/scripts/validate-manifest.ts performs the SD-4 §3
+PR-CI offline checks: JSON Schema gate (Ajv 2020 strict mode),
+secret-reference scope catalog ownership, required_integrations
+allow-list. Does NOT perform transitive-closure (Plan D) or
+live secret-manager calls (deploy/boot only).
+
+10 vitest tests cover happy path (2 manifests), missing
+required keys, additionalProperties:false, audience enum,
+malformed secret URIs, unknown scopes, unknown integrations,
+malformed secret-catalog.yml (non-array scopes), malformed
+integrations.yml (non-array allowed_integrations).
+
+Implementation uses Ajv2020 ESM default import (no .default
+dereference), pathToFileURL for portable CLI entrypoint
+detection across Windows/Unix paths with spaces, and
+Array.isArray guards on every YAML-loaded input.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```
@@ -1075,23 +1193,23 @@ export default tseslint.config(
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+
+  // ── Block A: @infinityrx/module-* boundary applies EVERYWHERE in the workspace.
+  // (The `import/no-restricted-paths` zones at the bottom complement this for
+  //  relative/alias bypass paths once Plan D populates them.)
   {
     files: ["**/*.{ts,tsx,js,jsx,mjs,cjs}"],
     plugins: { import: importPlugin },
     settings: {
       "import/resolver": {
-        typescript: { project: ["./tsconfig.json", "./scripts/tsconfig.json"] },
+        typescript: { project: ["./tsconfig.json", "./packages/scripts/tsconfig.json"] },
       },
     },
     rules: {
       "no-restricted-imports": ["error", {
         patterns: [
-          // Shape 1: @infinityrx/module-* package specifier (static ESM import/export).
-          // Dynamic forms (require, import(), re-exports) are covered by no-restricted-syntax below.
           { group: ["@infinityrx/module-*"],
             message: "Modules are referenced ONLY from packages/shell/src/_generated/. Direct imports break composition isolation (SD-4 §2)." },
-          { group: ["next/*", "next-auth/*", "@auth/*"],
-            message: "Framework-specific imports are forbidden outside portal/operator/app/. Move usage into a thin adapter (SD-2)." },
         ],
       }],
 
@@ -1146,26 +1264,55 @@ export default tseslint.config(
       "import/no-restricted-paths": ["error", { zones: GENERATED_MODULE_ZONES }],
     },
   },
+
+  // ── Block B: framework-agnostic import ban scoped to dirs that MUST stay
+  // framework-agnostic per SD-2 (`14d847a`). portal/operator/** is excluded
+  // because that is the ONE place where Next.js is allowed.
   {
-    // The existing portal/* ESLint config in portal/operator/eslint.config.js
-    // is unaffected — that's an operator-portal-local config. The root config
-    // here ADDS rules; both run.
-    files: ["portal/**/*.{ts,tsx,js,jsx}"],
+    files: [
+      "packages/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+      "portal/shared/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+    ],
     rules: {
-      // Future portal-specific overrides land here once Plan C's shell ships.
+      "no-restricted-imports": ["error", {
+        patterns: [
+          { group: ["@infinityrx/module-*"],
+            message: "Modules are referenced ONLY from packages/shell/src/_generated/. Direct imports break composition isolation (SD-4 §2)." },
+          { group: ["next/*", "next-auth/*", "@auth/*"],
+            message: "Framework-specific imports are forbidden outside portal/operator/app/. Move usage into a thin adapter (SD-2)." },
+        ],
+      }],
     },
   },
+
+  // ── Block C: the operator portal's local ESLint config (portal/operator/eslint.config.js)
+  // owns ALL portal/operator/** rules. Root ESLint applies only the @infinityrx/module-*
+  // ban and the no-restricted-syntax bypass-path rules in this scope.
+  // The root `npm run lint` script runs root lint with --ignore-pattern "portal/operator/**"
+  // and then runs `npm --workspace=ifx-operator-portal run lint` separately so the operator's
+  // own config executes on its own files. Both lints must pass for the workspace to be green.
 );
 ```
 
-- [ ] **Step 5.3: Run lint against the existing repo**
+- [ ] **Step 5.3: Verify the root ESLint config loads cleanly with empty zones**
+
+Critical: `import/no-restricted-paths` with `zones: []` must be a no-op, not a config error. Prove it before running full lint:
+
+Run: `npx eslint --print-config packages/scripts/validate-manifest.ts > /tmp/eslint-resolved.json 2>&1`
+
+Expected: exit 0, `/tmp/eslint-resolved.json` is valid JSON containing the resolved rule set (including `"import/no-restricted-paths": [...]`). If exit ≠ 0 or output is an error message, the config has a structural problem (most likely `import/no-restricted-paths` rejecting the empty zones array). In that case, change the empty default to `[{ target: "./packages/.gitkeep", from: "./packages/.gitkeep" }]` (a self-referencing no-op zone) and document the workaround in a code comment.
+
+- [ ] **Step 5.4: Run the composed lint locally**
 
 Run: `npm run lint`
-Expected: clean exit code 0, OR a small number of pre-existing issues in `portal/*` that the operator's local ESLint config already catches/ignores. If new failures appear that originate from the root config, debug — the root config must not regress existing portal code in Plan A.
 
-If lint fails on existing portal code due to root-rule conflicts: scope the offending root rules to `packages/**` only via `files:` glob, document the divergence in a code comment in `eslint.config.js`, and re-run.
+Expected: both `lint:root` and `lint:portal-operator` exit 0. Specifically:
+1. `lint:root` runs ESLint over packages/scripts/* and any other non-portal-operator workspace files. Currently the only TS file is the validator; clean run expected.
+2. `lint:portal-operator` invokes `npm --workspace=ifx-operator-portal run lint`, which uses the operator's existing `portal/operator/eslint.config.js`. That config is unchanged in Plan A — its run today is the baseline.
 
-- [ ] **Step 5.4: Commit**
+If the operator's lint script doesn't exist yet (check `portal/operator/package.json`'s scripts), the composed `lint:portal-operator` will fail with "Missing script". Fix: either add a no-op `"lint": "echo 'operator lint TBD in Plan C'"` step to the operator's package.json (NOT recommended — Plan A wants the existing lint to actually run), OR — confirmed by `cat portal/operator/package.json | jq '.scripts.lint'` — the operator already has a lint script and the composition works.
+
+- [ ] **Step 5.5: Commit**
 
 ```bash
 git add eslint.config.js package.json package-lock.json
@@ -1227,8 +1374,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint (workspace-root ESLint + portal ESLint)
-        run: npm run lint
+      - name: Lint — root config (packages/* + portal/shared)
+        run: npm run lint:root
+
+      - name: Lint — operator portal (existing local config)
+        run: npm run lint:portal-operator
 
       - name: Typecheck (project references)
         run: npm run typecheck
@@ -1237,10 +1387,10 @@ jobs:
         run: npm run manifest:validate
 
       - name: Manifest validate (example-reclaimrx-standalone.yml)
-        run: npm --workspace=scripts run validate-manifest -- infrastructure/manifests/example-reclaimrx-standalone.yml
+        run: npm run manifest:validate:standalone
 
       - name: Scripts tests (vitest)
-        run: npm --workspace=scripts test
+        run: npm --workspace=@infinityrx/scripts test
 ```
 
 - [ ] **Step 6.2: Run the CI sequence locally to prove green**
@@ -1249,14 +1399,15 @@ Run in sequence (any failure means CI would fail too):
 
 ```bash
 npm ci
-npm run lint
+npm run lint:root
+npm run lint:portal-operator
 npm run typecheck
 npm run manifest:validate
-npm --workspace=scripts run validate-manifest -- infrastructure/manifests/example-reclaimrx-standalone.yml
-npm --workspace=scripts test
+npm run manifest:validate:standalone
+npm --workspace=@infinityrx/scripts test
 ```
 
-Expected: all 6 commands exit 0.
+Expected: all 7 commands exit 0.
 
 - [ ] **Step 6.3: Commit**
 
@@ -1283,15 +1434,17 @@ This is the explicit acceptance gate before Plan B starts.
 - [ ] **Step 7.1: Run the full local CI sequence one more time, clean**
 
 ```bash
-rm -rf node_modules scripts/node_modules portal/operator/node_modules portal/shared/node_modules
+rm -rf node_modules packages/scripts/node_modules portal/operator/node_modules portal/shared/node_modules
 npm ci
-npm run lint
+npm run lint:root
+npm run lint:portal-operator
 npm run typecheck
 npm run manifest:validate
-npm --workspace=scripts test
+npm run manifest:validate:standalone
+npm --workspace=@infinityrx/scripts test
 ```
 
-Expected: all green. If anything fails, fix before Step 7.2.
+Expected: all 7 commands exit 0. If anything fails, fix before Step 7.2.
 
 - [ ] **Step 7.2: Write the Plan A status document**
 
@@ -1321,11 +1474,12 @@ Expected: all green. If anything fails, fix before Step 7.2.
 - `portal/operator` modifications — Plan D (mounts the shell + reference module).
 
 **Verification:**
-- `npm run lint` exits 0 against the full repo.
+- `npm run lint:root` exits 0 (root ESLint over packages/scripts + ignored portal/operator).
+- `npm run lint:portal-operator` exits 0 (operator's own ESLint config runs unchanged).
 - `npm run typecheck` exits 0 against the workspace-root tsconfig project references.
 - `npm run manifest:validate` returns "✓ infrastructure/manifests/operator-dev.yml validates clean".
-- `npm --workspace=scripts run validate-manifest -- infrastructure/manifests/example-reclaimrx-standalone.yml` returns "✓ ... validates clean".
-- `npm --workspace=scripts test` — 8/8 vitest tests pass.
+- `npm run manifest:validate:standalone` returns "✓ infrastructure/manifests/example-reclaimrx-standalone.yml validates clean".
+- `npm --workspace=@infinityrx/scripts test` — 10/10 vitest tests pass.
 - `.github/workflows/sp0-foundation.yml` runs green on first PR after Plan A commits.
 
 **Decision: ready for Plan B (packages/contract + packages/auth) to be written and executed.**
@@ -1363,7 +1517,7 @@ Plan B (packages/contract + packages/auth) gets written next using the establish
 | Spec section | Plan A covers? | Notes |
 |---|---|---|
 | §4.1 D10 auth contract | NO — Plan B | Per Plan A's scope boundary |
-| §4.1 D11 framework | YES (config only) | Workspace-root tsconfig + ESLint scaffold; no Next.js work |
+| §4.1 D11 framework | PARTIAL — config guardrails only | tsconfig.base.json + workspace-root ESLint scoping framework-imports to packages/** + portal/shared/**. Actual framework/shell enforcement lands in Plan C/D when the shell mounts and the operator portal consumes it |
 | §4.1 D12 gateway | YES (by omission) | No gateway service created — SD-3 defer is honored |
 | §4.1 D13 composition mechanism | PARTIAL | Schema + validator (Task 2, 4), ESLint scaffold (Task 5); codegen scripts deferred to Plan D |
 | §5.2 repo structure | YES | packages/, schemas/, infrastructure/manifests/ created |
