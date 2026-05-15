@@ -1,3 +1,18 @@
 // Public surface of @infinityrx/contract.
-// Plan B Task 2+ populates these re-exports as the modules are added.
-export {};
+
+export {
+  ErrorEnvelopeSchema,
+  isErrorEnvelope,
+  type ErrorEnvelope,
+} from "./error-envelope.js";
+
+export {
+  CachePolicySchema,
+  type CachePolicy,
+} from "./cache-policy.js";
+
+export type {
+  BaseClient,
+  ClientConfig,
+  ClientFactory,
+} from "./client-base.js";
