@@ -6,7 +6,7 @@
 - **BLOCK (`.strict()` zod claims):** `AccessClaimsSchema` + `RefreshClaimsSchema` now use `.strict()` so unknown keys are REJECTED, not stripped. Tests asserting tid/roles rejection on refresh claims now actually fail-when-broken.
 - **CONCERN (jose typed errors):** `verifyTokenRaw` now imports `JWTExpired`, `JWTInvalid`, `JWTClaimValidationFailed`, `JWSSignatureVerificationFailed` from `jose/errors` and maps via `instanceof`, not substring.
 - **CONCERN (RealImpl test coverage):** Task 3.6 adds 6 RealImpl tests via injected `fetch` (bearer header, correlation propagation, success parse, 404 → null, error envelope mapping, invalid response rejection).
-- **CONCERN (missing tests):** Task 5.4 adds refresh-after-password-reset + Redis-unreachable tests. The transport header-vs-body test is noted as Plan C's integration boundary (Plan B's `performRefresh` doesn't own HTTP transport).
+- **CONCERN (missing tests):** Task 5.4 adds refresh-after-password-reset + Redis-unreachable tests. **The transport header-vs-body test is INTENTIONALLY DEFERRED to Plan C** — `performRefresh` in Plan B is pure verification + atomic-consume + mint logic with NO HTTP boundary inside it. The HTTP boundary (the actual `Authorization: Bearer <refresh_jwt>` header arriving at a request handler) lives in Plan C's `portal/operator` proxy.ts and the corresponding BFF route handler. Testing transport in Plan B would require mocking both ends of a non-existent HTTP layer, which is integration territory. Plan C's acceptance includes a transport contract test asserting "refresh in body, not header → MISSING_BEARER" per SD-1 §11.
 - **CONCERN (orphan files):** `telemetry.ts` and `health.ts` removed from the file-structure section — `BaseClient.probeHealth()` in `client-base.ts` already covers the health model, and telemetry hooks are folded into `ClientConfig` (no separate file needed).
 - **NIT (goal wording):** Goal now says `npm run test:packages` runs both suites.
 
@@ -767,14 +767,19 @@ export function createRealPrescriberDirectoryClient(config: ClientConfig): Presc
     },
 
     async probeHealth() {
+      // NOTE: tsconfig.base.json has `exactOptionalPropertyTypes: true`, so we MUST NOT
+      // return `{ error: undefined }` on the ok path — the optional property must be
+      // OMITTED, not set to undefined. Branch the return type instead.
       const start = performance.now();
       try {
         const res = await fetchImpl(`${baseUrl}/health`, { method: "GET" });
         const latency_ms = Math.round(performance.now() - start);
-        return { ok: res.ok, latency_ms, error: res.ok ? undefined : `HTTP ${res.status}` };
+        return res.ok
+          ? { ok: true as const, latency_ms }
+          : { ok: false as const, latency_ms, error: `HTTP ${res.status}` };
       } catch (e) {
         return {
-          ok: false,
+          ok: false as const,
           latency_ms: Math.round(performance.now() - start),
           error: (e as Error).message,
         };
