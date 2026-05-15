@@ -1,2 +1,6 @@
 // Public surface of @infinityrx/ui.
-// Re-exports added as components are built in Tasks 2-4.
+
+// Primitives
+export { Button, type ButtonProps } from "./primitives/Button.js";
+export { Input, type InputProps } from "./primitives/Input.js";
+export { DataTable, type Column, type DataTableProps } from "./primitives/DataTable.js";
