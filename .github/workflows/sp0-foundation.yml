@@ -1,0 +1,47 @@
+name: sp0-foundation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  foundation:
+    name: Foundation (lint, typecheck, manifest-validate, scripts tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint — root config (packages/* + portal/shared)
+        run: npm run lint:root
+
+      - name: Lint — operator portal (existing local config)
+        run: npm run lint:portal-operator
+        continue-on-error: true
+
+      - name: Typecheck (project references)
+        run: npm run typecheck
+
+      - name: Manifest validate (operator-dev.yml)
+        run: npm run manifest:validate
+
+      - name: Manifest validate (example-reclaimrx-standalone.yml)
+        run: npm run manifest:validate:standalone
+
+      - name: Scripts tests (vitest)
+        run: npm --workspace=@infinityrx/scripts test
