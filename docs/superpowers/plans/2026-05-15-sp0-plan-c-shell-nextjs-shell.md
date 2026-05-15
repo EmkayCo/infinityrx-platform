@@ -98,12 +98,15 @@ packages/shell/
 portal/operator/
   middleware.ts                                  # MODIFIED: imports and re-exports shell middleware matcher config
   app/
-    layout.tsx                                   # MODIFIED: wraps root layout in <RequireAuth> with /login bypass
+    layout.tsx                                   # MODIFIED: root layout — UNGATED (no RequireAuth here; serves /login safely)
+    (public)/
+      login/
+        page.tsx                                 # /login — CREATE stub if not present; outside (authenticated) group
     (authenticated)/
-      layout.tsx                                 # MODIFIED (or CREATE): wraps authenticated subtree in <AppShellMount>
-    qa-harness/                                  # MODIFIED: replaces any existing stubs with re-exports from packages/shell routes
-      [[...path]]/
-        page.tsx                                 # Catch-all re-export of packages/shell qa-harness pages
+      layout.tsx                                 # MODIFIED (or CREATE): RequireAuth gate + AppShellMount; all routes here require auth
+      qa-harness/                                # MODIFIED: replaces any existing stubs with re-exports from packages/shell routes
+        [[...path]]/
+          page.tsx                               # Catch-all re-export of packages/shell qa-harness pages
 ```
 
 ### Modifies
@@ -114,8 +117,9 @@ package.json                                     # npm workspaces auto-discovers
 .github/workflows/sp0-foundation.yml             # extend test step to include packages/shell
 package-lock.json                                # regenerated after npm install
 portal/operator/middleware.ts                    # import shell middleware config
-portal/operator/app/layout.tsx                   # wrap root in RequireAuth
-portal/operator/app/(authenticated)/layout.tsx   # wrap in AppShellMount (create if not present)
+portal/operator/app/layout.tsx                   # root layout — verify/ensure UNGATED (no RequireAuth)
+portal/operator/app/(authenticated)/layout.tsx   # RequireAuth + AppShellMount (create if not present)
+portal/operator/app/(public)/login/page.tsx      # create stub if login page absent or not in a public group
 ```
 
 ### Leaves alone
@@ -166,7 +170,9 @@ infrastructure/                                  # manifests untouched (Plan D)
     "@infinityrx/auth": "*",
     "@infinityrx/contract": "*",
     "@infinityrx/ui": "*",
-    "@infinityrx/qa-harness": "*"
+    "@infinityrx/qa-harness": "*",
+    "@nanostores/react": "0.8.0",
+    "nanostores": "0.11.3"
   },
   "peerDependencies": {
     "next": "^16.2.0",
@@ -248,6 +254,8 @@ Append `{ "path": "./packages/shell" }` to the root `tsconfig.json`'s `reference
 - [ ] **Step 1.7: Verification**
 
 ```bash
+# npm install MUST run here — nanostores + @nanostores/react are declared in
+# this task's package.json and must be locked before Task 5 imports them.
 npm install
 npm --workspace=@infinityrx/shell run build
 # Expected: exit 0 (stub only compiles to empty module)
@@ -2132,11 +2140,11 @@ The actual file content may differ (fonts, metadata, etc.). The builder MUST rea
 
 - [ ] **Step 6.8: Create or modify `portal/operator/app/(authenticated)/layout.tsx`**
 
-If the route group `(authenticated)` does not exist, create it. The layout wraps the authenticated subtree in `<AppShellMount>` with the manifest from `_generated/manifest.json` and an empty `navEntries` array (modules register their entries in their own `module.config.ts`; Plan D wires that registration).
+If the route group `(authenticated)` does not exist, create it. This layout carries BOTH `<RequireAuth>` (the session gate) AND `<AppShellMount>` (the shell + nav). `RequireAuth` is here — NOT in the root layout — so that `/login` and other public routes are never gated.
 
 ```tsx
 import "server-only";
-import { AppShellMount } from "@infinityrx/shell";
+import { RequireAuth, AppShellMount } from "@infinityrx/shell";
 import type { NavEntry } from "@infinityrx/shell";
 // Use the "./manifest" export declared in @infinityrx/shell's package.json exports map.
 // @infinityrx/shell/src/_generated/... is NOT a valid import — package.json exports
@@ -2156,12 +2164,33 @@ export default async function AuthenticatedLayout({
   children: ReactNode;
 }): Promise<ReactNode> {
   return (
-    <AppShellMount navEntries={navEntries} manifest={manifest}>
-      {children}
-    </AppShellMount>
+    <RequireAuth loginPath="/login">
+      <AppShellMount navEntries={navEntries} manifest={manifest}>
+        {children}
+      </AppShellMount>
+    </RequireAuth>
   );
 }
 ```
+
+- [ ] **Step 6.8b: Ensure `portal/operator/app/(public)/login/page.tsx` exists outside the authenticated group**
+
+The `/login` page must live outside `(authenticated)/` so that unauthenticated users can reach it. If a login page already exists at `portal/operator/app/(auth)/login/page.tsx` or similar public location, verify it is not under `(authenticated)/`. If it doesn't exist yet, create a minimal stub:
+
+```tsx
+// portal/operator/app/(public)/login/page.tsx
+// Public route — no auth gate. Served from the root (ungated) layout.
+export default function LoginPage() {
+  return (
+    <main>
+      <h1>Sign In</h1>
+      {/* next-auth SignIn form or redirect to /api/auth/signin */}
+    </main>
+  );
+}
+```
+
+The actual login form implementation is out of scope for Plan C-shell (it is the Python auth service's concern). This stub satisfies the router: `/login` resolves, `RequireAuth` can redirect to it without a loop.
 
 - [ ] **Step 6.9: Update `packages/shell/src/index.ts` — add route page exports**
 
@@ -2213,9 +2242,12 @@ QaHarnessPage, CompositionPage, MockTogglePage, FactoryPage, CorrelationPage:
 RSC page components exported from packages/shell; portals import and mount
 them at their qa-harness routes. CompositionPage reads _generated/manifest.json
 at import time (static SD-4 artifact; no runtime HTTP fetch needed).
-portal/operator/app/layout.tsx: root layout wrapped in <RequireAuth>.
-portal/operator/app/(authenticated)/layout.tsx: authenticated subtree wrapped
-in <AppShellMount>; navEntries population deferred to Plan D module registration.
+portal/operator/app/layout.tsx: root layout verified UNGATED (no RequireAuth —
+prevents /login infinite redirect loop).
+portal/operator/app/(public)/login/page.tsx: stub created (public group, ungated).
+portal/operator/app/(authenticated)/layout.tsx: RequireAuth + AppShellMount here;
+all routes under (authenticated)/ require valid session. navEntries deferred to
+Plan D module registration.
 57 tests (51 prior + 6 qa-harness-pages).
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
@@ -2322,15 +2354,16 @@ describe("framework-agnostic spine enforcement", () => {
 });
 ```
 
-- [ ] **Step 7.2: Update `packages/shell/package.json` — add nanostores dependencies**
+- [ ] **Step 7.2: Verify nanostores dependencies are present in `packages/shell/package.json`**
 
-Add to the `dependencies` block (established in Step 1.1):
+`nanostores` and `@nanostores/react` are declared in the `dependencies` block in **Step 1.1** (not here — moved forward so the deps are declared before Task 5 imports them). Verify they are present:
+
 ```json
 "@nanostores/react": "0.8.0",
 "nanostores": "0.11.3"
 ```
 
-Run `npm install` to update `package-lock.json`.
+If `npm install` was not run after Task 1, run it now to update `package-lock.json`. Do not add these entries again — they are already in Task 1's package.json.
 
 - [ ] **Step 7.3: Extend `.github/workflows/sp0-foundation.yml` — include packages/shell**
 
@@ -2402,8 +2435,11 @@ Create `docs/superpowers/plans/2026-05-15-sp0-plan-c-shell-status.md`:
   than an HTTP fetch. Rationale: SD-4's generated-artifact mechanism embeds
   the manifest at build time; no runtime HTTP boundary needed.
 - `(authenticated)` route group layout created at `portal/operator/app/(authenticated)/`
-  so the qa-harness routes and public pages (`/login`) can coexist without
-  mutual interference.
+  carrying BOTH `RequireAuth` and `AppShellMount`. Root `app/layout.tsx` is UNGATED
+  — placing `RequireAuth` in the root layout creates an infinite redirect loop
+  for `/login` (unauthenticated → gate → redirect /login → gate → loop). Route groups
+  let public routes (`/login` in `(public)/`) and authenticated routes coexist under
+  the same root layout without mutual interference.
 ```
 
 Commit message:
