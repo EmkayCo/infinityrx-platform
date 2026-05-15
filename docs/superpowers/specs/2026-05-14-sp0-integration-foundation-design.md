@@ -181,7 +181,7 @@ Owns the entire frontend↔backend contract surface.
 - Session model (timeout, concurrent-session limits per `.claude/rules/hipaa-2026.md`).
 - Dev-JWT path (the `mintDevJwt` currently in `portal/operator`, formalized here; gated by `env` claim per SD-1 §4).
 - Shared revocation repository (Redis): `auth:revoked:<jti>`, `auth:consumed:<jti>`, `tokens_valid_since:<sub>:<tid>`.
-- Refresh endpoint protocol (SD-1 §8.6) — `POST /api/auth/refresh`, atomic consume, REFRESH_REPLAY error semantics, retry UX.
+- Refresh endpoint protocol (SD-1 §8.6) — `POST /api/v1/auth/token/refresh` (backend), atomic consume, REFRESH_REPLAY error semantics, portal single-flight adapter per SD-1 §11.
 
 ### 6.3 `packages/ui`
 
