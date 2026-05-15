@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint — root config (packages/* + portal/shared)
+      - name: Lint — root config (packages/* only)
         run: npm run lint:root
 
       - name: Lint — operator portal (existing local config)

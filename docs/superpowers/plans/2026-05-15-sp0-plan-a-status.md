@@ -2,7 +2,7 @@
 
 **Status:** Complete. `2026-05-15`
 
-**Final commit:** `<see latest commit on this file>`
+**Final commit:** `7284a2e`
 
 **Task SHAs (for traceability):**
 
@@ -14,7 +14,7 @@
 | 4 | Manifest validator + 10 vitest tests (TDD) | `2d69d81` |
 | 5 | Workspace-root ESLint with full SD-4 §4 import-boundary rules (+ .npmrc legacy-peer-deps + ajv overrides + validator ESM import fixes) | `4720be0` |
 | 6 | GitHub Actions sp0-foundation workflow (continue-on-error on portal lint) | `59a8296` |
-| 7 | Acceptance status doc (this file) | `<see latest commit on this file>` |
+| 7 | Acceptance status doc (this file) | `7284a2e` |
 
 **What ships:**
 
