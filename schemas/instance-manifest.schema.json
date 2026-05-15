@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infinityrx.dev/schemas/instance-manifest.schema.json",
+  "title": "InfinityRx Instance Deployment Manifest",
+  "description": "Per-customer instance manifest. Source of truth for build + deploy. See SD-4 (composition spike) §3 for the authoritative definition.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "instance_name",
+    "audience",
+    "auth_profile",
+    "modules",
+    "required_backends",
+    "required_shared_services",
+    "required_schemas",
+    "required_migrations",
+    "required_env",
+    "required_health",
+    "required_seed_data",
+    "required_queues",
+    "required_jobs",
+    "required_buckets",
+    "required_integrations",
+    "required_secrets",
+    "migration_policy"
+  ],
+  "properties": {
+    "instance_name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
+      "minLength": 3,
+      "maxLength": 64,
+      "description": "Lowercase kebab-case. Used in container labels and logs."
+    },
+    "audience": {
+      "type": "string",
+      "enum": ["operator", "client", "provider"],
+      "description": "Determines which portal app builds against this manifest."
+    },
+    "auth_profile": {
+      "type": "string",
+      "enum": ["development", "mock", "production"],
+      "description": "References infrastructure/auth-profiles/<name>.yml (added in Plan B alongside packages/auth)."
+    },
+    "branding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "primary_color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "logo_url": { "type": "string", "format": "uri" }
+      }
+    },
+    "modules": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+      "uniqueItems": true,
+      "minItems": 0
+    },
+    "required_backends":         { "$ref": "#/$defs/string_array" },
+    "required_shared_services":  { "$ref": "#/$defs/string_array" },
+    "required_schemas":          { "$ref": "#/$defs/string_array" },
+    "required_migrations":       { "$ref": "#/$defs/string_array" },
+    "required_env":              { "$ref": "#/$defs/string_array" },
+    "required_health":           {
+      "type": "array",
+      "items": { "type": "string", "format": "uri" },
+      "uniqueItems": true,
+      "minItems": 0
+    },
+    "required_seed_data":        { "$ref": "#/$defs/string_array" },
+    "required_queues":           { "$ref": "#/$defs/string_array" },
+    "required_jobs":             { "$ref": "#/$defs/string_array" },
+    "required_buckets":          { "$ref": "#/$defs/string_array" },
+    "required_integrations":     { "$ref": "#/$defs/string_array" },
+    "required_secrets": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^secret://[a-z][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+      },
+      "uniqueItems": true,
+      "minItems": 0
+    },
+    "migration_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ordering", "rollback", "pre_check"],
+      "properties": {
+        "ordering": { "type": "string", "enum": ["explicit"] },
+        "rollback": { "type": "string", "enum": ["none"] },
+        "pre_check": { "type": "string", "enum": ["dry_run_required"] }
+      }
+    }
+  },
+  "$defs": {
+    "string_array": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "minItems": 0
+    }
+  }
+}
