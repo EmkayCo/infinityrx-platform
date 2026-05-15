@@ -43,5 +43,5 @@ jobs:
       - name: Manifest validate (example-reclaimrx-standalone.yml)
         run: npm run manifest:validate:standalone
 
-      - name: Scripts tests (vitest)
-        run: npm --workspace=@infinityrx/scripts test
+      - name: All package tests (vitest)
+        run: npm run test:packages
