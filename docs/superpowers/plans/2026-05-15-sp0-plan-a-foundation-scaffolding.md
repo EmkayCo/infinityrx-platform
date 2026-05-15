@@ -1,15 +1,10 @@
 # SP-0 Plan A — Foundation Scaffolding Implementation Plan
 
-> **Status:** v2, 2026-05-15. v1 (`4b41f4e`) failed codex review with 4 BLOCKs + 3 CONCERNs + 2 NITs. v2 closes them:
-> - Validator Ajv imports fixed to ESM-correct shape (`new Ajv2020(...)`, `addFormats(ajv)` — no `.default`).
-> - Validator CLI entrypoint check switched to `pathToFileURL(process.argv[1]).href === import.meta.url` so Windows paths with spaces match.
-> - Root `npm run lint` now COMPOSES `lint:root` + `lint:portal-operator` — root ESLint does NOT silently subsume the existing operator config.
-> - Root `no-restricted-imports` framework-ban scoped to `packages/**`, `portal/shared/**`, `packages/scripts/**` only (not `portal/operator/**` where `next/*` is allowed).
-> - TS tooling moved from top-level `scripts/` (which is already the Python-loaders directory) to `packages/scripts/` — no more mixed-language workspace directory.
-> - Validator gains 2 new tests for malformed `secret-catalog.yml` / `integrations.yml` shapes; validator code adds `Array.isArray` guards.
-> - ESLint-config load-verification step added (proves `import/no-restricted-paths` with empty zones is a no-op, not a config error).
-> - Self-review D11 reworded to PARTIAL (config guardrails only).
-> - Lockfile-authority model documented in Task 1.
+> **Status:** v3, 2026-05-15. v1 (`4b41f4e`) BLOCKED codex pass-1 with 4 BLOCKs + 3 CONCERNs + 2 NITs. v2 (`633a03b`) closed 7/9 but introduced 1 new BLOCK (framework-import ban applied to `portal/shared`, which currently imports `next-auth/react` + `next-auth/providers/credentials`) and 1 stale-doc CONCERN. v3 closes both:
+> - Framework-import ban (`next/*`, `next-auth/*`, `@auth/*`) scoped to `packages/**` ONLY. `portal/shared/**` is deliberately excluded; it gets migrated into `packages/auth` + `packages/ui` + `packages/contract` in Plan C and the ban applies then.
+> - All remaining `scripts/validate-manifest.ts` references corrected to `packages/scripts/validate-manifest.ts`; "8 tests" updated to "10 tests" everywhere.
+>
+> v2's closures (carried into v3): Ajv ESM imports, Windows-portable CLI entrypoint, composed root+portal lint, scripts/ workspace relocation, malformed-config tests, ESLint config-load verification, D11 self-review reword, lockfile authority documented.
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -429,7 +424,7 @@ JSON Schemas used to validate configuration files outside the TypeScript type sy
 |---|---|---|
 | `instance-manifest.schema.json` | `infrastructure/manifests/<instance>.yml` | SD-4 §3 |
 
-All schemas are Draft 2020-12 + Ajv strict mode (`additionalProperties: false` enforced). The validator (`scripts/validate-manifest.ts`) refuses any file that fails the schema before computing transitive-closure checks.
+All schemas are Draft 2020-12 + Ajv strict mode (`additionalProperties: false` enforced). The validator (`packages/scripts/validate-manifest.ts`) refuses any file that fails the schema before computing transitive-closure checks.
 ```
 
 - [ ] **Step 2.3: Commit**
@@ -555,7 +550,7 @@ migration_policy:
 ```markdown
 # infrastructure/manifests/
 
-Per-customer instance manifests. One YAML file per customer-instance, validated against `schemas/instance-manifest.schema.json` by `scripts/validate-manifest.ts`.
+Per-customer instance manifests. One YAML file per customer-instance, validated against `schemas/instance-manifest.schema.json` by `packages/scripts/validate-manifest.ts`.
 
 | File | Purpose |
 |---|---|
@@ -571,7 +566,7 @@ Manifest authority is SD-4 §3 (`docs/superpowers/specs/2026-05-15-sp0-decision-
 
 ```yaml
 # Catalog of secret scopes the InfinityRx platform owns.
-# scripts/validate-manifest.ts confirms every manifest secret reference's scope
+# packages/scripts/validate-manifest.ts confirms every manifest secret reference's scope
 # is declared here (per SD-4 §3 PR-CI offline checks).
 # Plan A seeds the bare minimum; Plans B/C/D extend as scopes are needed.
 scopes:
@@ -1266,12 +1261,22 @@ export default tseslint.config(
   },
 
   // ── Block B: framework-agnostic import ban scoped to dirs that MUST stay
-  // framework-agnostic per SD-2 (`14d847a`). portal/operator/** is excluded
-  // because that is the ONE place where Next.js is allowed.
+  // framework-agnostic per SD-2 (`14d847a`).
+  //
+  // Plan A scope: applies ONLY to packages/** (the NEW SP-0 workspaces).
+  // portal/shared/** is DELIBERATELY excluded because:
+  //   - It currently imports next-auth/react and next-auth/providers/credentials
+  //     (see portal/shared/hooks/use-auth.ts, portal/shared/lib/auth.ts).
+  //   - It is the legacy seed that gets migrated into packages/contract +
+  //     packages/auth + packages/ui in Plan C. Until then, the ban would
+  //     fail on existing code.
+  //   - When Plan C migrates, the new packages/auth/* code inherits the ban
+  //     (because it lives under packages/**); portal/shared can then be
+  //     removed or its remaining files exempted explicitly.
+  // portal/operator/** is excluded because Next.js is allowed there by design.
   {
     files: [
       "packages/**/*.{ts,tsx,js,jsx,mjs,cjs}",
-      "portal/shared/**/*.{ts,tsx,js,jsx,mjs,cjs}",
     ],
     rules: {
       "no-restricted-imports": ["error", {
@@ -1279,7 +1284,7 @@ export default tseslint.config(
           { group: ["@infinityrx/module-*"],
             message: "Modules are referenced ONLY from packages/shell/src/_generated/. Direct imports break composition isolation (SD-4 §2)." },
           { group: ["next/*", "next-auth/*", "@auth/*"],
-            message: "Framework-specific imports are forbidden outside portal/operator/app/. Move usage into a thin adapter (SD-2)." },
+            message: "Framework-specific imports are forbidden in packages/**. Move usage into a thin adapter at portal/operator/app/ (SD-2)." },
         ],
       }],
     },
@@ -1464,7 +1469,7 @@ Expected: all 7 commands exit 0. If anything fails, fix before Step 7.2.
 - `infrastructure/manifests/example-reclaimrx-standalone.yml` (reference shape for single-module customer).
 - `infrastructure/secret-catalog.yml` (scope catalog).
 - `infrastructure/integrations.yml` (egress allow-list, empty).
-- `scripts/validate-manifest.ts` + 8 vitest tests covering schema gate, scope catalog, integrations allow-list.
+- `packages/scripts/validate-manifest.ts` + 10 vitest tests covering schema gate, scope catalog, integrations allow-list, malformed catalog, malformed allow-list.
 - `.github/workflows/sp0-foundation.yml` CI workflow (lint + typecheck + manifest-validate + scripts test).
 
 **What is NOT in Plan A** (Plan B and after):
