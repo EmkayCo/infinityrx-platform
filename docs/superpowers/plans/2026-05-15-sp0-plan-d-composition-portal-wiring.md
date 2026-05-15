@@ -1,8 +1,22 @@
 # SP-0 Plan D — Composition Mechanism + Reference Module + Portal Wiring
 
-> **Status:** v1, 2026-05-15.
+> **Status:** v2, 2026-05-15. v1 (commit `404b3c9`) was BLOCKED by codex pass-1 with 6 BLOCKs + 2 CONCERNs + 1 NIT. All issues resolved in v2 — see § "v2 changes" below.
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+## v2 changes (codex pass-1 findings resolved)
+
+| ID | Finding | Resolution |
+|---|---|---|
+| BLOCK 1 | `import * as ${c.name}` generates invalid TS identifier for `prescriber-directory` (hyphen) | Emit camelCase sanitizer (`kebabToCamelCase`); use quoted registry keys: `{ 'prescriber-directory': prescriberDirectory }` |
+| BLOCK 2 | Tests used plain Ajv + draft-07 fixture; Plan A's validator uses Ajv2020 + ajv-formats + draft 2020-12 | Tests now import or delegate to Plan A's `validate-manifest.ts` validator; real schema used, not a reduced fixture |
+| BLOCK 3 | CI `--verify-hash` flag not implemented; contradictory: generated files gitignored yet CI checks committed hash | Chose Option B: keep generated artifacts uncommitted; CI regenerates then checks exit 0 (no `--verify-hash` flag needed). Removed the stale-hash verify step from CI yaml. |
+| BLOCK 4 | Task 5 replaced existing `portal/operator/app/layout.tsx` wholesale → regresses fonts/theme/Providers/auth headers | Rewritten as surgical modification: preserve existing layout shell, compose `ManifestNav` into `AppShell`'s `nav=` prop slot (already there); document Plan C-shell ordering |
+| BLOCK 5 | Task 7 targeted `eslint.config.js`; HEAD has `eslint.config.mjs`; generated `.ts` in gitignored dir won't load | Target `eslint.config.mjs`; use ESM dynamic-import fallback only (no static import of generated file) |
+| BLOCK 6 | Task 4 `factory.ts` imported `MockPrescriberDirectoryClient`/`RealPrescriberDirectoryClient` classes; Plan B HEAD exports factory functions, not classes | Use actual exports: `createRealPrescriberDirectoryClient(config)` and `createMockPrescriberDirectoryClient()`. Tests assert interface/behavior, not `instanceof`. |
+| CONCERN 1 | Single-module repo → audit passes trivially; no fixture proves exclusion works | Added `packages/modules/_fixtures/__omitted__/` stub module + test asserting audit FAILS when that fixture is referenced; documented module catalog entry process |
+| CONCERN 2 | Audit placement contradictory across Task 5 + Task 6 | Single authoritative placement: `build-manifest` in `next.config.ts` prebuild; `audit-module-graph` as separate npm script run by CI after build. Acceptance criteria updated. |
+| NIT | `mainainers` typo in D4 documentation comment | Fixed → `maintainers` |
 
 **Goal:** Ship the SP-0 finishing gate across three pillars: (1) build-manifest codegen + module-graph audit + ESLint zone generation (composition mechanism, per SD-4 v5); (2) `prescriber-directory` reference module wiring demonstrating the full SP-0 composition pattern; (3) minimum portal scaffolding mounting `@infinityrx/ui` AppShell + manifest-driven nav in `portal/operator/app/`. End state: workspace-root `tsc -b` compiles all packages, `npm run test:packages` runs all suites, CI extended with composition-audit step.
 
@@ -39,6 +53,9 @@ packages/scripts/
   audit-module-graph.test.ts      # vitest: omitted-module present → throws; omitted-module absent → passes
 
 packages/modules/
+  _fixtures/
+    __omitted__/
+      module.config.ts            # Stub module for audit exclusion tests (CONCERN 1); never listed in any manifest
   prescriber-directory/
     module.config.ts              # SP-0 reference module config (name, routes, navEntry, requires, shellSurfaces)
     src/
@@ -72,7 +89,7 @@ docs/superpowers/plans/
 infrastructure/manifests/operator-dev.yml   # add prescriber-directory to modules + required_* fields
 tsconfig.json                               # add references to ./packages/modules/prescriber-directory
 .gitignore                                  # add packages/shell/src/_generated/* (except .gitkeep)
-eslint.config.js                            # wire GENERATED_MODULE_ZONES import from _generated/eslint-zones
+eslint.config.mjs                           # wire GENERATED_MODULE_ZONES dynamic import from _generated/eslint-zones (HEAD uses .mjs)
 .github/workflows/sp0-foundation.yml        # add composition-audit step
 ```
 
@@ -118,7 +135,12 @@ Each generated file carries an `// input_hash: sha256:<hex>` header computed fro
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import Ajv from "ajv";
+// Use Ajv2020 + ajv-formats to match Plan A's validate-manifest.ts (BLOCK 2).
+// The real schema uses draft 2020-12 and format: uri assertions.
+import { Ajv2020 } from "ajv/dist/2020.js";
+import { createRequire } from "node:module";
+const _require = createRequire(import.meta.url);
+const addFormats = _require("ajv-formats") as (ajv: InstanceType<typeof Ajv2020>) => void;
 import { parse as parseYaml } from "yaml";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -247,9 +269,11 @@ export function buildManifest(opts: BuildManifestOptions): BuildManifestResult {
   const rawYaml = readFileSync(manifestPath, "utf8");
   const manifest = parseYaml(rawYaml) as InstanceManifest;
 
-  // 2. Validate against JSON Schema.
+  // 2. Validate against JSON Schema using Ajv2020 + ajv-formats (matches Plan A's
+  //    validate-manifest.ts; real schema is draft 2020-12 with format: uri assertions).
   const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
-  const ajv = new Ajv({ strict: true, allErrors: true });
+  const ajv = new Ajv2020({ strict: true, allErrors: true });
+  addFormats(ajv);
   const valid = ajv.validate(schema, manifest);
   if (!valid) {
     throw new Error(
@@ -275,10 +299,19 @@ export function buildManifest(opts: BuildManifestOptions): BuildManifestResult {
   filesWritten.push(manifestJsonPath);
 
   // 6b. Emit module-imports.ts.
+  // Module names like "prescriber-directory" contain hyphens which are invalid TS identifiers.
+  // Sanitize to camelCase for the local binding; use quoted keys in the registry object.
+  // e.g. "prescriber-directory" → prescriberDirectory, key stays 'prescriber-directory'.
+  function kebabToCamelCase(s: string): string {
+    return s.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+  }
+
   const importLines = moduleConfigs
-    .map((c) => `import * as ${c.name} from "@infinityrx/module-${c.name}";`)
+    .map((c) => `import * as ${kebabToCamelCase(c.name)} from "@infinityrx/module-${c.name}";`)
     .join("\n");
-  const modulesRecord = moduleConfigs.map((c) => `  ${c.name}`).join(",\n");
+  const modulesRecord = moduleConfigs
+    .map((c) => `  '${c.name}': ${kebabToCamelCase(c.name)}`)
+    .join(",\n");
   const moduleImportsTs =
     `${header}\n` +
     `${importLines}\n\n` +
@@ -390,59 +423,40 @@ function makeModuleConfig(name: string): ModuleConfig {
 
 function makeTestDirs() {
   const base = join(tmpdir(), `plan-d-test-${randomUUID()}`);
-  const schemaPath = join(base, "schemas", "instance-manifest.schema.json");
+  // Use the REAL schema — not a reduced fixture — so Ajv2020 + ajv-formats validate
+  // the same way as validate-manifest.ts (Plan A). schemaPath points to the repo copy.
+  const schemaPath = getRealSchemaPath();
   const manifestPath = join(base, "infrastructure", "manifests", "test.yml");
   const outputDir = join(base, "out");
-  mkdirSync(join(base, "schemas"), { recursive: true });
   mkdirSync(join(base, "infrastructure", "manifests"), { recursive: true });
   mkdirSync(outputDir, { recursive: true });
   return { base, schemaPath, manifestPath, outputDir };
 }
 
-// Minimal JSON Schema that mirrors the real one for test purposes.
-function writeTestSchema(schemaPath: string) {
-  const schema = {
-    $schema: "http://json-schema.org/draft-07/schema#",
-    type: "object",
-    required: [
-      "instance_name", "audience", "auth_profile", "branding", "modules",
-      "required_backends", "required_shared_services", "required_schemas",
-      "required_migrations", "required_env", "required_health", "required_seed_data",
-      "required_queues", "required_jobs", "required_buckets", "required_integrations",
-      "required_secrets", "migration_policy",
-    ],
-    additionalProperties: false,
-    properties: {
-      instance_name: { type: "string" },
-      audience: { type: "string", enum: ["operator", "client", "provider"] },
-      auth_profile: { type: "string" },
-      branding: { type: "object", required: ["primary_color"], additionalProperties: true,
-        properties: { primary_color: { type: "string" }, logo_url: { type: "string" } } },
-      modules: { type: "array", items: { type: "string" }, uniqueItems: true },
-      required_backends: { type: "array", items: { type: "string" }, uniqueItems: true },
-      required_shared_services: { type: "array", items: { type: "string" }, uniqueItems: true },
-      required_schemas: { type: "array", items: { type: "string" }, uniqueItems: true },
-      required_migrations: { type: "array", items: { type: "string" }, uniqueItems: true },
-      required_env: { type: "array", items: { type: "string" }, uniqueItems: true },
-      required_health: { type: "array", items: { type: "string" }, uniqueItems: true },
-      required_seed_data: { type: "array", items: { type: "string" }, uniqueItems: true },
-      required_queues: { type: "array", items: { type: "string" }, uniqueItems: true },
-      required_jobs: { type: "array", items: { type: "string" }, uniqueItems: true },
-      required_buckets: { type: "array", items: { type: "string" }, uniqueItems: true },
-      required_integrations: { type: "array", items: { type: "string" }, uniqueItems: true },
-      required_secrets: { type: "array", items: { type: "string" }, uniqueItems: true },
-      migration_policy: {
-        type: "object", required: ["ordering", "rollback", "pre_check"], additionalProperties: false,
-        properties: {
-          ordering: { type: "string", enum: ["explicit"] },
-          rollback: { type: "string" },
-          pre_check: { type: "string" },
-        },
-      },
-    },
-  };
-  writeFileSync(schemaPath, JSON.stringify(schema, null, 2));
+// Use the REAL schema from schemas/instance-manifest.schema.json (draft 2020-12, same as
+// validate-manifest.ts / Plan A). A reduced draft-07 fixture would diverge from Plan A's
+// Ajv2020 validator and fail to catch format: uri validation errors (BLOCK 2).
+// buildManifest() is called with the real repo schema path so Ajv2020 + ajv-formats apply.
+function getRealSchemaPath(): string {
+  // Resolve from packages/scripts/ up two levels to repo root.
+  const { join: pjoin, resolve: presolve, dirname: pdirnm } = require("node:path");
+  const { fileURLToPath: pfturl } = require("node:url");
+  const here = pdirnm(pfturl(import.meta.url));
+  return presolve(pjoin(here, "..", "..", "schemas", "instance-manifest.schema.json"));
 }
+
+// NOTE: build-manifest.ts internally must use Ajv2020 + ajv-formats to match Plan A's
+// validate-manifest.ts. The Ajv instantiation in Step 1.1 must be updated accordingly:
+//
+//   import { Ajv2020 } from "ajv/dist/2020.js";
+//   import { createRequire } from "node:module";
+//   const _require = createRequire(import.meta.url);
+//   const addFormats = _require("ajv-formats") as (ajv: unknown) => void;
+//   const ajv = new Ajv2020({ strict: true, allErrors: true });
+//   addFormats(ajv);
+//
+// This aligns build-manifest.ts with validate-manifest.ts and ensures format: uri
+// validation (used in required_health URLs) is enforced consistently.
 
 import { stringify as stringifyYaml } from "yaml";
 
@@ -451,7 +465,7 @@ import { stringify as stringifyYaml } from "yaml";
 describe("buildManifest", () => {
   it("happy path — empty modules list emits manifest.json + module-imports.ts + nav.ts", () => {
     const { base, schemaPath, manifestPath, outputDir } = makeTestDirs();
-    writeTestSchema(schemaPath);
+    // Real schema used — no writeTestSchema() needed (BLOCK 2 fix).
     writeFileSync(manifestPath, stringifyYaml(makeMinimalManifest([])));
 
     const result = buildManifest({
@@ -466,9 +480,9 @@ describe("buildManifest", () => {
     expect(result.inputHash).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("single module — module-imports.ts contains the module import statement", () => {
+  it("single module — module-imports.ts contains valid TS identifier and quoted registry key", () => {
     const { base, schemaPath, manifestPath, outputDir } = makeTestDirs();
-    writeTestSchema(schemaPath);
+    // Real schema used — no writeTestSchema() needed (BLOCK 2 fix).
     writeFileSync(manifestPath, stringifyYaml(makeMinimalManifest(["prescriber-directory"])));
 
     const result = buildManifest({
@@ -478,14 +492,18 @@ describe("buildManifest", () => {
 
     const { readFileSync: rfs } = await import("node:fs");
     const moduleImports = rfs(join(outputDir, "module-imports.ts"), "utf8");
+    // Hyphenated name must be sanitized to camelCase for the TS binding.
+    expect(moduleImports).toContain("import * as prescriberDirectory from");
     expect(moduleImports).toContain('from "@infinityrx/module-prescriber-directory"');
+    // Registry must use quoted key (hyphen is not a valid identifier).
+    expect(moduleImports).toContain("'prescriber-directory': prescriberDirectory");
     expect(moduleImports).toContain("MODULES");
     expect(result.moduleNames).toEqual(["prescriber-directory"]);
   });
 
   it("nav.ts contains the navEntry for each module in manifest order", () => {
     const { base, schemaPath, manifestPath, outputDir } = makeTestDirs();
-    writeTestSchema(schemaPath);
+    // Real schema used — no writeTestSchema() needed (BLOCK 2 fix).
     writeFileSync(manifestPath, stringifyYaml(makeMinimalManifest(["prescriber-directory"])));
     const { readFileSync: rfs } = await import("node:fs");
 
@@ -501,7 +519,7 @@ describe("buildManifest", () => {
 
   it("invalid manifest audience enum → throws with schema validation message", () => {
     const { base, schemaPath, manifestPath, outputDir } = makeTestDirs();
-    writeTestSchema(schemaPath);
+    // Real schema used — no writeTestSchema() needed (BLOCK 2 fix).
     const badManifest = { ...makeMinimalManifest([]), audience: "invalid-audience" };
     writeFileSync(manifestPath, stringifyYaml(badManifest));
 
@@ -512,7 +530,7 @@ describe("buildManifest", () => {
 
   it("module listed in manifest but no module.config.ts → throws with module name", () => {
     const { base, schemaPath, manifestPath, outputDir } = makeTestDirs();
-    writeTestSchema(schemaPath);
+    // Real schema used — no writeTestSchema() needed (BLOCK 2 fix).
     writeFileSync(manifestPath, stringifyYaml(makeMinimalManifest(["nonexistent-module"])));
 
     expect(() =>
@@ -523,7 +541,7 @@ describe("buildManifest", () => {
 
   it("two runs with unchanged manifest produce identical inputHash", () => {
     const { base, schemaPath, manifestPath, outputDir } = makeTestDirs();
-    writeTestSchema(schemaPath);
+    // Real schema used — no writeTestSchema() needed (BLOCK 2 fix).
     writeFileSync(manifestPath, stringifyYaml(makeMinimalManifest([])));
     const opts: BuildManifestOptions = { manifestPath, schemaPath, outputDir, repoRoot: base,
       loadConfig: (_r, n) => makeModuleConfig(n) };
@@ -535,7 +553,7 @@ describe("buildManifest", () => {
 
   it("eslint-zones.ts placeholder is written when file does not exist", () => {
     const { base, schemaPath, manifestPath, outputDir } = makeTestDirs();
-    writeTestSchema(schemaPath);
+    // Real schema used — no writeTestSchema() needed (BLOCK 2 fix).
     writeFileSync(manifestPath, stringifyYaml(makeMinimalManifest([])));
 
     buildManifest({ manifestPath, schemaPath, outputDir, repoRoot: base,
@@ -548,7 +566,7 @@ describe("buildManifest", () => {
 
   it("manifest.json content round-trips through JSON.parse cleanly", () => {
     const { base, schemaPath, manifestPath, outputDir } = makeTestDirs();
-    writeTestSchema(schemaPath);
+    // Real schema used — no writeTestSchema() needed (BLOCK 2 fix).
     const manifest = makeMinimalManifest(["prescriber-directory"]);
     writeFileSync(manifestPath, stringifyYaml(manifest));
 
@@ -1045,7 +1063,83 @@ describe("auditModuleGraph", () => {
 });
 ```
 
-**Test count (Task 3):** 6 tests.
+**Test count (Task 3):** 6 tests + 2 fixture tests added for CONCERN 1 = **8 tests total**.
+
+#### CONCERN 1 addition: fixture module that proves exclusion works
+
+**New file:** `packages/modules/_fixtures/__omitted__/module.config.ts`
+
+This stub module exists ONLY to prove that `audit-module-graph` correctly flags it when it appears
+in traces but is absent from the manifest. It is never listed in any manifest (its name starts with
+`_fixtures/` so `discoverModuleNamesFromDisk` will find it, but manifests exclude it).
+
+```ts
+// packages/modules/_fixtures/__omitted__/module.config.ts
+// Fixture-only stub. NOT a real module. Used by audit-module-graph tests to prove
+// that modules absent from the manifest are flagged when they appear in build traces.
+// How module N+1 enters the canonical catalog:
+//   1. Create packages/modules/<module-name>/module.config.ts (copy this shape).
+//   2. Add <module-name> to the target manifest YAML under `modules:`.
+//   3. Run `npm run prebuild` — build-manifest validates transitive closure.
+//   4. CI composition-audit job catches violations before merge.
+export const config = {
+  name: "__omitted__",
+  routes: ["/__omitted__"],
+  navEntry: { label: "__omitted__", icon: "none", order: 999 },
+  requires: {
+    backends: [], sharedServices: [], schemas: [], migrations: [],
+    env: [], health: [], seedData: [], queues: [], jobs: [], buckets: [],
+    integrations: [], secrets: [],
+  },
+  shellSurfaces: {
+    navOrderSlots: [], cacheTagPrefixes: [], commandPaletteScopes: [],
+    routePrefixes: ["/__omitted__"], cacheKeyNamespaces: [], redisKeyPrefixes: [],
+    rabbitExchanges: [],
+  },
+  surfaceKinds: [] as Array<"server" | "client">,
+  entitlements: { requiredScope: null },
+} as const;
+```
+
+**Add to `packages/scripts/audit-module-graph.test.ts`:**
+
+```ts
+  it("fixture __omitted__ module: audit FAILS when it appears in traces but absent from manifest (CONCERN 1)", () => {
+    // This test proves the exclusion path works — single-module repos pass trivially,
+    // but with a deliberately-not-in-manifest fixture module the audit must fire.
+    const traces: TraceFile[] = [
+      {
+        routePath: ".next/server/app/page.js.nft.json",
+        files: ["/repo/packages/modules/_fixtures/__omitted__/src/index.ts"],
+      },
+    ];
+    const result = auditModuleGraph(makeOpts({
+      modules: ["prescriber-directory"],
+      knownModules: ["prescriber-directory", "__omitted__"],
+      loadTraceFiles: () => traces,
+    }));
+    expect(result.passed).toBe(false);
+    expect(result.omittedModules).toContain("__omitted__");
+    expect(result.violations[0]!.omittedModule).toBe("__omitted__");
+  });
+
+  it("fixture __omitted__ module: audit PASSES when it does NOT appear in any trace", () => {
+    const traces: TraceFile[] = [
+      {
+        routePath: ".next/server/app/prescribers/page.js.nft.json",
+        files: ["/node_modules/@infinityrx/module-prescriber-directory/dist/index.js"],
+      },
+    ];
+    const result = auditModuleGraph(makeOpts({
+      modules: ["prescriber-directory"],
+      knownModules: ["prescriber-directory", "__omitted__"],
+      loadTraceFiles: () => traces,
+    }));
+    expect(result.passed).toBe(true);
+    expect(result.omittedModules).toContain("__omitted__");
+    expect(result.violations).toHaveLength(0);
+  });
+```
 
 ### Task 4: `prescriber-directory` reference module wiring
 
@@ -1167,13 +1261,17 @@ export type { PrescriberDirectoryClient } from "@infinityrx/contract";
 
 ```ts
 // packages/modules/prescriber-directory/src/factory.ts
+// BLOCK 6 fix: Plan B HEAD exports factory functions, not classes.
+// Actual exports from @infinityrx/contract (per wave/B10-w5:packages/contract/src/index.ts):
+//   createRealPrescriberDirectoryClient(config: ClientConfig): PrescriberDirectoryClient
+//   createMockPrescriberDirectoryClient(): PrescriberDirectoryClient
 import type {
   PrescriberDirectoryClient,
   ClientConfig,
 } from "@infinityrx/contract";
 import {
-  MockPrescriberDirectoryClient,
-  RealPrescriberDirectoryClient,
+  createRealPrescriberDirectoryClient,
+  createMockPrescriberDirectoryClient,
 } from "@infinityrx/contract";
 
 type SupportedEnv = "development" | "mock" | "production";
@@ -1186,18 +1284,22 @@ export interface PrescriberDirectoryFactoryConfig extends ClientConfig {
 /**
  * Returns the correct PrescriberDirectoryClient implementation for the given env.
  *
- * - development  → MockPrescriberDirectoryClient (no network calls)
- * - mock / production → RealPrescriberDirectoryClient (requires baseUrl)
+ * - development  → mock client (no network calls, in-memory fixture from Plan B)
+ * - mock / production → real HTTP client (requires baseUrl in config)
  *
  * This is the SP-0 reference factory pattern. Every module in subsequent
  * waves ships a factory with this exact shape.
+ *
+ * Note for maintainers: delegates to Plan B's factory functions from @infinityrx/contract.
+ * If Plan B renames these exports, this factory and its tests break at compile time (tsc -b).
  */
 export function createPrescriberDirectoryClient(
   env: SupportedEnv,
   config: PrescriberDirectoryFactoryConfig
 ): PrescriberDirectoryClient {
   if (env === "development") {
-    return new MockPrescriberDirectoryClient(config);
+    // createMockPrescriberDirectoryClient() takes no config — mock has in-memory fixture.
+    return createMockPrescriberDirectoryClient();
   }
 
   if (!config.baseUrl) {
@@ -1207,7 +1309,7 @@ export function createPrescriberDirectoryClient(
     );
   }
 
-  return new RealPrescriberDirectoryClient({ ...config, baseUrl: config.baseUrl });
+  return createRealPrescriberDirectoryClient({ ...config, baseUrl: config.baseUrl });
 }
 ```
 
@@ -1265,33 +1367,43 @@ describe("prescriber-directory module.config", () => {
 
 ```ts
 // packages/modules/prescriber-directory/__tests__/factory.test.ts
+// BLOCK 6 fix: Plan B exports factory functions (not classes), so no instanceof checks.
+// Tests assert interface shape and behavior only.
 import { describe, expect, it } from "vitest";
 import { createPrescriberDirectoryClient } from "../src/factory.js";
-import { MockPrescriberDirectoryClient, RealPrescriberDirectoryClient } from "@infinityrx/contract";
 
 describe("createPrescriberDirectoryClient", () => {
-  it('development env → MockPrescriberDirectoryClient (no baseUrl needed)', () => {
+  it('development env — no baseUrl needed, returns client with search + getByNpi + probeHealth', () => {
     const client = createPrescriberDirectoryClient("development", { tenantId: "t1" });
-    expect(client).toBeInstanceOf(MockPrescriberDirectoryClient);
+    expect(typeof client.search).toBe("function");
+    expect(typeof client.getByNpi).toBe("function");
+    expect(typeof client.probeHealth).toBe("function");
   });
 
-  it('production env + baseUrl → RealPrescriberDirectoryClient', () => {
+  it('development env — mock client has expected name property', () => {
+    const client = createPrescriberDirectoryClient("development", { tenantId: "t1" });
+    expect(client.name).toBe("prescriber-directory");
+  });
+
+  it('production env + baseUrl — returns client with search method', () => {
     const client = createPrescriberDirectoryClient("production", {
       tenantId: "t1",
       baseUrl: "http://prescriber-directory:8030",
+      getAuthToken: async () => "tok",
     });
-    expect(client).toBeInstanceOf(RealPrescriberDirectoryClient);
+    expect(typeof client.search).toBe("function");
   });
 
-  it('mock env + baseUrl → RealPrescriberDirectoryClient', () => {
+  it('mock env + baseUrl — returns client with search method', () => {
     const client = createPrescriberDirectoryClient("mock", {
       tenantId: "t1",
       baseUrl: "http://prescriber-directory:8030",
+      getAuthToken: async () => "tok",
     });
-    expect(client).toBeInstanceOf(RealPrescriberDirectoryClient);
+    expect(typeof client.search).toBe("function");
   });
 
-  it('production env without baseUrl → throws with descriptive message', () => {
+  it('production env without baseUrl → throws with descriptive message containing "baseUrl"', () => {
     expect(() =>
       createPrescriberDirectoryClient("production", { tenantId: "t1" })
     ).toThrow("baseUrl");
@@ -1303,17 +1415,11 @@ describe("createPrescriberDirectoryClient", () => {
     ).toThrow("baseUrl");
   });
 
-  it("development env → client satisfies PrescriberDirectoryClient interface (has search method)", () => {
+  it('development env — mock client search returns results for a fixture NPI', async () => {
     const client = createPrescriberDirectoryClient("development", { tenantId: "t1" });
-    expect(typeof client.search).toBe("function");
-  });
-
-  it("production env → client satisfies PrescriberDirectoryClient interface (has search method)", () => {
-    const client = createPrescriberDirectoryClient("production", {
-      tenantId: "t1",
-      baseUrl: "http://localhost:8030",
-    });
-    expect(typeof client.search).toBe("function");
+    // Plan B mock fixture includes at least one doctor; search by last name returns results.
+    const resp = await client.search({ q: "Smith", limit: 5 });
+    expect(Array.isArray(resp.results)).toBe(true);
   });
 });
 ```
@@ -1332,34 +1438,58 @@ describe("createPrescriberDirectoryClient", () => {
 
 **Scope constraint:** Plan D ships MINIMUM scaffolding only. Auth-gated routes, RSC streaming, and session checks are Plan C-shell. These files establish the AppShell wrapper + manifest-driven nav so Plan B+C work is verifiable end-to-end. No auth logic here.
 
-- [ ] **Step 5.1: Write `portal/operator/app/layout.tsx`**
+- [ ] **Step 5.1: Modify `portal/operator/app/layout.tsx` (SURGICAL — preserve existing shell)**
+
+**CRITICAL: The file already exists at HEAD of wave/B10-w5 with fonts (Lato, IBM Plex Mono),
+theme init script, Providers, AppShell with `isAuthenticated` prop, and auth headers. DO NOT
+replace it wholesale — that regresses Plan C-shell's RequireAuth work (BLOCK 4).**
+
+Read the existing file first, then make the minimal surgical additions:
+1. Add `import { ManifestNav } from "./_nav/manifest-nav.js";` after the existing AppShell import.
+2. Add `nav={<ManifestNav />}` prop to the existing `<AppShell>` element.
+
+The existing layout at HEAD looks like:
 
 ```tsx
-// portal/operator/app/layout.tsx
-// Root layout: wraps every portal page in AppShell from @infinityrx/ui.
-// Nav slot is populated by ManifestNav (server component).
-// Auth gating is Plan C-shell — this file is intentionally auth-free.
-import type { ReactNode } from "react";
-import { AppShell } from "@infinityrx/ui";
-import { ManifestNav } from "./_nav/manifest-nav.js";
+// (existing imports preserved — Lato, IBM_Plex_Mono, Providers, AppShell, themeInitScript, globals.css)
+// ...
 
-export const metadata = {
-  title: "InfinityRx Operator Portal",
-  description: "InfinityRx operator administration portal",
-};
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const h = await headers();
+  const isAuthenticated = h.get("x-ifx-authenticated") === "1";
 
-export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
-      <body>
-        <AppShell nav={<ManifestNav />}>
-          {children}
-        </AppShell>
+    <html lang="en" className={`${lato.variable} ${ibmPlexMono.variable}`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
+      <body className="min-h-screen bg-[var(--ifx-bg)] font-sans antialiased">
+        <a href="#main-content" className="skip-nav">Skip to main content</a>
+        <Providers>
+          <AppShell isAuthenticated={isAuthenticated}>
+            {children}
+          </AppShell>
+        </Providers>
       </body>
     </html>
   );
 }
 ```
+
+**The two surgical changes Plan D makes:**
+
+```diff
++import { ManifestNav } from "./_nav/manifest-nav.js";
+ // (after existing AppShell import line)
+
+-          <AppShell isAuthenticated={isAuthenticated}>
++          <AppShell isAuthenticated={isAuthenticated} nav={<ManifestNav />}>
+```
+
+**Plan C-shell ordering note:** If Plan C-shell lands first (wrapping `<AppShell>` with `<RequireAuth>`),
+Plan D's `nav={<ManifestNav />}` slot wires into the already-authenticated layout. If Plan D lands
+first, the slot is later wrapped by `<RequireAuth>` without touching the nav prop. The `nav=` prop
+is additive and does not conflict with either ordering.
 
 - [ ] **Step 5.2: Write `portal/operator/app/_nav/manifest-nav.tsx`**
 
@@ -1495,14 +1625,23 @@ export default nextConfig;
 
 ```tsx
 // portal/operator/app/layout.test.tsx
-// Tests that RootLayout renders AppShell and passes children through.
-// Uses vitest + happy-dom (same environment as packages/ui tests).
+// Tests that RootLayout passes ManifestNav into the nav slot.
+// The existing layout (fonts, Providers, AppShell, auth headers) is preserved;
+// we only test the nav slot addition Plan D makes (BLOCK 4 fix).
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-// Stub @infinityrx/ui AppShell to avoid importing the full package tree in portal tests.
+// Stub @infinityrx/ui AppShell to isolate the nav slot under test.
 vi.mock("@infinityrx/ui", () => ({
-  AppShell: ({ children, nav }: { children: React.ReactNode; nav?: React.ReactNode }) => (
+  AppShell: ({
+    children,
+    nav,
+    isAuthenticated: _isAuthenticated,
+  }: {
+    children: React.ReactNode;
+    nav?: React.ReactNode;
+    isAuthenticated?: boolean;
+  }) => (
     <div data-testid="app-shell">
       {nav && <div data-testid="nav-slot">{nav}</div>}
       <div data-testid="main-slot">{children}</div>
@@ -1515,22 +1654,58 @@ vi.mock("./_nav/manifest-nav.js", () => ({
   ManifestNav: () => <nav data-testid="manifest-nav">nav stub</nav>,
 }));
 
+// Stub next/headers (used by the existing layout's isAuthenticated check).
+vi.mock("next/headers", () => ({
+  headers: () => ({ get: () => null }),
+}));
+
+// Stub font imports so the layout doesn't try to load Google Fonts in test.
+vi.mock("next/font/google", () => ({
+  Lato: () => ({ variable: "--font-lato" }),
+  IBM_Plex_Mono: () => ({ variable: "--font-ibm-mono" }),
+}));
+
+vi.mock("@shared/components/theme-toggle", () => ({
+  themeInitScript: "",
+}));
+
+vi.mock("./globals.css", () => ({}));
+
+vi.mock("@/components/providers", () => ({
+  Providers: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+vi.mock("@/components/layout/app-shell", () => ({
+  AppShell: ({
+    children,
+    nav,
+    isAuthenticated: _isAuthenticated,
+  }: {
+    children: React.ReactNode;
+    nav?: React.ReactNode;
+    isAuthenticated?: boolean;
+  }) => (
+    <div data-testid="app-shell">
+      {nav && <div data-testid="nav-slot">{nav}</div>}
+      {children}
+    </div>
+  ),
+}));
+
 import RootLayout from "./layout.js";
 
-describe("RootLayout", () => {
-  it("renders AppShell with children in main slot", () => {
-    render(
-      <RootLayout>
-        <div data-testid="page-content">Hello</div>
-      </RootLayout>
-    );
-    expect(screen.getByTestId("app-shell")).toBeDefined();
-    expect(screen.getByTestId("page-content")).toBeDefined();
+describe("RootLayout (Plan D surgical additions)", () => {
+  it("ManifestNav is passed into AppShell nav slot", async () => {
+    const jsx = await RootLayout({ children: <span data-testid="child">x</span> });
+    render(jsx as React.ReactElement);
+    expect(screen.getByTestId("nav-slot")).toBeDefined();
+    expect(screen.getByTestId("manifest-nav")).toBeDefined();
   });
 
-  it("passes ManifestNav into the nav slot", () => {
-    render(<RootLayout><span /></RootLayout>);
-    expect(screen.getByTestId("manifest-nav")).toBeDefined();
+  it("children are still rendered (existing layout shell preserved)", async () => {
+    const jsx = await RootLayout({ children: <div data-testid="page-content">Hello</div> });
+    render(jsx as React.ReactElement);
+    expect(screen.getByTestId("page-content")).toBeDefined();
   });
 });
 ```
@@ -1674,22 +1849,20 @@ Add a new job `composition-audit` that runs after the `lint-typecheck-test` job:
           INFINITYRX_GENERATED_OUT: packages/shell/src/_generated
       - name: Run generate-eslint-zones
         run: node --loader tsx packages/scripts/generate-eslint-zones.ts
-      - name: Verify generated files committed hash matches re-run hash
-        run: |
-          # Re-run both generators. If the output hash in the files differs from what
-          # was just generated, the committed _generated/ files are stale.
-          node --loader tsx packages/scripts/build-manifest.ts --verify-hash
-          node --loader tsx packages/scripts/generate-eslint-zones.ts --verify-hash
-        env:
-          INFINITYRX_MANIFEST: infrastructure/manifests/operator-dev.yml
-          INFINITYRX_GENERATED_OUT: packages/shell/src/_generated
+      # Generated artifacts are gitignored (Option B — BLOCK 3). CI regenerates them
+      # from scratch; no committed-hash check is needed or possible. Both generators
+      # above must exit 0 for this job to pass. Any schema / config error fails the
+      # generators, not a separate verify step.
       - name: Validate manifest transitive closure
         run: node --loader tsx packages/scripts/validate-manifest.ts
         env:
           INFINITYRX_MANIFEST: infrastructure/manifests/operator-dev.yml
 ```
 
-Note: The module-graph audit (`audit-module-graph.ts`) runs AFTER `next build`. Add a separate `portal-build-audit` job that depends on a portal build step — this is a future CI extension task (requires a full Next.js build in CI, which is expensive). For SP-0 the audit is wired into the LOCAL prebuild hook via `next.config.ts`. The CI job above covers all offline composition checks.
+**CONCERN 2 resolution — single authoritative audit placement:**
+- `build-manifest` (manifest validation + codegen): runs in `next.config.ts` prebuild (Task 5) AND in this CI job. Both are correct; the CI job is the authoritative gate.
+- `audit-module-graph` (post-build .nft.json trace scan): runs ONLY as a separate npm script after `next build`. It is NOT in `next.config.ts` (which runs at build START, before traces exist). Add a `portal:audit` npm script to `portal/operator/package.json`: `"portal:audit": "node --loader tsx packages/scripts/audit-module-graph.ts"`. CI calls this script in a separate `portal-build-audit` job (deferred to a follow-on wave — requires a full Next.js build in CI). For SP-0, the offline CI checks above are the gate; audit-module-graph is local-only.
+- Acceptance criterion A18 is updated below to reflect this single placement.
 
 - [ ] **Step 6.3: Update repo-root `tsconfig.json` to reference the prescriber-directory module**
 
@@ -1714,24 +1887,34 @@ packages/shell/src/_generated/*
 ### Task 7: Wire ESLint zones into workspace root config + composition-zone tests
 
 **Files:**
-- Modify: `eslint.config.js` (repo root) — add `GENERATED_MODULE_ZONES` import + `import/no-restricted-paths` rule
+- Modify: `eslint.config.mjs` (repo root) — add `GENERATED_MODULE_ZONES` dynamic import + `import/no-restricted-paths` rule
 - Create: `packages/scripts/eslint-zones-integration.test.ts` — tests that the ESLint config loads cleanly and that the zone rule fires on a synthetic violation
 
-**What it does:** Updates the workspace-root `eslint.config.js` that Plan A scaffolded (with empty `GENERATED_MODULE_ZONES = []`) to import from `packages/shell/src/_generated/eslint-zones.ts` and apply `import/no-restricted-paths`. The import line is the ONLY line that changes when a new module is added.
+**What it does:** Updates the workspace-root `eslint.config.mjs` that Plan A scaffolded (with empty `GENERATED_MODULE_ZONES = []`) to dynamically import from `packages/shell/src/_generated/eslint-zones.js` and apply `import/no-restricted-paths`. The import line is the ONLY line that changes when a new module is added.
 
-Per SD-4 §4: the `zones` array in `eslint.config.js` must reference `GENERATED_MODULE_ZONES` from the generated file — no hand-edited zone entries.
+**HEAD fact (BLOCK 5):** The file at HEAD is `eslint.config.mjs` (ESM `.mjs`), NOT `eslint.config.js`. Generated `.ts` in a gitignored dir cannot be statically imported — use a `try/catch` dynamic import of the compiled `.js` form, and document that `npm run prebuild` must run before linting on a cold checkout.
 
-- [ ] **Step 7.1: Update `eslint.config.js` to import `GENERATED_MODULE_ZONES`**
+Per SD-4 §4: the `zones` array in `eslint.config.mjs` must reference `GENERATED_MODULE_ZONES` from the generated file — no hand-edited zone entries.
 
-Locate the existing `eslint.config.js` in the repo root (created by Plan A). Find the line containing `GENERATED_MODULE_ZONES` (Plan A scaffolded this with an empty array or a `TODO` comment). Replace that section to import from the generated file:
+- [ ] **Step 7.1: Update `eslint.config.mjs` to import `GENERATED_MODULE_ZONES`**
+
+Locate the existing `eslint.config.mjs` in the repo root (created by Plan A). Find the line containing `GENERATED_MODULE_ZONES` or `import/no-restricted-paths` (Plan A scaffolded this with an empty array or a `TODO` comment). Replace that section with a cold-checkout-safe dynamic import:
 
 ```js
-// eslint.config.js (repo root) — the relevant section to add/modify:
+// eslint.config.mjs (repo root) — the relevant section to add/modify:
 
 // Generated composition-zone enforcement (SD-4 §4).
-// This import is the ONLY line that changes when a new module is added.
-// The file is written by `packages/scripts/generate-eslint-zones.ts`.
-import { GENERATED_MODULE_ZONES } from "./packages/shell/src/_generated/eslint-zones.js";
+// Dynamic import ONLY — no static import (BLOCK 5: generated file is gitignored,
+// lives in packages/shell/src/_generated/ which does not exist on a cold checkout).
+// Run `npm run prebuild` to populate before linting.
+let GENERATED_MODULE_ZONES = [];
+try {
+  const generated = await import("./packages/shell/src/_generated/eslint-zones.js");
+  GENERATED_MODULE_ZONES = generated.GENERATED_MODULE_ZONES;
+} catch {
+  // Cold checkout — zones not yet generated. ESLint runs with empty zones (no-op).
+  // Run `npm run prebuild` to populate.
+}
 
 // ... (rest of the existing config) ...
 // In the rules object, replace the placeholder for import/no-restricted-paths:
@@ -1740,20 +1923,7 @@ import { GENERATED_MODULE_ZONES } from "./packages/shell/src/_generated/eslint-z
 }],
 ```
 
-If Plan A's `eslint.config.js` already has the `import/no-restricted-paths` rule with an empty `zones: []`, change `zones: []` to `zones: GENERATED_MODULE_ZONES` and add the import at the top.
-
-If the `_generated/eslint-zones.ts` file does not exist at lint time (cold checkout before prebuild), ESLint will fail to import it. Add a fallback:
-
-```js
-// Graceful fallback when _generated/ hasn't been built yet (cold checkout).
-let GENERATED_MODULE_ZONES: unknown[] = [];
-try {
-  const generated = await import("./packages/shell/src/_generated/eslint-zones.js");
-  GENERATED_MODULE_ZONES = generated.GENERATED_MODULE_ZONES;
-} catch {
-  // Cold checkout — zones not yet generated. Run `npm run prebuild` to populate.
-}
-```
+If Plan A's `eslint.config.mjs` already has the `import/no-restricted-paths` rule with an empty `zones: []`, change `zones: []` to `zones: GENERATED_MODULE_ZONES` and add the dynamic-import block at the top of the config object (after other static imports).
 
 - [ ] **Step 7.2: Create `packages/scripts/eslint-zones-integration.test.ts`**
 
@@ -1874,8 +2044,8 @@ The executor must fill in the ACTUAL STATUS column after running all tasks and t
 | A15 | Portal layout + nav test suite: all 7 tests pass | Task 5 | |
 | A16 | `operator-dev.yml` includes `prescriber-directory` in `modules` + correct `required_*` fields | Task 6 | |
 | A17 | `validate-manifest.ts` (Plan A) passes on updated `operator-dev.yml` | Task 6 | |
-| A18 | CI `sp0-foundation.yml` has `composition-audit` job; runs `build-manifest` + `generate-eslint-zones` | Task 6 | |
-| A19 | Repo-root `eslint.config.js` imports `GENERATED_MODULE_ZONES`; `import/no-restricted-paths` rule is wired | Task 7 | |
+| A18 | CI `sp0-foundation.yml` has `composition-audit` job; runs `build-manifest` (validate + codegen) + `generate-eslint-zones` (exits 0 = generators clean); `audit-module-graph` is a local npm script only for SP-0 (post-build CI job deferred — CONCERN 2) | Task 6 | |
+| A19 | Repo-root `eslint.config.mjs` has dynamic-import fallback for `GENERATED_MODULE_ZONES`; `import/no-restricted-paths` rule is wired (empty zones on cold checkout — not a failure) | Task 7 | |
 | A20 | ESLint zone integration tests: all 5 tests pass | Task 7 | |
 | A21 | `workspace-root tsc -b` compiles cleanly with all packages including `prescriber-directory` | Cross-task | |
 | A22 | `npm run test:packages` runs all vitest suites (scripts + contract + auth + ui + qa-harness + prescriber-directory); 0 failures | Cross-task | |
@@ -1884,17 +2054,17 @@ The executor must fill in the ACTUAL STATUS column after running all tasks and t
 
 ## Test Count Summary
 
-| Task | Test file(s) | Count |
-|---|---|---|
-| Task 1 | `build-manifest.test.ts` | 7 |
-| Task 2 | `generate-eslint-zones.test.ts` | 9 |
-| Task 3 | `audit-module-graph.test.ts` | 6 |
-| Task 4 | `module.config.test.ts` + `factory.test.ts` | 14 |
-| Task 5 | `layout.test.tsx` + `manifest-nav.test.tsx` | 7 |
-| Task 6 | — (config only) | 0 |
-| Task 7 | `eslint-zones-integration.test.ts` | 5 |
-| Task 8 | — (docs only) | 0 |
-| **Total** | | **48** |
+| Task | Test file(s) | Count | Notes |
+|---|---|---|---|
+| Task 1 | `build-manifest.test.ts` | 7 | Uses real schema (BLOCK 2) |
+| Task 2 | `generate-eslint-zones.test.ts` | 9 | |
+| Task 3 | `audit-module-graph.test.ts` | 8 | +2 fixture tests (CONCERN 1) |
+| Task 4 | `module.config.test.ts` + `factory.test.ts` | 7 + 7 = 14 | factory tests assert interface, not instanceof (BLOCK 6) |
+| Task 5 | `layout.test.tsx` + `manifest-nav.test.tsx` | 2 + 5 = 7 | layout tests updated for surgical modification (BLOCK 4) |
+| Task 6 | — (config only) | 0 | |
+| Task 7 | `eslint-zones-integration.test.ts` | 5 | Targets `eslint.config.mjs` (BLOCK 5) |
+| Task 8 | — (docs only) | 0 | |
+| **Total** | | **50** | +2 from CONCERN 1 fixture tests |
 ```
 
 **Test count (Task 8):** 0 new tests (documentation only).
@@ -1928,8 +2098,15 @@ SD-4 §5 requires both server-graph audit (`.nft.json`) AND client-bundle audit 
 **D3 — `ManifestNav` reads `manifest.json` at request time (SSR), not `nav.ts`.**
 `nav.ts` is a TypeScript file consumed at build time by the ESLint zone check and type system. At SSR runtime the portal cannot dynamically import generated TS. `manifest.json` (JSON, not TS) is the correct runtime format. Nav labels are derived from module names (kebab-case → Title Case) which is good enough for the minimum scaffolding; full nav metadata (icon, order) will come from a separate endpoint or re-emit in `manifest.json` in a follow-on task.
 
-**D4 — `prescriber-directory` factory references `MockPrescriberDirectoryClient` and `RealPrescriberDirectoryClient` by name.**
-Plan B's `packages/contract/src/impls/prescriber-directory/` ships both implementations. Plan D's factory imports them by name from `@infinityrx/contract`. If Plan B renames these classes, Plan D's factory and tests break at compile time — which is the correct behaviour (explicit dependency, caught by `tsc -b`). No dynamic lookup.
+**D4 — `prescriber-directory` factory delegates to Plan B's exported factory functions.**
+Plan B HEAD (wave/B10-w5:packages/contract/src/index.ts) exports `createRealPrescriberDirectoryClient(config)`
+and `createMockPrescriberDirectoryClient()` as factory functions — NOT classes. (BLOCK 6 fix: v1
+incorrectly referenced class names `MockPrescriberDirectoryClient` / `RealPrescriberDirectoryClient`
+which do not exist as exports.) Plan D's factory delegates to these two functions. If Plan B renames
+them, Plan D's factory and tests break at compile time — the correct behavior (explicit dependency,
+caught by `tsc -b`). Tests assert interface shape and behavior; no `instanceof` checks on
+non-exported types. Note for maintainers: see `packages/modules/prescriber-directory/src/factory.ts`
+for the delegation pattern every future module will follow.
 
 **D5 — `_generated/.gitkeep` committed; rest of `_generated/` gitignored.**
 Generated files must not be committed (they change on every build, pollute git history). The `.gitkeep` ensures the directory exists so `build-manifest.ts` can write to it without needing to create it. `.gitignore` rule in Task 6 excludes everything except `.gitkeep`. This is the same pattern Plans A–C use for other generated directories.
