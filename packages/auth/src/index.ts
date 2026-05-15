@@ -34,3 +34,7 @@ export {
   InMemoryRevocationRepo,
   type RevocationRepo,
 } from "./revocation-repo.js";
+
+export { performRefresh, type RefreshAdapterOptions } from "./refresh-adapter.js";
+export { SingleFlightRefresh, readJtiUnsafe } from "./single-flight.js";
+export { mintDevJwt, DEV_IDENTITY, type DevJwtOptions } from "./dev-jwt.js";
