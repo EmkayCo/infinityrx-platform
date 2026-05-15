@@ -19,7 +19,7 @@
     "manifest:validate": "npm --workspace=@infinityrx/scripts run validate-manifest -- infrastructure/manifests/operator-dev.yml",
     "manifest:validate:standalone": "npm --workspace=@infinityrx/scripts run validate-manifest -- infrastructure/manifests/example-reclaimrx-standalone.yml",
     "test": "npm --workspace=@infinityrx/scripts test",
-    "test:packages": "npm --workspace=@infinityrx/scripts test && npm --workspace=@infinityrx/contract test && npm --workspace=@infinityrx/auth test"
+    "test:packages": "npm --workspace=@infinityrx/scripts test && npm --workspace=@infinityrx/contract test && npm --workspace=@infinityrx/auth test && npm --workspace=@infinityrx/ui test && npm --workspace=@infinityrx/qa-harness test"
   },
   "devDependencies": {
     "typescript": "5.6.3",

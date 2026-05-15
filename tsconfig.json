@@ -3,6 +3,8 @@
   "references": [
     { "path": "./packages/scripts" },
     { "path": "./packages/contract" },
-    { "path": "./packages/auth" }
+    { "path": "./packages/auth" },
+    { "path": "./packages/ui" },
+    { "path": "./packages/qa-harness" }
   ]
 }
