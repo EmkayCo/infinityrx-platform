@@ -154,7 +154,8 @@ infrastructure/                                  # manifests untouched (Plan D)
   "type": "module",
   "exports": {
     ".": "./dist/index.js",
-    "./middleware": "./dist/middleware.js"
+    "./middleware": "./dist/middleware.js",
+    "./manifest": "./src/_generated/manifest.json"
   },
   "scripts": {
     "build": "tsc -b",
@@ -238,7 +239,7 @@ export {};
 }
 ```
 
-This placeholder is the zero-module state. Plan D's `scripts/generate-composition.ts` overwrites this file at build time. Plan C-shell reads it via `import manifest from "./_generated/manifest.json" assert { type: "json" }` (TypeScript resolveJsonModule).
+This placeholder is the zero-module state. Plan D's `scripts/generate-composition.ts` overwrites this file at build time. Plan C-shell reads it via `import manifest from "./_generated/manifest.json" with { type: "json" }` (TypeScript 5.6.3 NodeNext — `with` is the TC39-ratified import attribute syntax; `assert` is deprecated). The file is also accessible to `portal/operator` and other consumers via the `"./manifest"` package export declared in `packages/shell/package.json`.
 
 - [ ] **Step 1.6: Modify `tsconfig.json` (repo root) — add packages/shell reference**
 
@@ -279,8 +280,22 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 - Create: `packages/shell/src/auth/require-role.tsx`
 - Create: `packages/shell/src/__tests__/require-role.test.tsx`
 - Modify: `packages/shell/src/index.ts`
+- Create: `packages/shell/src/auth/auth.config.ts` (next-auth config binding Plan B's verify chain)
 
 All components are **React Server Components** (async function, no `"use client"` directive). Auth checks run server-side via `next-auth`'s `auth()` helper — unauthorized users never receive page HTML.
+
+**Auth architecture decision — Option A (codex BLOCK 1 closure):**
+
+`RequireAuth` and `getSessionUser` call `next-auth`'s `auth()` helper and trust the `session.user` shape. This is intentional — `session.user` is populated exclusively in `next-auth`'s `callbacks.jwt`, which is the only place tokens are minted. The **load-bearing closure** is that `callbacks.jwt` MUST call `verifyAccessToken` from `@infinityrx/auth` before propagating claims into the session.
+
+Concretely, `packages/shell/src/auth/auth.config.ts` exports a `NextAuthConfig` object whose `callbacks.jwt` calls `verifyAccessToken(token.access_token, { secret, revocationRepo })` — Plan B's verify oracle. If `verifyAccessToken` throws `AuthError`, the callback returns `null` (next-auth treats this as a session invalidation and clears the cookie). Only after a successful verify are `sub`, `tid`, `roles`, and `mfaEnrolled` written into `session.user`.
+
+This means:
+- `getSessionUser` trusting `session.user` is safe: the session cannot be created without Plan B's verify chain running at login time.
+- The verify chain is not re-called on every RSC render (which would add latency and Redis round-trips). Token freshness is enforced by `next-auth`'s session expiry + the `callbacks.jwt` re-check on token refresh.
+- Revocation is enforced at login + refresh, not on every request. If per-request revocation is required in a future wave, the pattern is to add a `callbacks.session` check against the Redis revocation list.
+
+Option B (read cookie directly, call `verifyAccessToken` on every RSC) was considered and rejected: it bypasses next-auth's session management entirely, requiring custom cookie parsing and CSRF protection — trading framework complexity for marginal security gain that per-request Redis revocation adds. Option A keeps Next.js idioms intact while making Plan B's verify chain load-bearing at the session boundary.
 
 - [ ] **Step 2.1: Write `packages/shell/src/auth/types.ts`**
 
@@ -306,15 +321,87 @@ export interface UserIdentity {
 export type SessionUser = UserIdentity | null;
 ```
 
+- [ ] **Step 2.1b: Write `packages/shell/src/auth/auth.config.ts`**
+
+This file wires Plan B's `verifyAccessToken` into next-auth's `callbacks.jwt`. It is the load-bearing binding that makes Plan B the verify oracle for all sessions created in `portal/operator`.
+
+```ts
+import "server-only";
+import NextAuth, { type NextAuthConfig } from "next-auth";
+import Credentials from "next-auth/providers/credentials";
+// Plan B's verify oracle — called at JWT creation time.
+// If verifyAccessToken throws AuthError, jwt callback returns null
+// and next-auth clears the session cookie.
+import { verifyAccessToken } from "@infinityrx/auth";
+
+export const authConfig: NextAuthConfig = {
+  providers: [
+    Credentials({
+      /**
+       * The InfinityRx portal does not use credentials directly here —
+       * authentication is delegated to the Python auth service, which
+       * returns a signed access_token + refresh_token pair.
+       * The `authorize` callback receives those tokens from the login form.
+       */
+      async authorize(credentials) {
+        if (!credentials?.access_token) return null;
+        // Verify via Plan B's verify chain: checks signature, expiry, and
+        // Redis revocation list. Throws AuthError on any failure.
+        const payload = await verifyAccessToken(credentials.access_token as string);
+        return {
+          id: payload.sub,
+          access_token: credentials.access_token as string,
+        };
+      },
+    }),
+  ],
+  callbacks: {
+    async jwt({ token, user }) {
+      // On initial sign-in, user is populated by authorize().
+      if (user?.access_token) {
+        // Verify (again) and extract claims into session token.
+        // This ensures the JWT stored in the encrypted cookie was produced
+        // by a token that passed Plan B's verify chain.
+        const payload = await verifyAccessToken(user.access_token as string);
+        token.sub = payload.sub;
+        token.tid = payload.tid as string;
+        token.roles = payload.roles as string[];
+        token.mfaEnrolled = (payload.mfa_enrolled ?? false) as boolean;
+      }
+      // On subsequent refreshes, the claims are already in the token.
+      // Per-request revocation checking is deferred to a future wave;
+      // revocation is enforced at login + token-refresh boundaries only.
+      return token;
+    },
+    async session({ session, token }) {
+      // Propagate claims from JWT into session.user for getSessionUser().
+      session.user = {
+        ...session.user,
+        sub: token.sub as string,
+        tid: token.tid as string,
+        roles: token.roles as string[],
+        mfaEnrolled: token.mfaEnrolled as boolean,
+      };
+      return session;
+    },
+  },
+  session: { strategy: "jwt" },
+};
+
+export const { auth, handlers, signIn, signOut } = NextAuth(authConfig);
+```
+
+The `auth` export from this file is what `get-session-user.ts` and `require-auth.tsx` import. This is the critical link: `auth()` here runs the `session` callback which reads only claims populated by `callbacks.jwt` — which called `verifyAccessToken`. The trust chain is complete.
+
 - [ ] **Step 2.2: Write `packages/shell/src/auth/get-session-user.ts`**
 
 ```ts
 import "server-only";
-// next-auth v5: `auth()` is the server-side session accessor per SD-1 §6.
-// It reads from the encrypted __Secure-infinityrx-session cookie.
-// The session object carries only non-sensitive identity (sub, tid, roles,
-// mfaEnrolled) — access_token / refresh_token are NOT present per SD-1 §6 + §11.
-import { auth } from "next-auth";
+// Import `auth` from the auth.config binding, not from "next-auth" directly.
+// This ensures we use the configured session callback that populates
+// sub/tid/roles/mfaEnrolled from Plan B's verifyAccessToken chain.
+// See auth.config.ts for the load-bearing boundary documentation.
+import { auth } from "./auth.config.js";
 import type { SessionUser } from "./types.js";
 
 /**
@@ -352,13 +439,15 @@ export async function getSessionUser(): Promise<SessionUser> {
 ```ts
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock next-auth and server-only before importing the module under test.
-vi.mock("next-auth", () => ({
+// Mock the auth.config binding and server-only before importing module under test.
+// This ensures we test the session-extraction logic without running the full
+// next-auth JWT callback chain (which requires Plan B's verifyAccessToken).
+vi.mock("../auth/auth.config.js", () => ({
   auth: vi.fn(),
 }));
 vi.mock("server-only", () => ({}));
 
-import { auth } from "next-auth";
+import { auth } from "../auth/auth.config.js";
 import { getSessionUser } from "../auth/get-session-user.js";
 
 describe("getSessionUser", () => {
@@ -644,6 +733,8 @@ Commit message:
 ```
 feat(sp-0): Plan C-shell Task 2 — RequireAuth + RequireRole RSC auth gates
 
+auth.config.ts: NextAuthConfig with callbacks.jwt calling verifyAccessToken
+from @infinityrx/auth — Plan B is the verify oracle for all sessions.
 getSessionUser(): extracts UserIdentity from next-auth encrypted session
 server-side; access_token/refresh_token never exposed to client per SD-1 §6.
 <RequireAuth>: server-component redirect gate; unauthenticated → /login with
@@ -1780,9 +1871,33 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 - Create: `packages/shell/src/routes/qa-harness/factory/page.tsx`
 - Create: `packages/shell/src/routes/qa-harness/correlation/page.tsx`
 - Create: `packages/shell/src/__tests__/qa-harness-pages.test.tsx`
-- Modify: `portal/operator/app/layout.tsx` (wrap in `<RequireAuth>`)
-- Modify or Create: `portal/operator/app/(authenticated)/layout.tsx` (wrap in `<AppShellMount>`)
+- Modify: `portal/operator/app/layout.tsx` (root layout — UNGATED, no RequireAuth here)
+- Modify or Create: `portal/operator/app/(authenticated)/layout.tsx` (gate: RequireAuth + AppShellMount)
+- Ensure `/login` lives at `portal/operator/app/(public)/login/page.tsx` or `portal/operator/app/(auth)/login/page.tsx` — outside the `(authenticated)` group
 - Modify: `packages/shell/src/index.ts`
+
+**Route-group structure (codex BLOCK 3 fix):**
+
+```
+portal/operator/app/
+  layout.tsx                    ← ROOT layout: UNGATED. Provides HTML shell,
+                                  fonts, global CSS. No RequireAuth here.
+                                  Serving /login from this root is safe.
+  (public)/                     ← Public route group (no auth required)
+    login/
+      page.tsx                  ← /login — served without auth gate
+  (authenticated)/              ← Authenticated route group
+    layout.tsx                  ← RequireAuth + AppShellMount live here.
+                                  ALL routes under this group require auth.
+    page.tsx                    ← / (dashboard home, requires auth)
+    qa-harness/
+      [[...path]]/
+        page.tsx                ← /qa-harness/* (requires auth)
+```
+
+The root `app/layout.tsx` must NOT carry `<RequireAuth>`. If it does, Next.js calls `RequireAuth` before rendering `/login`, creating an infinite redirect loop: unauthenticated user hits `/login` → layout runs `RequireAuth` → no session → redirect to `/login` → loop.
+
+`RequireAuth` belongs exclusively in `app/(authenticated)/layout.tsx`. The Next.js middleware matcher (`SHELL_MIDDLEWARE_MATCHER`) enforces route-level protection for non-RSC paths; the RSC `RequireAuth` provides defence-in-depth inside the authenticated subtree.
 
 Each qa-harness page is a React Server Component that fetches the manifest (via static import of `_generated/manifest.json`) and renders the corresponding Plan C component. These pages are exported from `packages/shell` so that `portal/operator` (and future portals) can mount them by importing the page components — they don't have to duplicate the logic.
 
@@ -1823,8 +1938,11 @@ export async function QaHarnessPage({ clients }: QaHarnessPageProps): Promise<Re
 import "server-only";
 import { CompositionViewer } from "@infinityrx/qa-harness";
 // Static import of the generated manifest. Plan D's codegen overwrites this.
-// TypeScript resolves the type from the JSON shape.
-import manifest from "../../_generated/manifest.json" assert { type: "json" };
+// TypeScript 5.6.3 NodeNext: use `with { type: "json" }` (TC39 import
+// attributes), not `assert` (deprecated). Path: this file lives at
+// src/routes/qa-harness/composition/page.tsx — three levels up to reach
+// src/_generated/manifest.json.
+import manifest from "../../../_generated/manifest.json" with { type: "json" };
 
 /**
  * /qa-harness/composition — CompositionViewer.
@@ -1930,7 +2048,8 @@ vi.mock("@infinityrx/qa-harness", () => ({
   FactoryBindings: () => <div data-testid="factory-bindings" />,
   CorrelationIdJump: () => <div data-testid="correlation-jump" />,
 }));
-vi.mock("../../_generated/manifest.json", () => ({
+// Mock the corrected path: three levels up from src/routes/qa-harness/composition/
+vi.mock("../../../_generated/manifest.json", () => ({
   default: { instance_name: "test", modules: ["reclaimrx"], audience: "operator" },
 }));
 
@@ -1988,24 +2107,28 @@ describe("qa-harness pages", () => {
 });
 ```
 
-- [ ] **Step 6.7: Modify `portal/operator/app/layout.tsx` — wrap root layout in `<RequireAuth>`**
+- [ ] **Step 6.7: Verify `portal/operator/app/layout.tsx` — root layout MUST be ungated**
 
-Read the existing file first. The surgical change is to wrap the page body with `<RequireAuth>` from `@infinityrx/shell`, passing `/login` as `loginPath`. Leave any existing imports and JSX intact.
+Read the existing file first. The root layout must NOT contain `<RequireAuth>`. If any previous version added `RequireAuth` here, remove it — it creates an infinite redirect loop for `/login` (unauthenticated → RequireAuth → redirect /login → RequireAuth → loop).
+
+The root layout provides the HTML shell, font loading, and global CSS only. It renders `{children}` without any auth gate:
 
 ```tsx
-// Surgical change to portal/operator/app/layout.tsx:
-// 1. Add import at top:
-import { RequireAuth } from "@infinityrx/shell";
-// 2. Wrap the {children} JSX node inside the root layout:
-//    Before: <body>{children}</body>
-//    After:  <body><RequireAuth>{children}</RequireAuth></body>
-// EXCEPTION: bypass for /login, /api/auth/**, /_next/** paths is
-// handled by the middleware matcher (SHELL_MIDDLEWARE_MATCHER) and
-// next-auth's built-in public paths — RequireAuth itself always defers
-// to the session check, which next-auth handles cleanly for /login.
+// portal/operator/app/layout.tsx — NO RequireAuth here.
+// Auth gating lives in app/(authenticated)/layout.tsx only.
+// Root layout serves both public routes (/login) and authenticated routes.
+import type { ReactNode } from "react";
+
+export default function RootLayout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
 ```
 
-The actual edit depends on the current file content. The builder MUST read `portal/operator/app/layout.tsx` before applying this change.
+The actual file content may differ (fonts, metadata, etc.). The builder MUST read `portal/operator/app/layout.tsx` first and make only the surgical change: ensure `RequireAuth` is absent from the root layout.
 
 - [ ] **Step 6.8: Create or modify `portal/operator/app/(authenticated)/layout.tsx`**
 
@@ -2015,7 +2138,11 @@ If the route group `(authenticated)` does not exist, create it. The layout wraps
 import "server-only";
 import { AppShellMount } from "@infinityrx/shell";
 import type { NavEntry } from "@infinityrx/shell";
-import manifest from "@infinityrx/shell/src/_generated/manifest.json" assert { type: "json" };
+// Use the "./manifest" export declared in @infinityrx/shell's package.json exports map.
+// @infinityrx/shell/src/_generated/... is NOT a valid import — package.json exports
+// only exposes ".", "./middleware", and "./manifest". Using the export alias
+// ensures correctness after dist compilation and keeps consumers out of src/.
+import manifest from "@infinityrx/shell/manifest" with { type: "json" };
 import type { ReactNode } from "react";
 
 // navEntries will be populated by module packages as they register.
