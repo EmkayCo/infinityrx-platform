@@ -2,7 +2,25 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** Draft, 2026-05-15. Awaiting codex pass-1 gate review in main session.
+## v2 changes (codex pass-1 remediation, 2026-05-15)
+
+Codex pass-1 returned BLOCKED with 3 BLOCKs + 3 CONCERNs + 1 NIT. All closed in v2.
+
+| Finding | Status | How closed |
+|---|---|---|
+| BLOCK 1 — auth-reuse (Task 2) | CLOSED | Added `auth.config.ts` (Step 2.1b): `callbacks.jwt` calls `verifyAccessToken` from `@infinityrx/auth` before writing claims into session. `get-session-user.ts` imports `auth` from `./auth.config.js`, not from `next-auth` directly. Option A (next-auth as session adapter, Plan B as verify oracle) selected and documented. Test mock updated to mock `./auth.config.js`. |
+| BLOCK 2 — coexistence (Tasks 6.2 + 6.8) | CLOSED | (1) Task 6.2 path fixed: `../../_generated` → `../../../_generated` (file is 3 levels deep). (2) Task 6.8 manifest import changed from unresolvable `@infinityrx/shell/src/_generated/manifest.json` to `@infinityrx/shell/manifest` backed by new `"./manifest"` entry in package.json exports map. (3) `assert { type: "json" }` → `with { type: "json" }` throughout (TS 5.6.3 NodeNext uses TC39 import attributes). Test mock path updated to match. |
+| BLOCK 3 — auth-reuse routes (Tasks 6.7 + 6.8) | CLOSED | Root `app/layout.tsx` is UNGATED — `RequireAuth` in root layout causes infinite redirect loop for `/login`. `RequireAuth` moved exclusively to `app/(authenticated)/layout.tsx`. Login page stub added at `app/(public)/login/page.tsx`. Route-group tree in File Structure section corrected. Step 6.7 rewritten (verify root is ungated). Step 6.8 adds `RequireAuth` wrapping `AppShellMount`. Step 6.8b adds `(public)/login` stub. Decision log updated. |
+| CONCERN 1 — nanostores dep ordering | CLOSED | `nanostores 0.11.3` + `@nanostores/react 0.8.0` moved from Task 7 Step 7.2 into Task 1 Step 1.1 `package.json` dependencies. `npm install` in Step 1.7 runs before Task 5 imports them. Step 7.2 updated to verify-not-add. |
+| CONCERN 2 — prop type exports | CLOSED | All component prop interfaces changed to `export interface`: `RequireAuthProps`, `RequireRoleProps` (Task 2), `AppShellMountProps` (Task 3), `InspectorPanelProps` (Task 5 — explicit empty interface), `QaHarnessPageProps`, `MockTogglePageProps`, `FactoryPageProps` (Task 6). `CompositionPage` and `CorrelationPage` take no props — noted in index.ts comment. Final index.ts (Step 6.9) updated with all type exports. |
+| CONCERN 3 — forward-readiness / PHI (Task 5) | CLOSED | `wrapFetch` updated: (1) production no-op guard at top — returns `inner` unchanged when `NODE_ENV === 'production'`; (2) `REDACTED_HEADERS` set (Authorization, Cookie, Set-Cookie, x-api-key); (3) `PHI_KEY_PATTERN` regex (`/ssn\|dob\|member.*name\|patient/i`) redacts matching top-level body keys; (4) `capBody()` truncates bodies >4 KB with `<TRUNCATED:n bytes>` marker. Three new tests added: prod no-op, PHI redaction, body truncation. wrap-fetch test count 6→9, total plan test count 56→59. |
+| NIT — placeholder manifest shape | CLOSED | Task 1.5 placeholder `manifest.json` extended with `_generated` object: `input_hash` (all-zeros sentinel), `inputs` ([]), `generated_at` (epoch), `generator` ("placeholder"). `InstanceManifestShape` type in `nav-types.ts` extended with optional `_generated` field. Plan D overwrites the same shape; staleness check identifies placeholder via all-zeros `input_hash`. qa-harness test mock updated to include `_generated` sentinel values. |
+
+**Status:** v2 complete, 2026-05-15. Ready for codex pass-2.
+
+---
+
+**Status (v1):** Draft, 2026-05-15. Awaiting codex pass-1 gate review in main session.
 
 **Goal:** Ship `packages/shell` (Next.js 16.2–aware shell package) and wire it into `portal/operator`, delivering:
 - `<RequireAuth>` / `<RequireRole>` RSC auth-gating components backed by Plan B's `@infinityrx/auth` verify chain
@@ -241,11 +259,19 @@ export {};
 {
   "instance_name": "placeholder",
   "modules": [],
-  "audience": "operator"
+  "audience": "operator",
+  "_generated": {
+    "input_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "inputs": [],
+    "generated_at": "1970-01-01T00:00:00.000Z",
+    "generator": "placeholder"
+  }
 }
 ```
 
-This placeholder is the zero-module state. Plan D's `scripts/generate-composition.ts` overwrites this file at build time. Plan C-shell reads it via `import manifest from "./_generated/manifest.json" with { type: "json" }` (TypeScript 5.6.3 NodeNext — `with` is the TC39-ratified import attribute syntax; `assert` is deprecated). The file is also accessible to `portal/operator` and other consumers via the `"./manifest"` package export declared in `packages/shell/package.json`.
+This placeholder is the zero-module state. Plan D's `scripts/generate-composition.ts` overwrites this file at build time with the same top-level shape, populating `_generated.input_hash` (SHA-256 of all input module.config.ts files), `_generated.inputs` (list of input paths), `_generated.generated_at` (ISO timestamp), and `_generated.generator` (script version). The placeholder uses sentinel values — `input_hash` all-zeros, empty `inputs`, epoch timestamp — so Plan D's staleness check can distinguish the placeholder from a real generated artifact without a schema change.
+
+Plan C-shell reads the manifest via `import manifest from "./_generated/manifest.json" with { type: "json" }` (TypeScript 5.6.3 NodeNext — `with` is the TC39-ratified import attribute syntax; `assert` is deprecated). The file is also accessible to `portal/operator` and other consumers via the `"./manifest"` package export declared in `packages/shell/package.json`.
 
 - [ ] **Step 1.6: Modify `tsconfig.json` (repo root) — add packages/shell reference**
 
@@ -798,7 +824,21 @@ export interface NavEntry {
  * The full schema is in SD-4 §3; we read only what we need here.
  */
 export interface InstanceManifestShape {
+  readonly instance_name: string;
   readonly modules: readonly string[];
+  readonly audience: string;
+  /**
+   * Metadata written by Plan D's generate-composition.ts codegen.
+   * Present in the placeholder (sentinel values) and in real generated artifacts.
+   * Plan D's staleness check distinguishes placeholder from real via input_hash
+   * all-zeros sentinel.
+   */
+  readonly _generated?: {
+    readonly input_hash: string;
+    readonly inputs: readonly string[];
+    readonly generated_at: string;
+    readonly generator: string;
+  };
 }
 ```
 
@@ -1972,7 +2012,12 @@ eviction); clearEntries.
 InspectorPanel: "use client" slide-out panel; subscribes to atom; shows
 method/route/status/ms/cache/corrId columns; expandable JSON for req+resp body.
 Closes §6.4 deferred item "request/response inspector".
-51 tests (36 prior + 6 wrap-fetch + 3 inspector-store).
+Production guard: wrapFetch returns inner unchanged when NODE_ENV=production
+(zero overhead, zero PHI risk in prod). PHI redaction: body keys matching
+/ssn|dob|member.*name|patient/i replaced with "[REDACTED]". Body truncation:
+>4KB serialized → "<TRUNCATED:n bytes>" marker. 3 additional tests cover
+prod no-op, PHI redaction, and body truncation.
+54 tests (36 prior + 9 wrap-fetch + 3 inspector-store).
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ```
@@ -2169,8 +2214,19 @@ vi.mock("@infinityrx/qa-harness", () => ({
   CorrelationIdJump: () => <div data-testid="correlation-jump" />,
 }));
 // Mock the corrected path: three levels up from src/routes/qa-harness/composition/
+// Shape matches InstanceManifestShape including _generated (NIT closure).
 vi.mock("../../../_generated/manifest.json", () => ({
-  default: { instance_name: "test", modules: ["reclaimrx"], audience: "operator" },
+  default: {
+    instance_name: "test",
+    modules: ["reclaimrx"],
+    audience: "operator",
+    _generated: {
+      input_hash: "0000000000000000000000000000000000000000000000000000000000000000",
+      inputs: [],
+      generated_at: "1970-01-01T00:00:00.000Z",
+      generator: "placeholder",
+    },
+  },
 }));
 
 import { QaHarnessPage } from "../routes/qa-harness/page.js";
@@ -2532,7 +2588,7 @@ Create `docs/superpowers/plans/2026-05-15-sp0-plan-c-shell-status.md`:
 - `getSessionUser`: UserIdentity extractor, 4 tests
 - `AppShellMount` + `ModuleNav`: role-filtered, manifest-ordered nav, 10 tests
 - QA mode toggle: `parseQaMode`, `buildQaModeCookieValue`, `applyQaModeMiddleware`, 11 tests
-- `wrapFetch`: ClientConfig.fetch instrumentation hook, 6 tests
+- `wrapFetch`: ClientConfig.fetch instrumentation hook, 9 tests; production no-op guard + PHI key redaction + 4KB body cap
 - `inspector-store` + `InspectorPanel`: nanostores atom + slide-out panel, 3 tests
 - `/qa-harness/*` pages: 5 route page components (health, composition, mock, factory, correlation), 6 tests
 - `framework-bound.test.ts`: 5 tests asserting SD-2 mandate
