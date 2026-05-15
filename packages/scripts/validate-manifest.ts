@@ -15,14 +15,20 @@
  *
  * Authority: SD-4 (`0b3c9d7`) §3.
  */
-import Ajv2020 from "ajv/dist/2020.js";
-import addFormats from "ajv-formats";
+import { Ajv2020 } from "ajv/dist/2020.js";
+import { createRequire } from "node:module";
 import { parse as parseYaml } from "yaml";
 import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import type { ValidateFunction } from "ajv";
+
+// ajv-formats is a CJS-only package with no ESM exports map; use createRequire
+// to load it without triggering TypeScript's CJS-default-import restrictions
+// under moduleResolution:NodeNext + verbatimModuleSyntax (SD-4 §3).
+const _require = createRequire(import.meta.url);
+const addFormats = _require("ajv-formats") as (ajv: InstanceType<typeof Ajv2020>) => void;
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
