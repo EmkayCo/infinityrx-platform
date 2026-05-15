@@ -104,3 +104,8 @@ graphify-out/
 # MemPalace per-project files (issue #185)
 mempalace.yaml
 entities.json
+
+# SP-0 additions
+packages/*/node_modules
+packages/*/dist
+packages/*/*.tsbuildinfo

@@ -1,0 +1,31 @@
+{
+  "name": "infinityrx-platform",
+  "private": true,
+  "version": "0.0.0",
+  "description": "InfinityRx platform monorepo. SP-0 establishes packages/* workspaces alongside the existing portal/ workspaces.",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "workspaces": [
+    "portal/operator",
+    "portal/shared",
+    "packages/*"
+  ],
+  "scripts": {
+    "lint": "npm run lint:root && npm run lint:portal-operator",
+    "lint:root": "eslint . --ignore-pattern \"portal/operator/**\" --ignore-pattern \"node_modules/**\" --ignore-pattern \"**/dist/**\" --ignore-pattern \"**/.next/**\"",
+    "lint:portal-operator": "npm --workspace=ifx-operator-portal run lint",
+    "typecheck": "tsc -b",
+    "manifest:validate": "npm --workspace=@infinityrx/scripts run validate-manifest -- infrastructure/manifests/operator-dev.yml",
+    "manifest:validate:standalone": "npm --workspace=@infinityrx/scripts run validate-manifest -- infrastructure/manifests/example-reclaimrx-standalone.yml",
+    "test": "npm --workspace=@infinityrx/scripts test"
+  },
+  "devDependencies": {
+    "typescript": "5.6.3",
+    "@types/node": "22.7.5",
+    "eslint": "9.13.0",
+    "@eslint/js": "9.13.0",
+    "typescript-eslint": "8.10.0",
+    "vitest": "2.1.3"
+  }
+}
