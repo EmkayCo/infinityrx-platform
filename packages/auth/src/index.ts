@@ -27,3 +27,10 @@ export {
   AUTH_ERROR_MESSAGES,
   type AuthErrorCode,
 } from "./errors.js";
+
+export { mintTokenPair, type MintAccessOptions, type MintedTokens } from "./mint.js";
+export { verifyAccessToken, verifyRefreshToken, type VerifyOptions } from "./verify.js";
+export {
+  InMemoryRevocationRepo,
+  type RevocationRepo,
+} from "./revocation-repo.js";
