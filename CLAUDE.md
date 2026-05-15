@@ -40,20 +40,22 @@ Domain specialists are in `.claude/agents/tier2-specialists/` and are called on-
 | drug-database | 3 | Built | NDC/pricing/drug interactions complete; compound ingredients missing |
 | member-management | 3 | Built | 834/CSV ingestion, accumulators, 270/271; real CRUD on members/groups/enrollment/cob/coverage (W2D); EligibilityService._query_db real ORM queries (W1). Consent and COBRA tracking still gap |
 | pharmacy-directory | 3 | Built | Lookup, credentialing, PSAO; reviewer_id resolved from JWT identity, audit-trail repaired (W3D). Accreditation, LDD, contract rate history still gap |
-| prescriber-directory | 3 | Built | NPPES, state rules with safe restricted-default for unmodeled states + 10 populous states (W3C). No tenant isolation fence (CR-09 still open) |
-| adjudication-engine | 4 | Not started | Placeholder README only |
-| edi-compliance | 4 | Built | Full X12 suite (835/837/270/271/276/277/278/834/999), AS2+SFTP, NCPDP Batch 1.2, FHIR bridge. JWT auth via router-level Depends on all 4 route files (CR-03 RESOLVED). Test coverage ~15% still gap (CR-12) |
+| prescriber-directory | 3 | Built | NPPES, state rules with safe restricted-default for unmodeled states + 10 populous states (W3C). install_tenant_loader wired (CR-09 RESOLVED) |
+| adjudication-engine | 4 | Built | FastAPI app factory, middleware, DLQ, TCP listener, ML training API, admin APIs, load + concurrency tests (W31–44b) |
+| edi-compliance | 4 | Built | Full X12 suite (835/837/270/271/276/277/278/834/999), AS2+SFTP, NCPDP Batch 1.2, FHIR bridge. JWT auth via router-level Depends on all 4 route files (CR-03 RESOLVED). 99.19% test coverage (CR-12 RESOLVED) |
 | medical-claims | 4 | Built | Full claim pipeline, CMS-1500/UB-04, accumulator integration; httpx + tenacity HTTP clients with circuit-breaker fallback. PHI encrypted via EncryptedString verified (CR-02 RESOLVED). JWT auth via router-level Depends(get_current_user) on all 7 route files (CR-03 RESOLVED) |
-| mtm-clinical | 4 | Not started | Placeholder README only |
-| part-d-pde | 4 | Not started | Placeholder README only |
-| plan-design | 4 | Not started | Placeholder README only |
-| prior-authorization | 4 | Not started | Placeholder README only |
-| program-config | 4 | Not started | Placeholder README only |
-| rebate-management | 4 | Not started | Placeholder README only |
-| rules-engine | 4 | Not started | Placeholder README only |
-| switch-connectivity | 4 | Not started | Placeholder README only |
+| mtm-clinical | 4 | Scaffolded | Package structure only; no services or tests yet |
+| part-d-pde | 4 | Built | PDE generator/validator, real-time TrOOP, LIS/IRA/MFP support, ORM models, 92+ tests, API routes, app factory |
+| plan-design | 4 | Built | Full src/, formulary/hierarchy/network/market-access routes; 26 passing tests (W1) |
+| prior-authorization | 4 | Built | Full src/ with api/events/models/services/main.py, pyproject.toml, tests/ |
+| program-config | 4 | Built | Scheduled change sets, effective-dated config, hierarchical parameters, network tier, member-drug accumulator, RLS (W26) |
+| rebate-management | 4 | Built | Full src/ with api/db/events/models/services/utils/main.py |
+| rules-engine | 4 | Built | BRD rule catalog 19/19, 25 deterministic rule types, multi-Other-Payer, NCPDP ClaimContext wire fields (W26–34) |
+| switch-connectivity | 4 | Built | 15 pipeline stages, ProductionAdjudicationClient, NCPDP D.0 response builders, TCP listener, 41+ tests, sign-off matrix |
 | testing-simulator | 4 | Not started | Placeholder README only |
-| ebv-ebi-rtbc | 4 | Not started | Placeholder README only |
+| ebv-ebi-rtbc | 4 | Built | Full src/ with api/events/models/services/main.py, pyproject.toml, tests/ |
+
+_Last verified 2026-05-15 against post-remediation audit + surveyor inventory. CR-09 + CR-12 resolved in code._
 
 ## Session Remediation (2026-04-14)
 
