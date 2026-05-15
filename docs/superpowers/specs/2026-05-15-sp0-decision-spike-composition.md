@@ -1,12 +1,11 @@
 # SP-0 Decision Spike — Composition Mechanism
 
-**Status:** v3 drafted 2026-05-15. v2 (codex pass-1 closure) was committed `178fcf1`; codex pass-2 verified 2/3 BLOCKs CLOSED + 1/3 PARTIALLY-CLOSED, 1/3 CONCERNs CLOSED + 2/3 PARTIALLY-CLOSED, plus 1 new BLOCK + 2 new CONCERNs + 1 NIT. v3 closes the residuals:
-- Lint selectors broadened to catch require/import()/export through relative-path traversal and TS path-alias forms, not just `@infinityrx/module-*` package specifiers.
-- Pairwise CI matrix inputs broadened beyond `shellSurfaces` — now also pairs modules that share any of `requires.{backends, schemas, queues, jobs, buckets, integrations, env}` or declared cache-key namespaces.
-- Secret-reference validation split into PR-CI offline check (URI shape, catalog ownership) and environment-bound check (live secret-manager existence at deploy / boot).
-- Generated-artifact staleness switched from mtime to content-hash; generators emit `// input_hash: <sha256>` headers and CI re-runs the generator and diffs bytes.
-- Composition audit now separates server-route trace expectations from client-bundle stats expectations; client-only modules are proved present via bundle stats, not server traces.
-- Generated matrix path normalized to one location (`packages/shell/src/_generated/composition-matrix.yml` checked in; CI symlinks to `.github/workflows/composition-matrix.yml` at workflow runtime).
+**Status:** v4 drafted 2026-05-15. v3 was committed `a3bb508`; codex pass-3 verified 5/7 findings CLOSED, 2 PARTIALLY-CLOSED (sibling-relative module-to-module traversal without a `modules/` segment in the path was still bypassable), plus 1 new BLOCK (the `// input_hash` header is invalid YAML for `yq`) and 1 NIT (stale opening-summary phrase about CI symlinking the matrix). v4 closes them:
+- Sibling-relative imports inside `packages/modules/**` are now barred by `eslint-plugin-import`'s `no-restricted-paths` rule, declaring each module package as a zone forbidden from importing other module packages. Catches `../../other-module/src/...` traversal that has no `modules/` segment in the resolved string.
+- Generated-file header syntax is now per-file-type: `// input_hash:` for TS/JS, `# input_hash:` for YAML, and a top-level `_input_hash` JSON key for `manifest.json`. `composition-matrix.yml` is valid YAML for `yq` consumption.
+- Composition-matrix path: single canonical generated location `packages/shell/src/_generated/composition-matrix.yml`. The static workflow `.github/workflows/composition-matrix.yml` reads it at runtime via `fromJSON(yq)`. No symlink. The stale "CI symlinks" phrase has been deleted from this section in v4.
+
+v3 closes (carried into v4 — no further changes needed): pairwise collision surfaces broadened beyond shellSurfaces; secret validation split into PR-CI offline + deploy/boot environment-bound; content-hash replacing mtime; server-graph vs client-bundle audit split.
 **Addresses:** Codex BLOCKs **#1 (tree-shaking asserted not designed), #3 (deployment manifest underspecified), and #5 (cross-composition matrix too weak)** from the main SP-0 spec gate review. Closing this completes the spike.
 **Decision:** Build a **generated composition artifact** driven by a richer deployment manifest, enforced by a no-sibling-imports lint rule, verified by a build-time audit, and exercised by a per-PR cross-composition CI matrix.
 
@@ -334,6 +333,35 @@ export default defineConfig({
     ],
     // Force `import type` discrimination so the audit can distinguish type-only references from runtime ones
     "@typescript-eslint/consistent-type-imports": ["error", { prefer: "type-imports", fixStyle: "separate-type-imports" }],
+
+    // Closes pass-3 residual on BLOCK-1: sibling-relative imports inside packages/modules/**
+    // that don't contain the literal `modules/` segment in the resolved path
+    // (e.g., a file under packages/modules/paysync/src/foo.ts writing
+    //  `import x from "../../reclaimrx/src/bar"` — resolves to packages/modules/reclaimrx/...
+    //  but the string form `../../reclaimrx/...` doesn't match the (../)+modules/ regex).
+    // `eslint-plugin-import`'s no-restricted-paths is path-resolution-aware (not pattern-based),
+    // so it sees the resolved target and enforces zone boundaries.
+    "import/no-restricted-paths": ["error", {
+      zones: [
+        // Each module is a zone forbidden from importing any sibling module by ANY path shape.
+        // The `target` glob is every module's source, and the `from` glob is every OTHER module's source.
+        // ESLint expands this dynamically via the `from: ["packages/modules/!(<self>)/**"]` pattern
+        // when the rule is set up by `scripts/generate-eslint-zones.ts` (run as part of lint setup).
+        {
+          target: "packages/modules/*/src/**/*",
+          from: "packages/modules/*/src/**/*",
+          except: ["packages/modules/*/src/index.ts"],  // a module's own index re-exports stay legal within itself
+          message: "Modules must not import sibling modules by ANY path shape (package, alias, or relative traversal). Use packages/contract for shared types."
+        },
+        // Module source may not reach into another module's package root (e.g., dist/ or non-src/ files)
+        {
+          target: "packages/modules/*/**/*",
+          from: "packages/modules/*/**/*",
+          except: ["packages/modules/*/src/**", "packages/modules/*/module.config.ts", "packages/modules/*/package.json"],
+          message: "Cross-module file references are forbidden. Use the public package surface."
+        },
+      ],
+    }],
   },
 });
 ```
@@ -389,13 +417,38 @@ After §5.1 passes, a final cheap pass greps `.next/server/`, `.next/static/`, `
 1. **Exist.**
 2. **Be byte-identical** to a freshly re-run of `scripts/generate-composition.ts` against the same inputs (determinism check — CI re-runs the generator into a scratch directory and diffs byte-for-byte against the checked-in artifact).
 3. **Reference exactly the manifest's modules** — no more, no less.
-4. **Carry a deterministic `input_hash` header** at the top of every generated file:
+4. **Carry a deterministic `input_hash` marker** at the top of every generated file, using the comment syntax valid for that file type:
+
+   **TypeScript / JavaScript (`.ts`, `.js`):**
    ```ts
    // AUTO-GENERATED — do not edit.
    // input_hash: sha256:<hex>
    // inputs: <manifest-path>@<sha256>, <module.config.ts paths>@<sha256-each>
    ```
-   The hash is computed by `scripts/generate-composition.ts` over the sorted, normalized content of the manifest plus every `module.config.ts` it consumed. CI recomputes the hash from current inputs and fails if the embedded hash does not match — this is the staleness check, with no dependency on mtime, git timestamps, CI cache restore, artifact upload/download timing, or clock skew.
+
+   **YAML (`.yml`, `.yaml`):**
+   ```yaml
+   # AUTO-GENERATED — do not edit.
+   # input_hash: sha256:<hex>
+   # inputs: <manifest-path>@<sha256>, <module.config.ts paths>@<sha256-each>
+   matrix:
+     - ...
+   ```
+
+   **JSON (`.json` — comments not legal):** embed as top-level keys:
+   ```json
+   {
+     "_generated": true,
+     "_input_hash": "sha256:<hex>",
+     "_inputs": { "<manifest-path>": "<sha256>", "...": "..." },
+     "modules": ["reclaimrx", "paysync"]
+   }
+   ```
+   The validator strips `_`-prefixed keys before comparing the rest of `manifest.json` against the manifest's `modules` list.
+
+   The hash is computed by `scripts/generate-composition.ts` over the sorted, normalized content of the manifest plus every `module.config.ts` it consumed, using a stable serializer (JSON-canonical for objects, LF line endings). CI recomputes the hash from current inputs and fails if the embedded hash does not match — this is the staleness check, with no dependency on mtime, git timestamps, CI cache restore, artifact upload/download timing, or clock skew.
+
+   The YAML `composition-matrix.yml` is therefore valid YAML and consumable by `yq -o=json '.matrix' …` (as referenced in §6.2). The TS files are valid TypeScript. The JSON file is parseable JSON.
 
 mtime is NOT used for staleness anywhere in the pipeline. The pre-build hook in `portal/operator/next.config.ts` (introduced in §2) is rewritten to recompute the hash and refuse the build if it differs — same content-addressed mechanism, same failure mode regardless of which environment the build runs in.
 
@@ -498,6 +551,7 @@ This addresses codex BLOCK #5: matrix coverage is mechanically generated, scoped
 | `scripts/audit-composition.ts` runs post-build | Server-graph audit (.nft.json + .next/trace) + client-bundle audit (stats JSON), keyed by `surfaceKinds`, + string-search backstop + content-hash determinism check |
 | `scripts/generate-ci-matrix.ts` runs on module-config changes | Writes `packages/shell/src/_generated/composition-matrix.yml`; static `.github/workflows/composition-matrix.yml` reads it via `fromJSON(yq)`; pairwise scoped to overlap on shellSurfaces ∪ backends ∪ schemas ∪ queues ∪ jobs ∪ buckets ∪ integrations ∪ env ∪ cache-key/redis/rabbit namespaces |
 | `scripts/lint-tsconfig.ts` runs in CI | Rejects `@modules/*` path aliases (or any alias that resolves to a module package root) |
+| `scripts/generate-eslint-zones.ts` runs at lint setup | Generates the `import/no-restricted-paths` zone array from the current set of `packages/modules/*/` directories. Catches sibling-relative traversal (`../../<sibling>/...`) that doesn't carry a `modules/` segment in the resolved string. Closes the pass-3 BLOCK-1 residual |
 | Workspace-root `eslint.config.js` enforces import-boundary on six bypass paths | Static ESM, re-exports, dynamic import(), require(), relative traversal, path aliases, side-effect imports — all forbidden outside `_generated/` |
 | `module.config.ts` is the per-module source of truth | Includes `requires.{backends,sharedServices,schemas,migrations,env,health,seedData,queues,jobs,buckets,integrations,secrets}` and `shellSurfaces.{navOrderSlots,cacheTagPrefixes,commandPaletteScopes,routePrefixes}` |
 | `module.config.ts` purity gate | Compile-step check that each `module.config.ts` has zero imports from sibling modules, no `next/*` imports, no I/O. CI fails on violation |
