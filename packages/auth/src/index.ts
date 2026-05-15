@@ -1,3 +1,29 @@
 // Public surface of @infinityrx/auth.
-// Plan B Task 5+ populates these re-exports as the modules are added.
-export {};
+
+export {
+  AccessClaimsSchema,
+  RefreshClaimsSchema,
+  ISSUER,
+  AUDIENCE,
+  type AccessClaims,
+  type RefreshClaims,
+} from "./claims.js";
+
+export {
+  EnvClaimSchema,
+  resolveEnvClaim,
+  type EnvClaim,
+} from "./env-claim.js";
+
+export {
+  signAccessToken,
+  signRefreshToken,
+  verifyTokenRaw,
+  assertJwtSecret,
+} from "./crypto.js";
+
+export {
+  AuthError,
+  AUTH_ERROR_MESSAGES,
+  type AuthErrorCode,
+} from "./errors.js";
