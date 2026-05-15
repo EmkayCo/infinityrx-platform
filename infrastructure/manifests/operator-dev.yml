@@ -1,0 +1,32 @@
+# Dev / reference full-composition manifest.
+# Used by `npm run operator:dev` and by Plan A's manifest-validator test.
+# Modules list is EMPTY in Plan A — Plan D's reclaimrx scaffolding adds it.
+instance_name: operator-dev
+audience: operator
+auth_profile: development
+branding:
+  primary_color: "#1f2937"
+modules: []
+required_backends: []
+required_shared_services:
+  - postgres
+  - redis
+required_schemas: []
+required_migrations: []
+required_env:
+  - JWT_SECRET
+  - NEXTAUTH_SECRET
+  - INFINITYRX_ENV
+required_health: []
+required_seed_data: []
+required_queues: []
+required_jobs: []
+required_buckets: []
+required_integrations: []
+required_secrets:
+  - secret://jwt/signing-key
+  - secret://nextauth/secret
+migration_policy:
+  ordering: explicit
+  rollback: none
+  pre_check: dry_run_required

@@ -1,0 +1,50 @@
+# Reference manifest documenting the shape of a "customer buys just ReclaimRx" composition.
+# NOT auto-deployed. Plan D wires up the actual reclaimrx module package + its requires.* fields.
+instance_name: example-reclaimrx-standalone
+audience: operator
+auth_profile: production
+modules:
+  - reclaimrx
+required_backends:
+  - reclaimrx
+  - core-platform
+required_shared_services:
+  - postgres
+  - redis
+required_schemas:
+  - reclaimrx_v1
+  - core_v1
+required_migrations:
+  - core
+  - reclaimrx
+required_env:
+  - JWT_SECRET
+  - NEXTAUTH_SECRET
+  - INFINITYRX_ENV
+  - DATABASE_URL_CORE
+  - DATABASE_URL_RECLAIMRX
+  - REDIS_URL
+required_health:
+  - http://core-platform:8000/health
+  - http://reclaimrx:8020/health
+required_seed_data:
+  - reclaimrx/fwa-rules
+required_queues:
+  - reclaimrx.investigation.opened
+required_jobs:
+  - core.audit_chain_verify
+  - core.session_reaper
+  - reclaimrx.graph_anomaly_scan
+required_buckets:
+  - reclaimrx-investigation-evidence
+  - core-export-staging
+required_integrations: []
+required_secrets:
+  - secret://jwt/signing-key
+  - secret://nextauth/secret
+  - secret://db/core
+  - secret://db/reclaimrx
+migration_policy:
+  ordering: explicit
+  rollback: none
+  pre_check: dry_run_required

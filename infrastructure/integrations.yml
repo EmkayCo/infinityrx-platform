@@ -1,0 +1,3 @@
+# Allow-list of external network endpoints the platform may call out to.
+# Empty in Plan A; populated as modules declare requires.integrations.
+allowed_integrations: []
