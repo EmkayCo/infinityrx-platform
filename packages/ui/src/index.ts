@@ -14,3 +14,10 @@ export { AppShell, type AppShellProps } from "./shells/AppShell.js";
 
 // DnD
 export { DragHandle, type DragHandleProps } from "./dnd/DragHandle.js";
+
+// Charts
+export { KPICard, type KPICardProps } from "./charts/KPICard.js";
+export { LineChart, type LineChartProps } from "./charts/LineChart.js";
+
+// Command
+export { CommandPalette, type CommandPaletteProps, type CommandItem } from "./command/CommandPalette.js";
