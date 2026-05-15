@@ -41,6 +41,7 @@ from shared.observability.slow_query import install_slow_query_logger
 
 from ._shim import db as db_shim
 from .api import router as api_router
+from .jobs.seed import ensure_audit_chain_job
 from .audit.middleware import AuditContext, AuditMiddleware
 from .auth import auth_api_router, configure_core_auth
 from .auth._db import get_session as auth_get_session
@@ -113,6 +114,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.exception("slow_query_logger_install_failed")
     bus = get_event_bus()
     await bus.start()
+
+    # H-07: seed the daily audit chain verification job row if absent.
+    # Uses the sync shim session so this works in both test and prod mode.
+    try:
+        SessionLocal = db_shim.get_sessionmaker()
+        with SessionLocal() as _seed_db:
+            ensure_audit_chain_job(_seed_db)
+    except Exception:  # pragma: no cover - best-effort; job row missing != broken startup
+        logger.exception("audit_chain_job_seed_failed")
+
     logger.info("service_started", extra={"service": "core-platform"})
 
     try:

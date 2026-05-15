@@ -21,15 +21,16 @@ TENANT = uuid.UUID("11111111-1111-1111-1111-111111111111")
 ADMIN = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 
 
-def test_default_rules_cover_five_events():
+def test_default_rules_cover_required_events():
     keys = [r.event_pattern for r in DEFAULT_RULES]
-    assert len(keys) == 5
+    assert len(keys) == 6
     assert set(keys) == {
         event_types.EXCLUSION_MATCH_FOUND,
         event_types.JOB_FAILED,
         event_types.SFTP_DELIVERY_FAILED,
         event_types.ANOMALY_DETECTED,
         event_types.BATCH_FAILED,
+        event_types.AUDIT_CHAIN_BROKEN,
     }
 
 
