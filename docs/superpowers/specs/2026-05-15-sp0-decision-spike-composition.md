@@ -1,6 +1,12 @@
 # SP-0 Decision Spike — Composition Mechanism
 
-**Status:** v2 drafted 2026-05-15 incorporating codex pass-1 findings (3 BLOCK + 3 CONCERN): bypass paths in import enforcement, audit false-negatives via string-search-only, manifest gaps (seed data, queues, jobs, buckets, integrations, secrets), lint rule too narrow (dynamic import, re-exports, path aliases), pairwise matrix scoping, and missing §7 tasks. v2 closes them inline below.
+**Status:** v3 drafted 2026-05-15. v2 (codex pass-1 closure) was committed `178fcf1`; codex pass-2 verified 2/3 BLOCKs CLOSED + 1/3 PARTIALLY-CLOSED, 1/3 CONCERNs CLOSED + 2/3 PARTIALLY-CLOSED, plus 1 new BLOCK + 2 new CONCERNs + 1 NIT. v3 closes the residuals:
+- Lint selectors broadened to catch require/import()/export through relative-path traversal and TS path-alias forms, not just `@infinityrx/module-*` package specifiers.
+- Pairwise CI matrix inputs broadened beyond `shellSurfaces` — now also pairs modules that share any of `requires.{backends, schemas, queues, jobs, buckets, integrations, env}` or declared cache-key namespaces.
+- Secret-reference validation split into PR-CI offline check (URI shape, catalog ownership) and environment-bound check (live secret-manager existence at deploy / boot).
+- Generated-artifact staleness switched from mtime to content-hash; generators emit `// input_hash: <sha256>` headers and CI re-runs the generator and diffs bytes.
+- Composition audit now separates server-route trace expectations from client-bundle stats expectations; client-only modules are proved present via bundle stats, not server traces.
+- Generated matrix path normalized to one location (`packages/shell/src/_generated/composition-matrix.yml` checked in; CI symlinks to `.github/workflows/composition-matrix.yml` at workflow runtime).
 **Addresses:** Codex BLOCKs **#1 (tree-shaking asserted not designed), #3 (deployment manifest underspecified), and #5 (cross-composition matrix too weak)** from the main SP-0 spec gate review. Closing this completes the spike.
 **Decision:** Build a **generated composition artifact** driven by a richer deployment manifest, enforced by a no-sibling-imports lint rule, verified by a build-time audit, and exercised by a per-PR cross-composition CI matrix.
 
@@ -52,7 +58,7 @@ A `["reclaimrx"]`-only manifest produces a generated file with ONLY the `reclaim
 
 ### Generator's pre-build hook
 
-`portal/operator/next.config.ts` adds a build-time hook that fails the build if `_generated/` is stale relative to manifest mtime or any `module.config.ts` mtime. CI runs the generator explicitly; developers run via `npm run prebuild`.
+`portal/operator/next.config.ts` adds a build-time hook that recomputes the `input_hash` from the current manifest + `module.config.ts` files and fails the build if it does not match the `input_hash` header embedded in `_generated/` artifacts (content-addressed staleness — see §5.3 for rationale). CI runs the generator explicitly; developers run via `npm run prebuild`. No mtime comparison anywhere in the pipeline.
 
 ### What the generator does NOT do
 
@@ -194,7 +200,11 @@ export const config = {
     cacheTagPrefixes: ["reclaimrx:"],
     commandPaletteScopes: ["reclaimrx.*"],
     routePrefixes: ["/reclaimrx"],
+    cacheKeyNamespaces: ["reclaimrx:"],               // additional pairwise collision input (see §6.1)
+    redisKeyPrefixes: ["tenant:*:reclaimrx:"],
+    rabbitExchanges: ["reclaimrx.events"],
   },
+  surfaceKinds: ["server", "client"],                 // §5.1: drives server-trace vs client-bundle audit expectations
   entitlements: {                                     // future: runtime entitlements when sub-tenant features land
     requiredScope: null,
   },
@@ -210,7 +220,19 @@ export const config = {
 4. Computes the **transitive closure** of every key under `requires.*` — `backends`, `sharedServices`, `schemas`, `migrations`, `env`, `health`, `seedData`, `queues`, `jobs`, `buckets`, `integrations`, `secrets`.
 5. Compares against the manifest's explicit `required_*` fields. **Any mismatch (missing or extra) fails the build.**
 6. Verifies `migration_policy.ordering == "explicit"` resolves a topologically valid sequence given the dependency graph.
-7. Verifies every `secret://...` reference in `required_secrets` resolves at the configured secret manager URL (dry-run check, not value disclosure).
+7. **Secret-reference validation (PR-CI, OFFLINE only)** — for every `secret://...` reference in `required_secrets`:
+   a. URI shape passes the secret-reference grammar (`secret://<scope>/<name>` with `<scope>` ∈ enum, `<name>` matches `[a-z0-9-]+`).
+   b. The scope is declared in `infrastructure/secret-catalog.yml` (committed; lists which scopes the platform owns).
+   c. The (scope, name) pair is owned by at most one module's `module.config.ts` (no duplicates).
+   PR-CI does NOT call the live secret manager. Live-existence is asserted at deploy / boot only (see §3.X below). This prevents PR builds from requiring production secret-manager access.
+
+### Environment-bound secret existence check (§3.X)
+
+`scripts/verify-instance-secrets.ts` runs in TWO non-PR contexts:
+- At **deploy time** in the target environment's deploy pipeline (post-build, pre-rollout) — calls the configured secret manager for the target instance (dev / mock / prod) and asserts every `required_secrets` entry resolves to a non-empty value. Failure halts the rollout.
+- At **boot time** as a pre-start hook in the container's entrypoint — same checks, refuses to start the process if any required secret is missing or empty.
+
+Neither check is wired to PR CI. PR CI sees only the offline checks above.
 8. Verifies every `required_integrations` entry is in the platform's `infrastructure/integrations.yml` allow-list.
 9. Verifies every `required_queues` and `required_jobs` entry is declared in exactly one module's `module.config.ts` (no orphans, no duplicates).
 10. Verifies every `required_buckets` entry has a Terraform definition in `infrastructure/storage.tf`.
@@ -258,43 +280,57 @@ export default defineConfig({
         { group: ["next/*", "next-auth/*", "@auth/*"], message: "Framework-specific imports are forbidden outside portal/operator/app/. Move usage into a thin adapter." },
       ],
     }],
-    // Bypass path 2: re-exports (export * from "@infinityrx/module-*") — would smuggle the whole surface
-    // Bypass path 3: dynamic import("@infinityrx/module-*")
-    // Bypass path 4: require("@infinityrx/module-*")
-    // Bypass path 5: relative-path traversal into a sibling module's source
-    // Bypass path 6: TS path aliases that resolve to a module package root
+    // Bypass paths — each must be covered for THREE specifier shapes:
+    //   1. Package name      : "@infinityrx/module-<name>"
+    //   2. Relative traversal: "(../)+modules/<name>/..." or "(../)+packages/modules/<name>/..."
+    //   3. TS path alias     : "@/modules/<name>" or "@modules/<name>"
+    // Across SEVEN node types: static ESM ImportDeclaration (incl. side-effect), ExportAllDeclaration,
+    // ExportNamedDeclaration (with source), ImportExpression (dynamic import), and require() CallExpression.
+    // The `no-restricted-imports` rule above covers static ESM Import/Export for shape (1).
+    // The selectors below cover (1) dynamic forms + (2) and (3) for ALL forms.
     "no-restricted-syntax": ["error",
-      {
-        selector: "ExportAllDeclaration[source.value=/^@infinityrx\\/module-/]",
-        message: "Re-exporting from @infinityrx/module-* defeats composition isolation.",
-      },
-      {
-        selector: "ExportNamedDeclaration[source.value=/^@infinityrx\\/module-/]",
-        message: "Named re-exports from @infinityrx/module-* defeat composition isolation.",
-      },
-      {
-        selector: "ImportExpression[source.value=/^@infinityrx\\/module-/]",
-        message: "Dynamic import() of @infinityrx/module-* defeats composition isolation.",
-      },
-      {
-        selector: "CallExpression[callee.name='require'][arguments.0.value=/^@infinityrx\\/module-/]",
-        message: "require() of @infinityrx/module-* defeats composition isolation.",
-      },
-      {
-        // Relative-path traversal: importing from `../../modules/<name>/...` or `../../../packages/modules/<name>/...`
-        selector: "ImportDeclaration[source.value=/(\\.\\.\\/)+(packages\\/)?modules\\//]",
-        message: "Relative-path traversal into a sibling module is forbidden. Use packages/contract for shared types.",
-      },
-      {
-        // Path-alias bypass: `@/modules/<name>` or `@modules/<name>` (configured in tsconfig)
-        selector: "ImportDeclaration[source.value=/^@\\/?modules\\//]",
-        message: "TS path-alias references to modules are forbidden. Use packages/contract for shared types.",
-      },
-      {
-        // Side-effect imports: `import "@infinityrx/module-foo";`
-        selector: "ImportDeclaration[specifiers.length=0][source.value=/^@infinityrx\\/module-/]",
-        message: "Side-effect imports of @infinityrx/module-* defeat composition isolation.",
-      },
+      // ── Shape 1: @infinityrx/module-* package specifier (residual dynamic forms) ──
+      { selector: "ExportAllDeclaration[source.value=/^@infinityrx\\/module-/]",
+        message: "Re-exporting from @infinityrx/module-* defeats composition isolation." },
+      { selector: "ExportNamedDeclaration[source.value=/^@infinityrx\\/module-/]",
+        message: "Named re-exports from @infinityrx/module-* defeat composition isolation." },
+      { selector: "ImportExpression[source.value=/^@infinityrx\\/module-/]",
+        message: "Dynamic import() of @infinityrx/module-* defeats composition isolation." },
+      { selector: "CallExpression[callee.name='require'][arguments.0.value=/^@infinityrx\\/module-/]",
+        message: "require() of @infinityrx/module-* defeats composition isolation." },
+      { selector: "ImportDeclaration[specifiers.length=0][source.value=/^@infinityrx\\/module-/]",
+        message: "Side-effect imports of @infinityrx/module-* defeat composition isolation." },
+
+      // ── Shape 2: relative-path traversal `(../)+modules/<name>` or `(../)+packages/modules/<name>` ──
+      { selector: "ImportDeclaration[source.value=/(\\.\\.\\/)+(packages\\/)?modules\\//]",
+        message: "Relative-path traversal into a sibling module is forbidden. Use packages/contract." },
+      { selector: "ExportAllDeclaration[source.value=/(\\.\\.\\/)+(packages\\/)?modules\\//]",
+        message: "Relative re-export from a sibling module is forbidden." },
+      { selector: "ExportNamedDeclaration[source.value=/(\\.\\.\\/)+(packages\\/)?modules\\//]",
+        message: "Relative named re-export from a sibling module is forbidden." },
+      { selector: "ImportExpression[source.value=/(\\.\\.\\/)+(packages\\/)?modules\\//]",
+        message: "Dynamic import() via relative traversal into a sibling module is forbidden." },
+      { selector: "CallExpression[callee.name='require'][arguments.0.value=/(\\.\\.\\/)+(packages\\/)?modules\\//]",
+        message: "require() via relative traversal into a sibling module is forbidden." },
+      { selector: "ImportDeclaration[specifiers.length=0][source.value=/(\\.\\.\\/)+(packages\\/)?modules\\//]",
+        message: "Side-effect import via relative traversal into a sibling module is forbidden." },
+
+      // ── Shape 3: TS path-alias forms `@/modules/<name>` or `@modules/<name>` ──
+      { selector: "ImportDeclaration[source.value=/^@\\/?modules\\//]",
+        message: "TS path-alias references to modules are forbidden. Use packages/contract." },
+      { selector: "ExportAllDeclaration[source.value=/^@\\/?modules\\//]",
+        message: "TS path-alias re-export from a module is forbidden." },
+      { selector: "ExportNamedDeclaration[source.value=/^@\\/?modules\\//]",
+        message: "TS path-alias named re-export from a module is forbidden." },
+      { selector: "ImportExpression[source.value=/^@\\/?modules\\//]",
+        message: "TS path-alias dynamic import() of a module is forbidden." },
+      { selector: "CallExpression[callee.name='require'][arguments.0.value=/^@\\/?modules\\//]",
+        message: "TS path-alias require() of a module is forbidden." },
+      { selector: "ImportDeclaration[specifiers.length=0][source.value=/^@\\/?modules\\//]",
+        message: "TS path-alias side-effect import of a module is forbidden." },
+
+      // Belt-and-suspenders: a separate scripts/lint-tsconfig.ts step (see §7) refuses to even register a path
+      // alias whose target resolves into `packages/modules/`, so Shape 3 cannot become valid at the compiler level.
     ],
     // Force `import type` discrimination so the audit can distinguish type-only references from runtime ones
     "@typescript-eslint/consistent-type-imports": ["error", { prefer: "type-imports", fixStyle: "separate-type-imports" }],
@@ -316,37 +352,54 @@ After `next build`, a verification step asserts:
 
 ### 5.1 Module-graph audit (primary mechanism, not string-search)
 
-`next build` is invoked with `--experimental-build-trace` (or equivalent flag for the installed Next.js version) which writes per-route trace files at `.next/server/app/**/page.js.nft.json` and a project-wide trace at `.next/trace`. These declare *every file in every server route's module graph*. The audit:
+`next build` is invoked with `--experimental-build-trace` (or equivalent flag for the installed Next.js version) which writes per-route trace files at `.next/server/app/**/page.js.nft.json` and a project-wide trace at `.next/trace`. The audit separates **server-graph evidence** from **client-bundle evidence** because modules can ship surfaces of either kind (or both):
+
+Every module's `module.config.ts` MUST declare `surfaceKinds: ["server", "client"] | ["server"] | ["client"]` so the audit knows which evidence to expect. Default if unspecified is `["server", "client"]`.
+
+#### Server-graph audit (for modules with `"server"` in surfaceKinds)
 
 1. Loads every `.nft.json` and the `.next/trace` file — these are the authoritative module-graph manifests Next.js itself uses for serverless deploy slicing.
 2. Resolves every traced file against the workspace package map (built once from `pnpm-lock.yaml` + `node_modules/.pnpm/`).
-3. Computes the set of **packages actually traced into the build** (transitive closure of imports from any compiled route + middleware + instrumentation file).
-4. Asserts: `packages_in_build ∩ omitted_modules == ∅`. If any omitted module's package shows up in *any* route's `.nft.json`, the audit fails with the exact route file that pulled it.
-5. Asserts: `packages_in_build ⊇ manifest_modules`. If a required module is missing from every route's trace, the audit fails.
+3. Computes the set of **server-traced packages** (transitive closure of imports from any compiled route + middleware + instrumentation file).
+4. Asserts: `server_traced_packages ∩ omitted_modules == ∅`. If any omitted module's package shows up in *any* route's `.nft.json`, the audit fails with the exact route file that pulled it.
+5. Asserts: for every manifest module M with `"server"` in `surfaceKinds`, M ∈ `server_traced_packages`. If a required server-bearing module is missing from every route's trace, the audit fails.
 
-This is a module-graph fact, not a string heuristic. It survives minification, code-splitting, dynamic import resolution, and tree-shaking decisions made by SWC/webpack/Turbopack.
+#### Client-bundle audit (for modules with `"client"` in surfaceKinds)
 
-### 5.2 Bundle-graph supplement (catches client-bundle leakage)
+1. Reads `.next/build-manifest.json` + `.next/app-build-manifest.json` + per-page chunk manifests + SWC/webpack stats (`.next/analyze/*.json`).
+2. Resolves every chunk back to source packages via stats `modules[].name`.
+3. Computes `client_bundled_packages`.
+4. Asserts: `client_bundled_packages ∩ omitted_modules == ∅`.
+5. Asserts: for every manifest module M with `"client"` in `surfaceKinds`, M ∈ `client_bundled_packages`.
 
-For the client-side bundle, the audit reads `.next/build-manifest.json` + `.next/app-build-manifest.json` + the per-page chunk manifests, plus the SWC/webpack stats JSON (`next build --profile` writes `.next/analyze/*.json`). The audit:
+#### Both-graph absence (universal)
 
-1. Resolves every chunk back to source modules via stats `modules[].name`.
-2. Asserts no chunk's modules include any omitted module's package.
+Regardless of `surfaceKinds`, every omitted module must be absent from BOTH the server trace AND the client bundle. Presence in either is a failure.
 
-### 5.3 String-search backstop (cheap defense in depth)
+This is module-graph evidence, not a string heuristic. It survives minification, code-splitting, dynamic import resolution, and tree-shaking decisions made by SWC/webpack/Turbopack. The client-only / server-only split prevents false failures for modules that legitimately don't appear in one of the two evidence sources.
 
-After 5.1 and 5.2 pass, a final cheap pass greps `.next/server/`, `.next/static/`, `.next/build-manifest.json`, `.next/routes-manifest.json`, and `.next/required-server-files.json` for omitted-module package names and known route prefixes. This catches the long-tail case where a module's code reaches the build via a path the module graph didn't capture (e.g., a string-interpolated dynamic require evaluated at runtime). String-search-only would be insufficient (false negatives from minification, identifier mangling), but as a backstop *after* the graph audit it's a free extra check.
+### 5.2 String-search backstop (cheap defense in depth)
 
-### 5.4 Generated-file integrity
+After §5.1 passes, a final cheap pass greps `.next/server/`, `.next/static/`, `.next/build-manifest.json`, `.next/routes-manifest.json`, and `.next/required-server-files.json` for omitted-module package names and known route prefixes. This catches the long-tail case where a module's code reaches the build via a path the module graph didn't capture (e.g., a string-interpolated dynamic require evaluated at runtime). String-search-only would be insufficient (false negatives from minification, identifier mangling), but as a backstop *after* the graph audit it's a free extra check.
 
-`_generated/module-imports.ts` / `route-mounts.ts` / `nav.ts` / `manifest.json` must:
+### 5.3 Generated-file integrity (content-hash, not mtime)
 
-1. Exist.
-2. Be byte-identical to a freshly re-run of `scripts/generate-composition.ts` against the same inputs (determinism check).
-3. Reference exactly the manifest's modules — no more, no less.
-4. Have an mtime newer than the manifest and every referenced `module.config.ts` (staleness check).
+`_generated/module-imports.ts` / `route-mounts.ts` / `nav.ts` / `manifest.json` / `composition-matrix.yml` must:
 
-### 5.5 Wiring
+1. **Exist.**
+2. **Be byte-identical** to a freshly re-run of `scripts/generate-composition.ts` against the same inputs (determinism check — CI re-runs the generator into a scratch directory and diffs byte-for-byte against the checked-in artifact).
+3. **Reference exactly the manifest's modules** — no more, no less.
+4. **Carry a deterministic `input_hash` header** at the top of every generated file:
+   ```ts
+   // AUTO-GENERATED — do not edit.
+   // input_hash: sha256:<hex>
+   // inputs: <manifest-path>@<sha256>, <module.config.ts paths>@<sha256-each>
+   ```
+   The hash is computed by `scripts/generate-composition.ts` over the sorted, normalized content of the manifest plus every `module.config.ts` it consumed. CI recomputes the hash from current inputs and fails if the embedded hash does not match — this is the staleness check, with no dependency on mtime, git timestamps, CI cache restore, artifact upload/download timing, or clock skew.
+
+mtime is NOT used for staleness anywhere in the pipeline. The pre-build hook in `portal/operator/next.config.ts` (introduced in §2) is rewritten to recompute the hash and refuse the build if it differs — same content-addressed mechanism, same failure mode regardless of which environment the build runs in.
+
+### 5.4 Wiring
 
 `scripts/audit-composition.ts` runs as the `postbuild` script in `portal/operator/package.json`. CI fails if any check fails. The audit is the second mechanical enforcement of codex BLOCK #1 — graph-level evidence, not string-level inference.
 
@@ -365,21 +418,68 @@ CI runs `next build` + audit for these compositions on every PR:
 | **Scoped pairwise** for modules that share shell surfaces | Catches nav-route conflicts, cache-tag collisions, shared-state collisions |
 | Minimal: `["directories"]` (smallest realistic standalone product) | Ergonomic smoke test |
 
-### 6.1 Pairwise scoping (closes pass-1 CONCERN on N*(N-1)/2 blow-up)
+### 6.1 Pairwise scoping (closes pass-1 CONCERN-2 + pass-2 residual on collision-class coverage)
 
-Pairwise is NOT all-pairs. The matrix generator computes pairs from `module.config.ts.shellSurfaces`:
+Pairwise is NOT all-pairs, but the scoping inputs span more than `shellSurfaces`. The matrix generator computes pairs as the **union** of overlap predicates:
 
 ```
-pairs = { (A, B) : A != B AND shellSurfaces(A) ∩ shellSurfaces(B) ≠ ∅ }
+collisionSurfaces(M) = shellSurfaces(M)
+                    ∪ requires.backends(M)
+                    ∪ requires.schemas(M)
+                    ∪ requires.queues(M)
+                    ∪ requires.jobs(M)
+                    ∪ requires.buckets(M)
+                    ∪ requires.integrations(M)
+                    ∪ requires.env(M)
+                    ∪ cacheKeyNamespaces(M)         # declared in module.config.ts
+                    ∪ redisKeyPrefixes(M)           # declared in module.config.ts
+                    ∪ rabbitExchanges(M)            # declared in module.config.ts
+
+pairs = { (A, B) : A != B AND collisionSurfaces(A) ∩ collisionSurfaces(B) ≠ ∅ }
 ```
 
-Where the intersection considers `navOrderSlots`, `cacheTagPrefixes`, `commandPaletteScopes`, `routePrefixes`. Two modules that touch zero shared surfaces (e.g., reclaimrx + ai-nlp have disjoint nav slots, distinct cache prefixes, distinct route prefixes) do not need a pairwise build — there is no collision surface to test.
+Two modules need a pairwise build if and only if they share at least one of:
+- A shell surface (nav slot, route prefix, command-palette scope, cache-tag prefix).
+- A backend service (e.g., both call `core-platform`).
+- A database schema (e.g., both write to `core_v1`).
+- A queue, scheduled job, object-storage bucket, or external integration endpoint.
+- An env var (would mean ambiguous configuration).
+- A cache-key namespace, Redis key prefix, or RabbitMQ exchange.
 
-In practice, with 13 modules this collapses 78 unconstrained pairs to roughly 15-25 surface-sharing pairs. The exact set is computed and printed at PR time so the count is auditable.
+This catches the collision classes pass-2 flagged: shared-backend interaction effects, schema migration ordering between modules, queue/job contention, bucket-name clashes, integration egress allow-list interactions, env-var conflicts, cache poisoning across modules.
+
+In practice, with 13 modules this collapses 78 unconstrained pairs to roughly 30-45 collision-bearing pairs (more than the shellSurfaces-only count, but still far below 78). The exact set is computed and printed at PR time so the count is auditable; CI logs both the pair count and the surface-overlap reason for each pair.
+
+The `core-platform` module is excluded from pair generation because it is universal (every composition includes it) — pairs involving it would just be `(M, core-platform)` for all M, which is already exercised by the single-module matrix entries.
 
 ### 6.2 Generator wiring
 
-The matrix is generated from `packages/modules/*/module.config.ts` files — `scripts/generate-ci-matrix.ts` writes `.github/workflows/composition-matrix.yml` from the module registry. New module → new matrix entries automatically. The generated matrix file is checked in; CI fails if `_generated/composition-matrix.yml` is stale vs. any `module.config.ts` mtime (same staleness pattern as §2).
+The matrix is generated from `packages/modules/*/module.config.ts` files — `scripts/generate-ci-matrix.ts` writes **a single canonical output**: `packages/shell/src/_generated/composition-matrix.yml` (checked in, content-hash header per §5.3).
+
+GitHub Actions consumes that file via a workflow that reads it as a job input — there is no separate `.github/workflows/composition-matrix.yml` artifact (avoiding the dual-path inconsistency flagged by codex pass-2). The composition-matrix workflow at `.github/workflows/composition-matrix.yml` is a **static, checked-in workflow file** that loads its matrix dynamically from the `_generated/composition-matrix.yml`:
+
+```yaml
+# .github/workflows/composition-matrix.yml (static; do NOT regenerate)
+name: composition-matrix
+on: [pull_request, push]
+jobs:
+  compositions:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        composition: ${{ fromJSON(needs.load.outputs.matrix) }}
+    needs: load
+  load:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.read.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: echo "matrix=$(yq -o=json '.matrix' packages/shell/src/_generated/composition-matrix.yml)" >> $GITHUB_OUTPUT
+```
+
+New module → `scripts/generate-ci-matrix.ts` emits new entries into `_generated/composition-matrix.yml`. The static workflow picks them up at the next run. CI fails if the generated file's `input_hash` does not match a fresh recomputation against current `module.config.ts` content (content-addressed staleness, identical to §5.3).
 
 ### 6.3 Execution policy
 
@@ -395,8 +495,8 @@ This addresses codex BLOCK #5: matrix coverage is mechanically generated, scoped
 |---|---|
 | `scripts/generate-composition.ts` runs pre-build | New script in SP-0 scope; `_generated/` directory in `packages/shell/src/`; deterministic output (byte-identical re-runs) |
 | `scripts/validate-manifest.ts` runs in CI | Enforces transitive closure across backends, services, schemas, migrations, env, health, seed data, queues, jobs, buckets, integrations, secrets |
-| `scripts/audit-composition.ts` runs post-build | Module-graph audit (.nft.json + .next/trace) + bundle-graph audit (stats JSON) + string-search backstop + generated-file determinism+staleness checks |
-| `scripts/generate-ci-matrix.ts` runs on module-config changes | Writes the GitHub Actions matrix file; scoped pairwise from `shellSurfaces` overlap, not all-pairs |
+| `scripts/audit-composition.ts` runs post-build | Server-graph audit (.nft.json + .next/trace) + client-bundle audit (stats JSON), keyed by `surfaceKinds`, + string-search backstop + content-hash determinism check |
+| `scripts/generate-ci-matrix.ts` runs on module-config changes | Writes `packages/shell/src/_generated/composition-matrix.yml`; static `.github/workflows/composition-matrix.yml` reads it via `fromJSON(yq)`; pairwise scoped to overlap on shellSurfaces ∪ backends ∪ schemas ∪ queues ∪ jobs ∪ buckets ∪ integrations ∪ env ∪ cache-key/redis/rabbit namespaces |
 | `scripts/lint-tsconfig.ts` runs in CI | Rejects `@modules/*` path aliases (or any alias that resolves to a module package root) |
 | Workspace-root `eslint.config.js` enforces import-boundary on six bypass paths | Static ESM, re-exports, dynamic import(), require(), relative traversal, path aliases, side-effect imports — all forbidden outside `_generated/` |
 | `module.config.ts` is the per-module source of truth | Includes `requires.{backends,sharedServices,schemas,migrations,env,health,seedData,queues,jobs,buckets,integrations,secrets}` and `shellSurfaces.{navOrderSlots,cacheTagPrefixes,commandPaletteScopes,routePrefixes}` |
@@ -404,8 +504,11 @@ This addresses codex BLOCK #5: matrix coverage is mechanically generated, scoped
 | Manifest schema is YAML at `infrastructure/manifests/<instance>.yml` | New directory in SP-0 scope; existing `.env.*` pattern stays for instance-specific secret *values*; manifest holds secret *references* only |
 | `schemas/instance-manifest.schema.json` published | Strict-mode JSON Schema (Ajv `additionalProperties: false`); validator runs before transitive-closure check |
 | Generated artifact determinism | `scripts/generate-composition.ts` is hermetic — same inputs produce byte-identical output; CI re-runs the generator and diffs against checked-in `_generated/` |
-| Generated artifact staleness | Pre-build hook fails build if `_generated/` mtime is older than manifest or any `module.config.ts` mtime; same check is repeated in CI |
-| `scripts/validate-secret-references.ts` runs in CI | Confirms every `secret://...` in the manifest resolves at the configured secret manager (existence, not value disclosure); also runs at instance boot |
+| Generated artifact staleness | Content-addressed: every generated file embeds `// input_hash: sha256:<hex>`; pre-build hook and CI both recompute and compare. **No mtime comparisons** anywhere |
+| `scripts/validate-secret-references.ts` runs in PR CI | **Offline only**: URI shape grammar + `infrastructure/secret-catalog.yml` ownership + uniqueness across `module.config.ts`. No live secret-manager calls |
+| `scripts/verify-instance-secrets.ts` runs at deploy + boot | **Environment-bound**: calls the target instance's configured secret manager; halts rollout / refuses to start if any required secret is missing. Never runs in PR CI |
+| Module `surfaceKinds` declaration | Each `module.config.ts` declares `surfaceKinds: ["server"|"client", ...]`; audit uses it to apply server-trace vs client-bundle expectations correctly |
+| Composition matrix workflow is static | `.github/workflows/composition-matrix.yml` is a hand-written workflow that reads `packages/shell/src/_generated/composition-matrix.yml` at runtime via `fromJSON(yq)`. Single canonical generated path; no path inconsistency |
 | Module-config orphan check | CI fails if a `module.config.ts` declares a queue/job/bucket/integration not present in the workspace's declared catalog, or if a catalog entry has no declaring module |
 
 ## 8. Closing original spec gate BLOCKs
