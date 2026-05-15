@@ -2,7 +2,7 @@
 
 **Branch:** `wave/B10-w5-plan-c`
 **Base branch:** `wave/B10-w5` (commit `984eff2`)
-**Final HEAD SHA:** TBD — filled after Task 7 commit lands
+**Final HEAD SHA:** `0700af7`
 
 ---
 
