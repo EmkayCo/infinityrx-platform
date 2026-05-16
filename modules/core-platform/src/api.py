@@ -27,23 +27,36 @@ from .notifications.service import NotificationService
 
 
 def _audit_require_permission(permission: str):
-    """Permission gate for the audit router (CurrentUser role-based)."""
+    """Permission gate for the audit router.
 
-    def _dep(user: Any = None) -> Any:
-        from fastapi import Depends  # noqa: PLC0415
+    Checks that the caller's ``CurrentUser.permissions`` contains the
+    requested *permission* string (``module:action`` format).
 
-        def _inner(current: Any = Depends(current_user)) -> Any:
-            if "tenant_admin" not in getattr(current, "roles", []):
-                raise HTTPException(status_code=403, detail={"error": "forbidden", "message": f"missing permission {permission}"})
-            return current
+    Backward-compat: ``tenant_admin`` and ``platform_admin`` roles implicitly
+    possess all ``audit.*`` permissions because the RBAC layer (B12 slice 2+)
+    will encode this declaratively.  Until then, this shim grants access if
+    the permission is present OR the caller holds a privileged role.
 
-        return _inner()
-
+    HIGH-2 fix (B12-S1 v2): v1 checked only ``tenant_admin`` role, ignoring
+    the ``permission`` string entirely — any tenant_admin could access all
+    audit endpoints regardless of permission grants.
+    """
     from fastapi import Depends  # noqa: PLC0415
 
+    _PRIVILEGED_ROLES = frozenset({"tenant_admin", "platform_admin"})
+
     def _dep_factory(current: Any = Depends(current_user)) -> Any:
-        if "tenant_admin" not in getattr(current, "roles", []):
-            raise HTTPException(status_code=403, detail={"error": "forbidden", "message": f"missing permission {permission}"})
+        user_permissions: tuple = getattr(current, "permissions", ())
+        user_roles: tuple = getattr(current, "roles", ())
+        has_permission = permission in user_permissions
+        # Backward-compat: privileged roles implicitly hold all audit.* perms
+        # until the RBAC layer encodes this declaratively (B12 slice 2+).
+        has_privileged_role = bool(set(user_roles) & _PRIVILEGED_ROLES)
+        if not has_permission and not has_privileged_role:
+            raise HTTPException(
+                status_code=403,
+                detail={"error": "forbidden", "message": f"missing permission {permission}"},
+            )
         return current
 
     return _dep_factory

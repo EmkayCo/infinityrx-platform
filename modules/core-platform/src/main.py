@@ -192,28 +192,34 @@ def _audit_session_factory():
 def _audit_user_resolver(request: Request) -> AuditContext | None:
     """Resolve tenant/user from bearer token for audit logging.
 
+    Uses the same ``get_current_user`` path as the request auth stack so
+    audit context reflects the same user the auth decision would accept —
+    revoked tokens and inactive users yield None (no attribution) rather
+    than being incorrectly attributed.
+
+    MEDIUM-1 fix (B12-S1 v2): v1 called ``decode_token()`` directly, which
+    would attribute audit entries to callers whose tokens the auth path
+    rejects (revoked or for inactive users).
+
     Gracefully falls back to None (unauthenticated) when no valid JWT is
-    present — AuditMiddleware skips the audit write for unauthenticated calls
-    (e.g., /auth/login itself). Returns None rather than raising so that the
-    middleware never fails a request due to resolver errors.
+    present — AuditMiddleware skips the audit write for unauthenticated
+    calls (e.g., /auth/login itself). Returns None rather than raising so
+    that the middleware never fails a request due to resolver errors.
     """
     try:
         from shared.auth.dependencies import get_current_user  # noqa: PLC0415
-        from shared.auth.jwt_tokens import decode_token  # noqa: PLC0415
-        from shared.auth.exceptions import InvalidTokenError, ExpiredTokenError  # noqa: PLC0415
         from fastapi.security.utils import get_authorization_scheme_param  # noqa: PLC0415
 
         auth_header = request.headers.get("Authorization", "")
         scheme, token = get_authorization_scheme_param(auth_header)
         if scheme.lower() != "bearer" or not token:
             return None
-        claims = decode_token(token)
-        tenant_id = claims.tenant_id
-        if tenant_id is None:
-            return None
+        # Route through the full auth stack (decode + revocation + inactive check).
+        # Any rejection (401) is caught below and maps to None.
+        user = get_current_user(token=token)
         return AuditContext(
-            tenant_id=tenant_id,
-            user_id=claims.user_id,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
         )
     except Exception:  # noqa: BLE001 — best-effort; never fail the request
         return None
