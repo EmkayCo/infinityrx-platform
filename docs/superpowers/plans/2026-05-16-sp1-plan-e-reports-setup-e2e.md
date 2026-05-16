@@ -377,6 +377,7 @@ Plan E is complete when ALL of the following are true:
 - [ ] Production-bundle check CI step: no `RoleSwitcherChip` string in `.next/static/chunks/`
 - [ ] qa-harness exports unreachable CI step: build-manifest.json scan confirms no production chunk references `qa-harness` or `RoleSwitcher` (catches tree-shaking failures not caught by string grep alone)
 - [ ] echo/ surface wrapped into `packages/modules/paysync/src/surfaces/echo/` with `EchoClient`; `echo_run_status_received` Inbox kind added to taxonomy + INBOX_KIND_ROLE + module.config.ts
+- [ ] `EchoRunStatusCard.tsx` exists as a typed stub (accepts `item: InboxItem` prop, renders `<div data-testid="inbox-card-echo_run_status_received">{item.kind}</div>`, has a unit test); real implementation deferred to follow-on sprint — gate does NOT require full implementation, only that it is type-safe and not empty
 - [ ] E2E step added for echo/ surface: navigate to `/admin/paysync/echo` via module route → page renders Echo Spec 400 runs table
 - [ ] All 9 original portal surface directories deleted; no broken imports
 - [ ] `portal/operator/app/admin/paysync/echo/` deleted only AFTER E2E confirms module route functional

@@ -240,6 +240,9 @@ success. No WebSocket in SP-1.
 
 **BFF stub** (`src/bff/inbox.ts`): returns an empty array `[]` typed as `InboxItem[]`.
 Plan B replaces the stub with a real call to `GET /api/v1/billing/inbox?role=<role>`.
+**This stub is NOT a complete Inbox implementation** — it is the minimum required for the
+Plan A gate (module typechecks; mock renders correctly). The Inbox gate criteria below
+explicitly marks this as "stub; real implementation in Plan B."
 
 **Tests:**
 - `types.test.ts`: assert `INBOX_KIND_ROLE` has an entry for every value in `InboxItemKind`
@@ -513,6 +516,9 @@ Plan A is complete when ALL of the following are true:
 - [ ] `UploadsClient` and `InboxClient` interfaces present in `packages/contract/`
 - [ ] No `RoleSwitcherChip` in module's main barrel export (checked by grep in commit hook)
 - [ ] `packages/shell/src/index.ts` exports `ModuleConfig` type (so dependents can import it)
+- [ ] `src/bff/inbox.ts` exists as a typed stub returning `[]` — gate explicitly accepts this as stub-scope; "real Inbox implementation" is Plan B gate criterion, not Plan A
+- [ ] Surface `index.ts` stubs satisfy typed SurfaceConfig shape (not empty objects) — `tsc -b` confirms
+- [ ] Fixture files: header-only CSV stubs + empty-array JSON stubs are accepted at Plan A gate — real data is Plan E scope; gate does NOT claim fixture data is complete
 
 ---
 
