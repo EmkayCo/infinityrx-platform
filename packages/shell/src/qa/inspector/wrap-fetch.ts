@@ -95,7 +95,10 @@ export function wrapFetch(
       }
     } catch (err) {
       const latencyMs = Math.round(performance.now() - start);
-      const reqHeaders = captureHeaders(init?.headers);
+      // Prefer init.headers; fall back to Request.headers when input is a Request object.
+      const reqHeaders = captureHeaders(
+        init?.headers ?? (input instanceof Request ? input.headers : undefined)
+      );
       emit({
         id: crypto.randomUUID(),
         method,
@@ -115,7 +118,10 @@ export function wrapFetch(
     const requestBody = init?.body !== undefined
       ? redactBody(capBody(tryParseJson(init.body)))
       : undefined;
-    const reqHeaders = captureHeaders(init?.headers);
+    // Prefer init.headers; fall back to Request.headers when input is a Request object.
+    const reqHeaders = captureHeaders(
+      init?.headers ?? (input instanceof Request ? input.headers : undefined)
+    );
     const resHeaders = captureHeaders(res.headers);
 
     emit({

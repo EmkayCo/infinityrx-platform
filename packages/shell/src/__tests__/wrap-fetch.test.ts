@@ -202,4 +202,17 @@ describe("wrapFetch", () => {
     // No requestHeaders key when headers are absent.
     expect(entries[0]!.requestHeaders).toBeUndefined();
   });
+
+  it("captures headers from a Request object input (not just init.headers)", async () => {
+    const innerFetch = vi.fn().mockResolvedValue(makeJsonResponse({ ok: true }));
+    const entries: InspectorEntry[] = [];
+    const req = new Request("https://x.test/", {
+      headers: { Authorization: "Bearer token-from-request", "X-Tenant-ID": "t1" },
+    });
+    await wrapFetch(innerFetch, (e) => entries.push(e))(req);
+    // Authorization from Request.headers must be captured and redacted.
+    expect(entries[0]!.requestHeaders?.["Authorization"]).toBe("<REDACTED>");
+    // Non-sensitive header from Request.headers preserved.
+    expect(entries[0]!.requestHeaders?.["X-Tenant-ID"]).toBe("t1");
+  });
 });
