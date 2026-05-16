@@ -13,6 +13,7 @@ boundary that broke, pointing directly at the LESSON-006 gap.
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
@@ -35,16 +36,19 @@ def _build_live_app():
     create the auth tables on that same engine because they live on
     ``src.auth._models.Base`` — a different declarative base than the
     shim's own ``Base`` that ``_fresh_db`` runs ``create_all`` against.
+
+    Returns ``(app, stack)`` — caller MUST call ``stack.close()`` when done.
+    The patches must stay active through ``TestClient(app).__enter__()``
+    because the lifespan resolves patched names at call time (not import time).
     """
     AuthBase.metadata.create_all(db_shim.get_engine())
-    with (
-        patch.object(main_module, "_verify_database", AsyncMock()),
-        patch.object(main_module, "get_event_bus", return_value=AsyncMock()),
-        patch.object(main_module, "dispose_engine", AsyncMock()),
-        patch.object(main_module, "reset_event_bus"),
-    ):
-        app = main_module.create_app()
-    return app
+    stack = ExitStack()
+    stack.enter_context(patch.object(main_module, "_verify_database", AsyncMock()))
+    stack.enter_context(patch.object(main_module, "get_event_bus", return_value=AsyncMock()))
+    stack.enter_context(patch.object(main_module, "dispose_engine", AsyncMock()))
+    stack.enter_context(patch.object(main_module, "reset_event_bus"))
+    app = main_module.create_app()
+    return app, stack
 
 
 def _seed_admin_user() -> User:
@@ -91,14 +95,15 @@ def test_auth_router_mounted_users_list_returns_200() -> None:
     tenant_id = admin.tenant_id
     admin_id = admin.id
 
-    app = _build_live_app()
+    app, stack = _build_live_app()
     token = create_access_token(admin_id, tenant_id, ["tenant_admin"])
 
-    with TestClient(app) as client:
-        resp = client.get(
-            "/api/v1/users",
-            headers={"Authorization": f"Bearer {token}"},
-        )
+    with stack:
+        with TestClient(app) as client:
+            resp = client.get(
+                "/api/v1/users",
+                headers={"Authorization": f"Bearer {token}"},
+            )
 
     assert resp.status_code == 200, (
         f"auth_api_router must be mounted in create_app() and the session "
@@ -118,9 +123,10 @@ def test_auth_router_mounted_no_token_returns_401_not_404() -> None:
     A 404 would indicate the route isn't mounted at all. A 401 proves the
     request reached the middleware stack that guards the mounted route.
     """
-    app = _build_live_app()
-    with TestClient(app) as client:
-        resp = client.get("/api/v1/users")
+    app, stack = _build_live_app()
+    with stack:
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/users")
 
     assert resp.status_code == 401, (
         f"route must exist and middleware must 401 unauth callers (not 404). "
@@ -140,15 +146,16 @@ def test_login_endpoint_reachable_without_auth_header() -> None:
     (``{error: "unauthenticated", detail: "Missing or invalid credentials"}``).
     """
     _seed_admin_user()  # schema + a user to query against
-    app = _build_live_app()
+    app, stack = _build_live_app()
 
     # Use an RFC-2606 test domain so Pydantic's EmailStr validator accepts
     # the value. `.local` is rejected as a reserved TLD by email-validator.
-    with TestClient(app) as client:
-        resp = client.post(
-            "/api/v1/auth/login",
-            json={"email": "nobody@example.com", "password": "wrongpass"},
-        )
+    with stack:
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/auth/login",
+                json={"email": "nobody@example.com", "password": "wrongpass"},
+            )
 
     assert resp.status_code == 401, resp.text
     body = resp.json()
@@ -165,7 +172,8 @@ def test_auth_router_mounted_route_path_exists() -> None:
     A fast, no-HTTP sanity check that complements the end-to-end tests.
     Fails fast if someone drops ``app.include_router(auth_api_router)``.
     """
-    app = _build_live_app()
+    app, stack = _build_live_app()
+    stack.close()  # no lifespan needed for a route-table inspection
     paths = {getattr(r, "path", "") for r in app.routes}
     assert any(p == "/api/v1/users" for p in paths), (
         f"/api/v1/users not in routes — auth_api_router not mounted. "

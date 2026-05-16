@@ -17,6 +17,7 @@ from .audit.api import build_audit_router
 from .bank_holidays.api import router as bank_holidays_router
 from .exclusions.api import router as exclusions_router
 from .exclusions import job_handler as _exclusion_job_handler  # noqa: F401 — registers handler
+from .jobs import verify_audit_chain_job as _audit_chain_job_handler  # noqa: F401 — registers handler
 from .files.api import router as files_router
 from .government_programs.api import router as gov_programs_router
 from .health.api import router as health_router

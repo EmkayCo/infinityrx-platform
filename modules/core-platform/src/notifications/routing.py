@@ -89,6 +89,16 @@ DEFAULT_RULES: tuple[Rule, ...] = (
         severity="critical",
         select_recipients=lambda env: [],
     ),
+    # HIPAA 2026 H-07: audit chain integrity violation — CRITICAL severity.
+    # entry_id and hash metadata only — audit entry content is never included.
+    Rule(
+        event_pattern=et.AUDIT_CHAIN_BROKEN,
+        notification_type="audit_chain_integrity_violation",
+        title="Audit chain integrity violation (HIPAA H-07)",
+        message_template="Audit chain broken at entry {entry_id} for tenant {tenant_id}. Immediate investigation required.",
+        severity="critical",
+        select_recipients=lambda env: [],
+    ),
 )
 
 

@@ -56,6 +56,12 @@ JOB_FAILED = "job.failed"
 SFTP_DELIVERY_FAILED = "sftp.delivery_failed"
 
 # ---------------------------------------------------------------------------
+# Audit chain integrity (HIPAA 2026 H-07)
+# ---------------------------------------------------------------------------
+AUDIT_CHAIN_BROKEN = "audit.chain_broken"
+AUDIT_CHAIN_VERIFIED = "audit.chain_verified"
+
+# ---------------------------------------------------------------------------
 # Notifications (emitted by the notification service itself)
 # ---------------------------------------------------------------------------
 NOTIFICATION_CREATED = "notification.created"
@@ -84,5 +90,7 @@ ALL_EVENT_TYPES: tuple[str, ...] = (
     JOB_COMPLETED,
     JOB_FAILED,
     SFTP_DELIVERY_FAILED,
+    AUDIT_CHAIN_BROKEN,
+    AUDIT_CHAIN_VERIFIED,
     NOTIFICATION_CREATED,
 )
