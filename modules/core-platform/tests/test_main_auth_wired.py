@@ -232,10 +232,18 @@ def test_tenant_resolver_rejects_revoked_token_via_middleware() -> None:
             headers={"Authorization": f"Bearer {token}"},
         )
 
-    # Middleware must 401 — revoked token must not set tenant context
+    # Middleware must 401 with its own response shape — distinguishes middleware-level
+    # rejection from route-level get_current_user rejection.
+    # Middleware shape: {"error": "unauthenticated", "detail": "Missing or invalid credentials"}
+    # Route-level shape: {"detail": {"error": "unauthorized", "message": "..."}}
     assert resp.status_code == 401, (
         f"_TenantResolver must reject revoked tokens via get_current_user. "
         f"Got {resp.status_code}: {resp.text}"
+    )
+    body = resp.json()
+    assert body.get("error") == "unauthenticated", (
+        "Response must be the middleware-level 401 (not a route-level auth rejection). "
+        f"Expected error='unauthenticated' but got: {body}"
     )
 
 
@@ -288,8 +296,14 @@ def test_tenant_resolver_rejects_inactive_user() -> None:
             headers={"Authorization": f"Bearer {token}"},
         )
 
-    # Middleware must 401 — suspended user must not set tenant context
+    # Middleware must 401 with its own response shape — distinguishes middleware-level
+    # rejection from route-level get_current_user rejection.
     assert resp.status_code == 401, (
         f"_TenantResolver must reject inactive users via get_current_user. "
         f"Got {resp.status_code}: {resp.text}"
+    )
+    body = resp.json()
+    assert body.get("error") == "unauthenticated", (
+        "Response must be the middleware-level 401 (not a route-level auth rejection). "
+        f"Expected error='unauthenticated' but got: {body}"
     )
