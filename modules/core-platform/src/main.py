@@ -2,8 +2,8 @@
 
 Ensures in-flight DB transactions and in-flight event-bus messages are
 flushed before the process exits. Without this, pod termination
-(SIGTERM â†’ 30s grace â†’ SIGKILL) can corrupt PHI/audit data â€” HIPAA
-Â§164.308(a)(1) availability + Â§164.308(a)(7) contingency.
+(SIGTERM Ã¢â€ â€™ 30s grace Ã¢â€ â€™ SIGKILL) can corrupt PHI/audit data Ã¢â‚¬â€ HIPAA
+Ã‚Â§164.308(a)(1) availability + Ã‚Â§164.308(a)(7) contingency.
 
 On startup:
     - Verify the database is reachable (SELECT 1).
@@ -16,7 +16,7 @@ On shutdown (lifespan exit OR SIGTERM OR SIGINT):
     - Log "service stopped".
 
 The SIGTERM/SIGINT handler forwards to the lifespan by raising an
-asyncio CancelledError in uvicorn's main loop â€” uvicorn then triggers
+asyncio CancelledError in uvicorn's main loop Ã¢â‚¬â€ uvicorn then triggers
 the normal lifespan shutdown path. We only install the handler when
 running under an event loop (skipped in TestClient).
 """
@@ -128,7 +128,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # exclusion job handler to trigger its self-registration on
     # default_registry (import side-effect at module load time).
     try:
-        from .exclusions import job_handler as _excl_handler  # noqa: F401 â€” side-effect import
+        from .exclusions import job_handler as _excl_handler  # noqa: F401 Ã¢â‚¬â€ side-effect import
         from .jobs.seed import seed_system_jobs
         _seed_session = db_shim.get_sessionmaker()()
         try:
@@ -196,7 +196,7 @@ def _audit_session_factory():
     Uses the shim's session factory so this works in both test and production
     mode (the shim uses SQLite in tests, Postgres in production).
     """
-    from .._shim import db as db_shim  # noqa: PLC0415 â€” deferred to avoid circular import
+    from .._shim import db as db_shim  # noqa: PLC0415 Ã¢â‚¬â€ deferred to avoid circular import
 
     @contextmanager
     def _cm():
@@ -213,30 +213,37 @@ def _audit_session_factory():
 def _audit_user_resolver(request: Request) -> AuditContext | None:
     """Resolve tenant/user from bearer token for audit logging.
 
+    Uses the same ``get_current_user`` path as the request auth stack so
+    audit context reflects the same user the auth decision would accept â€”
+    revoked tokens and inactive users yield None (no attribution) rather
+    than being incorrectly attributed.
+
+    MEDIUM-1 fix (B12-S1 v2): v1 called ``decode_token()`` directly, which
+    would attribute audit entries to callers whose tokens the auth path
+    rejects (revoked or for inactive users).
+
     Gracefully falls back to None (unauthenticated) when no valid JWT is
-    present â€” AuditMiddleware skips the audit write for unauthenticated calls
-    (e.g., /auth/login itself). Returns None rather than raising so that the
-    middleware never fails a request due to resolver errors.
+    present â€” AuditMiddleware skips the audit write for unauthenticated
+    calls (e.g., /auth/login itself). Returns None rather than raising so
+    that the middleware never fails a request due to resolver errors.
+
     """
     try:
         from shared.auth.dependencies import get_current_user  # noqa: PLC0415
-        from shared.auth.jwt_tokens import decode_token  # noqa: PLC0415
-        from shared.auth.exceptions import InvalidTokenError, ExpiredTokenError  # noqa: PLC0415
         from fastapi.security.utils import get_authorization_scheme_param  # noqa: PLC0415
 
         auth_header = request.headers.get("Authorization", "")
         scheme, token = get_authorization_scheme_param(auth_header)
         if scheme.lower() != "bearer" or not token:
             return None
-        claims = decode_token(token)
-        tenant_id = claims.tenant_id
-        if tenant_id is None:
-            return None
+        # Route through the full auth stack (decode + revocation + inactive check).
+        # Any rejection (401) is caught below and maps to None.
+        user = get_current_user(token=token)
         return AuditContext(
-            tenant_id=tenant_id,
-            user_id=claims.user_id,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
         )
-    except Exception:  # noqa: BLE001 â€” best-effort; never fail the request
+    except Exception:  # noqa: BLE001 Ã¢â‚¬â€ best-effort; never fail the request
         return None
 
 
@@ -265,7 +272,7 @@ class _TenantResolver:
                 tenant_id=claims.tenant_id,
                 roles=roles,
             )
-        except Exception:  # noqa: BLE001 â€” best-effort resolver
+        except Exception:  # noqa: BLE001 Ã¢â‚¬â€ best-effort resolver
             return None
 
 
@@ -280,13 +287,13 @@ def create_app() -> FastAPI:
     # Middleware ordering note: Starlette applies middleware in LIFO order
     # (last add_middleware call = outermost layer). The desired request flow:
     #
-    #   SecurityHeaders â†’ RateLimit â†’ TenantIsolation â†’ Audit â†’ routes
+    #   SecurityHeaders Ã¢â€ â€™ RateLimit Ã¢â€ â€™ TenantIsolation Ã¢â€ â€™ Audit Ã¢â€ â€™ routes
     #
     # So we add them in the reverse order (innermost first):
     #   AuditMiddleware (innermost, closest to routes)
     #   TenantIsolationMiddleware (pure ASGI, runs before routes)
     #   RateLimitMiddleware
-    #   SecurityHeadersMiddleware (outermost â€” headers on ALL responses)
+    #   SecurityHeadersMiddleware (outermost Ã¢â‚¬â€ headers on ALL responses)
     app.add_middleware(
         AuditMiddleware,
         session_factory=_audit_session_factory,
@@ -332,7 +339,7 @@ def create_app() -> FastAPI:
     # the real ORM. `configure_audit_sink` swaps the process-wide
     # InMemoryAuditSink fallback for a DB-backed sink. LESSON-006 applies:
     # the integration test in tests/test_main_auth_wired.py hits a real
-    # HTTP request through this wiring â€” unit tests on the router alone
+    # HTTP request through this wiring Ã¢â‚¬â€ unit tests on the router alone
     # do not prove it's mounted.
     SessionLocal = db_shim.get_sessionmaker()
 

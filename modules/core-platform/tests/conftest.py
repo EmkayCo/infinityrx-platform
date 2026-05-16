@@ -76,7 +76,8 @@ def _user_for(tenant: uuid.UUID, roles: list[str]) -> auth_shim.CurrentUser:
         id=uuid.uuid4(),
         tenant_id=tenant,
         email=f"user-{tenant}@example.com",
-        roles=roles,
+        status="active",
+        roles=tuple(roles),
     )
 
 
