@@ -59,12 +59,13 @@ def _source_shim_tables():
         """))
 
 
-# Table-name and completeness-guard overrides for all job-handler tests:
-#   - bare table names (no schema prefix) → SQLite-compatible ORM path
+# Source-table and completeness-guard overrides for all job-handler tests:
+#   - bare source table names → SQLite shim tables created by _source_shim_tables
 #   - _oig_min_rows=0 / _sam_min_rows=0 → bypass the completeness guard so
 #     test fixtures with 0-1 rows don't suppress delisting or aggregation
+# NOTE: _excl_table is accepted by run_exclusion_refresh for backward-compat
+# but ignored — the ORM model (ExclusionListEntry) is always used.
 _JH_TABLE_OVERRIDES = dict(
-    _excl_table="core_exclusion_list",
     _oig_table="oig_leie_exclusions",
     _sam_table="sam_exclusions",
     _oig_min_rows=0,
@@ -143,9 +144,10 @@ async def test_exclusion_refresh_aggregates_to_production_table(_source_shim_tab
     """NEW BLOCK: exclusion_refresh must populate the production exclusion table.
 
     Seeds OIG + SAM source shim tables, calls run_exclusion_refresh, then
-    asserts rows appear in core_exclusion_list (the bare-table test alias for
-    core.exclusion_list). Previously the job ran ingestion but never called
-    run_aggregation(), so adjudication continued to screen against stale data.
+    asserts rows appear in core.exclusion_list (ExclusionListEntry ORM model,
+    accessed as "exclusion_list" in SQLite via schema_translate_map).
+    Previously the job ran ingestion but never called run_aggregation(), so
+    adjudication continued to screen against stale data.
     """
     from src.models import ExclusionListEntry
 
@@ -176,7 +178,7 @@ async def test_exclusion_refresh_aggregates_to_production_table(_source_shim_tab
 
     result = await jh.run_exclusion_refresh({}, **_JH_TABLE_OVERRIDES)
 
-    # The aggregator must have written both seeded rows into core_exclusion_list
+    # The aggregator must have written both seeded rows into core.exclusion_list
     assert result["aggregated_inserted"] >= 2, (
         f"Expected >= 2 aggregated rows in production table, got {result['aggregated_inserted']}"
     )
@@ -188,10 +190,56 @@ async def test_exclusion_refresh_aggregates_to_production_table(_source_shim_tab
         rows = s.query(ExclusionListEntry).all()
         npis = {r.npi for r in rows if r.npi}
         assert "1111111111" in npis, (
-            f"OIG-seeded NPI 1111111111 must be in core_exclusion_list, found: {npis}"
+            f"OIG-seeded NPI 1111111111 must be in core.exclusion_list, found: {npis}"
         )
         assert "2222222222" in npis, (
-            f"SAM-seeded NPI 2222222222 must be in core_exclusion_list, found: {npis}"
+            f"SAM-seeded NPI 2222222222 must be in core.exclusion_list, found: {npis}"
+        )
+    finally:
+        s.close()
+
+
+@respx.mock
+async def test_aggregator_writes_screener_reads_same_row(_source_shim_tables, monkeypatch):
+    """End-to-end naming-unification gate: aggregator writes via ORM → screener reads same row.
+
+    Verifies that ExclusionListEntry (schema="core", tablename="exclusion_list") is
+    written by run_aggregation and read back by ExclusionScreeningService through the
+    same unified ORM model — no bare-name / schema-qualified split.
+    """
+    from src.exclusions.screening_service import ExclusionScreeningService
+    from src.exclusions.matching import MatchCandidate
+
+    engine = db_shim.get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO oig_leie_exclusions
+                (npi, lastname, firstname, state, excltype, excldate)
+            VALUES ('3333333333', 'E2E-JONES', 'E2E-MARY', 'TX', '1128a1', '2022-06-01')
+        """))
+
+    from src._shim import config as cfg
+    monkeypatch.setattr(cfg.settings, "OIG_EXCLUSION_URL", "https://example.test/oig.csv")
+    respx.get("https://example.test/oig.csv").mock(
+        return_value=httpx.Response(200, text="LASTNAME,FIRSTNAME\n")
+    )
+    respx.get("https://api.sam.gov/entity-information/v4/exclusions").mock(
+        return_value=httpx.Response(200, json={"exclusionDetails": []})
+    )
+
+    result = await jh.run_exclusion_refresh({}, **_JH_TABLE_OVERRIDES)
+    assert result["aggregated_inserted"] >= 1, "Aggregator must have written at least one row"
+
+    # Now read back via ExclusionScreeningService — same ORM model, same table
+    SessionLocal = db_shim.get_sessionmaker()
+    s = SessionLocal()
+    try:
+        svc = ExclusionScreeningService(s)
+        candidate = MatchCandidate(entity_type="prescriber", entity_id="p-e2e", npi="3333333333")
+        matches = svc.screen_entity(tenant_id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", entity=candidate)
+        assert len(matches) >= 1, (
+            "ExclusionScreeningService must find the row written by the aggregator — "
+            "naming unification broken if this fails"
         )
     finally:
         s.close()

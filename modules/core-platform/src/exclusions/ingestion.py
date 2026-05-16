@@ -87,7 +87,7 @@ def _upsert_entry(
 
 
 class OIGIngestionClient:
-    """Downloads the OIG LEIE CSV and upserts rows into core_exclusion_list."""
+    """Downloads the OIG LEIE CSV and upserts rows into core.exclusion_list."""
 
     def __init__(self, http_client: httpx.AsyncClient, *, url: str) -> None:
         self._http = http_client

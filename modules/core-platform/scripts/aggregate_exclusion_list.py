@@ -2,29 +2,23 @@
 
 Reads from shared.oig_leie_exclusions and shared.sam_exclusions,
 normalizes each source to the ExclusionListEntry schema, and upserts
-into the production table ``core.exclusion_list`` (Postgres).
+into core.exclusion_list via the ORM model (single code path for both
+Postgres production and SQLite test environments).
 
 Production target
 -----------------
-**core.exclusion_list** (schema ``core``) — the canonical Postgres table
-defined in ``shared/db/models/core.py::ExclusionList``.  The aggregator
-writes to this schema-qualified table so adjudication and downstream
-screening services can read exclusion data from the correct location.
+**core.exclusion_list** (schema ``core``) — the canonical table defined by
+``src.models.ExclusionListEntry`` (``__tablename__="exclusion_list"``,
+``__table_args__={"schema": "core"}``).  SQLAlchemy resolves the schema prefix
+on Postgres automatically.  The shim's ``create_all()`` strips ``schema=``
+for SQLite so test fixtures work without a Postgres connection.
 
-The shim model ``src.models.ExclusionListEntry`` (``core_exclusion_list``,
-no schema prefix) is used ONLY by the core-platform service layer in test
-environments.  The aggregator does NOT write to the shim table; it writes
-to the production table via the ORM ``ExclusionListEntry`` class when the
-``excl_table`` argument is ``"core.exclusion_list"`` (the default) and
-falls back to the bare ``"core_exclusion_list"`` name for SQLite-backed
-integration tests (which pass the bare name explicitly).
-
-BLOCK-1 fix (P0a v2): v1 imported ``src.models.ExclusionListEntry``
-(SQLite shim, ``core_exclusion_list``, no schema) and always wrote there.
-Production runs therefore never populated ``core.exclusion_list`` and
-adjudication screening always returned no results.  The fix targets the
-production schema-qualified table by default, with the SQLite shim path
-preserved for test fixtures via the ``excl_table`` parameter.
+P0a v3 naming unification (BLOCK-1 follow-up): the previous dual-path design
+maintained a bare-name ORM path (``core_exclusion_list``) for SQLite tests
+and a schema-qualified raw-SQL path for Postgres.  Both paths are now unified:
+the ORM model is always schema-qualified; the shim's ``create_all()`` strips
+the schema for SQLite.  ``excl_table`` parameters are retained for
+backward-compatibility but ignored in write/delist paths.
 
 Natural upsert key:
   OIG: (source='OIG', npi)               when npi is present
@@ -78,12 +72,13 @@ from src.models import ExclusionListEntry  # noqa: E402
 logger = logging.getLogger("excl.aggregator")
 
 # Production table names (schema-qualified for Postgres).
-# Tests override these via run_aggregation(oig_table=..., sam_table=..., excl_table=...).
+# Tests override oig_table/sam_table via run_aggregation(oig_table=..., sam_table=...).
 _DEFAULT_OIG_TABLE = "shared.oig_leie_exclusions"
 _DEFAULT_SAM_TABLE = "shared.sam_exclusions"
-# BLOCK-1 fix: default target is the production schema-qualified table.
-# Integration tests pass excl_table="core_exclusion_list" (the SQLite shim)
-# so they remain hermetic without a Postgres connection.
+# Canonical table identifier — kept for _mark_delisted raw-SQL delisting path.
+# The ORM model (ExclusionListEntry, schema="core", tablename="exclusion_list")
+# is the single source of truth for writes; this constant is the schema-qualified
+# string used for the SELECT/UPDATE delist pass in _mark_delisted.
 _DEFAULT_EXCL_TABLE = "core.exclusion_list"
 
 # CONCERN-1 fix: minimum row counts that signal a complete source snapshot.
@@ -222,131 +217,12 @@ def _lookup_key(data: dict):
     )
 
 
-def _upsert_raw(session: Session, data: dict, excl_table: str) -> str:
-    """Upsert one normalized row via raw SQL into ``excl_table``.
-
-    Used when ``excl_table`` is schema-qualified (e.g. ``core.exclusion_list``)
-    so SQLAlchemy ORM class metadata cannot directly target the table.
-    Uses ``IS NOT DISTINCT FROM`` for NULL-safe natural-key comparison on
-    Postgres; falls back to standard equality on SQLite (where ``IS NOT
-    DISTINCT FROM`` is not supported).
-
-    Returns 'inserted' | 'updated'.
-    """
-    now = datetime.now(timezone.utc)
-    source = data["source"]
-    npi = data.get("npi")
-
-    if npi:
-        existing_id = session.execute(
-            text(
-                f"SELECT id FROM {excl_table} WHERE source = :source AND npi = :npi LIMIT 1"  # nosec
-            ),
-            {"source": source, "npi": npi},
-        ).scalar()
-        # CONCERN-2 fix: if NPI lookup finds nothing, fall back to name-key
-        # lookup for a row with NULL NPI that can be upgraded with the NPI.
-        if existing_id is None:
-            existing_id = session.execute(
-                text(
-                    f"SELECT id FROM {excl_table}"  # nosec
-                    " WHERE source = :source"
-                    " AND npi IS NULL"
-                    " AND last_name IS NOT DISTINCT FROM :last_name"
-                    " AND first_name IS NOT DISTINCT FROM :first_name"
-                    " AND organization_name IS NOT DISTINCT FROM :org_name"
-                    " AND state IS NOT DISTINCT FROM :state"
-                    " LIMIT 1"
-                ),
-                {
-                    "source": source,
-                    "last_name": data.get("last_name"),
-                    "first_name": data.get("first_name"),
-                    "org_name": data.get("organization_name"),
-                    "state": data.get("state"),
-                },
-            ).scalar()
-    else:
-        existing_id = session.execute(
-            text(
-                f"SELECT id FROM {excl_table}"  # nosec
-                " WHERE source = :source"
-                " AND last_name IS NOT DISTINCT FROM :last_name"
-                " AND first_name IS NOT DISTINCT FROM :first_name"
-                " AND organization_name IS NOT DISTINCT FROM :org_name"
-                " AND state IS NOT DISTINCT FROM :state"
-                " LIMIT 1"
-            ),
-            {
-                "source": source,
-                "last_name": data.get("last_name"),
-                "first_name": data.get("first_name"),
-                "org_name": data.get("organization_name"),
-                "state": data.get("state"),
-            },
-        ).scalar()
-
-    if existing_id is None:
-        session.execute(
-            text(
-                f"INSERT INTO {excl_table}"  # nosec
-                " (source, entity_type, npi, first_name, last_name,"
-                "  organization_name, state, exclusion_type,"
-                "  exclusion_date, reinstate_date, last_updated)"
-                " VALUES (:source, :entity_type, :npi, :first_name, :last_name,"
-                "         :org_name, :state, :excl_type,"
-                "         :excl_date, :reinstate_date, :last_updated)"
-            ),
-            {
-                "source": source,
-                "entity_type": data.get("entity_type"),
-                "npi": npi,
-                "first_name": data.get("first_name"),
-                "last_name": data.get("last_name"),
-                "org_name": data.get("organization_name"),
-                "state": data.get("state"),
-                "excl_type": data.get("exclusion_type"),
-                "excl_date": data.get("exclusion_date"),
-                "reinstate_date": data.get("reinstate_date"),
-                "last_updated": now,
-            },
-        )
-        return "inserted"
-
-    session.execute(
-        text(
-            f"UPDATE {excl_table} SET"  # nosec
-            " entity_type = :entity_type,"
-            " npi = :npi,"
-            " first_name = :first_name,"
-            " last_name = :last_name,"
-            " organization_name = :org_name,"
-            " state = :state,"
-            " exclusion_type = :excl_type,"
-            " exclusion_date = :excl_date,"
-            " reinstate_date = :reinstate_date,"
-            " last_updated = :last_updated"
-            " WHERE id = :row_id"
-        ),
-        {
-            "entity_type": data.get("entity_type"),
-            "npi": npi,
-            "first_name": data.get("first_name"),
-            "last_name": data.get("last_name"),
-            "org_name": data.get("organization_name"),
-            "state": data.get("state"),
-            "excl_type": data.get("exclusion_type"),
-            "excl_date": data.get("exclusion_date"),
-            "reinstate_date": data.get("reinstate_date"),
-            "last_updated": now,
-            "row_id": existing_id,
-        },
-    )
-    return "updated"
-
-
 def _upsert_orm(session: Session, data: dict) -> str:
-    """Upsert via ORM (ExclusionListEntry shim). Used by tests with SQLite.
+    """Upsert one normalized row via the ORM (ExclusionListEntry).
+
+    ExclusionListEntry carries schema="core" for Postgres; SQLite test engines
+    have schema stripped by db_shim.create_all() so the table is always reachable
+    as "exclusion_list" without a schema prefix.
 
     CONCERN-2 fix: when an NPI is present and no NPI-keyed row exists,
     fall back to a name-key lookup before inserting. If a name-key match
@@ -383,14 +259,13 @@ def _upsert_orm(session: Session, data: dict) -> str:
 
 
 def _upsert(session: Session, data: dict, excl_table: str = _DEFAULT_EXCL_TABLE) -> str:
-    """Dispatch to raw-SQL or ORM upsert based on whether excl_table is schema-qualified.
+    """Upsert one normalized row via the ORM (ExclusionListEntry).
 
-    Schema-qualified tables (``core.exclusion_list``) use raw SQL so ORM
-    class metadata does not need to be changed.  Bare tables
-    (``core_exclusion_list``) use the ORM shim for SQLite test compatibility.
+    The ``excl_table`` parameter is accepted for backward-compatibility but
+    ignored — the ORM model (schema="core", tablename="exclusion_list") is the
+    single write path for both Postgres and SQLite tests (the shim's create_all
+    strips schema= for SQLite so the table is always reachable as "exclusion_list").
     """
-    if "." in excl_table:
-        return _upsert_raw(session, data, excl_table)
     return _upsert_orm(session, data)
 
 
@@ -502,9 +377,9 @@ def run_aggregation(
         session:      SQLAlchemy session connected to the target database.
         oig_table:    Qualified table name for OIG source (override in tests).
         sam_table:    Qualified table name for SAM source (override in tests).
-        excl_table:   Target exclusion list table (default: ``core.exclusion_list``
-                      for production Postgres).  Pass ``"core_exclusion_list"``
-                      in SQLite-backed tests to use the ORM shim path.
+        excl_table:   Retained for backward-compatibility; ignored in write/delist
+                      paths (the ORM model is always used).  Kept as a parameter
+                      so existing call-sites do not need immediate updates.
         oig_min_rows: Minimum OIG source rows required to allow delisting.
                       Pass 0 in tests to disable the completeness guard.
                       Defaults to ``_OIG_MIN_ROWS_FOR_DELIST`` (env-driven).
@@ -660,8 +535,8 @@ def _mark_delisted(
     For rows that qualify, sets reinstate_date = TODAY (Date column type)
     to signal delisting.
 
-    When excl_table is schema-qualified (contains '.'), uses raw SQL
-    UPDATE so the ORM shim's table binding is bypassed.
+    Uses the ORM exclusively (excl_table parameter retained for call-site
+    compatibility but not used in the query).
     """
     now = datetime.now(timezone.utc)
     today = now.date()
@@ -686,47 +561,25 @@ def _mark_delisted(
             sam_total, _sam_threshold,
         )
 
-    if "." in excl_table:
-        # Raw SQL path for production schema-qualified table.
-        # Fetch active NPI rows via raw SQL to avoid ORM shim binding.
-        active_pairs = session.execute(
-            text(
-                f"SELECT id, source, npi FROM {excl_table}"  # nosec
-                " WHERE npi IS NOT NULL AND reinstate_date IS NULL"
-            )
-        ).fetchall()
-        for row_id, source, npi in active_pairs:
-            source_set = oig_npis if source == "OIG" else sam_npis
-            delist_ok = oig_delist_ok if source == "OIG" else sam_delist_ok
-            if not delist_ok:
-                continue  # completeness gate: skip this source
-            if npi not in source_set:
-                session.execute(
-                    text(
-                        f"UPDATE {excl_table}"  # nosec
-                        " SET reinstate_date = :rd, last_updated = :lu"
-                        " WHERE id = :row_id"
-                    ),
-                    {"rd": today, "lu": now, "row_id": row_id},
-                )
-                result.delisted += 1
-    else:
-        # ORM path for SQLite shim (test environments).
-        active_rows = session.execute(
-            select(ExclusionListEntry)
-            .where(ExclusionListEntry.npi.isnot(None))
-            .where(ExclusionListEntry.reinstate_date.is_(None))
-        ).scalars().all()
+    # Unified ORM path — ExclusionListEntry carries schema="core" for Postgres;
+    # SQLite test engine has schema stripped by db_shim.create_all() so the
+    # table is always reachable.  The ``excl_table`` parameter is kept for
+    # backward-compatibility but is not used here.
+    active_rows = session.execute(
+        select(ExclusionListEntry)
+        .where(ExclusionListEntry.npi.isnot(None))
+        .where(ExclusionListEntry.reinstate_date.is_(None))
+    ).scalars().all()
 
-        for row in active_rows:
-            source_set = oig_npis if row.source == "OIG" else sam_npis
-            delist_ok = oig_delist_ok if row.source == "OIG" else sam_delist_ok
-            if not delist_ok:
-                continue  # completeness gate
-            if row.npi not in source_set:
-                row.reinstate_date = now
-                row.last_updated = now
-                result.delisted += 1
+    for row in active_rows:
+        source_set = oig_npis if row.source == "OIG" else sam_npis
+        delist_ok = oig_delist_ok if row.source == "OIG" else sam_delist_ok
+        if not delist_ok:
+            continue  # completeness gate
+        if row.npi not in source_set:
+            row.reinstate_date = now
+            row.last_updated = now
+            result.delisted += 1
 
     if result.delisted > 0:
         session.flush()
