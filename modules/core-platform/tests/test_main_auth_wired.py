@@ -13,6 +13,7 @@ boundary that broke, pointing directly at the LESSON-006 gap.
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
@@ -30,6 +31,12 @@ from src.auth.service import _assign_roles  # noqa: PLC2701  (intentional test a
 def _build_live_app():
     """Create the production app with lifespan startup stubbed.
 
+    Returns ``(app, ExitStack)`` — the caller MUST call ``stack.close()``
+    (or use the stack as a context manager) to undo the patches AFTER the
+    TestClient exits.  The patches must remain active for the full duration
+    of the TestClient context because the lifespan fires when the client
+    starts up, not when ``create_app()`` is called.
+
     The autouse ``_fresh_db`` fixture in tests/conftest.py has already
     configured the shim engine to a per-test SQLite. We also have to
     create the auth tables on that same engine because they live on
@@ -37,14 +44,13 @@ def _build_live_app():
     shim's own ``Base`` that ``_fresh_db`` runs ``create_all`` against.
     """
     AuthBase.metadata.create_all(db_shim.get_engine())
-    with (
-        patch.object(main_module, "_verify_database", AsyncMock()),
-        patch.object(main_module, "get_event_bus", return_value=AsyncMock()),
-        patch.object(main_module, "dispose_engine", AsyncMock()),
-        patch.object(main_module, "reset_event_bus"),
-    ):
-        app = main_module.create_app()
-    return app
+    stack = ExitStack()
+    stack.enter_context(patch.object(main_module, "_verify_database", AsyncMock()))
+    stack.enter_context(patch.object(main_module, "get_event_bus", return_value=AsyncMock()))
+    stack.enter_context(patch.object(main_module, "dispose_engine", AsyncMock()))
+    stack.enter_context(patch.object(main_module, "reset_event_bus"))
+    app = main_module.create_app()
+    return app, stack
 
 
 def _seed_admin_user() -> User:
@@ -91,10 +97,10 @@ def test_auth_router_mounted_users_list_returns_200() -> None:
     tenant_id = admin.tenant_id
     admin_id = admin.id
 
-    app = _build_live_app()
+    app, stack = _build_live_app()
     token = create_access_token(admin_id, tenant_id, ["tenant_admin"])
 
-    with TestClient(app) as client:
+    with stack, TestClient(app) as client:
         resp = client.get(
             "/api/v1/users",
             headers={"Authorization": f"Bearer {token}"},
@@ -118,8 +124,8 @@ def test_auth_router_mounted_no_token_returns_401_not_404() -> None:
     A 404 would indicate the route isn't mounted at all. A 401 proves the
     request reached the middleware stack that guards the mounted route.
     """
-    app = _build_live_app()
-    with TestClient(app) as client:
+    app, stack = _build_live_app()
+    with stack, TestClient(app) as client:
         resp = client.get("/api/v1/users")
 
     assert resp.status_code == 401, (
@@ -140,11 +146,11 @@ def test_login_endpoint_reachable_without_auth_header() -> None:
     (``{error: "unauthenticated", detail: "Missing or invalid credentials"}``).
     """
     _seed_admin_user()  # schema + a user to query against
-    app = _build_live_app()
+    app, stack = _build_live_app()
 
     # Use an RFC-2606 test domain so Pydantic's EmailStr validator accepts
     # the value. `.local` is rejected as a reserved TLD by email-validator.
-    with TestClient(app) as client:
+    with stack, TestClient(app) as client:
         resp = client.post(
             "/api/v1/auth/login",
             json={"email": "nobody@example.com", "password": "wrongpass"},
@@ -165,7 +171,8 @@ def test_auth_router_mounted_route_path_exists() -> None:
     A fast, no-HTTP sanity check that complements the end-to-end tests.
     Fails fast if someone drops ``app.include_router(auth_api_router)``.
     """
-    app = _build_live_app()
+    app, stack = _build_live_app()
+    stack.close()  # no lifespan needed — route table is set at create_app() time
     paths = {getattr(r, "path", "") for r in app.routes}
     assert any(p == "/api/v1/users" for p in paths), (
         f"/api/v1/users not in routes — auth_api_router not mounted. "
