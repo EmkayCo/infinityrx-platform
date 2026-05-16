@@ -45,3 +45,68 @@ jobs:
 
       - name: All package tests (vitest)
         run: npm run test:packages
+
+  prepare-artifacts:
+    name: Prepare generated artifacts (build-manifest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: foundation
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run build-manifest (operator-dev)
+        run: |
+          INFINITYRX_MANIFEST=infrastructure/manifests/operator-dev.yml \
+          INFINITYRX_GENERATED_OUT=packages/shell/src/_generated \
+          node --loader tsx packages/scripts/build-manifest.ts
+        env:
+          SKIP_PREBUILD: "1"
+
+      - name: Upload generated artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sp0-generated
+          path: packages/shell/src/_generated/
+          retention-days: 1
+
+  composition-audit:
+    name: Composition audit (module graph)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: prepare-artifacts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download generated artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sp0-generated
+          path: packages/shell/src/_generated/
+
+      - name: Audit module graph
+        run: |
+          node --loader tsx packages/scripts/audit-module-graph.ts \
+            --manifest packages/shell/src/_generated/manifest.json \
+            --known prescriber-directory
+        env:
+          SKIP_PREBUILD: "1"

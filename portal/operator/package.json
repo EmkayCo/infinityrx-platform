@@ -15,7 +15,8 @@
     "test:e2e": "playwright test",
     "test:all": "vitest run && playwright test",
     "qa": "bash scripts/quality-gate.sh",
-    "qa:quick": "SKIP_BUILD=1 bash scripts/quality-gate.sh"
+    "qa:quick": "SKIP_BUILD=1 bash scripts/quality-gate.sh",
+    "portal:audit": "node --loader tsx ../../packages/scripts/audit-module-graph.ts"
   },
   "dependencies": {
     "@infinityrx/portal-shared": "*",

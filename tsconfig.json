@@ -6,6 +6,7 @@
     { "path": "./packages/auth" },
     { "path": "./packages/ui" },
     { "path": "./packages/qa-harness" },
-    { "path": "./packages/shell" }
+    { "path": "./packages/shell" },
+    { "path": "./packages/modules/prescriber-directory" }
   ]
 }

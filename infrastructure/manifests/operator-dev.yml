@@ -6,7 +6,8 @@ audience: operator
 auth_profile: development
 branding:
   primary_color: "#1f2937"
-modules: []
+modules:
+  - prescriber-directory
 required_backends: []
 required_shared_services:
   - postgres
