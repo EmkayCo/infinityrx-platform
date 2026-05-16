@@ -74,8 +74,8 @@ artifact metadata. Plan D adds a `FileArtifact` table that tracks every generate
 - `id` — `PG_UUID(as_uuid=True)`, PK
 - `tenant_id` — `PG_UUID(as_uuid=True)`, NOT NULL, indexed `(tenant_id, generated_at)`
 - `kind` — `VARCHAR(16)`, NOT NULL; enum values: `nacha`, `835`
-- `source_batch_id` — `PG_UUID(as_uuid=True)`, nullable FK `batches.id` (NACHA source)
-- `source_payment_run_id` — `PG_UUID(as_uuid=True)`, nullable FK `payment_runs.id` (835 source)
+- `source_batch_id` — `PG_UUID(as_uuid=True)`, nullable FK to `PaymentBatch.id` (NACHA source; `PaymentBatch` is the correct ORM class in `tables.py` line 214 — verify table name by reading the model before writing the FK)
+- `source_payment_run_id` — `PG_UUID(as_uuid=True)`, nullable FK to `PaymentBatch.id` (835 source — 835 files are also derived from payment batches; "payment_run" is an alias for `PaymentBatch` in the API layer)
 - `upload_id` — `PG_UUID(as_uuid=True)`, nullable FK `uploads.id` (backward provenance link)
 - `generated_by` — `PG_UUID(as_uuid=True)`, NOT NULL, FK `users.id`
 - `generated_at` — `TIMESTAMP WITH TIME ZONE`, NOT NULL, server_default=now()
@@ -120,20 +120,38 @@ on download response (files may contain payment data).
 - 835: `payment_run.upload_id` (set in Plan C Task 1)
 If the source entity has no `upload_id` (legacy data), `FileArtifact.upload_id` is null.
 
-**Existing generator integration:**
-- `modules/billing/src/services/nacha.py` — call `generate_nacha_file(batch_id)` (confirm exact
-  function signature by reading the file before writing the wrapper; do not invent a signature)
-- `modules/edi-compliance/src/x12/generators/gen_835.py` — call the 835 generator (confirm
-  function signature by reading before writing; use the existing interface, no changes to that file)
+**Existing generator integration (verified from HEAD — inventory §7):**
 
-- [ ] Step 2.1: Read `modules/billing/src/services/nacha.py` and `modules/edi-compliance/src/x12/generators/gen_835.py` to confirm exact function signatures
-- [ ] Step 2.2: Write `modules/billing/src/services/file_artifact.py` wrapping both generators
+Two NACHA implementations exist; Plan D uses the one in payment-processing:
+
+| Implementation | Path | Symbol | Signature |
+|---|---|---|---|
+| billing (class-based) | `modules/billing/src/services/nacha.py:29` | `NACHAGenerator` | `def generate(self, payments: list[NACHAPayment]) -> str` |
+| payment-processing (function) | `modules/payment-processing/src/services/nacha_generator.py:243` | `generate_nacha_file` | top-level function — **read the file to confirm exact signature before calling** |
+
+**Decision (B5 fix):** `FilesService.generate_nacha` MUST import from
+`modules/payment-processing/src/services/nacha_generator.py` and call `generate_nacha_file(...)`.
+Do NOT call `NACHAGenerator.generate()` from billing — that is the alternative; the canonical
+production function is `generate_nacha_file` in payment-processing. The builder MUST read
+`modules/payment-processing/src/services/nacha_generator.py` line 243 to verify the exact
+argument signature before writing the wrapper. Do not assume arguments.
+
+**835 generator:** `modules/edi-compliance/src/x12/generators/gen_835.py` — read before calling;
+use the existing interface, no changes to that file.
+
+**Cross-tenant + RBAC integration tests:** EVERY new endpoint (4 endpoints) requires:
+- 3-role RBAC test (Operator → result, Approver → result, Auditor → result)
+- Cross-tenant isolation test per endpoint
+- MFA gate test per endpoint
+
+- [ ] Step 2.1: Read `modules/payment-processing/src/services/nacha_generator.py` line 243 to confirm exact `generate_nacha_file` signature; read `modules/edi-compliance/src/x12/generators/gen_835.py` for 835 generator signature
+- [ ] Step 2.2: Write `modules/billing/src/services/file_artifact.py` wrapping `generate_nacha_file` from payment-processing and the 835 generator
 - [ ] Step 2.3: Write `modules/billing/src/api/files.py` router
 - [ ] Step 2.4: Mount on `modules/billing/src/main.py`
 - [ ] Step 2.5: Write unit tests for service (generate + artifact row creation)
-- [ ] Step 2.6: Write integration tests (3 roles × 4 endpoints; download streams bytes)
-- [ ] Step 2.7: Run billing tests — 100% on auth/RBAC paths, ≥95% on file service
-- [ ] Step 2.8: Commit — `feat(sp-1-d): files router — NACHA/835 generate + download + provenance`
+- [ ] Step 2.6: Write integration tests (3 roles × 4 endpoints; cross-tenant per endpoint; MFA gate per endpoint; download streams bytes)
+- [ ] Step 2.7: Run billing tests — 100% on auth/RBAC paths, **≥99% branch coverage** on file service
+- [ ] Step 2.8: Commit — `feat(sp-1-d): files router — NACHA from payment-processing/nacha_generator.py, 835 generate + download + provenance`
 
 ---
 
@@ -161,15 +179,47 @@ Per spec §5.5 point 3 and §10.4 resolution.
 }
 ```
 
-**Implementation (§10.4 resolution):**
+**Implementation (§10.4 resolution + B6 fix):**
 1. Count entries for tenant: `SELECT COUNT(*) FROM audit_log WHERE tenant_id = :tid`
 2. If count > `PAYSYNC_HASH_CHAIN_SYNC_LIMIT` (default 10000): return `{verified: null, too_large: true, entry_count: N, broken_at_entry: null, elapsed_ms: <elapsed>}`
-3. Else: iterate entries in `created_at ASC` order, recompute each `entry_hash` from `(prev_hash + action + who + when + payload)` using the same algorithm as `verify_audit_chain_job.py`. Stop at first mismatch.
+3. Else: iterate `AuditEntry` rows in `created_at ASC` order. For each entry, recompute its hash
+   using the **exact** function from `modules/core-platform/src/audit/hash_chain.py`:
+
+```python
+from modules.core_platform.src.audit.hash_chain import compute_entry_hash
+
+recomputed = compute_entry_hash(
+    tenant_id=entry.tenant_id,
+    action=entry.action,
+    entity_type=entry.entity_type,
+    entity_id=entry.entity_id,
+    created_at=entry.created_at,
+    previous_hash=prev_entry.entry_hash if prev_entry else None,
+)
+if recomputed != entry.entry_hash:
+    return broken at this entry
+```
+
+   The signature is **keyword-only** (all args must be passed as kwargs):
+   ```python
+   def compute_entry_hash(
+       *,
+       tenant_id: UUID,
+       action: str,
+       entity_type: str | None,
+       entity_id: str | None,
+       created_at: datetime,
+       previous_hash: str | None,
+   ) -> str:
+   ```
+   Do NOT use any other hash formula (e.g., `prev_hash + action + who + when + payload`).
+   That formula produces different hashes from the stored values and will cause false audit failures.
+
 4. Return `{verified: true/false, broken_at_entry: <id>|null, entry_count: N, too_large: false, elapsed_ms: <elapsed>}`
 
-**CRITICAL:** read `modules/core-platform/src/jobs/verify_audit_chain_job.py` before writing
-the hash computation. Use the **exact same** hash function and field ordering. Any deviation
-will produce false "chain broken" results. Do not invent a hash algorithm.
+**CRITICAL:** The builder MUST read `modules/core-platform/src/audit/hash_chain.py` before
+writing the verifier. Import and call `compute_entry_hash` directly — do not duplicate the
+hash logic. Any deviation produces false "chain broken" results.
 
 **RBAC:** Auditor only. Operator and Approver receive 403.
 
@@ -179,13 +229,13 @@ will produce false "chain broken" results. Do not invent a hash algorithm.
 - empty: 0 entries → `{verified: true, entry_count: 0}` (empty chain is trivially valid)
 - too-large: entry_count > limit → `{verified: null, too_large: true}`
 
-- [ ] Step 3.1: Read `modules/core-platform/src/jobs/verify_audit_chain_job.py` to extract hash function
-- [ ] Step 3.2: Write `modules/core-platform/src/api/journal_verify.py` using extracted hash function
+- [ ] Step 3.1: Read `modules/core-platform/src/audit/hash_chain.py` to confirm `compute_entry_hash` keyword-only signature (tenant_id, action, entity_type, entity_id, created_at, previous_hash)
+- [ ] Step 3.2: Write `modules/core-platform/src/api/journal_verify.py` calling `compute_entry_hash` with exact kwargs — no reimplementation of hash logic
 - [ ] Step 3.3: Mount on `modules/core-platform/src/main.py`
-- [ ] Step 3.4: Write unit tests for all 4 cases
-- [ ] Step 3.5: Write integration test: Auditor 200, Operator 403, Approver 403
-- [ ] Step 3.6: Run core-platform tests — all pass
-- [ ] Step 3.7: Commit — `feat(sp-1-d): sync hash-chain verifier endpoint (Auditor-only, ≤10k entries)`
+- [ ] Step 3.4: Write unit tests for all 4 cases (verified/broken/empty/too-large)
+- [ ] Step 3.5: Write integration tests: Auditor → 200; Operator → 403; Approver → 403; cross-tenant isolation (Tenant A verify cannot see Tenant B entries); MFA gate test
+- [ ] Step 3.6: Run core-platform tests — all pass, 100% on auth path
+- [ ] Step 3.7: Commit — `feat(sp-1-d): sync hash-chain verifier — uses compute_entry_hash from hash_chain.py (Auditor-only, ≤10k entries)`
 
 ---
 
@@ -324,14 +374,18 @@ renders "Provenance: Upload #N" linking to `UploadDetailPage`.
 
 Plan D is complete when ALL of the following are true:
 
-- [ ] `modules/billing` tests pass; 100% on auth/RBAC paths for files router (Approver-only generate, all roles download); ≥95% on file artifact service
+- [ ] `modules/billing` tests pass; 100% on auth/RBAC paths for files router (Approver-only generate, all roles download); **≥99% branch coverage** on file artifact service (CLAUDE.md Auto-Gate)
 - [ ] `modules/core-platform` tests pass; 100% on journal_verify auth path (Auditor only → 200; others → 403); 4 verifier unit tests pass (verified/broken/empty/too-large)
 - [ ] Migration `0013` upgrades and downgrades cleanly
 - [ ] `POST /api/v1/core/journal/verify` with 0 entries returns `{verified: true, entry_count: 0}`
 - [ ] `POST /api/v1/core/journal/verify` with a corrupted entry returns `{verified: false, broken_at_entry: <id>}`
 - [ ] `POST /api/v1/core/journal/verify` when count > limit returns `{verified: null, too_large: true}`
 - [ ] `POST /api/v1/billing/files/generate` by Auditor returns 403
-- [ ] `npm --workspace=@infinityrx/module-paysync test` passes; all 11 Inbox card components non-stub; ≥95% on files + journal surfaces
+- [ ] NACHA generation calls `generate_nacha_file` from `modules/payment-processing/src/services/nacha_generator.py` — verified by unit test import path (not `NACHAGenerator.generate` from billing)
+- [ ] Hash verifier calls `compute_entry_hash` from `modules/core-platform/src/audit/hash_chain.py` with exact keyword-only args — verified by unit test (corrupted entry detected correctly)
+- [ ] Cross-tenant isolation test passes for all 4 new files endpoints and the journal-verify endpoint
+- [ ] MFA gate test passes for all new endpoints
+- [ ] `npm --workspace=@infinityrx/module-paysync test` passes; all 11 Inbox card components non-stub; **≥99% branch coverage** on files + journal surfaces
 - [ ] `HashChainVerifierPanel` RTL test: 4 states (idle, verified, broken, too-large) all render correctly
 - [ ] `HashChainBadge` RTL test: green/amber/red/grey states rendered
 - [ ] `JournalEntryDetail` RTL test: upload cross-link renders when `upload_id` present
@@ -354,9 +408,11 @@ Plan D is complete when ALL of the following are true:
 
 ## Dependencies
 
-- SP-1 Plan C complete (Batch + PaymentRun `upload_id` FKs present; billing app factory running)
-- `modules/core-platform/src/jobs/verify_audit_chain_job.py` exists (confirmed in directory listing)
-- `modules/billing/src/services/nacha.py` exists (confirmed)
+- SP-1 Plan C complete (`PaymentBatch` + `InvoiceLineItem` `upload_id` FKs present; billing app factory running)
+- `modules/core-platform/src/audit/hash_chain.py` — `compute_entry_hash` (keyword-only: tenant_id, action, entity_type, entity_id, created_at, previous_hash) — the verifier calls this function directly
+- `modules/core-platform/src/jobs/verify_audit_chain_job.py` — reference implementation (do not copy; call `compute_entry_hash` from hash_chain.py instead)
+- `modules/payment-processing/src/services/nacha_generator.py` — `generate_nacha_file` at line 243 — the NACHA generator Plan D wraps (NOT `NACHAGenerator.generate` from billing)
+- `modules/billing/src/services/nacha.py` — billing's `NACHAGenerator.generate()` alternative — NOT used by Plan D for `generate_nacha_file`; read for reference only
 - `modules/edi-compliance/src/x12/generators/gen_835.py` exists (confirmed)
 - `TanStack Virtual` available in `packages/ui` (SP-0 Plan C/D)
 - `@infinityrx/module-paysync` Plan A primitives: `HashChainBadge`, `RbacGate`, `ProvenanceBreadcrumb`
