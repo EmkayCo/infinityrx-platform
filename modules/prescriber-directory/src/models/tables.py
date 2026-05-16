@@ -209,13 +209,21 @@ class DataRefreshLog(PrescriberBase):
 class PrescriberPharmacyRelationship(PrescriberBase):
     __tablename__ = "prescriber_pharmacy_relationships"
     __table_args__ = (
-        UniqueConstraint("prescriber_npi", "pharmacy_npi", "period_month", name="uq_ppr_npi_month"),
-        Index("idx_ppr_prescriber", "prescriber_npi"),
-        Index("idx_ppr_pharmacy", "pharmacy_npi"),
+        # CR-01 v2 HIPAA: unique constraint now includes tenant_id so volumes are
+        # isolated per tenant. Old uq_ppr_npi_month (without tenant_id) would allow
+        # Tenant A to increment Tenant B's row counts — data mixing.
+        UniqueConstraint(
+            "tenant_id", "prescriber_npi", "pharmacy_npi", "period_month",
+            name="uq_ppr_tenant_npi_month",
+        ),
+        Index("idx_ppr_tenant_prescriber", "tenant_id", "prescriber_npi"),
+        Index("idx_ppr_tenant_pharmacy", "tenant_id", "pharmacy_npi"),
         {"schema": "prescriber_dir"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    # CR-01 v2 HIPAA: tenant_id added to isolate volume rows per tenant
+    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
     prescriber_npi: Mapped[str] = mapped_column(String(10), nullable=False)
     pharmacy_npi: Mapped[str] = mapped_column(String(10), nullable=False)
     period_month: Mapped[str] = mapped_column(String(7), nullable=False)  # YYYY-MM

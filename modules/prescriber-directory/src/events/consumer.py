@@ -3,23 +3,35 @@
 Consumes:
   - claim.ingested     → update prescriber-pharmacy relationship volumes
   - exclusion.match_found → mark prescriber as excluded
+
+CR-01 v2 HIPAA fix: handle_claim_ingested now accepts tenant_id and filters
+PrescriberPharmacyRelationship queries by it, preventing cross-tenant data mixing.
 """
 
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import UTC, datetime
+from typing import Optional
 
 logger = logging.getLogger("prescriber-directory.events.consumer")
 
 
-async def handle_claim_ingested(payload: dict, db) -> None:
-    """Consume claim.ingested — accumulate prescriber→pharmacy volume.
+async def handle_claim_ingested(
+    payload: dict,
+    db,
+    tenant_id: Optional[uuid.UUID] = None,
+) -> None:
+    """Consume claim.ingested — accumulate prescriber→pharmacy volume per tenant.
 
-    Expected payload fields:
-      prescriber_npi: str
-      pharmacy_npi: str
-      date_of_service: str (YYYY-MM-DD)
+    CR-01 v2 HIPAA: tenant_id is required and used to scope the upsert query.
+    Rows are now per-tenant (PrescriberPharmacyRelationship.tenant_id column added).
+
+    Args:
+        payload: Event payload with prescriber_npi, pharmacy_npi, date_of_service.
+        db: SQLAlchemy Session.
+        tenant_id: Tenant UUID from EventEnvelope — filters all DB queries.
     """
     prescriber_npi = payload.get("prescriber_npi")
     pharmacy_npi = payload.get("pharmacy_npi")
@@ -32,6 +44,13 @@ async def handle_claim_ingested(payload: dict, db) -> None:
         )
         return
 
+    if tenant_id is None:
+        logger.warning(
+            "claim_ingested_missing_tenant_id",
+            extra={"svc_event": "claim.ingested"},
+        )
+        return
+
     # Extract YYYY-MM period key
     period_month = date_of_service[:7] if date_of_service and len(date_of_service) >= 7 else ""
     if not period_month:
@@ -40,7 +59,9 @@ async def handle_claim_ingested(payload: dict, db) -> None:
     from sqlalchemy import select
     from src.models.tables import PrescriberPharmacyRelationship
 
+    # CR-01 v2 HIPAA: filter by tenant_id — prevents cross-tenant data mixing
     stmt = select(PrescriberPharmacyRelationship).where(
+        PrescriberPharmacyRelationship.tenant_id == tenant_id,
         PrescriberPharmacyRelationship.prescriber_npi == prescriber_npi,
         PrescriberPharmacyRelationship.pharmacy_npi == pharmacy_npi,
         PrescriberPharmacyRelationship.period_month == period_month,
@@ -50,6 +71,8 @@ async def handle_claim_ingested(payload: dict, db) -> None:
     now = datetime.now(UTC)
     if row is None:
         row = PrescriberPharmacyRelationship(
+            # CR-01 v2 HIPAA: store tenant_id so rows are isolated per tenant
+            tenant_id=tenant_id,
             prescriber_npi=prescriber_npi,
             pharmacy_npi=pharmacy_npi,
             period_month=period_month,

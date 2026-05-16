@@ -8,6 +8,8 @@ so integration tests through create_app() catch regressions.
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,6 +41,28 @@ async def _get_dlq_permissions() -> set[str]:
     return set()
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Wire event consumers at startup; stop bus and reset on shutdown.
+
+    CR-01 v2 CONCERN-6 fix: bus.stop() is now always awaited in the
+    finally block — v1 omitted this, leaving the bus running after shutdown.
+    """
+    from shared.events.factory import get_event_bus, reset_event_bus  # noqa: PLC0415
+    from .events import wire_consumers  # noqa: PLC0415
+
+    bus = get_event_bus()
+    try:
+        await bus.start()
+        await wire_consumers(bus)
+        logger.info("reporting service started", extra={"svc_name": "reporting"})
+        yield
+    finally:
+        await bus.stop()  # CR-01 v1 CONCERN: always await, never fire-and-forget
+        reset_event_bus()
+        logger.info("reporting service stopped", extra={"svc_name": "reporting"})
+
+
 def create_app() -> FastAPI:
     """Application factory. Tests use this to build a fresh app per case."""
     from shared.config import get_settings  # noqa: PLC0415 — deferred to allow test override
@@ -48,6 +72,7 @@ def create_app() -> FastAPI:
     cors_origins = getattr(settings, "CORS_ALLOW_ORIGINS", [])
 
     app = FastAPI(
+        lifespan=lifespan,
         title="InfinityRx Reporting",
         version="1.0.0",
         description="Dashboards, Star Ratings PDC, Excel/PDF exports, and scheduled delivery.",
