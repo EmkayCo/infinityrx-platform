@@ -2,34 +2,46 @@
 
 **Date:** 2026-05-16
 **Sub-project:** SP-1 PaySync Operator Portal
-**Status:** Ready for execution
-**Depends on:** SP-0 Plans A–D (packages/contract, packages/auth, packages/ui, packages/qa-harness, packages/shell all shipped)
+**Status:** Ready for execution (R2 — addresses pre-execute codex NO-GO of 2026-05-16; 6 items resolved, re-codex required before any code)
+**Depends on:** SP-0 Plans A–D (packages/contract, packages/auth, packages/ui, packages/qa-harness, packages/shell all shipped). Verified: `packages/{auth,contract,modules,qa-harness,scripts,shell,ui}/` all present at HEAD `d9c69152`.
+
+---
+
+## R2 Revision Summary (pre-execute codex NO-GO fixes)
+
+Pre-execute codex returned NO-GO with 6 items. R2 addresses each:
+
+| # | Issue | Fix |
+|---|---|---|
+| 1 | `src/module.config.ts` with `export default` is incompatible with HEAD tooling (build-manifest, audit-module-graph, generate-eslint-zones all glob `packages/modules/*/module.config.ts` and import the named `config` export). | Move to root `packages/modules/paysync/module.config.ts`. Use `export const config = {...} as const;` matching `prescriber-directory/module.config.ts`. SD-4 shape from `packages/scripts/build-manifest.ts:36-77` interface `ModuleConfig`. |
+| 2 | Plan A invented `packages/shell/src/types/module-config.ts` and an `@infinityrx/shell/types/module-config.js` package export that does not exist. Adding a sub-path export would require editing `packages/shell/package.json`. | DROP entirely. No shared `ModuleConfig` type needed. PD doesn't import one; `as const` on the literal is enough. Manifest tool reads the literal via dynamic import. |
+| 3 | `@tanstack/react-query` and `@tanstack/react-virtual` cited by `useInboxItems`/`InboxQueue` are absent from root, `packages/ui`, `packages/contract`. Plan A's package.json did not add them. | Add `@tanstack/react-query@5.59.20` and `@tanstack/react-virtual@3.10.8` to `packages/modules/paysync/package.json` dependencies. Add React peer deps. |
+| 4 | Plan A claimed "complete folder skeleton" but omitted the `echo/` surface that wraps real operational functionality (`portal/operator/app/admin/paysync/echo/`, inventory §9). | Explicitly defer `echo/` to Plan E §6 (which already wraps it). Plan A scope = 12 surfaces; gate criterion does NOT claim echo coverage. |
+| 5 | Task 2.6 cited `portal/operator/app/payments/manual-ap` — does not exist. Real path is `portal/operator/app/admin/paysync/manual-ap`. | Fix Task 2.6 wrapping note. |
+| 6 | Plan A's contract extension at `packages/contract/src/paysync/*` doesn't match HEAD convention (`packages/contract/src/impls/<domain>/{types,client,real,mock}.ts` + named exports from `index.ts`, per `prescriber-directory`). Gate only checked file presence, not exportability. | Restructure Task 6 to `packages/contract/src/impls/paysync/{types,clients,real,mock}.ts` + add named exports to `packages/contract/src/index.ts`. Gate requires factories instantiable in test, not just files present. |
 
 ---
 
 ## §10 Plan-Time Decisions Resolved in This Plan
 
-This plan resolves all six §10 plan-time decisions from the spec. Decisions that belong to
-later plans are noted with the plan that owns them.
-
 | # | Decision | Resolution | Owned by |
 |---|---|---|---|
-| §10.1 | Plan phasing strategy | 5 plans: A=scaffold+inbox, B=uploads+cycles, C=batches+AR/AP, D=files+journal, E=reports+setup+E2E | Plan A (this) |
-| §10.2 | Upload file storage strategy | Local disk under `uploads/{tenant_id}/{upload_id}/{original_filename}` in the billing module's working dir; configurable via `PAYSYNC_UPLOAD_DIR` env var; 90-day retention policy enforced by a nightly cleanup job registered in the manifest | Plan B |
-| §10.3 | CSV/Excel minimum schema | 8 mandatory columns: `ndc` (11 digits), `npi` (10 digits, Luhn), `claim_id` (string, unique within upload), `date_of_service` (YYYY-MM-DD), `quantity` (positive Decimal), `days_supply` (positive integer), `amount_billed` (Decimal, 4dp max), `member_id` (string); `source_platform` header comment optional | Plan B |
-| §10.4 | Hash-chain verifier perf budget | 5 seconds for ≤10 000 entries synchronously; for chains >10 000 entries the sync endpoint returns `{verified: null, too_large: true, job_id: "<id>"}` and the UI polls the existing async job | Plan D |
-| §10.5 | Inbox cache strategy | Polling at 10s interval, `revalidate-on-focus` via TanStack Query `staleTime: 10_000`; no WebSocket in SP-1; per-kind TTL: all inbox item kinds share 10s; mutation handlers call `invalidateQueries(['paysync','inbox'])` immediately | Plan A (this) |
-| §10.6 | Module-extraction sequence | Extract-per-surface as each surface is wired (Plans B/C/D/E), not bulk-upfront. Plan A creates the skeleton folders with `index.ts` stubs; each subsequent plan fills its assigned surfaces | Plan A (this) |
+| §10.1 | Plan phasing strategy | 5 plans: A=scaffold+inbox, B=uploads+cycles, C=batches+AR/AP, D=files+journal, E=reports+setup+E2E+echo | Plan A (this) |
+| §10.2 | Upload file storage strategy | Local disk under `{PAYSYNC_UPLOAD_DIR}/{tenant_id}/{upload_id}/{original_filename}`; configurable via env; 90-day retention via nightly cleanup job | Plan B |
+| §10.3 | CSV/Excel minimum schema | 8 mandatory columns: `ndc, npi, claim_id, date_of_service, quantity, days_supply, amount_billed, member_id`; `source_platform` optional; per-row errors never abort other rows | Plan B |
+| §10.4 | Hash-chain verifier perf budget | ≤10 000 entries sync (<5s); >10 000 returns `{verified: null, too_large: true, job_id}`; threshold via `PAYSYNC_HASH_CHAIN_SYNC_LIMIT` | Plan D |
+| §10.5 | Inbox cache strategy | TanStack Query `staleTime: 10_000`, `refetchOnWindowFocus: true`; mutations `invalidateQueries(['paysync','inbox'])` immediately; no WebSocket in SP-1 | Plan A (this) |
+| §10.6 | Module-extraction sequence | Extract-per-surface as wired (Plans B/C/D/E). Plan A creates skeleton folders with `index.ts` stubs; subsequent plans fill assigned surfaces; original portal pages deleted in Plan E after E2E passes | Plan A (this) |
 
 ---
 
 ## Goal
 
 Establish `packages/modules/paysync/` as a fully typed SP-0-conformant module package with the
-complete folder skeleton, `module.config.ts` entry point, the Inbox spine (typed taxonomy,
-`useInboxItems` hook, `InboxQueue` component, `ItemRegistry`), all module-local shared
-primitives (`ProvenanceBreadcrumb`, `MoneyDisplay`, `MoneyInput`, `HashChainBadge`, `RbacGate`,
-`RoleSwitcherChip`), BFF skeleton, and fixture directory layout.
+complete folder skeleton, root `module.config.ts` (SD-4 shape + paysync runtime composition),
+the Inbox spine (typed taxonomy, `useInboxItems` hook, `InboxQueue` component, `ItemRegistry`),
+all module-local shared primitives (`ProvenanceBreadcrumb`, `MoneyDisplay`, `MoneyInput`,
+`HashChainBadge`, `RbacGate`, `RoleSwitcherChip`), BFF skeleton, and fixture directory layout.
 
 This plan delivers the structural skeleton that every subsequent SP-1 plan layers into. No
 surface is wired to a real backend yet — stubs return fixture data. The Inbox is the one
@@ -41,23 +53,29 @@ renders, filters by role, and click-throughs resolve.
 ## Scope
 
 **In:**
-- `packages/modules/paysync/` package skeleton (package.json, tsconfig, vitest config)
-- `module.config.ts` — full route table, RBAC matrix, Inbox kind registrations, navTree
-- `src/inbox/` — `InboxItemKind` taxonomy, `InboxItem` type, `ItemRegistry`, `InboxQueue` component, `useInboxItems` hook
-- `src/components/` — `ProvenanceBreadcrumb`, `MoneyDisplay`, `MoneyInput`, `HashChainBadge`, `RbacGate`, `RoleSwitcherChip`
-- `src/bff/` — BFF route skeleton (`/api/paysync/inbox`, stubs for all surface routes)
-- `src/surfaces/` — one folder per surface with `index.ts` stub (12 surfaces)
-- `fixtures/` — directory layout + seed JSON stubs (empty arrays; real fixture data in Plan E)
-- `packages/contract` extension — `UploadsClient` interface stub + `InboxClient` interface
+- `packages/modules/paysync/` package skeleton (`package.json`, `tsconfig.json`, `vitest.config.ts`)
+- `packages/modules/paysync/module.config.ts` (root, SD-4 shape) — named `config` export + sibling `paysyncComposition` export (rbac, inbox kinds, route-to-surface map, navTree, qa)
+- `src/index.ts` — module public surface (Inbox types, primitives, surface configs, factory glue)
+- `src/inbox/` — `InboxItemKind` taxonomy, `InboxItem` type, `ItemRegistry`, `InboxQueue` component, `useInboxItems` hook, 11 typed card stubs
+- `src/components/` — `ProvenanceBreadcrumb`, `MoneyDisplay`, `MoneyInput`, `HashChainBadge`, `RbacGate`, `RoleSwitcherChip` (under `dev-only/`)
+- `src/types/surface.ts` — `SurfaceConfig` type (module-local; not shared in `@infinityrx/shell`)
+- `src/bff/inbox.ts` — BFF stub returning `[]` typed as `InboxItem[]` (real impl Plan B)
+- `src/surfaces/` — 12 surface folders with `index.ts` stubs exporting typed `SurfaceConfig` constants
+- `fixtures/` — directory layout + header-only CSV stubs + empty-array JSON stubs (real data in Plan E)
+- `packages/contract/src/impls/paysync/` — `{types,clients,real,mock}.ts` matching `prescriber-directory` pattern; named exports from `packages/contract/src/index.ts`
 - `infrastructure/manifests/operator-dev.yml` — add `paysync` to `modules` list
-- Unit tests for Inbox taxonomy, `RbacGate`, `MoneyDisplay`/`MoneyInput` (Decimal enforcement)
+- Root `tsconfig.json` references — add `{ "path": "./packages/modules/paysync" }`
+- Root `package.json` `test:packages` — add `&& npm --workspace=@infinityrx/module-paysync test`
+- Unit tests for Inbox taxonomy exhaustiveness, `InboxQueue` render, `RbacGate`, `MoneyDisplay`/`MoneyInput` (Decimal enforcement)
 
 **Out:**
 - Any real backend wiring (Plans B–E)
+- `echo/` surface — DEFERRED to Plan E §6 (already wraps it; not in Plan A scope)
 - Playwright E2E (Plan E)
-- Upload resource (Plan B)
+- Upload resource backend (Plan B)
 - Real fixture data in seed JSON files (Plan E)
 - Hash-chain verifier endpoint (Plan D)
+- Any change to `packages/shell/` exports — not needed; PD doesn't, paysync doesn't
 
 ---
 
@@ -65,16 +83,16 @@ renders, filters by role, and click-throughs resolve.
 
 ### Task 1 — Package scaffold
 
-| # | Subject | Files touched | Test added | Deliverable |
-|---|---|---|---|---|
-| 1.1 | `package.json` for `@infinityrx/module-paysync` | `packages/modules/paysync/package.json` | — | npm workspace recognised |
-| 1.2 | `tsconfig.json` extending `tsconfig.base.json` | `packages/modules/paysync/tsconfig.json` | — | `tsc -b` clean |
-| 1.3 | `vitest.config.ts` | `packages/modules/paysync/vitest.config.ts` | — | `npm test` runnable |
-| 1.4 | Add `packages/modules/paysync` to workspace-root `tsconfig.json` references | `tsconfig.json` | — | project reference compiles |
-| 1.5 | Add `paysync` to `operator-dev.yml` modules list | `infrastructure/manifests/operator-dev.yml` | manifest validator passes | manifest valid |
-| 1.6 | Add `paysync` to `infrastructure/manifests/operator.yml` if it exists, else note in commit | `infrastructure/manifests/operator.yml` (if present) | — | manifest sync |
+| # | Subject | Files touched | Deliverable |
+|---|---|---|---|
+| 1.1 | `package.json` for `@infinityrx/module-paysync` | `packages/modules/paysync/package.json` | npm workspace recognised |
+| 1.2 | `tsconfig.json` extending `tsconfig.base.json` + refs to shell/contract/auth/ui/qa-harness | `packages/modules/paysync/tsconfig.json` | `tsc -b` clean |
+| 1.3 | `vitest.config.ts` mirroring PD pattern with `environment: 'happy-dom'` + workspace aliases | `packages/modules/paysync/vitest.config.ts` | `npm test` runnable |
+| 1.4 | Add `packages/modules/paysync` to root `tsconfig.json` references | `tsconfig.json` | project reference compiles |
+| 1.5 | Add `paysync` to `infrastructure/manifests/operator-dev.yml` modules list | `infrastructure/manifests/operator-dev.yml` | manifest valid |
+| 1.6 | Add `npm --workspace=@infinityrx/module-paysync test` to root `package.json` `test:packages` script | `package.json` | CI picks up paysync tests |
 
-**Step 1.1 detail — `packages/modules/paysync/package.json`:**
+**Step 1.1 — `packages/modules/paysync/package.json`:**
 
 ```json
 {
@@ -82,9 +100,8 @@ renders, filters by role, and click-throughs resolve.
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "main": "./src/module.config.ts",
   "exports": {
-    ".": "./src/module.config.ts"
+    ".": "./dist/src/index.js"
   },
   "scripts": {
     "build": "tsc -b",
@@ -92,96 +109,165 @@ renders, filters by role, and click-throughs resolve.
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@infinityrx/contract": "*",
     "@infinityrx/auth": "*",
+    "@infinityrx/contract": "*",
+    "@infinityrx/qa-harness": "*",
+    "@infinityrx/shell": "*",
     "@infinityrx/ui": "*",
-    "@infinityrx/qa-harness": "*"
+    "@tanstack/react-query": "5.59.20",
+    "@tanstack/react-virtual": "3.10.8"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
-    "typescript": "5.6.3",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "14.5.2",
     "@types/node": "22.7.5",
-    "vitest": "2.1.3",
-    "@testing-library/react": "16.0.0",
-    "@testing-library/user-event": "14.5.2"
+    "@types/react": "19.1.2",
+    "@types/react-dom": "19.1.2",
+    "happy-dom": "15.11.7",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "typescript": "5.6.3",
+    "vitest": "2.1.9"
   }
 }
 ```
 
-**Step 1.2 detail — `packages/modules/paysync/tsconfig.json`:**
+Notes:
+- `exports` points at `./dist/src/index.js` (compiled JS) matching PD. Tooling reads `module.config.ts` at root via file-path glob, NOT via package export.
+- `@infinityrx/shell` dep is declared even though we don't import a sub-path; we use it for type-only re-exports if needed in Plan B+. Including it now prevents adding it later as a noisy edit.
+- React + tanstack pinned to versions compatible with the rest of the workspace (shell uses 19.2.6 / tanstack-query not yet present elsewhere; verify no peer-dep conflicts with `npm install`).
+- Co-located test files (`*.test.tsx`) and `__tests__/` are both picked up by vitest default discovery.
+
+**Step 1.2 — `packages/modules/paysync/tsconfig.json`:**
 
 ```json
 {
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": ".",
     "jsx": "react-jsx",
-    "lib": ["ES2023", "DOM"]
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["**/*.test.ts", "**/*.test.tsx", "dist", "node_modules"]
+  "references": [
+    { "path": "../../auth" },
+    { "path": "../../contract" },
+    { "path": "../../qa-harness" },
+    { "path": "../../shell" },
+    { "path": "../../ui" }
+  ],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "module.config.ts"],
+  "exclude": ["**/*.test.ts", "**/*.test.tsx", "__tests__/**", "dist", "node_modules"]
 }
 ```
 
-- [ ] Step 1.1: Write `packages/modules/paysync/package.json`
-- [ ] Step 1.2: Write `packages/modules/paysync/tsconfig.json`
-- [ ] Step 1.3: Write `packages/modules/paysync/vitest.config.ts` (mirror `packages/scripts/vitest.config.ts` pattern with `environment: 'jsdom'`)
-- [ ] Step 1.4: Add `{ "path": "./packages/modules/paysync" }` to workspace-root `tsconfig.json` references array
-- [ ] Step 1.5: Edit `infrastructure/manifests/operator-dev.yml` — add `paysync` to `modules:` array
-- [ ] Step 1.6: Run `npm run manifest:validate` — confirm passes
-- [ ] Step 1.7: Commit — `feat(sp-1-a): scaffold @infinityrx/module-paysync package`
+**Step 1.3 — `packages/modules/paysync/vitest.config.ts`** (mirror PD with happy-dom + workspace aliases):
+
+```ts
+import { defineConfig } from "vitest/config";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
+const here = dirname(fileURLToPath(import.meta.url));
+
+export default defineConfig({
+  resolve: {
+    alias: {
+      "@infinityrx/contract": resolve(here, "../../contract/src/index.ts"),
+      "@infinityrx/auth":     resolve(here, "../../auth/src/index.ts"),
+      "@infinityrx/ui":       resolve(here, "../../ui/src/index.ts"),
+      "@infinityrx/shell":    resolve(here, "../../shell/src/index.ts"),
+      "@infinityrx/qa-harness": resolve(here, "../../qa-harness/src/index.ts"),
+    },
+  },
+  test: {
+    include: ["__tests__/**/*.test.{ts,tsx}", "src/**/*.test.{ts,tsx}"],
+    environment: "happy-dom",
+  },
+});
+```
+
+- [ ] Step 1.1: Write `packages/modules/paysync/package.json` (literal content above)
+- [ ] Step 1.2: Write `packages/modules/paysync/tsconfig.json` (literal content above)
+- [ ] Step 1.3: Write `packages/modules/paysync/vitest.config.ts` (literal content above)
+- [ ] Step 1.4: Edit root `tsconfig.json` — add `{ "path": "./packages/modules/paysync" }` to references array
+- [ ] Step 1.5: Edit `infrastructure/manifests/operator-dev.yml` — add `paysync` to `modules:` array (`- paysync` line)
+- [ ] Step 1.6: Edit root `package.json` — append `&& npm --workspace=@infinityrx/module-paysync test` to `test:packages` script (and `&& npm --workspace=@infinityrx/module-paysync run build` is NOT needed; tsc -b walks references)
+- [ ] Step 1.7: `npm install` to refresh workspace lockfile (no new tanstack deps elsewhere; ensure no peer conflict)
+- [ ] Step 1.8: `npm run typecheck` — exits 0 (note: module.config.ts may fail until Task 5 lands; that's expected at this commit boundary; defer the typecheck verification to the Task 5 commit)
+- [ ] Step 1.9: `npm run manifest:validate` — exits 0 (note: `paysync` is now in modules list but `packages/modules/paysync/module.config.ts` doesn't exist yet → expected failure here; defer manifest validation to the Task 5 commit; for this commit, just confirm the YAML is parseable via `python -c "import yaml; yaml.safe_load(open('infrastructure/manifests/operator-dev.yml'))"`)
+- [ ] Step 1.10: Commit — `feat(sp-1-a): scaffold @infinityrx/module-paysync package`
 
 ---
 
 ### Task 2 — Surface skeleton (12 surfaces)
 
 Create one folder per surface under `packages/modules/paysync/src/surfaces/` with an `index.ts`
-that exports a `SurfaceConfig` stub. Each stub is a typed constant that satisfies the surface
-shape — no implementation yet.
+that exports a typed `SurfaceConfig` constant. Each stub is a typed constant that satisfies the
+`SurfaceConfig` shape — no implementation yet.
 
-| # | Surface folder | Files created | Notes |
+| # | Surface folder | Wraps existing portal route | Notes |
 |---|---|---|---|
-| 2.1 | `uploads/` | `index.ts` | NEW surface |
-| 2.2 | `cycles/` | `index.ts` | wraps `portal/operator/app/admin/paysync/cycles/` |
-| 2.3 | `batches/` | `index.ts` | wraps `portal/operator/app/admin/paysync/batches/` |
-| 2.4 | `carryovers/` | `index.ts` | wraps `portal/operator/app/admin/paysync/carryovers/` |
-| 2.5 | `invoices/` | `index.ts` | wraps invoices + `portal/operator/app/accounting/invoices/` |
-| 2.6 | `payment-runs/` | `index.ts` | wraps `portal/operator/app/payments/batches/` + manual-ap |
-| 2.7 | `files/` | `index.ts` | NEW surface |
-| 2.8 | `bank-settlements/` | `index.ts` | wraps `portal/operator/app/admin/paysync/bank-settlements/` |
-| 2.9 | `reconciliations/` | `index.ts` | wraps `portal/operator/app/admin/paysync/reconciliations/` |
-| 2.10 | `journal/` | `index.ts` | NEW surface |
-| 2.11 | `reports/` | `index.ts` | wraps `portal/operator/app/accounting/` |
-| 2.12 | `setup/` | `index.ts` | wraps `portal/operator/app/admin/paysync/` setup surfaces |
+| 2.1 | `uploads/` | — | NEW surface |
+| 2.2 | `cycles/` | `portal/operator/app/admin/paysync/cycles/` | |
+| 2.3 | `batches/` | `portal/operator/app/admin/paysync/batches/` | |
+| 2.4 | `carryovers/` | `portal/operator/app/admin/paysync/carryovers/` | |
+| 2.5 | `invoices/` | `portal/operator/app/admin/paysync/invoices/` + `portal/operator/app/accounting/invoices/` | |
+| 2.6 | `payment-runs/` | `portal/operator/app/payments/batches/` + `portal/operator/app/admin/paysync/manual-ap/` | (R2 FIX — `manual-ap` is under `admin/paysync/`, not `payments/`) |
+| 2.7 | `files/` | — | NEW surface |
+| 2.8 | `bank-settlements/` | `portal/operator/app/admin/paysync/bank-settlements/` | |
+| 2.9 | `reconciliations/` | `portal/operator/app/admin/paysync/reconciliations/` | |
+| 2.10 | `journal/` | — | NEW surface |
+| 2.11 | `reports/` | `portal/operator/app/accounting/` | |
+| 2.12 | `setup/` | `portal/operator/app/admin/paysync/{cycle-schedules,email-recipients,email-templates,export-templates,gl-account-mappings,invoice-sequences}/` | aggregates setup surfaces |
+| — | `echo/` | `portal/operator/app/admin/paysync/echo/` | **DEFERRED to Plan E §6.** Plan A does NOT create this surface. |
 
-Each `index.ts` template:
+**`SurfaceConfig` type** (`src/types/surface.ts`):
+
+```ts
+// Module-local type for surface descriptors. Not shared via @infinityrx/shell —
+// surfaces are an internal composition concern of paysync.
+export interface SurfaceConfig {
+  readonly id: string;
+  readonly path: string;
+}
+```
+
+Each `src/surfaces/<name>/index.ts` template:
 
 ```ts
 // packages/modules/paysync/src/surfaces/<name>/index.ts
 // Stub — wired in SP-1 Plan <X>. Do not add implementation here.
+import type { SurfaceConfig } from "../../types/surface.js";
 
-export const <Name>Surface = {
-  id: '<name>',
-  path: '/admin/paysync/<name>',
-} as const;
+export const <Name>Surface: SurfaceConfig = {
+  id: "<name>",
+  path: "/admin/paysync/<name>",
+};
 ```
 
-- [ ] Step 2.1–2.12: Create all 12 surface stubs
-- [ ] Step 2.13: Commit — `feat(sp-1-a): surface skeleton stubs (12 surfaces)`
+- [ ] Step 2.0: Write `src/types/surface.ts` with `SurfaceConfig` type
+- [ ] Step 2.1–2.12: Create all 12 surface stubs (each typed as `SurfaceConfig`, NOT empty objects)
+- [ ] Step 2.13: `tsc -b` exits 0 in module (still expected to fail at workspace level until Task 5 lands)
+- [ ] Step 2.14: Commit — `feat(sp-1-a): surface skeleton stubs (12 surfaces; echo deferred to Plan E)`
 
 ---
 
 ### Task 3 — Inbox spine
 
 **Files:**
-- `packages/modules/paysync/src/inbox/types.ts` — `InboxItemKind`, `InboxItem`, `RbacRole`
-- `packages/modules/paysync/src/inbox/ItemRegistry.ts` — registry map
+- `packages/modules/paysync/src/inbox/types.ts` — `InboxItemKind`, `InboxItem`, `RbacRole`, `INBOX_KIND_ROLE`
+- `packages/modules/paysync/src/inbox/ItemRegistry.ts` — registry map (kind → lazy card import + rbac_required)
 - `packages/modules/paysync/src/inbox/useInboxItems.ts` — TanStack Query hook
 - `packages/modules/paysync/src/inbox/InboxQueue.tsx` — virtualized list component
 - `packages/modules/paysync/src/inbox/index.ts` — barrel export
-- `packages/modules/paysync/src/bff/inbox.ts` — BFF handler stub returning mock fixture data
-- `packages/modules/paysync/tests/unit/inbox/types.test.ts` — discriminated-union exhaustiveness
-- `packages/modules/paysync/tests/unit/inbox/InboxQueue.test.tsx` — renders, filters by role, no items state
+- `packages/modules/paysync/src/bff/inbox.ts` — BFF handler STUB returning `[]: InboxItem[]`
+- `packages/modules/paysync/__tests__/inbox/types.test.ts` — exhaustiveness check
+- `packages/modules/paysync/__tests__/inbox/InboxQueue.test.tsx` — renders, filters by role, no-items state
 
 **`types.ts` content (authoritative — do not deviate):**
 
@@ -189,45 +275,44 @@ export const <Name>Surface = {
 // Authoritative Inbox taxonomy per SP-1 spec §5.3.
 // Add new kinds here first; ItemRegistry registers the card component.
 
-export type RbacRole = 'operator' | 'approver' | 'auditor';
+export type RbacRole = "operator" | "approver" | "auditor";
 
 export type InboxItemKind =
-  | 'upload_pending_review'
-  | 'upload_validated_awaiting_batching'
-  | 'cycle_pending_close'
-  | 'cycle_close_review'
-  | 'batch_drafted'
-  | 'ar_invoice_draft'
-  | 'ap_payment_run_held'
-  | 'banking_discrepancy'
-  | 'reconciliation_pending'
-  | 'carryover_open'
-  | 'journal_periodic_review';
+  | "upload_pending_review"
+  | "upload_validated_awaiting_batching"
+  | "cycle_pending_close"
+  | "cycle_close_review"
+  | "batch_drafted"
+  | "ar_invoice_draft"
+  | "ap_payment_run_held"
+  | "banking_discrepancy"
+  | "reconciliation_pending"
+  | "carryover_open"
+  | "journal_periodic_review";
 
 export type InboxItem = {
   readonly id: string;
   readonly kind: InboxItemKind;
   readonly tenant_id: string;
-  readonly upload_id: string | null;   // provenance link; null only for journal_periodic_review
+  readonly upload_id: string | null;
   readonly rbac_required: RbacRole;
-  readonly created_at: string;         // ISO 8601
-  readonly priority: 'normal' | 'high';
-  readonly payload: Record<string, unknown>; // typed per kind via discriminated union in Plan B+
+  readonly created_at: string;
+  readonly priority: "normal" | "high";
+  readonly payload: Record<string, unknown>;
 };
 
-/** Maps each InboxItemKind to the role that must action it. */
 export const INBOX_KIND_ROLE: Record<InboxItemKind, RbacRole> = {
-  upload_pending_review:              'operator',
-  upload_validated_awaiting_batching: 'operator',
-  cycle_pending_close:                'operator',
-  carryover_open:                     'operator',
-  cycle_close_review:                 'approver',
-  batch_drafted:                      'approver',
-  ar_invoice_draft:                   'approver',
-  ap_payment_run_held:                'approver',
-  banking_discrepancy:                'approver',
-  reconciliation_pending:             'approver',
-  journal_periodic_review:            'auditor',
+  upload_pending_review:              "operator",
+  upload_validated_awaiting_batching: "operator",
+  cycle_pending_close:                "operator",
+  carryover_open:                     "operator",
+  cycle_close_review:                 "approver",
+  batch_drafted:                      "approver",
+  ar_invoice_draft:                   "approver",
+  ap_payment_run_held:                "approver",
+  banking_discrepancy:                "approver",
+  reconciliation_pending:             "approver",
+  journal_periodic_review:            "auditor",
 };
 ```
 
@@ -238,27 +323,25 @@ export const INBOX_KIND_ROLE: Record<InboxItemKind, RbacRole> = {
 calls `queryClient.invalidateQueries({ queryKey: ['paysync', 'inbox'] })` immediately after
 success. No WebSocket in SP-1.
 
-**BFF stub** (`src/bff/inbox.ts`): returns an empty array `[]` typed as `InboxItem[]`.
-Plan B replaces the stub with a real call to `GET /api/v1/billing/inbox?role=<role>`.
-**This stub is NOT a complete Inbox implementation** — it is the minimum required for the
-Plan A gate (module typechecks; mock renders correctly). The Inbox gate criteria below
-explicitly marks this as "stub; real implementation in Plan B."
+**BFF stub** (`src/bff/inbox.ts`): returns `[] as InboxItem[]`. **This is a stub — NOT a complete
+Inbox implementation.** Plan B replaces it with a real call to the backend Upload + Inbox routes.
+The Plan A gate criterion below explicitly accepts this as stub-scope.
 
 **Tests:**
-- `types.test.ts`: assert `INBOX_KIND_ROLE` has an entry for every value in `InboxItemKind`
-  (exhaustiveness via `Object.keys` comparison). Catches kind additions that forget the role map.
+- `types.test.ts`: assert `Object.keys(INBOX_KIND_ROLE)` matches every value in the `InboxItemKind`
+  union (literal string equality on a sorted array). Catches additions that forget the role map.
 - `InboxQueue.test.tsx`: render with 3 items (1 operator, 1 approver, 1 auditor); assert
-  role=operator shows 1, role=approver shows 1, role=auditor shows 1; assert "No items" state
-  when array is empty.
+  role=operator filter shows 1, role=approver shows 1, role=auditor shows 1; assert "No items"
+  state when array is empty.
 
 - [ ] Step 3.1: Write `src/inbox/types.ts` exactly as shown
-- [ ] Step 3.2: Write `src/inbox/ItemRegistry.ts` — map of kind → lazy-loaded card component + `rbac_required`
-- [ ] Step 3.3: Write `src/inbox/useInboxItems.ts` — TanStack Query hook per §10.5 resolution
-- [ ] Step 3.4: Write `src/inbox/InboxQueue.tsx` — TanStack Virtual list, group by kind, filter by role
-- [ ] Step 3.5: Write `src/inbox/index.ts` barrel
-- [ ] Step 3.6: Write `src/bff/inbox.ts` stub
-- [ ] Step 3.7: Write tests (exhaustiveness + render tests)
-- [ ] Step 3.8: Run `npm --workspace=@infinityrx/module-paysync test` — all pass
+- [ ] Step 3.2: Write `src/inbox/ItemRegistry.ts` — map of `InboxItemKind → { card: () => Promise<unknown>; rbac_required: RbacRole }` (card imports point at `../inbox/cards/<Name>Card.js` — actual stubs land in Task 5)
+- [ ] Step 3.3: Write `src/inbox/useInboxItems.ts` — `function useInboxItems(role: RbacRole)` returns TanStack Query result; calls `fetch('/api/paysync/inbox?role=' + role)` for now (BFF route added in Plan A; real backend in Plan B)
+- [ ] Step 3.4: Write `src/inbox/InboxQueue.tsx` — uses `@tanstack/react-virtual` for virtualization; props `{ items: InboxItem[]; role: RbacRole }`; filters `items.filter(i => i.rbac_required === role)`; renders via `ItemRegistry`
+- [ ] Step 3.5: Write `src/inbox/index.ts` barrel (re-export types, hook, component, registry)
+- [ ] Step 3.6: Write `src/bff/inbox.ts` stub returning `[] as InboxItem[]`
+- [ ] Step 3.7: Write `__tests__/inbox/types.test.ts` (exhaustiveness) and `__tests__/inbox/InboxQueue.test.tsx` (render + filter + empty)
+- [ ] Step 3.8: `npm --workspace=@infinityrx/module-paysync test` — all pass
 - [ ] Step 3.9: Commit — `feat(sp-1-a): Inbox spine — taxonomy, registry, hook, queue component`
 
 ---
@@ -271,217 +354,270 @@ explicitly marks this as "stub; real implementation in Plan B."
 - `packages/modules/paysync/src/components/MoneyInput.tsx`
 - `packages/modules/paysync/src/components/HashChainBadge.tsx`
 - `packages/modules/paysync/src/components/RbacGate.tsx`
-- `packages/modules/paysync/src/components/RoleSwitcherChip.tsx`
-- `packages/modules/paysync/src/components/index.ts` barrel
-- Tests for each primitive (unit, co-located: `*.test.tsx`)
+- `packages/modules/paysync/src/components/dev-only/RoleSwitcherChip.tsx` (qa-only)
+- `packages/modules/paysync/src/components/index.ts` barrel (excludes `dev-only/`)
+- Co-located unit tests (`*.test.tsx`) for each primitive — picked up by vitest default discovery
 
 **MoneyDisplay / MoneyInput rules** (`.claude/rules/financial-precision.md`):
-- `MoneyDisplay` receives a `value: string` (Decimal serialised as string per the financial rules);
+- `MoneyDisplay` receives `value: string` (Decimal serialised as string per financial rules);
   formats with `Intl.NumberFormat` using `currency: 'USD'`. Never accepts `number` or `float`.
 - `MoneyInput` validates on blur: rejects input with >4 decimal places; rejects NaN; calls
   `onChange(decimalString)` only when valid; shows inline error "Max 4 decimal places" otherwise.
-- Both have 100% branch coverage tests — financial path, per Auto-Gate rules.
+- Both: 100% branch coverage — financial path per Auto-Gate.
 
-**RbacGate rules:**
+**RbacGate rules** (`.claude/rules/security.md`):
 - Props: `role: RbacRole | RbacRole[]`, `currentRole: RbacRole`, `children: React.ReactNode`
 - When denied: renders children wrapped in `<span aria-disabled="true" title="<Role> role required">`;
-  pointer-events: none via CSS class. Never hides. Per spec §5.4.
+  `pointer-events: none` via CSS class. Never hides. Per spec §5.4.
 - 100% branch coverage required (allowed, denied, array-role match, array-role deny).
 
 **RoleSwitcherChip rules:**
-- Only exported from `@infinityrx/qa-harness` re-export path, NOT from main module barrel.
-  Enforced by placing it in `src/components/dev-only/RoleSwitcherChip.tsx` and only
-  re-exporting from a `qa` named export in `module.config.ts`.
-- Production bundle check: CI step added in Plan E asserts
-  `RoleSwitcherChip` string does not appear in any `.next/static/chunks/*.js`.
+- Lives under `src/components/dev-only/RoleSwitcherChip.tsx`. NOT exported from main `components/index.ts`.
+- Plan A's gate has a grep check: `! grep -r "RoleSwitcherChip" packages/modules/paysync/src/components/index.ts`.
+- Re-export from `paysyncComposition.qa.RoleSwitcherChip` in `module.config.ts` (Task 5) for qa-harness consumption.
+- Production bundle check (CI step added in Plan E) asserts string does not appear in any `.next/static/chunks/*.js`.
 
 **ProvenanceBreadcrumb:**
 - Props: `chain: Array<{ label: string; href: string }>` — renders as `<nav aria-label="Provenance">` with `/` separators.
 - Truncates middle items at >4 nodes (shows first + last 2 with `...`).
 
-- [ ] Step 4.1: Write all 6 primitive components + barrel
-- [ ] Step 4.2: Write unit tests for each (100% branch on financial + RBAC paths)
-- [ ] Step 4.3: Run tests — all pass
-- [ ] Step 4.4: Commit — `feat(sp-1-a): module primitives — ProvenanceBreadcrumb, Money*, HashChainBadge, RbacGate, RoleSwitcherChip`
+**HashChainBadge:**
+- Props: `{ verified: boolean | null; tooLarge?: boolean }` — renders one of: green ✓ verified, red ✗ failed, amber ⚠ too-large-deferred, gray spinner if `verified === null && !tooLarge`.
+
+- [ ] Step 4.1: Write 6 primitive components + barrel (barrel excludes `dev-only/`)
+- [ ] Step 4.2: Write co-located unit tests (`MoneyDisplay.test.tsx`, etc.) — 100% branch on `MoneyDisplay`, `MoneyInput`, `RbacGate`
+- [ ] Step 4.3: `npm --workspace=@infinityrx/module-paysync test -- --coverage` — verify 100% branch on financial + RBAC paths
+- [ ] Step 4.4: `grep -r "RoleSwitcherChip" packages/modules/paysync/src/components/index.ts` — returns no matches (barrel does not export qa-only chip)
+- [ ] Step 4.5: Commit — `feat(sp-1-a): module primitives — ProvenanceBreadcrumb, Money*, HashChainBadge, RbacGate, RoleSwitcherChip`
 
 ---
 
-### Task 5 — `module.config.ts` entry point
+### Task 5 — `module.config.ts` (root) + 11 typed card stubs
 
-**File:** `packages/modules/paysync/src/module.config.ts`
+**File:** `packages/modules/paysync/module.config.ts` (ROOT — not `src/`)
 
-This is the composition entry point consumed by SP-0's `generate-composition.ts`. It must
-satisfy the `ModuleConfig` type. **IMPORTANT (B1 fix):** `packages/shell/src/types/module-config.ts`
-does NOT exist. The `packages/shell/src/` directory contains only: `__mocks__/`, `__tests__/`,
-`_generated/`, `auth/`, `index.ts`, `middleware.ts`, `qa/`, `routes/`, `shell/`. There is no
-`types/` subdirectory.
+**R2 fix:** Plan A no longer creates `packages/shell/src/types/module-config.ts`. The SD-4
+`ModuleConfig` interface lives in `packages/scripts/build-manifest.ts:36-77` and is read
+structurally by tooling — no shared type import is needed; `as const` on the literal is
+sufficient (matches `prescriber-directory/module.config.ts`).
 
-**Resolution:** Plan A creates `packages/shell/src/types/module-config.ts` as new scope. This
-file defines the `ModuleConfig` interface that the shell's composition layer will import. The
-builder must:
-1. `grep -rn "ModuleConfig" packages/shell/src/` before writing to check if it already exists
-   under a different path or is exported from `index.ts`.
-2. If no existing export is found: create `packages/shell/src/types/module-config.ts` with the
-   explicit interface (see below) and re-export from `packages/shell/src/index.ts`.
-3. If an existing export is found: use that import path instead of the invented one.
-
-**`ModuleConfig` interface** (to be created if not already present):
+**Two exports in this file:**
+1. `export const config = {...} as const;` — SD-4 shape consumed by build-manifest, audit-module-graph, generate-eslint-zones
+2. `export const paysyncComposition = {...} as const;` — runtime composition (rbac matrix, inbox kinds, route-to-surface map, navTree, qa) consumed by SP-1 surface mounting + qa-harness; NOT inspected by SD-4 tooling
 
 ```ts
-// packages/shell/src/types/module-config.ts
-export interface RouteConfig {
-  path: string;
-  surface: string;
-  label: string;
-}
+// packages/modules/paysync/module.config.ts
+// SP-1 PaySync module config.
+// `config` follows SD-4 §3 shape (read by packages/scripts/build-manifest.ts).
+// `paysyncComposition` is paysync-specific runtime composition (rbac, inbox kinds, etc.).
 
-export interface NavItem {
-  label: string;
-  path: string;
-  icon: string;
-}
-
-export interface InboxKindRegistration {
-  kind: string;
-  card: () => Promise<unknown>;
-}
-
-export interface ModuleConfig {
-  id: string;
-  displayName: string;
-  routes: RouteConfig[];
-  rbac: Record<string, string[]>;
-  inboxItemKinds: InboxKindRegistration[];
-  navTree: {
-    primary: NavItem[];
-  };
-  qa?: {
-    RoleSwitcherChip?: () => Promise<unknown>;
-  };
-}
-```
-
-This interface must also be added to `packages/shell/src/index.ts` as a named export so
-other packages can `import type { ModuleConfig } from '@infinityrx/shell'`.
-
-```ts
-// packages/modules/paysync/src/module.config.ts
-// Import path depends on what Task 5 Step 5.0 finds:
-// - If types/module-config.ts was created new: import from '@infinityrx/shell/types/module-config.js'
-// - If ModuleConfig is already exported from shell index.ts: use that path
-// The builder MUST grep before choosing the import path.
-import type { ModuleConfig } from '@infinityrx/shell/types/module-config.js';
-
-export default {
-  id: 'paysync',
-  displayName: 'PaySync',
+export const config = {
+  name: "paysync",
   routes: [
-    { path: '/admin/paysync',              surface: 'uploads',        label: 'Inbox'           },
-    { path: '/admin/paysync/uploads',      surface: 'uploads',        label: 'Uploads'         },
-    { path: '/admin/paysync/cycles',       surface: 'cycles',         label: 'Cycles'          },
-    { path: '/admin/paysync/batches',      surface: 'batches',        label: 'Batches'         },
-    { path: '/admin/paysync/carryovers',   surface: 'carryovers',     label: 'Carryovers'      },
-    { path: '/admin/paysync/invoices',     surface: 'invoices',       label: 'Invoices'        },
-    { path: '/admin/paysync/payment-runs', surface: 'payment-runs',   label: 'Payment Runs'    },
-    { path: '/admin/paysync/files',        surface: 'files',          label: 'Files'           },
-    { path: '/admin/paysync/settlements',  surface: 'bank-settlements',label: 'Settlements'    },
-    { path: '/admin/paysync/reconcile',    surface: 'reconciliations',label: 'Reconciliations' },
-    { path: '/admin/paysync/journal',      surface: 'journal',        label: 'Journal'         },
-    { path: '/admin/paysync/reports',      surface: 'reports',        label: 'Reports'         },
-    { path: '/admin/paysync/setup',        surface: 'setup',          label: 'Setup'           },
+    "/admin/paysync",
+    "/admin/paysync/uploads",
+    "/admin/paysync/cycles",
+    "/admin/paysync/batches",
+    "/admin/paysync/carryovers",
+    "/admin/paysync/invoices",
+    "/admin/paysync/payment-runs",
+    "/admin/paysync/files",
+    "/admin/paysync/settlements",
+    "/admin/paysync/reconcile",
+    "/admin/paysync/journal",
+    "/admin/paysync/reports",
+    "/admin/paysync/setup",
   ],
+  navEntry: {
+    label: "PaySync",
+    icon: "credit-card",
+    order: 20,
+  },
+  requires: {
+    backends: ["billing", "payment-processing", "core-platform"],
+    sharedServices: ["postgres", "redis"],
+    schemas: ["billing_v1", "payment_processing_v1", "core_v1"],
+    migrations: ["core", "billing", "payment-processing"],
+    env: [
+      "DATABASE_URL_BILLING",
+      "DATABASE_URL_PAYMENT_PROCESSING",
+      "PAYSYNC_UPLOAD_DIR",
+      "PAYSYNC_HASH_CHAIN_SYNC_LIMIT",
+    ],
+    health: [
+      "http://billing:8040/health",
+      "http://payment-processing:8050/health",
+    ],
+    seedData: [],
+    queues: ["paysync.upload.parsed"],
+    jobs: ["paysync.uploads.retention", "paysync.audit.hash-chain.verify"],
+    buckets: [],
+    integrations: [],
+    secrets: [
+      "secret://db/billing",
+      "secret://db/payment-processing",
+    ],
+  },
+  shellSurfaces: {
+    navOrderSlots: [20],
+    cacheTagPrefixes: ["paysync:"],
+    commandPaletteScopes: ["paysync.*"],
+    routePrefixes: ["/admin/paysync"],
+    cacheKeyNamespaces: ["paysync:"],
+    redisKeyPrefixes: ["tenant:*:paysync:"],
+    rabbitExchanges: ["paysync"],
+  },
+  surfaceKinds: ["server", "client"] as Array<"server" | "client">,
+  entitlements: { requiredScope: null },
+} as const;
+
+// Paysync-specific runtime composition. NOT read by SD-4 manifest tooling.
+// Consumed by:
+//   - Surface mounting (Plans B–E)
+//   - Inbox card registry (Task 5 below)
+//   - qa-harness role switcher chip (qa-harness only, never production)
+export const paysyncComposition = {
+  displayName: "PaySync",
   rbac: {
     operator: [
-      'paysync.upload', 'paysync.upload.view', 'paysync.batch.draft',
-      'paysync.cycle.view', 'paysync.carryover.view', 'paysync.journal.view',
-      'paysync.audit.view',
+      "paysync.upload", "paysync.upload.view", "paysync.batch.draft",
+      "paysync.cycle.view", "paysync.carryover.view", "paysync.journal.view",
+      "paysync.audit.view",
     ],
     approver: [
-      'paysync.upload', 'paysync.upload.view', 'paysync.batch.draft',
-      'paysync.cycle.view', 'paysync.carryover.view', 'paysync.journal.view',
-      'paysync.audit.view',
-      'paysync.cycle.close', 'paysync.invoice.send', 'paysync.payment_run.release',
-      'paysync.nacha.generate', 'paysync.835.generate', 'paysync.reconcile.finalize',
-      'paysync.discrepancy.resolve', 'paysync.manual_ap.commit', 'paysync.setup.mutate',
+      "paysync.upload", "paysync.upload.view", "paysync.batch.draft",
+      "paysync.cycle.view", "paysync.carryover.view", "paysync.journal.view",
+      "paysync.audit.view",
+      "paysync.cycle.close", "paysync.invoice.send", "paysync.payment_run.release",
+      "paysync.nacha.generate", "paysync.835.generate", "paysync.reconcile.finalize",
+      "paysync.discrepancy.resolve", "paysync.manual_ap.commit", "paysync.setup.mutate",
     ],
     auditor: [
-      'paysync.read', 'paysync.upload.view', 'paysync.journal.view',
-      'paysync.journal.verify', 'paysync.audit.view',
+      "paysync.read", "paysync.upload.view", "paysync.journal.view",
+      "paysync.journal.verify", "paysync.audit.view",
     ],
   },
   inboxItemKinds: [
-    { kind: 'upload_pending_review',              card: () => import('./inbox/cards/UploadPendingReviewCard.js')    },
-    { kind: 'upload_validated_awaiting_batching', card: () => import('./inbox/cards/UploadValidatedCard.js')        },
-    { kind: 'cycle_pending_close',                card: () => import('./inbox/cards/CyclePendingCloseCard.js')      },
-    { kind: 'cycle_close_review',                 card: () => import('./inbox/cards/CycleCloseReviewCard.js')       },
-    { kind: 'batch_drafted',                      card: () => import('./inbox/cards/BatchDraftedCard.js')           },
-    { kind: 'ar_invoice_draft',                   card: () => import('./inbox/cards/ArInvoiceDraftCard.js')         },
-    { kind: 'ap_payment_run_held',                card: () => import('./inbox/cards/ApPaymentRunHeldCard.js')       },
-    { kind: 'banking_discrepancy',                card: () => import('./inbox/cards/BankingDiscrepancyCard.js')     },
-    { kind: 'reconciliation_pending',             card: () => import('./inbox/cards/ReconciliationPendingCard.js')  },
-    { kind: 'carryover_open',                     card: () => import('./inbox/cards/CarryoverOpenCard.js')          },
-    { kind: 'journal_periodic_review',            card: () => import('./inbox/cards/JournalPeriodicReviewCard.js')  },
+    { kind: "upload_pending_review",              card: () => import("./src/inbox/cards/UploadPendingReviewCard.js")    },
+    { kind: "upload_validated_awaiting_batching", card: () => import("./src/inbox/cards/UploadValidatedCard.js")        },
+    { kind: "cycle_pending_close",                card: () => import("./src/inbox/cards/CyclePendingCloseCard.js")      },
+    { kind: "cycle_close_review",                 card: () => import("./src/inbox/cards/CycleCloseReviewCard.js")       },
+    { kind: "batch_drafted",                      card: () => import("./src/inbox/cards/BatchDraftedCard.js")           },
+    { kind: "ar_invoice_draft",                   card: () => import("./src/inbox/cards/ArInvoiceDraftCard.js")         },
+    { kind: "ap_payment_run_held",                card: () => import("./src/inbox/cards/ApPaymentRunHeldCard.js")       },
+    { kind: "banking_discrepancy",                card: () => import("./src/inbox/cards/BankingDiscrepancyCard.js")     },
+    { kind: "reconciliation_pending",             card: () => import("./src/inbox/cards/ReconciliationPendingCard.js")  },
+    { kind: "carryover_open",                     card: () => import("./src/inbox/cards/CarryoverOpenCard.js")          },
+    { kind: "journal_periodic_review",            card: () => import("./src/inbox/cards/JournalPeriodicReviewCard.js")  },
   ],
+  routeSurfaces: {
+    "/admin/paysync":              "uploads",        // Inbox at index
+    "/admin/paysync/uploads":      "uploads",
+    "/admin/paysync/cycles":       "cycles",
+    "/admin/paysync/batches":      "batches",
+    "/admin/paysync/carryovers":   "carryovers",
+    "/admin/paysync/invoices":     "invoices",
+    "/admin/paysync/payment-runs": "payment-runs",
+    "/admin/paysync/files":        "files",
+    "/admin/paysync/settlements":  "bank-settlements",
+    "/admin/paysync/reconcile":    "reconciliations",
+    "/admin/paysync/journal":      "journal",
+    "/admin/paysync/reports":      "reports",
+    "/admin/paysync/setup":        "setup",
+  },
   navTree: {
     primary: [
-      { label: 'Inbox',    path: '/admin/paysync',             icon: 'inbox'      },
-      { label: 'History',  path: '/admin/paysync/uploads',     icon: 'clock'      },
-      { label: 'Journal',  path: '/admin/paysync/journal',     icon: 'book-open'  },
-      { label: 'Reports',  path: '/admin/paysync/reports',     icon: 'bar-chart'  },
-      { label: 'Setup',    path: '/admin/paysync/setup',       icon: 'settings'   },
+      { label: "Inbox",    path: "/admin/paysync",             icon: "inbox"      },
+      { label: "History",  path: "/admin/paysync/uploads",     icon: "clock"      },
+      { label: "Journal",  path: "/admin/paysync/journal",     icon: "book-open"  },
+      { label: "Reports",  path: "/admin/paysync/reports",     icon: "bar-chart"  },
+      { label: "Setup",    path: "/admin/paysync/setup",       icon: "settings"   },
     ],
   },
-  // qa-harness export — tree-shaken from production bundles per spec §6.6
   qa: {
-    RoleSwitcherChip: () => import('./components/dev-only/RoleSwitcherChip.js'),
+    RoleSwitcherChip: () => import("./src/components/dev-only/RoleSwitcherChip.js"),
   },
-} satisfies ModuleConfig;
+} as const;
 ```
 
-**Inbox card stubs — stub-as-done policy (B11 fix):**
-Plan A MUST NOT count stub files as task-complete at any gate. The 11 card stubs created here
-render a minimal but functional skeleton: they accept typed props (the `InboxItem` shape from
-`types.ts`) and render the kind name + a placeholder body. They are NOT empty `<div>` files
-that pass no props — that would be a dead stub. Plans B/C/D replace each stub with a real
-component; the stub must be type-safe so the replacement is a drop-in.
+**11 typed inbox card stubs** (`src/inbox/cards/<Name>Card.tsx`):
 
-Each stub must:
-- Accept `item: InboxItem` as a prop (typed from `types.ts`)
-- Render `<div data-testid="inbox-card-{kind}">{item.kind}</div>`
-- Have a unit test asserting it renders without crashing given a minimal `InboxItem` fixture
+```tsx
+// packages/modules/paysync/src/inbox/cards/UploadPendingReviewCard.tsx
+// Typed stub — replaced with real card in Plan B. Renders kind + data-testid only.
+import type { InboxItem } from "../types.js";
 
-These stubs are functional enough to verify dynamic imports in `module.config.ts` resolve, and
-type-safe enough that Plans B/C/D can replace the body without touching the interface.
+export default function UploadPendingReviewCard({ item }: { item: InboxItem }) {
+  return <div data-testid="inbox-card-upload_pending_review">{item.kind}</div>;
+}
+```
 
-**Surface `index.ts` stubs — same policy:** each surface `index.ts` stub (Task 2) exports a
-typed `SurfaceConfig` constant. It must satisfy the surface shape from `module.config.ts` routes
-so that the route table compiles. A plain `export const UploadsSurface = {}` without the correct
-shape will fail `tsc -b` — which is the desired gate.
+Each card stub:
+- Accepts `{ item: InboxItem }` props (typed from `types.ts`)
+- Renders `<div data-testid="inbox-card-{kind}">{item.kind}</div>`
+- Has a co-located unit test (`<Name>Card.test.tsx`) asserting render given a minimal `InboxItem` fixture
 
-- [ ] Step 5.0: `grep -rn "ModuleConfig" packages/shell/src/` — determine if type already exists and at which path
-- [ ] Step 5.1: If not found: create `packages/shell/src/types/module-config.ts` with the `ModuleConfig` interface above; add named re-export to `packages/shell/src/index.ts`
-- [ ] Step 5.2: Write `src/module.config.ts` using the import path confirmed in Step 5.0
-- [ ] Step 5.3: Create 11 typed card stubs under `src/inbox/cards/` — each accepts `item: InboxItem`, renders kind + data-testid, has a unit test
-- [ ] Step 5.4: Verify `tsc -b` clean
-- [ ] Step 5.5: Commit — `feat(sp-1-a): module.config.ts entry point + ModuleConfig type (new in shell/types/) + 11 typed card stubs`
+These are not empty stubs. Plans B–E replace the body without changing the interface.
+
+- [ ] Step 5.1: Write `packages/modules/paysync/module.config.ts` at ROOT (literal content above; both `config` and `paysyncComposition` exports)
+- [ ] Step 5.2: Create 11 card stubs under `src/inbox/cards/` — each typed + data-testid + co-located test
+- [ ] Step 5.3: Update `src/inbox/ItemRegistry.ts` (from Task 3.2) to import from `paysyncComposition.inboxItemKinds`
+- [ ] Step 5.4: `npm run typecheck` — exits 0 (now including all workspace refs; module.config.ts root file recognized)
+- [ ] Step 5.5: `npm run manifest:validate` — exits 0 (paysync now in modules list AND module.config.ts exists with required SD-4 shape)
+- [ ] Step 5.6: `npm --workspace=@infinityrx/module-paysync test` — all pass
+- [ ] Step 5.7: Commit — `feat(sp-1-a): module.config.ts (SD-4 + paysync composition) + 11 typed inbox card stubs`
 
 ---
 
-### Task 6 — Contract extension + fixtures layout
+### Task 6 — Contract extension (impls/paysync) + fixtures layout
 
-**Contract extension** (`packages/contract`):
-Add `src/paysync/uploads-client.ts` with the `UploadsClient` interface stub (methods: `list`,
-`get`, `create`, `getClaims`) and `src/paysync/inbox-client.ts` with `InboxClient` interface
-(`list`). Both have `RealImpl` and `MockImpl` classes — `MockImpl` returns typed empty
-arrays/fixtures. Pattern mirrors existing `paysync-api.ts` in `portal/shared/lib/`.
+**Contract extension** — match HEAD pattern at `packages/contract/src/impls/prescriber-directory/`:
 
-**Fixtures layout:**
+Files:
+- `packages/contract/src/impls/paysync/types.ts` — Zod schemas for `Upload`, `InboxItem`, `RbacRole`
+- `packages/contract/src/impls/paysync/clients.ts` — `UploadsClient` interface (`list`, `get`, `create`, `getClaims`), `InboxClient` interface (`list`); cache policies for each
+- `packages/contract/src/impls/paysync/real.ts` — `createRealUploadsClient`, `createRealInboxClient` (return objects; HTTP impl stubbed but typed)
+- `packages/contract/src/impls/paysync/mock.ts` — `createMockUploadsClient`, `createMockInboxClient` (return typed empty arrays / hard-coded fixtures)
+
+Add to `packages/contract/src/index.ts`:
+
+```ts
+// PaySync clients — SP-1.
+export {
+  UploadSchema,
+  InboxItemSchema,
+  RbacRoleSchema,
+  type Upload,
+  type InboxItem as ContractInboxItem,  // alias to avoid clash with module's InboxItem
+  type RbacRole as ContractRbacRole,
+} from "./impls/paysync/types.js";
+
+export {
+  PAYSYNC_UPLOADS_CACHE_POLICIES,
+  PAYSYNC_INBOX_CACHE_POLICIES,
+  type UploadsClient,
+  type InboxClient,
+} from "./impls/paysync/clients.js";
+
+export {
+  createRealUploadsClient,
+  createRealInboxClient,
+} from "./impls/paysync/real.js";
+
+export {
+  createMockUploadsClient,
+  createMockInboxClient,
+} from "./impls/paysync/mock.js";
 ```
-packages/modules/paysync/fixtures/
+
+**Fixtures layout** (`packages/modules/paysync/fixtures/`):
+
+```
+fixtures/
   uploads/
-    upload-001-healthy.csv        ← 20 valid claims (real data in Plan E)
-    upload-002-validation-fail.csv ← 20 invalid rows (real data in Plan E)
-    upload-003-half-bad.csv       ← 30 rows mixed (real data in Plan E)
+    upload-001-healthy.csv        ← header row only (real data in Plan E)
+    upload-002-validation-fail.csv ← header row only (real data in Plan E)
+    upload-003-half-bad.csv       ← header row only (real data in Plan E)
   seeds/
     tenant.json                   ← {} stub
     cycles.json                   ← [] stub
@@ -491,12 +627,18 @@ packages/modules/paysync/fixtures/
     users.json                    ← [] stub
 ```
 
-CSV stubs contain only header rows in Plan A. Real data populates in Plan E.
+CSV header (per §10.3 minimum schema):
+```
+ndc,npi,claim_id,date_of_service,quantity,days_supply,amount_billed,member_id
+```
 
-- [ ] Step 6.1: Add `UploadsClient` + `InboxClient` to `packages/contract/src/paysync/`
-- [ ] Step 6.2: Create fixtures directory layout with header-only CSV stubs + empty JSON stubs
-- [ ] Step 6.3: Verify contract package still typechecks (`tsc -b`)
-- [ ] Step 6.4: Commit — `feat(sp-1-a): contract extensions (UploadsClient, InboxClient) + fixtures layout`
+- [ ] Step 6.1: Write `packages/contract/src/impls/paysync/{types,clients,real,mock}.ts`
+- [ ] Step 6.2: Add named exports to `packages/contract/src/index.ts` (literal above)
+- [ ] Step 6.3: Add contract test in `packages/contract/src/__tests__/paysync.test.ts` — instantiate `createMockUploadsClient()` and `createMockInboxClient()`; assert `list()` returns typed arrays; assert schemas validate sample fixtures
+- [ ] Step 6.4: Create fixtures directory layout (3 CSV stubs with headers + 6 JSON stubs)
+- [ ] Step 6.5: `npm --workspace=@infinityrx/contract test` — all pass
+- [ ] Step 6.6: `tsc -b` exits 0 (contract still compiles with new exports)
+- [ ] Step 6.7: Commit — `feat(sp-1-a): contract impls/paysync + fixtures layout`
 
 ---
 
@@ -504,51 +646,53 @@ CSV stubs contain only header rows in Plan A. Real data populates in Plan E.
 
 Plan A is complete when ALL of the following are true:
 
-- [ ] `npm run typecheck` exits 0 (all workspace project references compile)
+- [ ] `npm run typecheck` exits 0 (all workspace project references compile, including new `packages/modules/paysync` reference)
 - [ ] `npm --workspace=@infinityrx/module-paysync test` — all tests pass, 0 failing
-- [ ] Coverage gates: 100% branch on `MoneyDisplay`, `MoneyInput`, `RbacGate` (financial + security paths); **≥99% branch coverage** on Inbox components (CLAUDE.md Auto-Gate)
-- [ ] `npm run manifest:validate` exits 0 with `paysync` in modules list
-- [ ] `packages/shell/src/types/module-config.ts` exists (created by Plan A or confirmed pre-existing at a verified path)
-- [ ] `packages/modules/paysync/src/module.config.ts` exports a value satisfying `ModuleConfig` (tsc confirms via `satisfies ModuleConfig`)
-- [ ] All 11 inbox card stubs exist, are typed (accept `item: InboxItem` prop), have unit tests, and dynamic imports in `module.config.ts` resolve — zero empty-file stubs
-- [ ] All 12 surface `index.ts` stubs exist and export a typed `SurfaceConfig` constant (not an empty object) — `tsc -b` proves they satisfy the surface shape
-- [ ] Fixtures directory layout exists with 3 CSV stubs (header rows only acceptable here) + 6 JSON stubs (empty arrays acceptable here — real data is Plan E)
-- [ ] `UploadsClient` and `InboxClient` interfaces present in `packages/contract/`
-- [ ] No `RoleSwitcherChip` in module's main barrel export (checked by grep in commit hook)
-- [ ] `packages/shell/src/index.ts` exports `ModuleConfig` type (so dependents can import it)
-- [ ] `src/bff/inbox.ts` exists as a typed stub returning `[]` — gate explicitly accepts this as stub-scope; "real Inbox implementation" is Plan B gate criterion, not Plan A
-- [ ] Surface `index.ts` stubs satisfy typed SurfaceConfig shape (not empty objects) — `tsc -b` confirms
-- [ ] Fixture files: header-only CSV stubs + empty-array JSON stubs are accepted at Plan A gate — real data is Plan E scope; gate does NOT claim fixture data is complete
+- [ ] `npm --workspace=@infinityrx/contract test` — all tests pass (includes new paysync impl tests)
+- [ ] Coverage gates: 100% branch on `MoneyDisplay`, `MoneyInput`, `RbacGate` (financial + security paths); ≥99% branch coverage on Inbox components (CLAUDE.md Auto-Gate)
+- [ ] `npm run manifest:validate` exits 0 with `paysync` in modules list AND `packages/modules/paysync/module.config.ts` exporting valid `config` matching SD-4 `ModuleConfig` shape
+- [ ] `packages/modules/paysync/module.config.ts` at ROOT (not src/) exports BOTH `config` (SD-4 shape) AND `paysyncComposition` (runtime fields); tsc confirms via `as const`
+- [ ] All 11 inbox card stubs exist, are typed (accept `item: InboxItem` prop), render `data-testid="inbox-card-{kind}"`, have unit tests, and dynamic imports in `paysyncComposition.inboxItemKinds` resolve — zero empty-file stubs
+- [ ] All 12 surface `index.ts` stubs exist and export a typed `SurfaceConfig` constant (not empty object) — `tsc -b` proves they satisfy the `SurfaceConfig` shape; **`echo/` surface is NOT in Plan A (deferred to Plan E §6) — gate does NOT claim echo coverage**
+- [ ] Fixtures directory exists with 3 CSV stubs (header rows only acceptable here) + 6 JSON stubs (empty arrays acceptable here — real data is Plan E)
+- [ ] Contract package: `packages/contract/src/impls/paysync/{types,clients,real,mock}.ts` present; named exports added to `packages/contract/src/index.ts`; mock factories instantiable in test (NOT just files present)
+- [ ] No `RoleSwitcherChip` string in `packages/modules/paysync/src/components/index.ts` (checked by grep in commit; only re-exported via `paysyncComposition.qa.RoleSwitcherChip`)
+- [ ] `src/bff/inbox.ts` exists as a typed stub returning `[]: InboxItem[]` — gate explicitly accepts this as stub-scope; "real Inbox implementation" is Plan B gate criterion, not Plan A
+- [ ] Root `tsconfig.json` references include `{ "path": "./packages/modules/paysync" }`
+- [ ] Root `package.json` `test:packages` script appends `&& npm --workspace=@infinityrx/module-paysync test`
+- [ ] NO changes to `packages/shell/` source or exports (R2 simplification — no shared `ModuleConfig` type needed; `as const` literal is sufficient)
+- [ ] NO `@tanstack/react-query` / `@tanstack/react-virtual` peer-dep conflicts on `npm install`
 
 ---
 
 ## Deliverables
 
 - `packages/modules/paysync/` — fully typed SP-0-conformant module package, compilable, testable
-- `module.config.ts` — composition entry point consumed by `generate-composition.ts` in Plan D
+- `module.config.ts` at root — SD-4 `config` + paysync `paysyncComposition`; consumed by build-manifest tooling AND surface mounting layer
 - Complete Inbox taxonomy (`InboxItemKind`, `INBOX_KIND_ROLE`) — extensible without refactor
 - All 6 module-local primitives — usable by Plans B–E immediately
-- BFF route skeleton — Plans B–E fill in real handlers
-- Contract interfaces — Plans B–E provide real implementations
+- BFF route stub — Plans B–E fill in real handlers
+- Contract impls — Plans B–E provide real backend wiring; mocks usable now for dev
 - Fixtures skeleton — Plan E populates real synthetic data
 
 ---
 
 ## Dependencies
 
-- SP-0 Plans A–D fully executed (packages/contract, packages/auth, packages/ui, packages/shell all present)
-- `packages/shell/src/types/module-config.ts` — **does NOT exist in HEAD** (verified from directory listing). Plan A creates it as new scope (Task 5 Step 5.1). The builder must `grep -rn "ModuleConfig" packages/shell/src/` first to check for a pre-existing export at a different path.
-- `packages/shell/src/` confirmed structure: `__mocks__/`, `__tests__/`, `_generated/`, `auth/`, `index.ts`, `middleware.ts`, `qa/`, `routes/`, `shell/` — no `types/` directory exists yet
-- `@tanstack/react-query` present in `packages/ui` or `packages/contract` (SP-0 Plan C/D)
-- `@tanstack/react-virtual` present (SP-0 Plan C)
+- SP-0 Plans A–D fully executed: `packages/{auth,contract,modules,qa-harness,scripts,shell,ui}/` all present at HEAD `d9c69152` ✓
+- `packages/scripts/build-manifest.ts:36-77` exports `ModuleConfig` interface — that is the SD-4 shape `config` must satisfy ✓
+- `packages/modules/prescriber-directory/module.config.ts` — canonical template for the `as const` + `config`-named-export pattern ✓
+- No changes required to `packages/shell/` exports (R2 simplification)
+- `@tanstack/react-query@5.59.20`, `@tanstack/react-virtual@3.10.8` added to module package only — first introduction to workspace; verify no peer conflicts during `npm install`
 
 ---
 
 ## Cross-references
 
-- Spec §5.1 (layering), §5.3 (Inbox spine), §5.4 (RBAC matrix), §5.6 (SP-0 consumed), §6.1 (inbox components), §6.6 (module.config.ts), §6.6 (RoleSwitcherChip production exclusion), §10 (plan-time decisions)
-- Rules: `.claude/rules/financial-precision.md` (MoneyDisplay/Input), `.claude/rules/security.md` (RbacGate), `.claude/rules/testing.md` (100% financial/security coverage), `.claude/rules/architecture.md` (module structure), `.claude/rules/code-standards.md` (dead code ban)
+- Spec §5.1 (layering), §5.3 (Inbox spine), §5.4 (RBAC matrix), §5.6 (SP-0 consumed), §6.1 (inbox components), §6.6 (RoleSwitcherChip production exclusion), §10 (plan-time decisions)
+- Rules: `.claude/rules/financial-precision.md`, `.claude/rules/security.md`, `.claude/rules/testing.md`, `.claude/rules/architecture.md`, `.claude/rules/code-standards.md`
 - SP-0 Plan D: `docs/superpowers/plans/2026-05-15-sp0-plan-d-composition-portal-wiring.md`
+- HEAD canonical template: `packages/modules/prescriber-directory/module.config.ts`
+- HEAD SD-4 interface: `packages/scripts/build-manifest.ts:36-77`
 - SP-1 Plans B–E: depend on all deliverables above
-- Shell package structure (verified): `packages/shell/src/` has no `types/` dir — Plan A adds it
-- B1 fix: `ModuleConfig` type must be created or found by grep; not pre-confirmed
+- Pre-execute codex NO-GO (resolved by this R2): the 6 items in §"R2 Revision Summary" above
