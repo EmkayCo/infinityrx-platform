@@ -1,0 +1,11 @@
+{
+  "instance_name": "placeholder",
+  "modules": [],
+  "audience": "operator",
+  "_generated": {
+    "input_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "inputs": [],
+    "generated_at": "1970-01-01T00:00:00.000Z",
+    "generator": "placeholder"
+  }
+}
