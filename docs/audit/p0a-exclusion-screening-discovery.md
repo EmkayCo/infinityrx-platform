@@ -93,3 +93,28 @@ scripts/load_oig_leie.py
 scripts/load_sam.py (v4 endpoint)                         → ExclusionScreeningService
   → shared.sam_exclusions (~167k rows)                         → core.exclusion_matches
 ```
+
+---
+
+## 7. v2 Changes — Codex Gate-Close Findings (P0a v2, 2026-05-15)
+
+Codex pass-1 on v1 identified 3 BLOCKs and 3 CONCERNs after the initial
+wave commit. All 6 were addressed in P0a v2.
+
+| Finding | Status | Commit |
+|---|---|---|
+| BLOCK 1: aggregator wrote to SQLite shim (`core_exclusion_list`) not production `core.exclusion_list`; Date columns used DateTime | CLOSED | `10338d7` |
+| BLOCK 2: SAM parser read v3 flat key `exclusionDetails` after URL upgraded to v4; v4 returns nested `excludedEntity` — zero rows ingested | CLOSED | `c928652` |
+| BLOCK 3: ExactMatcher + FuzzyMatcher did not filter `reinstate_date IS NULL`; reinstated entities matched and produced false positives | CLOSED | `7c42644` |
+| CONCERN 1: delisting guard — `_mark_delisted()` now gates per-source on configurable row-count threshold (`oig_min_rows` / `sam_min_rows`); defaults env-driven (`EXCL_OIG_MIN_ROWS=60000`, `EXCL_SAM_MIN_ROWS=100000`); tests bypass with 0 | CLOSED | `10338d7` |
+| CONCERN 2: NULL-NPI name-key rows were duplicated when source later added an NPI; secondary name-key lookup now upgrades existing row | CLOSED | `10338d7` |
+| CONCERN 3: `exclusion_refresh` handler existed but was never seeded into `core_jobs` and never imported on startup; `src/jobs/seed.py` + lifespan wiring added | CLOSED | `e4b7b7e` |
+
+**Pre-existing fix also landed**: `test_main_auth_wired.py` patches exited
+their `with` block before `TestClient` ran the lifespan; extended to
+`ExitStack` pattern so patches persist through the full lifespan. (`7858ac3`)
+
+**Final test count**: 452 passed, 0 failed (full core-platform suite).
+**New tests added**: 11 (4 BLOCK-3 matcher, 3 CONCERN-1 guard, 1 CONCERN-2
+NPI upgrade, 3 CONCERN-3 seed).
+**Branch**: `wave/B10-w5-p0a-exclusion-screening`
