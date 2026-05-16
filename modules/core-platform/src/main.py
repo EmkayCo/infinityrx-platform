@@ -2,8 +2,8 @@
 
 Ensures in-flight DB transactions and in-flight event-bus messages are
 flushed before the process exits. Without this, pod termination
-(SIGTERM → 30s grace → SIGKILL) can corrupt PHI/audit data — HIPAA
-§164.308(a)(1) availability + §164.308(a)(7) contingency.
+(SIGTERM â†’ 30s grace â†’ SIGKILL) can corrupt PHI/audit data â€” HIPAA
+Â§164.308(a)(1) availability + Â§164.308(a)(7) contingency.
 
 On startup:
     - Verify the database is reachable (SELECT 1).
@@ -16,7 +16,7 @@ On shutdown (lifespan exit OR SIGTERM OR SIGINT):
     - Log "service stopped".
 
 The SIGTERM/SIGINT handler forwards to the lifespan by raising an
-asyncio CancelledError in uvicorn's main loop — uvicorn then triggers
+asyncio CancelledError in uvicorn's main loop â€” uvicorn then triggers
 the normal lifespan shutdown path. We only install the handler when
 running under an event loop (skipped in TestClient).
 """
@@ -123,6 +123,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             ensure_audit_chain_job(_seed_db)
     except Exception:  # pragma: no cover - best-effort; job row missing != broken startup
         logger.exception("audit_chain_job_seed_failed")
+    # CONCERN-3 fix (P0a v2): seed system jobs (exclusion_refresh, etc.)
+    # into core_jobs so the scheduler picks them up.  Also import the
+    # exclusion job handler to trigger its self-registration on
+    # default_registry (import side-effect at module load time).
+    try:
+        from .exclusions import job_handler as _excl_handler  # noqa: F401 â€” side-effect import
+        from .jobs.seed import seed_system_jobs
+        _seed_session = db_shim.get_sessionmaker()()
+        try:
+            seeded = seed_system_jobs(_seed_session)
+            _seed_session.commit()
+            if seeded > 0:
+                logger.info("excl_jobs_seeded excl_count=%d", seeded)
+        except Exception:  # pragma: no cover - best-effort, non-fatal
+            logger.exception("excl_jobs_seed_failed")
+            _seed_session.rollback()
+        finally:
+            _seed_session.close()
+    except Exception:  # pragma: no cover - best-effort, non-fatal
+        logger.exception("excl_jobs_seed_import_failed")
+
 
     logger.info("service_started", extra={"service": "core-platform"})
 
@@ -175,7 +196,7 @@ def _audit_session_factory():
     Uses the shim's session factory so this works in both test and production
     mode (the shim uses SQLite in tests, Postgres in production).
     """
-    from .._shim import db as db_shim  # noqa: PLC0415 — deferred to avoid circular import
+    from .._shim import db as db_shim  # noqa: PLC0415 â€” deferred to avoid circular import
 
     @contextmanager
     def _cm():
@@ -193,7 +214,7 @@ def _audit_user_resolver(request: Request) -> AuditContext | None:
     """Resolve tenant/user from bearer token for audit logging.
 
     Gracefully falls back to None (unauthenticated) when no valid JWT is
-    present — AuditMiddleware skips the audit write for unauthenticated calls
+    present â€” AuditMiddleware skips the audit write for unauthenticated calls
     (e.g., /auth/login itself). Returns None rather than raising so that the
     middleware never fails a request due to resolver errors.
     """
@@ -215,7 +236,7 @@ def _audit_user_resolver(request: Request) -> AuditContext | None:
             tenant_id=tenant_id,
             user_id=claims.user_id,
         )
-    except Exception:  # noqa: BLE001 — best-effort; never fail the request
+    except Exception:  # noqa: BLE001 â€” best-effort; never fail the request
         return None
 
 
@@ -244,7 +265,7 @@ class _TenantResolver:
                 tenant_id=claims.tenant_id,
                 roles=roles,
             )
-        except Exception:  # noqa: BLE001 — best-effort resolver
+        except Exception:  # noqa: BLE001 â€” best-effort resolver
             return None
 
 
@@ -259,13 +280,13 @@ def create_app() -> FastAPI:
     # Middleware ordering note: Starlette applies middleware in LIFO order
     # (last add_middleware call = outermost layer). The desired request flow:
     #
-    #   SecurityHeaders → RateLimit → TenantIsolation → Audit → routes
+    #   SecurityHeaders â†’ RateLimit â†’ TenantIsolation â†’ Audit â†’ routes
     #
     # So we add them in the reverse order (innermost first):
     #   AuditMiddleware (innermost, closest to routes)
     #   TenantIsolationMiddleware (pure ASGI, runs before routes)
     #   RateLimitMiddleware
-    #   SecurityHeadersMiddleware (outermost — headers on ALL responses)
+    #   SecurityHeadersMiddleware (outermost â€” headers on ALL responses)
     app.add_middleware(
         AuditMiddleware,
         session_factory=_audit_session_factory,
@@ -311,7 +332,7 @@ def create_app() -> FastAPI:
     # the real ORM. `configure_audit_sink` swaps the process-wide
     # InMemoryAuditSink fallback for a DB-backed sink. LESSON-006 applies:
     # the integration test in tests/test_main_auth_wired.py hits a real
-    # HTTP request through this wiring — unit tests on the router alone
+    # HTTP request through this wiring â€” unit tests on the router alone
     # do not prove it's mounted.
     SessionLocal = db_shim.get_sessionmaker()
 

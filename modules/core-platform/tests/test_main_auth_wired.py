@@ -4,7 +4,7 @@ LESSON-006 enforcement: these tests ONLY pass if auth_api_router is actually
 included in the production app, the session dependency is wired through the
 shim, the shared auth user loader is configured, and the tenant isolation
 middleware has the anonymous-path allowlist for login. A unit test on any
-single piece is insufficient — it cannot prove the router is on the live
+single piece is insufficient â€” it cannot prove the router is on the live
 request path behind the full middleware stack.
 
 If any piece of that wiring regresses, one of these tests fails at the
@@ -31,13 +31,19 @@ from src.auth.service import _assign_roles  # noqa: PLC2701  (intentional test a
 def _build_live_app():
     """Create the production app with lifespan startup stubbed.
 
+    Returns ``(app, ExitStack)`` â€” the caller MUST call ``stack.close()``
+    (or use the stack as a context manager) to undo the patches AFTER the
+    TestClient exits.  The patches must remain active for the full duration
+    of the TestClient context because the lifespan fires when the client
+    starts up, not when ``create_app()`` is called.
+
     The autouse ``_fresh_db`` fixture in tests/conftest.py has already
     configured the shim engine to a per-test SQLite. We also have to
     create the auth tables on that same engine because they live on
-    ``src.auth._models.Base`` — a different declarative base than the
+    ``src.auth._models.Base`` â€” a different declarative base than the
     shim's own ``Base`` that ``_fresh_db`` runs ``create_all`` against.
 
-    Returns ``(app, stack)`` — caller MUST call ``stack.close()`` when done.
+    Returns ``(app, stack)`` â€” caller MUST call ``stack.close()`` when done.
     The patches must stay active through ``TestClient(app).__enter__()``
     because the lifespan resolves patched names at call time (not import time).
     """
@@ -98,16 +104,16 @@ def test_auth_router_mounted_users_list_returns_200() -> None:
     app, stack = _build_live_app()
     token = create_access_token(admin_id, tenant_id, ["tenant_admin"])
 
-    with stack:
-        with TestClient(app) as client:
-            resp = client.get(
-                "/api/v1/users",
-                headers={"Authorization": f"Bearer {token}"},
-            )
+    with stack, TestClient(app) as client:
+        resp = client.get(
+            "/api/v1/users",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
 
     assert resp.status_code == 200, (
         f"auth_api_router must be mounted in create_app() and the session "
-        f"dependency must be overridden — LESSON-006. "
+        f"dependency must be overridden â€” LESSON-006. "
         f"Got {resp.status_code}: {resp.text}"
     )
     body = resp.json()
@@ -118,15 +124,15 @@ def test_auth_router_mounted_users_list_returns_200() -> None:
 
 def test_auth_router_mounted_no_token_returns_401_not_404() -> None:
     """Unauthenticated GET /api/v1/users must be rejected by the tenant
-    isolation middleware with 401 — not 404.
+    isolation middleware with 401 â€” not 404.
 
     A 404 would indicate the route isn't mounted at all. A 401 proves the
     request reached the middleware stack that guards the mounted route.
     """
     app, stack = _build_live_app()
-    with stack:
-        with TestClient(app) as client:
-            resp = client.get("/api/v1/users")
+    with stack, TestClient(app) as client:
+        resp = client.get("/api/v1/users")
+
 
     assert resp.status_code == 401, (
         f"route must exist and middleware must 401 unauth callers (not 404). "
@@ -138,7 +144,7 @@ def test_login_endpoint_reachable_without_auth_header() -> None:
     """POST /api/v1/auth/login must reach the handler without a bearer token.
 
     Without the unauthenticated-path allowlist on TenantIsolationMiddleware,
-    every login attempt would 401 at the middleware wall — breaking the
+    every login attempt would 401 at the middleware wall â€” breaking the
     entire login flow in prod. This test proves the allowlist is wired by
     checking that the middleware does NOT intercept: invalid credentials
     return a 401 whose body is shaped like the handler's response
@@ -150,12 +156,12 @@ def test_login_endpoint_reachable_without_auth_header() -> None:
 
     # Use an RFC-2606 test domain so Pydantic's EmailStr validator accepts
     # the value. `.local` is rejected as a reserved TLD by email-validator.
-    with stack:
-        with TestClient(app) as client:
-            resp = client.post(
-                "/api/v1/auth/login",
-                json={"email": "nobody@example.com", "password": "wrongpass"},
-            )
+    with stack, TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/auth/login",
+            json={"email": "nobody@example.com", "password": "wrongpass"},
+        )
+
 
     assert resp.status_code == 401, resp.text
     body = resp.json()
@@ -173,13 +179,14 @@ def test_auth_router_mounted_route_path_exists() -> None:
     Fails fast if someone drops ``app.include_router(auth_api_router)``.
     """
     app, stack = _build_live_app()
-    stack.close()  # no lifespan needed for a route-table inspection
+    stack.close()  # no lifespan needed â€” route table is set at create_app() time
+
     paths = {getattr(r, "path", "") for r in app.routes}
     assert any(p == "/api/v1/users" for p in paths), (
-        f"/api/v1/users not in routes — auth_api_router not mounted. "
+        f"/api/v1/users not in routes â€” auth_api_router not mounted. "
         f"paths: {sorted(paths)}"
     )
     assert any(p == "/api/v1/auth/login" for p in paths), (
-        f"/api/v1/auth/login not in routes — auth_api_router not mounted. "
+        f"/api/v1/auth/login not in routes â€” auth_api_router not mounted. "
         f"paths: {sorted(paths)}"
     )

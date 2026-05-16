@@ -144,3 +144,100 @@ def test_source_filter(seeded):
         sources=("OIG",),
     )
     assert all(r.source == "OIG" for r in res)  # none match → empty list is also valid
+
+
+# ---------------------------------------------------------------------------
+# BLOCK-3 reinstate_date filter tests (P0a v2)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def seeded_with_reinstated(db_session):
+    """Fixture with both active and reinstated exclusion rows.
+
+    The reinstated rows have reinstate_date set to a past timestamp.
+    ExactMatcher and FuzzyMatcher MUST return zero matches for these rows
+    even when NPI or name matches perfectly.
+    """
+    from datetime import datetime, timezone
+    reinstated_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    db_session.add_all(
+        [
+            # Active row — should match
+            ExclusionListEntry(
+                source="OIG",
+                entity_type="individual",
+                npi="1234567890",
+                first_name="John",
+                last_name="Smith",
+                state="NY",
+                reinstate_date=None,
+            ),
+            # Reinstated row with same NPI — MUST NOT match
+            ExclusionListEntry(
+                source="OIG",
+                entity_type="individual",
+                npi="9876543210",
+                first_name="Jane",
+                last_name="Doe",
+                state="CA",
+                reinstate_date=reinstated_at,
+            ),
+            # Reinstated organization row — MUST NOT match by fuzzy name
+            ExclusionListEntry(
+                source="SAM",
+                entity_type="organization",
+                organization_name="Reinstated Health Corp",
+                state="TX",
+                reinstate_date=reinstated_at,
+            ),
+        ]
+    )
+    db_session.commit()
+    return db_session
+
+
+def test_exact_matcher_excludes_reinstated_npi(seeded_with_reinstated):
+    """ExactMatcher returns 0 results when the matching NPI is reinstated."""
+    res = ExactMatcher().match(
+        seeded_with_reinstated,
+        MatchCandidate(entity_type="prescriber", entity_id="p1", npi="9876543210"),
+    )
+    assert res == [], "reinstated NPI must not produce an exact match"
+
+
+def test_exact_matcher_returns_active_npi(seeded_with_reinstated):
+    """ExactMatcher still returns active rows normally."""
+    res = ExactMatcher().match(
+        seeded_with_reinstated,
+        MatchCandidate(entity_type="prescriber", entity_id="p1", npi="1234567890"),
+    )
+    assert len(res) == 1
+    assert res[0].confidence == "exact"
+
+
+def test_fuzzy_matcher_excludes_reinstated_org(seeded_with_reinstated):
+    """FuzzyMatcher returns 0 results for an org name whose row is reinstated."""
+    res = FuzzyMatcher(probable_threshold=85, possible_threshold=70).match(
+        seeded_with_reinstated,
+        MatchCandidate(
+            entity_type="pharmacy",
+            entity_id="ph1",
+            organization_name="Reinstated Health Corp",
+        ),
+    )
+    assert res == [], "reinstated organization must not produce a fuzzy match"
+
+
+def test_fuzzy_matcher_excludes_reinstated_individual(seeded_with_reinstated):
+    """FuzzyMatcher returns 0 results for a name whose row is reinstated."""
+    res = FuzzyMatcher(probable_threshold=85, possible_threshold=70).match(
+        seeded_with_reinstated,
+        MatchCandidate(
+            entity_type="prescriber",
+            entity_id="p1",
+            first_name="Jane",
+            last_name="Doe",
+            state="CA",
+        ),
+    )
+    assert res == [], "reinstated individual must not produce a fuzzy match"

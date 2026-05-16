@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import httpx
@@ -25,6 +26,20 @@ def test_parse_date_formats():
     assert _parse_date(None) is None
     assert _parse_date("   ") is None
     assert _parse_date("not a date") is None
+
+
+def test_parse_date_sam_v4_mm_dd_yyyy():
+    """SAM v4 activationDate is MM-DD-YYYY (e.g. '01-15-2024'). Must not be dropped."""
+    from datetime import datetime
+    result = _parse_date("01-15-2024")
+    assert result is not None, "_parse_date must accept SAM v4 MM-DD-YYYY format"
+    assert result == datetime(2024, 1, 15)
+
+
+def test_parse_date_malformed_returns_none_not_crash():
+    """Malformed date must return None (not raise), so rows are inserted with NULL date."""
+    assert _parse_date("99-99-9999") is None
+    assert _parse_date("hello-world") is None
 
 
 def test_pick_case_insensitive():
@@ -87,29 +102,55 @@ async def test_oig_normalize_catches_errors(db_session, monkeypatch):
 
 @respx.mock
 async def test_sam_ingest_upsert(db_session):
+    # v4 nested shape — official GSA fixture format.
+    # fetch_records() reads "excludedEntity" and calls _flatten_v4_record on each.
+    # After flattening the keys are: classificationType, name, npi, stateOrProvince,
+    # exclusionType, activationDate, terminationDate, etc.
     body = {
-        "exclusionDetails": [
+        "totalRecords": 3,
+        "excludedEntity": [
             {
-                "classification": "Individual",
-                "firstName": "Alice",
-                "lastName": "Jones",
-                "state": "NY",
-                "npi": "1112223334",
-                "exclusionType": "SAM",
-                "activationDate": "2021-01-01",
-                "terminationDate": None,
+                "exclusionDetails": {
+                    "classificationType": "Individual",
+                    "exclusionType": "SAM",
+                },
+                "exclusionIdentification": {
+                    "entityName": "",
+                    "firstName": "Alice",
+                    "lastName": "Jones",
+                    "npi": "1112223334",
+                },
+                "exclusionActions": {
+                    "listOfActions": [
+                        {"activateDate": "01-01-2021", "terminationDate": None},
+                    ]
+                },
+                "exclusionPrimaryAddress": {"stateOrProvinceCode": "NY"},
+                "exclusionOtherInformation": {},
             },
             {
-                "classification": "Firm",
-                "entityName": "Bad Pharma Inc",
-                "state": "CA",
-                "exclusionType": "SAM",
-                "activationDate": "2020-05-05",
+                "exclusionDetails": {
+                    "classificationType": "Firm",
+                    "exclusionType": "SAM",
+                },
+                "exclusionIdentification": {
+                    "entityName": "Bad Pharma Inc",
+                    "npi": None,
+                },
+                "exclusionActions": {
+                    "listOfActions": [
+                        {"activateDate": "05-05-2020"},
+                    ]
+                },
+                "exclusionPrimaryAddress": {"stateOrProvinceCode": "CA"},
+                "exclusionOtherInformation": {},
             },
-            {"name": None},  # malformed
-        ]
+            # Malformed — missing exclusionDetails entirely
+            {"exclusionIdentification": {"entityName": ""}},
+        ],
+        "links": {},
     }
-    respx.get("https://api.sam.gov/entity-information/v3/exclusions").mock(
+    respx.get("https://api.sam.gov/entity-information/v4/exclusions").mock(
         return_value=httpx.Response(200, json=body)
     )
     async with httpx.AsyncClient() as http:
@@ -118,8 +159,8 @@ async def test_sam_ingest_upsert(db_session):
     assert report.inserted == 2
     assert report.skipped_malformed == 1
 
-    # Idempotent
-    respx.get("https://api.sam.gov/entity-information/v3/exclusions").mock(
+    # Idempotent — re-running same body produces 0 inserts, 2 updates.
+    respx.get("https://api.sam.gov/entity-information/v4/exclusions").mock(
         return_value=httpx.Response(200, json=body)
     )
     async with httpx.AsyncClient() as http:
@@ -141,7 +182,7 @@ async def test_sam_ingest_list_body(db_session):
 
 @respx.mock
 async def test_sam_ingest_unknown_body_shape(db_session):
-    respx.get("https://api.sam.gov/entity-information/v3/exclusions").mock(
+    respx.get("https://api.sam.gov/entity-information/v4/exclusions").mock(
         return_value=httpx.Response(200, json="something")
     )
     async with httpx.AsyncClient() as http:
@@ -152,8 +193,23 @@ async def test_sam_ingest_unknown_body_shape(db_session):
 
 @respx.mock
 async def test_sam_normalize_error_counted(db_session, monkeypatch):
-    respx.get("https://api.sam.gov/entity-information/v3/exclusions").mock(
-        return_value=httpx.Response(200, json={"exclusionDetails": [{"name": "x"}]})
+    # v4 nested shape with one valid entity — the monkeypatched normalize raises
+    # on every record so all records land in skipped_malformed.
+    body = {
+        "totalRecords": 1,
+        "excludedEntity": [
+            {
+                "exclusionDetails": {"classificationType": "Firm", "exclusionType": "SAM"},
+                "exclusionIdentification": {"entityName": "x", "npi": None},
+                "exclusionActions": {"listOfActions": []},
+                "exclusionPrimaryAddress": {},
+                "exclusionOtherInformation": {},
+            }
+        ],
+        "links": {},
+    }
+    respx.get("https://api.sam.gov/entity-information/v4/exclusions").mock(
+        return_value=httpx.Response(200, json=body)
     )
     from src.exclusions import ingestion as ing
 
@@ -182,3 +238,111 @@ def test_oig_normalize_invalid_state(db_session):
 def test_oig_normalize_no_identifier_returns_none(db_session):
     client = OIGIngestionClient(None, url="u")  # type: ignore[arg-type]
     assert client.normalize({"STATE": "NY"}) is None
+
+
+@respx.mock
+async def test_sam_v4_mm_dd_yyyy_date_persisted_not_null(db_session):
+    """BLOCK-2: SAM v4 activationDate in MM-DD-YYYY must persist as a non-null date.
+
+    Previously _parse_date did not accept MM-DD-YYYY so exclusion_date was silently
+    dropped to NULL. This test asserts the date is persisted as date(2024, 1, 15).
+    """
+    from sqlalchemy import select
+    from src.models import ExclusionListEntry
+
+    body = {
+        "totalRecords": 1,
+        "excludedEntity": [
+            {
+                "exclusionDetails": {
+                    "classificationType": "Individual",
+                    "exclusionType": "SAM",
+                },
+                "exclusionIdentification": {
+                    "entityName": "",
+                    "firstName": "Jane",
+                    "lastName": "Doe",
+                    "npi": "1234567891",
+                },
+                "exclusionActions": {
+                    "listOfActions": [
+                        {"activateDate": "01-15-2024", "terminationDate": None},
+                    ]
+                },
+                "exclusionPrimaryAddress": {"stateOrProvinceCode": "TX"},
+                "exclusionOtherInformation": {},
+            },
+        ],
+        "links": {},
+    }
+    respx.get("https://api.sam.gov/entity-information/v4/exclusions").mock(
+        return_value=httpx.Response(200, json=body)
+    )
+    async with httpx.AsyncClient() as http:
+        client = SAMIngestionClient(http, api_key="key")
+        report = await client.ingest(db_session)
+
+    assert report.inserted == 1, f"Expected 1 inserted, got {report.inserted}"
+    assert report.skipped_malformed == 0
+
+    row = db_session.execute(
+        select(ExclusionListEntry).where(ExclusionListEntry.npi == "1234567891")
+    ).scalars().first()
+    assert row is not None, "Row must be persisted"
+    assert row.exclusion_date is not None, (
+        "exclusion_date must NOT be NULL — SAM v4 MM-DD-YYYY date was silently dropped"
+    )
+    # datetime(2024, 1, 15) stored — compare year/month/day to handle datetime vs date
+    assert row.exclusion_date.year == 2024
+    assert row.exclusion_date.month == 1
+    assert row.exclusion_date.day == 15
+
+
+@respx.mock
+async def test_sam_v4_malformed_date_inserts_with_null_date(db_session):
+    """BLOCK-2: malformed date in SAM v4 record must log warning and insert row with NULL date.
+
+    Row must still be inserted (not skipped/crashed).
+    """
+    from sqlalchemy import select
+    from src.models import ExclusionListEntry
+
+    body = {
+        "totalRecords": 1,
+        "excludedEntity": [
+            {
+                "exclusionDetails": {
+                    "classificationType": "Firm",
+                    "exclusionType": "SAM",
+                },
+                "exclusionIdentification": {
+                    "entityName": "Corrupt Pharma LLC",
+                    "npi": None,
+                },
+                "exclusionActions": {
+                    "listOfActions": [
+                        {"activateDate": "not-a-date", "terminationDate": None},
+                    ]
+                },
+                "exclusionPrimaryAddress": {"stateOrProvinceCode": "FL"},
+                "exclusionOtherInformation": {},
+            },
+        ],
+        "links": {},
+    }
+    respx.get("https://api.sam.gov/entity-information/v4/exclusions").mock(
+        return_value=httpx.Response(200, json=body)
+    )
+    async with httpx.AsyncClient() as http:
+        client = SAMIngestionClient(http, api_key="key")
+        report = await client.ingest(db_session)
+
+    # Row must be inserted (not skipped) — only the date is NULL
+    assert report.inserted == 1, f"Row with malformed date must still be inserted, got inserted={report.inserted}"
+    assert report.skipped_malformed == 0
+
+    row = db_session.execute(
+        select(ExclusionListEntry).where(ExclusionListEntry.organization_name == "Corrupt Pharma LLC")
+    ).scalars().first()
+    assert row is not None, "Row with malformed date must be inserted"
+    assert row.exclusion_date is None, "exclusion_date must be NULL for malformed date input"

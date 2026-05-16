@@ -35,13 +35,22 @@ def _norm(s: Optional[str]) -> str:
 
 
 class ExactMatcher:
-    """Matches by NPI only."""
+    """Matches by NPI only.
+
+    BLOCK-3 fix (P0a v2): filter WHERE reinstate_date IS NULL so reinstated
+    entities no longer produce false-positive blocks on legitimate prescribers
+    and pharmacies.
+    """
 
     def match(self, session: Session, entity: MatchCandidate) -> List[MatchResult]:
         if not entity.npi:
             return []
         rows = (
-            session.execute(select(ExclusionListEntry).where(ExclusionListEntry.npi == entity.npi))
+            session.execute(
+                select(ExclusionListEntry)
+                .where(ExclusionListEntry.npi == entity.npi)
+                .where(ExclusionListEntry.reinstate_date.is_(None))
+            )
             .scalars()
             .all()
         )
@@ -65,7 +74,15 @@ class FuzzyMatcher:
     def match(self, session: Session, entity: MatchCandidate) -> List[MatchResult]:
         if not entity.last_name and not entity.organization_name:
             return []
-        rows = session.execute(select(ExclusionListEntry)).scalars().all()
+        # BLOCK-3 fix (P0a v2): exclude reinstated rows so reinstated
+        # entities no longer produce false-positive matches.
+        rows = (
+            session.execute(
+                select(ExclusionListEntry).where(ExclusionListEntry.reinstate_date.is_(None))
+            )
+            .scalars()
+            .all()
+        )
         out: List[MatchResult] = []
         e_last = _norm(entity.last_name)
         e_first = _norm(entity.first_name)
