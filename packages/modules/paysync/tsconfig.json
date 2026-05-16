@@ -1,0 +1,18 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": ".",
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
+  },
+  "references": [
+    { "path": "../../auth" },
+    { "path": "../../contract" },
+    { "path": "../../qa-harness" },
+    { "path": "../../shell" },
+    { "path": "../../ui" }
+  ],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "module.config.ts"],
+  "exclude": ["**/*.test.ts", "**/*.test.tsx", "__tests__/**", "dist", "node_modules"]
+}
