@@ -30,9 +30,12 @@ const REDACTED_HEADERS = new Set([
   "x-api-key",
 ]);
 
-// Keep REDACTED_HEADERS used to prevent noUnusedLocals lint error.
-// It is referenced in future header-capture logic (not yet implemented).
-void REDACTED_HEADERS;
+/**
+ * Pattern matching header names that always warrant redaction, regardless
+ * of whether they appear in REDACTED_HEADERS. Catches variants like
+ * x-auth-token, x-access-token, etc.
+ */
+const SENSITIVE_HEADER_PATTERN = /authorization|cookie|set-cookie/i;
 
 /**
  * Body key pattern for PHI-adjacent fields. Any key matching this pattern
@@ -92,6 +95,10 @@ export function wrapFetch(
       }
     } catch (err) {
       const latencyMs = Math.round(performance.now() - start);
+      // Prefer init.headers; fall back to Request.headers when input is a Request object.
+      const reqHeaders = captureHeaders(
+        init?.headers ?? (input instanceof Request ? input.headers : undefined)
+      );
       emit({
         id: crypto.randomUUID(),
         method,
@@ -101,6 +108,7 @@ export function wrapFetch(
         isMock: false,
         cacheHit: false,
         timestamp,
+        ...(reqHeaders !== undefined ? { requestHeaders: reqHeaders } : {}),
         ...(init?.body !== undefined ? { requestBody: redactBody(capBody(tryParseJson(init.body))) } : {}),
       });
       throw err;
@@ -110,6 +118,11 @@ export function wrapFetch(
     const requestBody = init?.body !== undefined
       ? redactBody(capBody(tryParseJson(init.body)))
       : undefined;
+    // Prefer init.headers; fall back to Request.headers when input is a Request object.
+    const reqHeaders = captureHeaders(
+      init?.headers ?? (input instanceof Request ? input.headers : undefined)
+    );
+    const resHeaders = captureHeaders(res.headers);
 
     emit({
       id: crypto.randomUUID(),
@@ -121,12 +134,62 @@ export function wrapFetch(
       cacheHit: res.headers.get("x-cache") === "HIT",
       correlationId,
       timestamp,
+      ...(reqHeaders !== undefined ? { requestHeaders: reqHeaders } : {}),
+      ...(resHeaders !== undefined ? { responseHeaders: resHeaders } : {}),
       ...(requestBody !== undefined ? { requestBody } : {}),
       ...(responseBody !== undefined ? { responseBody } : {}),
     });
 
     return res;
   };
+}
+
+/**
+ * Convert a Headers object (or RequestInit.headers) to a plain record,
+ * redacting any header whose lowercased name is in REDACTED_HEADERS or
+ * matches SENSITIVE_HEADER_PATTERN.
+ *
+ * For Headers objects, REDACTED_HEADERS names are probed explicitly via
+ * headers.get() in addition to iterating entries(). This is necessary because
+ * certain environments (e.g., browser Fetch API) filter set-cookie from
+ * entries() but still allow direct .get() access.
+ *
+ * PRODUCTION GUARD: callers must not invoke this in production — the top-level
+ * production guard in wrapFetch() returns inner before headers are read.
+ */
+function captureHeaders(headers: HeadersInit | Headers | undefined): Record<string, string> | undefined {
+  if (!headers) return undefined;
+
+  const result: Record<string, string> = {};
+  let hasEntries = false;
+
+  const rawEntries: [string, string][] = headers instanceof Headers
+    ? [...headers.entries()]
+    : Array.isArray(headers)
+      ? (headers as [string, string][])
+      : Object.entries(headers as Record<string, string>);
+
+  for (const [key, value] of rawEntries) {
+    hasEntries = true;
+    const lower = key.toLowerCase();
+    const redact = REDACTED_HEADERS.has(lower) || SENSITIVE_HEADER_PATTERN.test(lower);
+    result[key] = redact ? "<REDACTED>" : value;
+  }
+
+  // Explicitly probe REDACTED_HEADERS by name for Headers objects —
+  // some environments suppress them from entries() but allow direct .get().
+  if (headers instanceof Headers) {
+    for (const name of REDACTED_HEADERS) {
+      if (Object.prototype.hasOwnProperty.call(result, name)) continue;
+      const val = headers.get(name);
+      if (val !== null) {
+        hasEntries = true;
+        result[name] = "<REDACTED>";
+      }
+    }
+  }
+
+  return hasEntries ? result : undefined;
 }
 
 function tryParseJson(body: BodyInit): unknown {

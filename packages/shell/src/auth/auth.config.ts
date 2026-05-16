@@ -39,20 +39,23 @@ export const authConfig: NextAuthConfig = {
         token.tid = payload.tid as string;
         token.roles = payload.roles as string[];
         token.mfaEnrolled = (payload.mfa_enrolled ?? false) as boolean;
+        // Store the raw access_token so RequireAuth can run per-request
+        // signature/expiry verification without waiting for session refresh.
+        token.accessToken = user.access_token as string;
       }
-      // On subsequent refreshes, the claims are already in the token.
-      // Per-request revocation checking is deferred to a future wave;
-      // revocation is enforced at login + token-refresh boundaries only.
       return token;
     },
     async session({ session, token }) {
       // Propagate claims from JWT into session.user for getSessionUser().
+      // accessToken is also propagated so RequireAuth can call verifyAccessToken
+      // on every request (catches revoked/expired tokens between refreshes).
       session.user = {
         ...session.user,
         sub: token.sub as string,
         tid: token.tid as string,
         roles: token.roles as string[],
         mfaEnrolled: token.mfaEnrolled as boolean,
+        accessToken: token.accessToken as string | undefined,
       };
       return session;
     },

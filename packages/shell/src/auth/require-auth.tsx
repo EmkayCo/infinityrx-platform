@@ -2,6 +2,7 @@ import "server-only";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { getSessionUser } from "./get-session-user.js";
+import { verifySessionToken } from "./verify-session-token.js";
 
 // Exported so consumers can type wrappers without reaching into src/.
 export interface RequireAuthProps {
@@ -21,6 +22,12 @@ export interface RequireAuthProps {
  * redirect happens before any HTML is sent — unauthorized users never see
  * guarded content, even briefly.
  *
+ * Per-request revocation check: after confirming a session exists,
+ * verifySessionToken() re-validates the raw access_token (signature + expiry).
+ * This catches tokens that expired or were revoked between next-auth session
+ * refresh boundaries. React cache() ensures a single verify call per render
+ * even when multiple RequireAuth instances appear in one RSC tree.
+ *
  * Usage in app/(authenticated)/layout.tsx (RSC):
  *   <RequireAuth callbackUrl={pathname}>
  *     {children}
@@ -32,7 +39,8 @@ export async function RequireAuth({
   callbackUrl,
 }: RequireAuthProps): Promise<ReactNode> {
   const user = await getSessionUser();
-  if (!user) {
+  const tokenValid = await verifySessionToken();
+  if (!user || !tokenValid) {
     const target = callbackUrl
       ? `${loginPath}?callbackUrl=${encodeURIComponent(callbackUrl)}`
       : loginPath;

@@ -20,6 +20,10 @@ export interface InspectorEntry {
   readonly correlationId?: string;
   /** ISO 8601 timestamp of the request. */
   readonly timestamp: string;
+  /** Request headers. Auth/cookie values are redacted. */
+  readonly requestHeaders?: Record<string, string>;
+  /** Response headers. Set-Cookie/auth values are redacted. */
+  readonly responseHeaders?: Record<string, string>;
   /** Request body, if any (non-null only for POST/PUT/PATCH). */
   readonly requestBody?: unknown;
   /** Response body (JSON-parsed), if successful. */
