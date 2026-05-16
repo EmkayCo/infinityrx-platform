@@ -94,7 +94,8 @@ class File(Base):
 
 
 class ExclusionListEntry(Base):
-    __tablename__ = "core_exclusion_list"
+    __tablename__ = "exclusion_list"
+    __table_args__ = {"schema": "core"}
 
     id: Mapped[int] = mapped_column(_BigIntAutoPK, primary_key=True, autoincrement=True)
     source: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
@@ -116,7 +117,7 @@ class ExclusionMatch(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     exclusion_list_id: Mapped[Optional[int]] = mapped_column(
-        _BigIntAutoPK, ForeignKey("core_exclusion_list.id")
+        _BigIntAutoPK, ForeignKey("core.exclusion_list.id")
     )
     matched_entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
     matched_entity_id: Mapped[str] = mapped_column(String(255), nullable=False)

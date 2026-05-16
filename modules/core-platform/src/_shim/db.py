@@ -31,7 +31,13 @@ _SessionLocal: Optional[sessionmaker] = None
 def configure_engine(url: str = "sqlite:///:memory:") -> None:
     global _engine, _SessionLocal
     connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-    _engine = create_engine(url, future=True, connect_args=connect_args)
+    kw: dict = {}
+    if url.startswith("sqlite"):
+        # SQLite does not support schemas.  Map every schema used by core-platform
+        # models (currently only "core") to None so ORM-generated SQL omits the
+        # schema prefix and resolves against the flat SQLite table namespace.
+        kw["execution_options"] = {"schema_translate_map": {"core": None}}
+    _engine = create_engine(url, future=True, connect_args=connect_args, **kw)
     _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
 
 
@@ -76,6 +82,9 @@ def current_tenant_id() -> Optional[uuid.UUID]:
 
 
 def create_all() -> None:
+    # The engine is configured with schema_translate_map={"core": None} for SQLite
+    # (set in configure_engine), so SQLAlchemy translates away the schema= attribute
+    # on both DDL (CREATE TABLE) and DML (SELECT/INSERT/UPDATE) for test engines.
     Base.metadata.create_all(get_engine())
 
 
