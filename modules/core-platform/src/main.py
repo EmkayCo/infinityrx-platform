@@ -113,6 +113,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.exception("slow_query_logger_install_failed")
     bus = get_event_bus()
     await bus.start()
+
+    # CONCERN-3 fix (P0a v2): seed system jobs (exclusion_refresh, etc.)
+    # into core_jobs so the scheduler picks them up.  Also import the
+    # exclusion job handler to trigger its self-registration on
+    # default_registry (import side-effect at module load time).
+    try:
+        from .exclusions import job_handler as _excl_handler  # noqa: F401 — side-effect import
+        from .jobs.seed import seed_system_jobs
+        _seed_session = db_shim.get_sessionmaker()()
+        try:
+            seeded = seed_system_jobs(_seed_session)
+            _seed_session.commit()
+            if seeded > 0:
+                logger.info("excl_jobs_seeded excl_count=%d", seeded)
+        except Exception:  # pragma: no cover - best-effort, non-fatal
+            logger.exception("excl_jobs_seed_failed")
+            _seed_session.rollback()
+        finally:
+            _seed_session.close()
+    except Exception:  # pragma: no cover - best-effort, non-fatal
+        logger.exception("excl_jobs_seed_import_failed")
+
     logger.info("service_started", extra={"service": "core-platform"})
 
     try:
