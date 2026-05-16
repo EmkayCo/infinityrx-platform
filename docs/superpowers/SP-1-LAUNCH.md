@@ -2,8 +2,27 @@
 
 **Purpose:** self-contained handoff for a fresh Claude Code session window to execute SP-1.
 **Branch:** `wave/B10-w5`
-**Status:** Spec + 5 plans committed; Codex consult in flight (review pending).
+**Status:** ⛔ **NO-GO — plans require rewrite.** Codex returned 12 BLOCK + 4 CONCERN items on 2026-05-16. Plan-writer drafted against imagined paths (invented SP-0 shell contract, wrong billing model paths, wrong ORM class names, wrong endpoint matrix, invented NACHA function, hash-verifier algorithm mismatch). Spec is mostly fine; plans A-D need rewrite. Full review: `docs/superpowers/codex-sp1-review-r1.md`.
 **Created:** 2026-05-16 by the SP-0 → SP-1 brainstorm session.
+
+---
+
+## ⛔ DO NOT EXECUTE — Codex NO-GO
+
+**Plans A-D were drafted against imagined code paths.** Executing as written will:
+- Break alembic migrations against wrong model paths (`models/claims.py` does not exist; actual is `models/tables.py`)
+- Audit non-existent backend routes (`/billing/batches`, `/billing/payment-runs`, etc.) and miss the real ones (`/api/v1/billing/payment-batches/*`, `/invoices/*`, `/settlement/record`)
+- Reference non-existent ORM classes (`Batch`, `PaymentRun`, `Carryover`, `BankSettlement` — actual classes are `PaymentBatch`, `Payment`, `Invoice`, `InvoiceLineItem`)
+- Call invented backend functions (`generate_nacha_file` — actual is `NACHAGenerator.generate(payments)`)
+- Generate broken hash verification (Plan D's algorithm mismatches existing `compute_entry_hash` over tenant/action/entity/created_at/previous_hash)
+- Skip mandatory project rules: PHI compliance (Plan B exposes `member_id` without `PHIMixin`), per-endpoint cross-tenant tests, `EventEnvelope` for `paysync.upload.parsed`, 99% branch coverage (plans say 95%)
+
+**The fresh session should NOT execute Plan A.** Either:
+1. **Re-dispatch the plan-writer** with strict drafter discipline (read every cited file with `git show HEAD:<path>` BEFORE writing; verify every class name; verify every route path; verify every function signature). The originating session left a re-dispatch prompt template at the bottom of this file (§8).
+2. **Manually rewrite Plans A-D** against actual repo paths.
+3. **Defer SP-1** until the originating session can re-shape the plans with the user.
+
+The spec itself is broadly fine (broadly-covered intent). The 12 BLOCK items are almost entirely plan-level fabrications, not spec-level scope errors.
 
 ---
 
@@ -128,6 +147,51 @@ one sentence with the choices.
 The originating session is brainstorming SP-2 (Directories Portal) in
 parallel. Do not touch docs/superpowers/specs/*sp2* or
 docs/superpowers/plans/*sp2* — those are owned by the other session.
+```
+
+---
+
+## 8. Re-dispatch prompt for plan-writer (if rewriting plans)
+
+If you choose to re-run the plan-writer to fix the BLOCK items, dispatch a general-purpose subagent with the prompt below. Stricter than the original — it MANDATES verifying every cited path before writing.
+
+```
+You are re-writing SP-1 plans A-D (B/C/D for sure; A possibly) to fix
+Codex BLOCK findings in docs/superpowers/codex-sp1-review-r1.md.
+
+HARD RULES — violation = restart:
+1. Before writing ANY code sample, ORM class name, function call, route
+   path, file path, or migration target, run ONE of:
+     - git show HEAD:<path>
+     - cat <path>
+     - grep -n <symbol> <path>
+   Confirm what's actually there. Do NOT trust the original plans —
+   they hallucinated.
+2. Before referencing any backend module name, class, or function, run
+   the grep first. Example: `grep -n "class Payment" modules/billing/src/models/tables.py`.
+3. Before referencing any route, run: `grep -rn "@router\.(get|post|put|delete)" modules/billing/src/api/`.
+4. Before referencing the SP-0 shell contract, run: `ls packages/shell/src/` and read what's actually there. Plan A claimed `packages/shell/src/types/module-config.ts` exists — it does not.
+
+Required corrections per Codex BLOCKs:
+- B1: Verify or stub `packages/shell/src/types/module-config.ts` properly. Either build it or import what actually exists.
+- B2: Replace `models/claims.py` references with actual path (`models/tables.py`).
+- B3: Replace invented class names with actual: `PaymentBatch`, `Payment`, `Invoice`, `InvoiceLineItem`. Find what corresponds to "Carryover"/"BankSettlement"/"Reconciliation" or document that they need to be added.
+- B4: Replace invented route paths with actual ones from grepping `modules/billing/src/api/`.
+- B5: Replace `generate_nacha_file(batch_id)` with `NACHAGenerator.generate(payments)` (or whatever the real signature is — verify).
+- B6: Plan D hash verifier must use `compute_entry_hash` over tenant/action/entity/created_at/previous_hash. Read `modules/core-platform/src/audit/hash_chain.py`.
+- B7: PHI fields (member_id, etc.) must use PHIMixin + PHI access audit + masking. Per .claude/rules/phi-compliance.md. Add explicit route-level tests.
+- B8: Tenant-isolation cross-tenant tests for EVERY API endpoint, not just uploads list. Per .claude/rules/tenant-isolation.md.
+- B9: Every event needs EventEnvelope, ordering_key, idempotency_key, schema_version, idempotent_handler decorator, event-type docs. Per .claude/rules/event-bus.md.
+- B10: Coverage gates: 100% financial/PHI/security/auth; 99% branch elsewhere (not 95%). Per .claude/rules/testing.md.
+- B11: No stub files at gate; remove "create stub, count as done" tasks from Plan A.
+- B12: Real disposition for portal/operator/app/admin/paysync/echo/ — what does it do? (Read its page.tsx + the Echo functions in paysync-api.ts.) Decide: keep, move, or remove. Document the choice in Plan E.
+
+Output: Write each corrected plan to docs/superpowers/plans/2026-05-16-sp1-plan-{a,b,c,d,e}.md. Use Edit on existing files (preserve git history) where possible; full rewrite where the diff is too large. One commit per plan with message: "fix(sp-1): Plan X rewrite — address codex BLOCK items {N,M,...}".
+
+After all rewrites: re-fire codex review:
+codex exec "Re-review SP-1 plans against commits <new-shas>. Verify all 12 BLOCK items addressed. Output GO / NO-GO / GO-WITH-CHANGES."
+
+Return a report listing every BLOCK addressed + which commit fixed it.
 ```
 
 ---
