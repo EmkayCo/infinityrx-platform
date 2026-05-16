@@ -3,7 +3,7 @@
 **Status:** ACCEPTED — all 8 tasks landed, codex-green
 **Branch:** `wave/B10-w5-plan-d-exec`
 **Base branch:** `wave/B10-w5`
-**Final HEAD SHA:** `44c076b81bdc8ba26cefbf3226fe860f2cfe66f4`
+**Final HEAD SHA:** `98bf9733a55da95c7ec2df21ef42ef88286bd957`
 **Date:** 2026-05-16
 **Executed by:** Agent ad224fcc455e59cbd (T1–T6) + Agent a76fa85d742d94dc0 (T7–T8 finisher)
 
@@ -87,15 +87,15 @@
 
 | Task | Test file(s) | Count | Notes |
 |---|---|---|---|
-| T1 | `build-manifest.test.ts` | 8 | +1 digit-bearing kebab-to-camel bonus (v3); Ajv2020 default import |
-| T2 | `generate-eslint-zones.test.ts` | 9 | `.mjs` output assertion added (STILL-OPEN-3) |
+| T1 | `build-manifest.test.ts` | 9 | +1 digit-bearing kebab-to-camel bonus (v3); Ajv2020 default import; 9 verified by vitest run |
+| T2 | `generate-eslint-zones.test.ts` | 10 | `.mjs` output assertion added (STILL-OPEN-3); 10 verified by vitest run |
 | T3 | `audit-module-graph.test.ts` | 6 | Inject-only pattern (STILL-OPEN-4 option c) |
 | T4 | `module.config.test.ts` + `factory.test.ts` | 14 | 7 config + 7 factory; factory asserts interface not instanceof (BLOCK-6) |
 | T5 | `layout.test.tsx` + `manifest-nav.test.tsx` | 7 | 2 layout + 5 manifest-nav; surgical edit (BLOCK-4) |
 | T6 | — (config changes only) | 0 | CI + gitignore + manifest YAML |
 | T7 | `eslint-zones-integration.test.ts` | 5 | cold-checkout warn + sentinel shape + `.mjs` no-TS-syntax |
 | T8 | — (docs only) | 0 | |
-| **Total** | | **49** | 0 failures, 0 skips |
+| **Total** | | **51** | 0 failures, 0 skips (verified: `npm run test:packages` in scripts package) |
 
 ---
 
@@ -125,4 +125,4 @@
 
 **Plan D is complete. Branch `wave/B10-w5-plan-d-exec` is ready to merge.**
 
-All 8 tasks landed. Composition pipeline (build-manifest + eslint-zones + audit-module-graph), prescriber-directory reference module, and portal nav wiring shipped. 49 total tests, 0 failures.
+All 8 tasks landed. Composition pipeline (build-manifest + eslint-zones + audit-module-graph), prescriber-directory reference module, and portal nav wiring shipped. 51 total tests, 0 failures.

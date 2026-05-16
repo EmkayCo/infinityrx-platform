@@ -68,7 +68,7 @@ describe("ESLint zone integration", () => {
       warnSpy.mockRestore();
     });
 
-    it("GENERATED_MODULE_ZONES_SENTINEL satisfies eslint-plugin-import minItems:1 (non-empty array)", async () => {
+    it("GENERATED_MODULE_ZONES_SENTINEL satisfies eslint-plugin-import minItems:1 (non-empty array)", () => {
       // The sentinel constant in eslint.config.mjs is a non-empty array (1 self-referencing zone).
       // eslint-plugin-import's import/no-restricted-paths schema requires zones.length >= 1.
       // We verify the sentinel shape directly — no dynamic import of the generated mjs needed.
