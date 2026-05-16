@@ -78,7 +78,7 @@ UploadDetailPage → Cycle view with provenance breadcrumb.
 | # | Subject | Files touched | Test added | Deliverable |
 |---|---|---|---|---|
 | 1.1 | `Upload` ORM model | `modules/billing/src/models/upload.py` | unit test: model fields + enum transitions | `Upload` importable from billing models |
-| 1.2 | Add `upload_id` FK to `Claim` model | `modules/billing/src/models/claims.py` | unit test: claim.upload_id not null FK | FK present on existing model |
+| 1.2 | Add `upload_id` FK to `ClaimRecord` model | `modules/billing/src/models/tables.py` (class `ClaimRecord`, line 39) | unit test: claim_record.upload_id not null FK | FK present on existing model |
 | 1.3 | Alembic migration | `modules/billing/alembic/versions/0011_add_upload_resource.py` | migration runs upgrade + downgrade cleanly | schema updated |
 
 **`Upload` model fields** (from spec §5.2, no deviation):
@@ -95,19 +95,29 @@ UploadDetailPage → Cycle view with provenance breadcrumb.
 - `status` — `VARCHAR(32)`, NOT NULL, default `'parsing'`; allowed: `parsing`, `validation_failed`, `validated`, `superseded`
 - `row_count` — `INTEGER`, nullable (set after parse completes)
 - `error_count` — `INTEGER`, nullable (set after parse completes)
+- `row_errors` — `JSONB`, nullable (list of per-row error dicts; populated after parse)
 - Inherits `TenantScopedMixin` (per `.claude/rules/tenant-isolation.md`)
+- Inherits `PHIMixin` (`shared/db/models/phi_mixin.py`) — `member_id` values referenced in row_errors are PHI-adjacent; PHIMixin marks this model for PHI audit logging (per `.claude/rules/phi-compliance.md`)
 - Inherits `AuditMixin` (every mutation audited per `.claude/rules/hipaa-2026.md`)
 
+**PHI controls on `member_id`:**
+- `member_id` appears in uploaded CSV rows and may appear in `row_errors` JSON.
+- `Upload` itself does not store `member_id` as a top-level column — it propagates into `ClaimRecord` rows (which already have PHI encryption via `EncryptedString` on existing PHI columns per `.claude/rules/phi-compliance.md`).
+- `row_errors` JSONB must NEVER store full `member_id` values in error messages — store only `"member_id: value too long"` or similar non-revealing descriptions. No PHI in log messages.
+- All API responses containing `row_errors` MUST include `Cache-Control: no-store` header.
+- Every read of upload row_errors by an authenticated user MUST emit a PHI access audit entry with `action="phi_access"`, `entity_type="upload"`, `entity_id=<upload_id>` (per `.claude/rules/phi-compliance.md`).
+- `EncryptedString` (from `shared/crypto/sqlalchemy_types.py`) is NOT required on `Upload` model directly — but any future column storing `member_id` verbatim MUST use it.
+
 **Migration rules:**
-- `upload_id` FK on `claims` is NULLABLE initially (existing claims have no upload; new claims require it at the service layer, not DB layer, so old data isn't broken)
+- `upload_id` FK on `ClaimRecord` is NULLABLE initially (existing claims have no upload; new claims require it at the service layer, not DB layer, so old data isn't broken)
 - Index: `(upload_id)` on `claims` table for `GET /uploads/{id}/claims` query performance
 
-- [ ] Step 1.1: Write `modules/billing/src/models/upload.py` with `Upload` model + `UploadStatus` enum
-- [ ] Step 1.2: Add `upload_id` nullable FK column to `modules/billing/src/models/claims.py`
+- [ ] Step 1.1: Write `modules/billing/src/models/upload.py` with `Upload` model + `UploadStatus` enum; inherit `PHIMixin` + `TenantScopedMixin` + `AuditMixin`
+- [ ] Step 1.2: Add `upload_id` nullable FK column to `ClaimRecord` in `modules/billing/src/models/tables.py` (line 39)
 - [ ] Step 1.3: Write Alembic migration `0011_add_upload_resource.py`; verify upgrade + downgrade run cleanly on a fresh schema
-- [ ] Step 1.4: Write unit tests for model fields and enum transitions
+- [ ] Step 1.4: Write unit tests for model fields, enum transitions, and PHIMixin inheritance
 - [ ] Step 1.5: Run `modules/billing` tests — all pass
-- [ ] Step 1.6: Commit — `feat(sp-1-b): Upload ORM model + alembic 0011 (upload_id FK on claims)`
+- [ ] Step 1.6: Commit — `feat(sp-1-b): Upload ORM model + alembic 0011 (upload_id FK on ClaimRecord in tables.py)`
 
 ---
 
@@ -140,7 +150,9 @@ Validation per row:
 
 Row errors are stored as `List[Dict[str, str]]` on the upload row in a JSON column
 `row_errors: JSONB` — added to migration `0011`. Never logged (may contain PHI-adjacent data
-per `.claude/rules/phi-compliance.md` — member_id is stored but treated as opaque identifier).
+per `.claude/rules/phi-compliance.md`). Error messages in `row_errors` MUST describe the
+validation failure without echoing the `member_id` value itself (e.g., `"member_id too long"`
+not `"member_id 'ABC123...' exceeds 64 chars"`). This prevents PHI leakage into error storage.
 
 **Storage layout** (§10.2 resolution):
 ```
@@ -190,16 +202,90 @@ SD-1. Role checked against JWT `roles` claim.
 **Tenant isolation:** all queries include `WHERE tenant_id = :current_tenant_id` via
 `TenantScopedMixin` + `install_tenant_loader`. Per `.claude/rules/tenant-isolation.md`.
 
-**Integration test pattern:** 3 roles × N endpoints; cross-tenant isolation test for uploads list.
+**Cross-tenant isolation (mandatory per `.claude/rules/tenant-isolation.md:23`):**
+EVERY new endpoint in this plan (5 upload endpoints + 1 inbox endpoint + every BFF route)
+MUST have a dedicated cross-tenant isolation test: create 2 tenants, seed data for both,
+authenticate as Tenant A, assert zero Tenant B records appear in the response. This is not
+optional. The cross-tenant test is a separate named test function for each endpoint, not a
+shared helper.
+
+**PHI access audit on upload row_errors read:** `GET /uploads/{id}` and
+`GET /uploads/{id}/claims` MUST emit a PHI access audit entry with `action="phi_access"`,
+`entity_type="upload"`, `entity_id=<upload_id>`, `user_id`, `tenant_id`. Add a test that
+verifies the audit entry is written for each of these two endpoints.
+
+**MFA / ePHI enforcement test:** add one test per new route that confirms a request with a
+valid JWT but `mfa_verified=False` in the token claims returns 403 when
+`tenant.mfa_required=True`. This verifies the MFA gate is enforced for ePHI-adjacent routes.
+
+**Integration test pattern:** 3 roles × every new endpoint; plus dedicated cross-tenant test
+per endpoint; plus PHI audit test per read endpoint; plus MFA gate test per endpoint.
 Per `.claude/rules/testing.md` LESSON-001 SAVEPOINT pattern.
 
 - [ ] Step 3.1: Write `modules/billing/src/api/uploads.py`
 - [ ] Step 3.2: Write `modules/billing/src/api/inbox.py`
 - [ ] Step 3.3: Mount routers in `modules/billing/src/main.py`
-- [ ] Step 3.4: Write `modules/billing/tests/integration/test_uploads_router.py` (RBAC matrix + cross-tenant)
-- [ ] Step 3.5: Write `modules/billing/tests/integration/test_inbox_router.py`
+- [ ] Step 3.4: Write `modules/billing/tests/integration/test_uploads_router.py` — RBAC matrix (3 roles × 5 endpoints) + cross-tenant test per endpoint + PHI audit test for read endpoints + MFA gate test per endpoint
+- [ ] Step 3.5: Write `modules/billing/tests/integration/test_inbox_router.py` — real items for each kind + cross-tenant test + MFA gate test
 - [ ] Step 3.6: Run `modules/billing` full test suite — all pass, 100% on auth/RBAC/PHI paths
-- [ ] Step 3.7: Commit — `feat(sp-1-b): billing Upload + Inbox routers, RBAC-gated, tenant-isolated`
+- [ ] Step 3.7: Commit — `feat(sp-1-b): billing Upload + Inbox routers, RBAC-gated, tenant-isolated, PHI-audited`
+
+---
+
+### Task 3b — Backend: `paysync.upload.parsed` event (EventEnvelope compliance)
+
+The spec (§5.5 and spec line 270) requires a `paysync.upload.parsed` event when an upload
+completes parsing. This task wires the event-bus publication and consumer per
+`.claude/rules/event-bus.md`.
+
+**Event publication** (in `modules/billing/src/services/upload.py`, at end of parse step):
+
+```python
+from shared.events.bus import EventBus
+from shared.events.envelope import EventEnvelope
+
+envelope = EventEnvelope(
+    event_type="paysync.upload.parsed",
+    payload={
+        "upload_id": str(upload.id),
+        "tenant_id": str(upload.tenant_id),
+        "status": upload.status,
+        "row_count": upload.row_count,
+        "error_count": upload.error_count,
+    },
+    ordering_key=str(upload.id),                          # per event-bus rule: entity ID
+    idempotency_key=f"paysync:upload:{upload.id}:parsed", # per event-bus rule: business-level key
+    schema_version="1.0",                                 # per event-bus rule: required
+    tenant_id=str(upload.tenant_id),                      # per event-bus rule: required on envelope
+)
+await event_bus.publish(envelope)
+```
+
+**Event contract doc:** `docs/api-contracts/events/paysync.upload.parsed.md` — created in this
+task. Content: event type, schema version, payload fields, ordering key, idempotency key,
+publisher (billing/upload service), consumers (paysync module Inbox feed derivation).
+
+**Consumer** (in `modules/billing/src/api/inbox.py` or a dedicated consumer module):
+The consumer handler MUST be wrapped with `@idempotent_handler` decorator per
+`.claude/rules/event-bus.md:11`. The handler derives the Inbox item from the event payload.
+
+**Unknown fields:** consumer must handle `schema_version` > `"1.0"` gracefully by ignoring
+unknown payload fields (forward-compat, per `.claude/rules/event-bus.md`).
+
+**Tests:**
+- Unit: `upload.service.parse_complete` publishes `EventEnvelope` with correct `ordering_key`,
+  `idempotency_key`, `schema_version`, `tenant_id`
+- Unit: consumer handler decorated with `idempotent_handler`; duplicate event is no-op
+- Unit: consumer handles payload with extra unknown fields (forward-compat test)
+- Integration: POST upload → event emitted → Inbox endpoint returns `upload_pending_review` item
+
+- [ ] Step 3b.1: Add `paysync.upload.parsed` event publication to upload service using `EventEnvelope` with all required fields
+- [ ] Step 3b.2: Write `@idempotent_handler`-decorated consumer in inbox/upload consumer module
+- [ ] Step 3b.3: Write `docs/api-contracts/events/paysync.upload.parsed.md` event contract doc
+- [ ] Step 3b.4: Write unit tests for event publication + consumer (including forward-compat test)
+- [ ] Step 3b.5: Write integration test: upload → event → Inbox item
+- [ ] Step 3b.6: Run tests — all pass, 100% on event-bus paths
+- [ ] Step 3b.7: Commit — `feat(sp-1-b): paysync.upload.parsed event — EventEnvelope, ordering_key, idempotent_handler, contract doc`
 
 ---
 
@@ -262,8 +348,7 @@ response from backend (sha256 dedup): renders "Already uploaded — [view existi
 banner linking to existing upload's detail page.
 
 **Error handling** (spec §8):
-- Parse errors → `UploadDetailPage` row-error list; never shows PHI (member_id is displayed
-  as-is since it's an opaque identifier, not a PHI field in this context, but `Cache-Control: no-store` on response)
+- Parse errors → `UploadDetailPage` row-error list; `member_id` is a PHI field and MUST NOT be displayed in the row-error list — show only the validation failure description (e.g., "Row 12: member_id too long"). `Cache-Control: no-store` on every response containing `row_errors`. Reading row_errors emits a PHI access audit entry (per `.claude/rules/phi-compliance.md`).
 - RBAC denial → `RbacGate` soft-disables upload button for Auditor role
 - Backend down (write path) → fail-fast, no optimistic update, error toast with correlation_id
 
@@ -321,16 +406,23 @@ banner linking to existing upload's detail page.
 
 Plan B is complete when ALL of the following are true:
 
-- [ ] `modules/billing` full test suite passes; 100% coverage on upload service (financial: Decimal parsing; security: auth/RBAC; PHI: tenant isolation); ≥95% on all other active billing code added in this plan
+- [ ] `modules/billing` full test suite passes; 100% coverage on upload service (financial: Decimal parsing; security: auth/RBAC; PHI: tenant isolation, PHI access audit, member_id non-echo in row_errors); **≥99% branch coverage** on all other active billing code added in this plan (CLAUDE.md Auto-Gate)
 - [ ] Migration `0011` runs `upgrade` and `downgrade` cleanly on a fresh schema
 - [ ] `GET /api/v1/billing/inbox?role=operator` returns ≥1 item given a seeded database with an upload in `validation_failed` state
 - [ ] `POST /api/v1/billing/uploads` with a duplicate file returns 409 with existing upload reference
-- [ ] `npm --workspace=@infinityrx/module-paysync test` passes; 100% coverage on `MoneyDisplay`/`MoneyInput`/`RbacGate`; ≥95% on uploads + cycles surface components
+- [ ] Cross-tenant isolation test passes for EVERY new endpoint (6 endpoints): Tenant A cannot see Tenant B data
+- [ ] PHI access audit entry written when `GET /uploads/{id}` or `GET /uploads/{id}/claims` is called (verified by test)
+- [ ] MFA gate test: request with `mfa_verified=False` JWT + `mfa_required=True` tenant returns 403 on every new route
+- [ ] `paysync.upload.parsed` event published with `EventEnvelope`, correct `ordering_key`, `idempotency_key`, `schema_version="1.0"`, `tenant_id` (verified by unit test)
+- [ ] Consumer handler decorated with `@idempotent_handler`; duplicate event is a no-op (verified by unit test)
+- [ ] `docs/api-contracts/events/paysync.upload.parsed.md` exists and documents event contract
+- [ ] `npm --workspace=@infinityrx/module-paysync test` passes; 100% coverage on `MoneyDisplay`/`MoneyInput`/`RbacGate`; **≥99% branch coverage** on uploads + cycles surface components
 - [ ] `tsc -b` clean across workspace
 - [ ] `UploadsListPage` renders sha256 dedup banner in RTL test
 - [ ] Cycles detail page shows `ProvenanceBreadcrumb` and disabled close button for Operator role in RTL test
 - [ ] All 3 CSV fixtures populated with real synthetic non-PHI data (no placeholder headers only)
 - [ ] `fixtures/seeds/users.json` contains 3 users with Operator/Approver/Auditor roles
+- [ ] `Cache-Control: no-store` verified on all responses returning `row_errors` (integration test)
 
 ---
 
@@ -349,10 +441,12 @@ Plan B is complete when ALL of the following are true:
 ## Dependencies
 
 - SP-1 Plan A complete (package skeleton, primitives, Inbox taxonomy, contract stubs)
-- `modules/billing` existing models (`claims.py`, `journal.py`, existing DB session setup)
+- `modules/billing` existing models in `modules/billing/src/models/tables.py` — specifically `ClaimRecord` (line 39), `PaymentBatch` (line 214), `Invoice` (line 333), `InvoiceLineItem` (line 391) — no separate `claims.py` or `journal.py` files
 - SP-0 auth/JWT infrastructure (`get_current_user` dependency available in billing module)
 - `shared/db/models/tenant_scoped_mixin.py` and `install_tenant_loader` (per `.claude/rules/tenant-isolation.md`)
-- `shared/crypto/sqlalchemy_types.py` `EncryptedString` (if any PHI column added — Upload model does not store PHI directly, but claim rows referenced by upload may; PHI fields already encrypted on existing `claims` model)
+- `shared/db/models/phi_mixin.py` `PHIMixin` — required on `Upload` model (member_id PHI proximity)
+- `shared/crypto/sqlalchemy_types.py` `EncryptedString` — not used on `Upload` model directly, but required on any future column storing `member_id` verbatim
+- `shared/events/envelope.py` `EventEnvelope` and `shared/events/bus.py` `EventBus` — required for `paysync.upload.parsed` event
 - Alembic environment in `modules/billing/alembic/`
 
 ---
@@ -363,4 +457,6 @@ Plan B is complete when ALL of the following are true:
 - Rules: `.claude/rules/financial-precision.md`, `.claude/rules/tenant-isolation.md`, `.claude/rules/security.md`, `.claude/rules/phi-compliance.md`, `.claude/rules/testing.md` (LESSON-001 SAVEPOINT, LESSON-004 regex anchors, LESSON-007 UUID)
 - SP-1 Plan A: `docs/superpowers/plans/2026-05-16-sp1-plan-a-module-scaffold-inbox-spine.md`
 - SP-1 Plan C: consumes `Upload` model, `CyclesClient`, and Inbox feed
-- Existing billing services: `modules/billing/src/services/{claims,journal,nacha,ar,ap}.py`
+- Existing billing models (all in `modules/billing/src/models/tables.py`): `ClaimRecord` (line 39), `PaymentBatch` (line 214), `Invoice` (line 333), `InvoiceLineItem` (line 391), `JournalEntry` (line 478)
+- Existing billing services: `modules/billing/src/services/{nacha,ar,ap}.py` (no separate `claims.py` — claim logic lives in the router and tables.py)
+- Event contract doc to be created: `docs/api-contracts/events/paysync.upload.parsed.md`
