@@ -87,27 +87,53 @@ async def test_oig_normalize_catches_errors(db_session, monkeypatch):
 
 @respx.mock
 async def test_sam_ingest_upsert(db_session):
+    # v4 nested shape — official GSA fixture format.
+    # fetch_records() reads "excludedEntity" and calls _flatten_v4_record on each.
+    # After flattening the keys are: classificationType, name, npi, stateOrProvince,
+    # exclusionType, activationDate, terminationDate, etc.
     body = {
-        "exclusionDetails": [
+        "totalRecords": 3,
+        "excludedEntity": [
             {
-                "classification": "Individual",
-                "firstName": "Alice",
-                "lastName": "Jones",
-                "state": "NY",
-                "npi": "1112223334",
-                "exclusionType": "SAM",
-                "activationDate": "2021-01-01",
-                "terminationDate": None,
+                "exclusionDetails": {
+                    "classificationType": "Individual",
+                    "exclusionType": "SAM",
+                },
+                "exclusionIdentification": {
+                    "entityName": "",
+                    "firstName": "Alice",
+                    "lastName": "Jones",
+                    "npi": "1112223334",
+                },
+                "exclusionActions": {
+                    "listOfActions": [
+                        {"activateDate": "01-01-2021", "terminationDate": None},
+                    ]
+                },
+                "exclusionPrimaryAddress": {"stateOrProvinceCode": "NY"},
+                "exclusionOtherInformation": {},
             },
             {
-                "classification": "Firm",
-                "entityName": "Bad Pharma Inc",
-                "state": "CA",
-                "exclusionType": "SAM",
-                "activationDate": "2020-05-05",
+                "exclusionDetails": {
+                    "classificationType": "Firm",
+                    "exclusionType": "SAM",
+                },
+                "exclusionIdentification": {
+                    "entityName": "Bad Pharma Inc",
+                    "npi": None,
+                },
+                "exclusionActions": {
+                    "listOfActions": [
+                        {"activateDate": "05-05-2020"},
+                    ]
+                },
+                "exclusionPrimaryAddress": {"stateOrProvinceCode": "CA"},
+                "exclusionOtherInformation": {},
             },
-            {"name": None},  # malformed
-        ]
+            # Malformed — missing exclusionDetails entirely
+            {"exclusionIdentification": {"entityName": ""}},
+        ],
+        "links": {},
     }
     respx.get("https://api.sam.gov/entity-information/v4/exclusions").mock(
         return_value=httpx.Response(200, json=body)
@@ -118,7 +144,7 @@ async def test_sam_ingest_upsert(db_session):
     assert report.inserted == 2
     assert report.skipped_malformed == 1
 
-    # Idempotent
+    # Idempotent — re-running same body produces 0 inserts, 2 updates.
     respx.get("https://api.sam.gov/entity-information/v4/exclusions").mock(
         return_value=httpx.Response(200, json=body)
     )
@@ -152,8 +178,23 @@ async def test_sam_ingest_unknown_body_shape(db_session):
 
 @respx.mock
 async def test_sam_normalize_error_counted(db_session, monkeypatch):
+    # v4 nested shape with one valid entity — the monkeypatched normalize raises
+    # on every record so all records land in skipped_malformed.
+    body = {
+        "totalRecords": 1,
+        "excludedEntity": [
+            {
+                "exclusionDetails": {"classificationType": "Firm", "exclusionType": "SAM"},
+                "exclusionIdentification": {"entityName": "x", "npi": None},
+                "exclusionActions": {"listOfActions": []},
+                "exclusionPrimaryAddress": {},
+                "exclusionOtherInformation": {},
+            }
+        ],
+        "links": {},
+    }
     respx.get("https://api.sam.gov/entity-information/v4/exclusions").mock(
-        return_value=httpx.Response(200, json={"exclusionDetails": [{"name": "x"}]})
+        return_value=httpx.Response(200, json=body)
     )
     from src.exclusions import ingestion as ing
 

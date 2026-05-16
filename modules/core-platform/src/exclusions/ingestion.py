@@ -155,7 +155,28 @@ class OIGIngestionClient:
 
 
 class SAMIngestionClient:
-    """Queries the SAM.gov entity exclusions endpoint."""
+    """Queries the SAM.gov entity exclusions endpoint.
+
+    v4 response shape:
+      {"excludedEntity": [{"exclusionDetails": {...},
+                           "exclusionIdentification": {...},
+                           "exclusionActions": {"listOfActions": [...]},
+                           "exclusionPrimaryAddress": {...},
+                           "exclusionOtherInformation": {...}},
+                          ...],
+       "totalRecords": N,
+       "links": {...}}
+
+    Each nested record is flattened via ``_flatten_v4_record`` from
+    ``shared.data_ingestion.sources.sam_exclusions`` before being passed
+    to ``normalize``. This produces a flat dict with keys like
+    ``classificationType``, ``name``, ``npi``, ``stateOrProvince``,
+    ``exclusionType``, ``activationDate``, ``terminationDate``.
+
+    BLOCK-2 fix (P0a v2): v1 read ``body.get("exclusionDetails", [])``
+    (the v3 flat list key) and passed nested v4 dicts directly to normalize().
+    Both bugs caused zero rows to be ingested from production SAM API.
+    """
 
     DEFAULT_URL = "https://api.sam.gov/entity-information/v4/exclusions"
 
@@ -165,27 +186,59 @@ class SAMIngestionClient:
         self._url = url or self.DEFAULT_URL
 
     async def fetch_records(self) -> List[Dict[str, Any]]:
+        """Fetch SAM.gov v4 exclusions, returning a list of flattened records.
+
+        Reads ``excludedEntity`` from the v4 nested response and flattens
+        each entry via ``_flatten_v4_record``.  Falls back gracefully for
+        test doubles that return a flat list or a legacy v3-style body.
+        """
+        from shared.data_ingestion.sources.sam_exclusions import _flatten_v4_record
+
         resp = await self._http.get(self._url, params={"api_key": self._api_key})
         resp.raise_for_status()
         body = resp.json()
         if isinstance(body, dict):
-            return list(body.get("exclusionDetails", []))
+            entities = body.get("excludedEntity")
+            if entities is not None:
+                # v4 nested shape — flatten each record
+                out: List[Dict[str, Any]] = []
+                for entity in entities:
+                    try:
+                        out.append(_flatten_v4_record(entity))
+                    except (ValueError, TypeError):
+                        # malformed entity; counted as skipped in ingest()
+                        out.append({})
+                return out
+            # Legacy / test v3 shape: {"exclusionDetails": [...]} — pass through as-is
+            legacy = body.get("exclusionDetails")
+            if legacy is not None:
+                return list(legacy)
+            return []
         if isinstance(body, list):
             return body
         return []
 
     def normalize(self, raw: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+        """Normalize a flattened SAM record into an ExclusionListEntry field dict.
+
+        Accepts the flat shape produced by ``_flatten_v4_record`` whose keys
+        are camelCase (``classificationType``, ``stateOrProvince``, etc.).
+        Also accepts the legacy v3 flat shape for backwards-compat test fixtures.
+        """
         name = raw.get("name") or raw.get("entityName")
-        classification = (raw.get("classification") or "").lower()
-        npi = raw.get("npi")
-        state = raw.get("state")
+        # v4 flat uses "classificationType"; v3 flat used "classification"
+        classification = (raw.get("classificationType") or raw.get("classification") or "").lower()
+        npi_raw = raw.get("npi")
+        npi = (str(npi_raw).strip() if npi_raw else None) or None
+        # v4 flat uses "stateOrProvince"; v3 flat used "state"
+        state = raw.get("stateOrProvince") or raw.get("state")
         if not name and not npi:
             return None
         is_individual = "individual" in classification or raw.get("firstName") is not None
         if is_individual:
             return {
                 "entity_type": "individual",
-                "npi": str(npi) if npi else None,
+                "npi": npi,
                 "first_name": raw.get("firstName"),
                 "last_name": raw.get("lastName") or name,
                 "organization_name": None,
@@ -196,7 +249,7 @@ class SAMIngestionClient:
             }
         return {
             "entity_type": "organization",
-            "npi": str(npi) if npi else None,
+            "npi": npi,
             "first_name": None,
             "last_name": None,
             "organization_name": name,
