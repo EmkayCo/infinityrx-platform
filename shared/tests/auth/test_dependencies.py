@@ -132,7 +132,8 @@ class TestGetCurrentUser:
         from shared.auth.jwt_tokens import decode_token
 
         claims = decode_token(token)
-        repo.revoke(claims.jti, claims.exp)
+        assert claims.tenant_id is not None
+        repo.revoke(claims.jti, claims.tenant_id, claims.exp)
         client = TestClient(_make_app())
         r = client.get("/me", headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 401

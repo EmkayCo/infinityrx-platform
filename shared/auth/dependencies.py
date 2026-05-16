@@ -146,7 +146,11 @@ def get_current_user(
     """
     claims = _resolve_claims(token)
     repo = _get_revoked_repo()
-    if repo.is_revoked(claims.jti):
+    # Access tokens always carry a tenant claim (enforced by
+    # create_access_token). If somehow it is missing the decoder will
+    # have raised InvalidTokenError before we get here.
+    assert claims.tenant_id is not None
+    if repo.is_revoked(claims.jti, claims.tenant_id):
         raise _unauthorized("token revoked")
 
     loader = _get_user_loader()
@@ -155,10 +159,6 @@ def get_current_user(
         raise _unauthorized("user not found")
     if user.status != "active":
         raise _unauthorized(f"user {user.status}")
-    # Access tokens always carry a tenant claim (enforced by
-    # create_access_token). If somehow it is missing the decoder will
-    # have raised InvalidTokenError before we get here.
-    assert claims.tenant_id is not None
     _set_tenant_context(claims.tenant_id)
     return user
 
