@@ -1,0 +1,143 @@
+# SP-1 Launch Packet — PaySync Operator Portal
+
+**Purpose:** self-contained handoff for a fresh Claude Code session window to execute SP-1.
+**Branch:** `wave/B10-w5`
+**Status:** Spec + 5 plans committed; Codex consult in flight (review pending).
+**Created:** 2026-05-16 by the SP-0 → SP-1 brainstorm session.
+
+---
+
+## 1. Artifacts
+
+### Spec
+- `docs/superpowers/specs/2026-05-16-sp1-paysync-operator-portal-design.md` (commit `5e8abf88`)
+
+### Plans (5 sequential, A → E)
+| Commit | Plan | Goal |
+|---|---|---|
+| `e3ff11a1` | `2026-05-16-sp1-plan-a-module-scaffold-inbox-spine.md` | `packages/modules/paysync` skeleton, Inbox spine + item taxonomy, 6 shared primitives, 12 surface stubs, BFF skeleton, fixtures layout |
+| `ff8af128` | `2026-05-16-sp1-plan-b-uploads-cycles.md` | Upload backend resource (model, alembic 0011, parser, dedup, router), Inbox feed endpoint, uploads surface (dropzone/list/detail/viewer), cycles rewire to contract layer |
+| `0476fdd1` | `2026-05-16-sp1-plan-c-batches-ar-ap.md` | `upload_id` FK on Batch/InvoiceLine/PaymentRun (alembic 0012), RBAC server-side audit + gap-fill, 6 financial surfaces wired, 6 contract clients, 10 Inbox cards |
+| `dea5fa57` | `2026-05-16-sp1-plan-d-files-journal.md` | FileArtifact model (alembic 0013), NACHA/835 generate+download router, sync hash-chain verifier on core-platform, Files + Journal surfaces, `HashChainBadge` 4 states |
+| `25c70bd0` | `2026-05-16-sp1-plan-e-reports-setup-e2e.md` | Reports + Setup surfaces, fixture population, QA-harness seed button + role-switcher, 25-step Playwright E2E, `RoleSwitcherChip` prod-bundle CI check, portal scaffolding cleanup |
+
+### Codex review (pending)
+- `docs/superpowers/codex-sp1-review-r1.md` — being generated; output expected by start of execution.
+- **Hard rule:** do NOT begin Plan A execution until codex review returns and any BLOCK items are resolved.
+
+---
+
+## 2. The 9 locked scope decisions (S1–S9)
+
+| # | Decision | Choice |
+|---|---|---|
+| S1 | Vertical | PaySync operator portal |
+| S2 | Workflow scope | Full (uploads → cycles → batches → AR/AP → NACHA/835 → settlement → journal → reports → setup) |
+| S3 | Persona | All-in-one shared UI with RBAC gates |
+| S4 | Integration depth | Portal/UI only — no external partner delivery, no 50-state backend gap-fill, `Upload` resource counts as wiring |
+| S5 | Shippable bar | End-to-end round trip on synthetic non-PHI data against real backend |
+| S6 | RBAC | 3 roles — Operator / Approver / Auditor with segregation-of-duties |
+| S7 | IA | Inbox-first (queue + History + Journal + Reports + Setup) |
+| S8 | Deployable shape | Module inside `portal/operator` only; standalone deferred |
+| S9 | Upload provenance | NEW backend resource; immutable file artifact; claims permanently scoped to their upload |
+
+---
+
+## 3. Plan-time decisions resolved (spec §10)
+
+| # | Answer (from plan-writer) |
+|---|---|
+| §10.1 | 5 plans A–E exactly as listed above |
+| §10.2 | Upload storage: local disk `{PAYSYNC_UPLOAD_DIR}/{tenant_id}/{upload_id}/{filename}`; 90-day retention via nightly job; atomic write (.tmp rename) |
+| §10.3 | CSV schema 8 mandatory cols: `ndc, npi, claim_id, date_of_service, quantity, days_supply, amount_billed, member_id`; `source_platform` optional; per-row errors never abort other rows |
+| §10.4 | Hash-chain perf: ≤10k entries sync (<5s); above threshold returns `{verified: null, too_large: true}`; threshold via `PAYSYNC_HASH_CHAIN_SYNC_LIMIT` |
+| §10.5 | Inbox cache: 10s polling + revalidate-on-focus + TanStack Query `staleTime: 10_000`; mutations `invalidateQueries` immediately; no WebSocket in SP-1 |
+| §10.6 | Per-surface extraction as wired (Plans B/C/D/E); Plan A creates folder stubs only; original portal pages deleted in Plan E after E2E passes |
+
+---
+
+## 4. Open items the fresh session must address
+
+1. **`echo/` route decision (user input needed).** `portal/operator/app/admin/paysync/echo/` is in the existing scaffolding but not mapped to any surface in spec §6.5. Plan E task 6 marks it "evaluate before deleting." Ask the user: debug route to remove, keep, or surface as dev tool?
+2. **Codex review outcome.** `docs/superpowers/codex-sp1-review-r1.md` — read first; resolve every BLOCK before Plan A; address CONCERN items in-plan; NITs are optional.
+3. **Backend Upload resource location.** Plan B places the new `Upload` table + router in `modules/billing/`. Confirm this is the right module (vs spinning a new ingestion module). Plan B notes this is a judgment call — verify before running alembic 0011.
+
+---
+
+## 5. Werkbench / project rules (non-negotiable)
+
+- **Codex at every gate.** Spec consult ✓ (in flight). Pre-execute consult: required before Plan A starts. Gate-close consult: required at each plan completion. Per `framework/disciplines/wave-control-ledger.md` + `framework/disciplines/two-tool-layering.md`.
+- **Co-Authored-By trailer on every commit:** `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`
+- **Decimal-only money.** Never `float`/`Float` in services, models, schemas, events that touch money. Per `.claude/rules/financial-precision.md`. Pre-commit hook enforces.
+- **Zero PHI in test data.** Synthetic fixtures only. Per `.claude/rules/phi-compliance.md`.
+- **JWT_SECRET ≥32 chars.** Per security rules.
+- **TenantScopedMixin on every tenant-owned model.** `install_tenant_loader` on every session factory. Per `.claude/rules/tenant-isolation.md`.
+- **EventEnvelope for all events.** Never raw `(topic, dict)`. Dot-notation event types. Per `.claude/rules/event-bus.md`.
+- **Drafter discipline.** Before writing any code sample in a plan or commit message, run `git show HEAD:<file>` or read the actual file. SP-0 had multiple BLOCKED specs from imagined code.
+- **Token discipline.** Use Write for skeletons + Edit for per-task additions. SP-0 hit the 32k output cap multiple times on mono-blocks.
+- **Sync def + threadpool for FastAPI handlers** until full async migration lands. Per project status table in CLAUDE.md.
+- **Test-first.** TDD for all core business logic (CLAUDE.md principle 11).
+- **Coverage gates.** 100% on financial/PHI/security/auth paths; ≥99% branch elsewhere. Per `.claude/rules/testing.md`.
+
+---
+
+## 6. Handoff prompt for fresh session (copy-paste)
+
+```
+You are continuing work on the InfinityRx PBM platform, branch wave/B10-w5.
+Your job is to execute SP-1 (PaySync Operator Portal) from the existing
+spec + 5 plans.
+
+START HERE — in this exact order:
+
+1. Read docs/superpowers/SP-1-LAUNCH.md (this file). It is your single
+   source of truth for what SP-1 is, what's locked, and what rules apply.
+
+2. Read docs/superpowers/codex-sp1-review-r1.md (Codex's gate review of
+   the spec + plans). If it does not exist yet, the codex review is still
+   in flight from the originating session — wait or re-fire it via:
+   codex exec "<re-fire prompt from this file's §1>"
+
+3. Read the spec: docs/superpowers/specs/2026-05-16-sp1-paysync-operator-portal-design.md
+
+4. Read CLAUDE.md (project root) + the .claude/rules/*.md files referenced
+   in SP-1-LAUNCH.md §5. These are non-negotiable.
+
+5. Confirm with the user: (a) the `echo/` route decision, (b) the
+   Upload-resource-module placement (modules/billing/ vs new module),
+   (c) any BLOCK items from the Codex review.
+
+6. Read Plan A: docs/superpowers/plans/2026-05-16-sp1-plan-a-module-scaffold-inbox-spine.md
+
+7. Re-fire Codex consult on Plan A specifically before any execution —
+   Werkbench Wave Control Ledger requires pre-execute consult at the plan
+   level too. Example: codex exec "Review Plan A for executability — is
+   every task atomic, are gate criteria measurable, are referenced paths
+   real? Output BLOCK/CONCERN/NIT."
+
+8. Execute Plan A task-by-task, atomic commits, with the Co-Authored-By
+   trailer. Run tests before each commit. Do not skip pre-commit hooks.
+
+9. At Plan A completion: codex gate-close consult, then proceed to Plan B.
+
+You have authorization to make decisions that best fit the InfinityRx PBM
+business model. When in doubt, pick the option that respects the Werkbench
+rules and the project rules in CLAUDE.md. If you must escalate, do so in
+one sentence with the choices.
+
+The originating session is brainstorming SP-2 (Directories Portal) in
+parallel. Do not touch docs/superpowers/specs/*sp2* or
+docs/superpowers/plans/*sp2* — those are owned by the other session.
+```
+
+---
+
+## 7. Cross-references
+
+- SP-0 spec (foundation): `docs/superpowers/specs/2026-05-14-sp0-integration-foundation-design.md`
+- SP-0 plans: `docs/superpowers/plans/2026-05-15-sp0-plan-*.md`
+- Werkbench discipline: `~/Documents/Code Projects/Werkbench/framework/disciplines/wave-control-ledger.md`
+- Werkbench tool layering: `~/Documents/Code Projects/Werkbench/framework/disciplines/two-tool-layering.md`
+- Project rules: `.claude/rules/*.md`
+- Existing PaySync scaffolding: `portal/operator/app/admin/paysync/`, `portal/operator/app/accounting/`, `portal/operator/app/billing/`, `portal/operator/app/payments/`, `portal/operator/components/paysync/`, `portal/shared/lib/paysync-api.ts`
+- Existing backend: `modules/billing/src/services/{nacha,ap,ar,journal,remittance_835,claims}.py`, `modules/payment-processing/src/services/nacha_generator.py`, `modules/edi-compliance/src/x12/generators/gen_835.py`, `modules/core-platform/src/jobs/verify_audit_chain_job.py`
