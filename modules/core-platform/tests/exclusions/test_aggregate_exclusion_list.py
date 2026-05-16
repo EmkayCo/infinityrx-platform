@@ -425,7 +425,7 @@ def test_full_aggregation_oig_only(agg_session):
     _insert_oig(agg_session, npi=None, lastname="TEST-GAMMA", busname="TEST-ORG A")
     agg_session.commit()
 
-    result = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions")
+    result = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions", excl_table="core_exclusion_list")
     agg_session.commit()
 
     assert result.oig_seen == 3
@@ -447,7 +447,7 @@ def test_full_aggregation_sam_only(agg_session):
     _insert_sam(agg_session, npi=None, name="TEST-PHARMA EVIL INC")
     agg_session.commit()
 
-    result = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions")
+    result = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions", excl_table="core_exclusion_list")
     agg_session.commit()
 
     assert result.sam_seen == 2
@@ -466,7 +466,7 @@ def test_full_aggregation_oig_and_sam(agg_session):
     _insert_sam(agg_session, npi=shared_npi, name="TEST-BOTH-SAM")
     agg_session.commit()
 
-    result = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions")
+    result = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions", excl_table="core_exclusion_list")
     agg_session.commit()
 
     assert result.oig_inserted == 1
@@ -483,13 +483,13 @@ def test_idempotent_rerun(agg_session):
     agg_session.commit()
 
     # First run
-    r1 = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions")
+    r1 = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions", excl_table="core_exclusion_list")
     agg_session.commit()
     assert r1.total_inserted == 2
     assert r1.total_updated == 0
 
     # Second run — same source data
-    r2 = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions")
+    r2 = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions", excl_table="core_exclusion_list")
     agg_session.commit()
     assert r2.total_inserted == 0
     assert r2.total_updated == 2
@@ -505,8 +505,10 @@ def test_delisting_npi_removed_from_source(agg_session):
     rowid = _insert_oig(agg_session, npi=npi, lastname="TEST-DELIST")
     agg_session.commit()
 
-    # First run — populates exclusion_list with the NPI row
-    r1 = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions")
+    # First run — populates exclusion_list with the NPI row.
+    # Pass oig_min_rows=0 to bypass the CONCERN-1 completeness guard in tests
+    # (production guard needs 60k+ rows; unit tests legitimately have 1 row).
+    r1 = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions", excl_table="core_exclusion_list", oig_min_rows=0, sam_min_rows=0)
     agg_session.commit()
     assert r1.oig_inserted == 1
 
@@ -515,7 +517,7 @@ def test_delisting_npi_removed_from_source(agg_session):
     agg_session.commit()
 
     # Second run — NPI no longer in source → must be delisted
-    r2 = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions")
+    r2 = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions", excl_table="core_exclusion_list", oig_min_rows=0, sam_min_rows=0)
     agg_session.commit()
     assert r2.delisted == 1
 
@@ -538,8 +540,11 @@ def test_delisting_does_not_re_delist_already_terminated(agg_session):
     agg_session.add(entry)
     agg_session.commit()
 
-    # Run with empty source — the terminated row should stay unchanged
-    r = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions")
+    # Run with empty source — the terminated row should stay unchanged.
+    # Pass oig_min_rows=0 so the completeness guard doesn't suppress delisting;
+    # the result must be 0 because the row already has reinstate_date, not
+    # because the guard fired.
+    r = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions", excl_table="core_exclusion_list", oig_min_rows=0, sam_min_rows=0)
     agg_session.commit()
 
     # delisted count should be 0 since the row already has reinstate_date
@@ -552,7 +557,7 @@ def test_delisting_does_not_re_delist_already_terminated(agg_session):
 
 def test_empty_sources_no_error(agg_session):
     """Both source tables empty → aggregation succeeds with 0 counts."""
-    result = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions")
+    result = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions", excl_table="core_exclusion_list")
     agg_session.commit()
 
     assert result.oig_seen == 0
@@ -560,3 +565,94 @@ def test_empty_sources_no_error(agg_session):
     assert result.total_errors == 0
     assert result.total_inserted == 0
     assert result.delisted == 0
+
+
+# ---------------------------------------------------------------------------
+# CONCERN-2: NPI merge — no-NPI row upgraded when NPI arrives later
+# ---------------------------------------------------------------------------
+
+def test_no_npi_row_upgraded_when_npi_arrives(agg_session):
+    """A no-NPI name-key row is upgraded (not duplicated) when the source
+    later delivers a row for the same entity that includes an NPI.
+
+    CONCERN-2 fix (P0a v2): v1 inserted a new row in this scenario,
+    creating duplicate entries and breaking downstream screens.
+    """
+    # Pre-seed a no-NPI OIG row for "TEST-UPGRADE, TEST-FIRST" in NY
+    _insert_oig(agg_session, npi=None, lastname="TEST-UPGRADE",
+                firstname="TEST-FIRST", state="NY", excltype="1128a1")
+    agg_session.commit()
+
+    # First aggregation run — inserts the name-key row (no NPI)
+    r1 = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions", excl_table="core_exclusion_list")
+    agg_session.commit()
+    assert r1.oig_inserted == 1
+
+    # Simulate source gaining an NPI for the same entity
+    agg_session.execute(text("""
+        UPDATE oig_leie_exclusions
+        SET npi = '1234567899'
+        WHERE lastname = 'TEST-UPGRADE' AND firstname = 'TEST-FIRST'
+    """))
+    agg_session.commit()
+
+    # Second aggregation run — must UPGRADE the existing row, not insert
+    r2 = run_aggregation(agg_session, oig_table="oig_leie_exclusions", sam_table="sam_exclusions", excl_table="core_exclusion_list")
+    agg_session.commit()
+    assert r2.oig_inserted == 0, "NPI arrival must not create a duplicate row"
+    assert r2.oig_updated == 1, "existing row must be updated with the NPI"
+
+    # Only one row in the list — no duplicate
+    rows = agg_session.query(ExclusionListEntry).filter_by(source="OIG").all()
+    assert len(rows) == 1
+    assert rows[0].npi == "1234567899"
+
+
+# ---------------------------------------------------------------------------
+# CONCERN-1: Completeness guard — delisting suppressed on partial source load
+# ---------------------------------------------------------------------------
+
+def test_delisting_suppressed_when_source_below_threshold(agg_session):
+    """Delisting is suppressed when the source row count is below the minimum.
+
+    CONCERN-1 fix (P0a v2): without the completeness guard, a partial
+    source load (e.g., ingestion failure after 1k rows) would falsely
+    reinstate all exclusions not in the incomplete slice.
+
+    This test verifies that passing a high min_rows threshold prevents
+    delisting even when rows are absent from the source.
+    """
+    npi = "2222222222"
+    rowid = _insert_oig(agg_session, npi=npi, lastname="TEST-GUARD")
+    agg_session.commit()
+
+    # First run with guard disabled — populates the row
+    r1 = run_aggregation(
+        agg_session,
+        oig_table="oig_leie_exclusions",
+        sam_table="sam_exclusions",
+        excl_table="core_exclusion_list",
+        oig_min_rows=0,
+        sam_min_rows=0,
+    )
+    agg_session.commit()
+    assert r1.oig_inserted == 1
+
+    # Delete the source row to simulate removal
+    _delete_oig_by_id(agg_session, rowid)
+    agg_session.commit()
+
+    # Second run with high min_rows threshold — guard must suppress delisting
+    r2 = run_aggregation(
+        agg_session,
+        oig_table="oig_leie_exclusions",
+        sam_table="sam_exclusions",
+        excl_table="core_exclusion_list",
+        oig_min_rows=99999,   # impossible to reach with test data
+        sam_min_rows=99999,
+    )
+    agg_session.commit()
+    assert r2.delisted == 0, "completeness guard must suppress delisting when source is below threshold"
+
+    entry = agg_session.query(ExclusionListEntry).filter_by(source="OIG", npi=npi).one()
+    assert entry.reinstate_date is None, "reinstate_date must remain NULL when guard suppresses delisting"
