@@ -53,49 +53,86 @@ resolve discrepancy) are wired; file generation (NACHA/835) is Plan D.
 
 ### Task 1 — Backend: upload_id propagation onto derived entities
 
-Verify and, where absent, add `upload_id` FK columns to the existing Batch, InvoiceLine, and
-PaymentRun ORM models. This is the backward-provenance link required by spec §5.2.
+Verify and, where absent, add `upload_id` FK columns to the existing ORM models. All billing
+ORM classes live in `modules/billing/src/models/tables.py` — there is no separate `models/`
+subdirectory with per-entity files. The relevant classes and their line numbers (verified from HEAD):
+
+| Model class | Line in tables.py | Equivalent plan term |
+|---|---|---|
+| `PaymentBatch` | 214 | "Batch" |
+| `Payment` | 254 | individual payment within a batch |
+| `Invoice` | 333 | AR invoice |
+| `InvoiceLineItem` | 391 | "InvoiceLine" |
+
+**Note on missing classes (B3 resolution):**
+- `PaymentRun` — does not exist as a separate ORM class. `PaymentBatch` (line 214) is the
+  equivalent. All plan references to "PaymentRun" must use `PaymentBatch`.
+- `Carryover` — not present in `modules/billing/src/models/tables.py`. It exists as a
+  TypeScript type in `portal/shared/lib/paysync-api.ts` but has no backend ORM model.
+  **Decision:** Plan C adds a new `Carryover` ORM model to `tables.py` as part of Task 1
+  (new class after `ARPayment` at line 451). This is new scope SP-1 must add, not pre-existing.
+- `BankSettlement` — not in billing models. `Settlement` IS in
+  `modules/payment-processing/src/models/tables.py` (line 138). Plan C surfaces read from
+  the payment-processing module via its API; Plan C does NOT duplicate the ORM model.
+- `Reconciliation` — not in billing. Tied to `Settlement` in payment-processing. Same
+  approach: read via payment-processing API, do not duplicate ORM.
 
 | # | Subject | Files touched | Test added | Deliverable |
 |---|---|---|---|---|
-| 1.1 | Audit existing Batch model for `upload_id` FK | `modules/billing/src/models/` | — | Audit finding documented in commit message |
-| 1.2 | Add `upload_id` FK to Batch (if absent) | `modules/billing/src/models/` | unit: batch.upload_id set when created from upload | FK present |
-| 1.3 | Add `upload_id` FK to InvoiceLine (if absent) | `modules/billing/src/models/` | unit: invoice_line.upload_id traces to source upload | FK present |
-| 1.4 | Add `upload_id` FK to PaymentRun (if absent) | `modules/billing/src/models/` | unit: payment_run.upload_id traces to source upload | FK present |
+| 1.1 | Audit `PaymentBatch`, `Invoice`, `InvoiceLineItem` in `tables.py` for `upload_id` FK | `modules/billing/src/models/tables.py` | — | Audit finding in commit message |
+| 1.2 | Add `upload_id` FK to `PaymentBatch` (if absent) | `modules/billing/src/models/tables.py` | unit: payment_batch.upload_id set when created from upload | FK present |
+| 1.3 | Add `upload_id` FK to `InvoiceLineItem` (if absent) | `modules/billing/src/models/tables.py` | unit: invoice_line_item.upload_id traces to source upload | FK present |
+| 1.4 | Add new `Carryover` ORM model to `tables.py` | `modules/billing/src/models/tables.py` | unit: model fields, TenantScopedMixin inherited | New model present |
 | 1.5 | Alembic migration `0012_upload_id_on_derived_entities.py` | `modules/billing/alembic/versions/` | migration upgrade + downgrade clean | Schema updated |
 
-**Rule:** `upload_id` FKs on derived entities are NULLABLE (same rationale as claims in Plan B —
-existing rows have no upload; new rows must have it set at the service layer). The nullable FK
-preserves backward-compatibility with existing billing data while enforcing provenance on all
-new SP-1-originated entities.
+**Rule:** `upload_id` FKs on derived entities are NULLABLE (same rationale as `ClaimRecord` in
+Plan B — existing rows have no upload; new rows must have it set at the service layer).
 
 **Provenance chain verified by:** `ProvenanceBreadcrumb` on Batch detail page renders
-`Upload #N → Cycle ... → Batch B-XXXX`. If `upload_id` is null on a batch (legacy data),
+`Upload #N → Cycle ... → Batch B-XXXX`. If `upload_id` is null on a `PaymentBatch` (legacy data),
 breadcrumb renders `Legacy (no upload) → Cycle ... → Batch B-XXXX` — never crashes.
 
-- [ ] Step 1.1: Read existing Batch/InvoiceLine/PaymentRun models; confirm which FKs are absent
-- [ ] Step 1.2–1.4: Add missing `upload_id` FKs
+- [ ] Step 1.1: Read `modules/billing/src/models/tables.py` lines 214–450; confirm which FKs are absent
+- [ ] Step 1.2–1.3: Add missing `upload_id` FKs to `PaymentBatch` and `InvoiceLineItem`
+- [ ] Step 1.4: Add `Carryover` model class to `tables.py` (after `ARPayment`, line ~451)
 - [ ] Step 1.5: Write migration `0012`; run upgrade + downgrade
-- [ ] Step 1.6: Write unit tests for FK propagation
-- [ ] Step 1.7: Commit — `feat(sp-1-c): upload_id FK on Batch/InvoiceLine/PaymentRun + alembic 0012`
+- [ ] Step 1.6: Write unit tests for FK propagation + new Carryover model
+- [ ] Step 1.7: Commit — `feat(sp-1-c): upload_id FK on PaymentBatch/InvoiceLineItem + new Carryover model + alembic 0012`
 
 ---
 
 ### Task 2 — Backend: RBAC enforcement audit on mutating billing endpoints
 
 Per spec §5.5 point 2: verify Operator/Approver/Auditor gates are enforced at the server-side
-on every mutating endpoint in `modules/billing/src/api/`. Add missing role checks.
+on every mutating endpoint in `modules/billing/src/api/router.py`. The REAL routes (verified
+from HEAD — see inventory §5) are listed below. Audit against these exact paths, not invented ones.
 
-| Endpoint pattern | Required role | Action if missing |
+**Billing router actual routes** (from `modules/billing/src/api/router.py`):
+
+| Real endpoint | Required role | Action if missing |
 |---|---|---|
-| `POST /billing/batches` (create draft) | Operator or Approver | Add `require_role(['operator','approver'])` |
-| `POST /billing/batches/{id}/release` | Approver only | Add `require_role(['approver'])` |
-| `POST /billing/batches/{id}/hold` | Approver only | Add if missing |
-| `POST /billing/invoices/{id}/send` | Approver only | Add if missing |
-| `POST /billing/payment-runs/{id}/release` | Approver only | Add if missing |
-| `POST /billing/reconciliations/{id}/finalize` | Approver only | Add if missing |
-| `POST /billing/settlements/{id}/resolve-discrepancy` | Approver only | Add if missing |
-| `POST /billing/manual-ap` | Approver only | Add if missing |
+| `POST /claims` (line 93) | Operator or Approver | Add `require_role(['operator','approver'])` |
+| `POST /routing-rules` (line 280) | Approver only | Add if missing |
+| `PUT /routing-rules/{rule_id}` (line 290) | Approver only | Add if missing |
+| `POST /payment-batches/generate` (line 533) | Operator or Approver | Add if missing |
+| `POST /payment-batches/{batch_id}/validate` (line 592) | Operator or Approver | Add if missing |
+| `POST /payment-batches/{batch_id}/approve` (line 602) | Approver only | Add if missing |
+| `POST /payment-batches/{batch_id}/submit` (line 612) | Approver only | Add if missing |
+| `POST /payment-batches/{batch_id}/void` (line 622) | Approver only | Add if missing |
+| `POST /settlement/record` (line 686) | Approver only | Add if missing |
+| `POST /invoicing-configs` (line 786) | Approver only | Add if missing |
+| `PUT /invoicing-configs/{config_id}` (line 796) | Approver only | Add if missing |
+| `POST /invoices/generate` (line 871) | Operator or Approver | Add if missing |
+| `POST /invoices/{invoice_id}/approve` (line 951) | Approver only | Add if missing |
+| `POST /invoices/{invoice_id}/send` (line 961) | Approver only | Add if missing |
+| `POST /invoices/{invoice_id}/void` (line 971) | Approver only | Add if missing |
+
+**Auditor role:** GET-only access to all billing endpoints. No mutating actions.
+
+**RBAC matrix summary (per inventory §5):**
+- Operator: GET on all; POST `/claims`, POST `/payment-batches/{id}/validate`
+- Approver: all Operator permissions PLUS all approve/submit/void/send/record/generate mutations
+- Auditor: GET only
 
 **Implementation pattern** (consistent with existing billing auth pattern):
 ```python
@@ -107,15 +144,27 @@ require_role(current_user, ['approver'])  # raises 403 on deny
 If `shared.auth.roles` doesn't exist, add it as a thin helper in `shared/auth/roles.py` that
 checks `current_user.roles` (list of strings from JWT claim) against the required set.
 
-**Test:** for each gated endpoint, add one test: Approver → 200/201, Auditor → 403, Operator
-→ 403 (where Approver-only) or 200/201 (where Operator-or-Approver).
+**Per-endpoint cross-tenant isolation tests (mandatory):** EVERY endpoint in the billing
+router (both GET and mutating) that returns tenant-scoped data MUST have a dedicated cross-tenant
+test: 2 tenants, seed both, authenticate as Tenant A, assert zero Tenant B records. This applies
+to all 29 billing routes listed in inventory §5.
 
-- [ ] Step 2.1: Read all billing API route files; list which endpoints lack role enforcement
-- [ ] Step 2.2: Add role enforcement to each gap endpoint
+**MFA gate tests:** add one test per new-or-modified route that confirms `mfa_verified=False`
+JWT + `mfa_required=True` tenant returns 403.
+
+**Test:** for each gated endpoint:
+- Approver → 200/201
+- Auditor → 403
+- Operator → 403 (Approver-only) or 200/201 (Operator-or-Approver)
+- Cross-tenant → 0 Tenant B rows
+- MFA gate → 403 when not verified
+
+- [ ] Step 2.1: Read `modules/billing/src/api/router.py`; list which of the 15 mutating routes lack role enforcement
+- [ ] Step 2.2: Add role enforcement to each gap route
 - [ ] Step 2.3: Add `shared/auth/roles.py` if it doesn't exist
-- [ ] Step 2.4: Write integration tests for RBAC matrix on each mutating endpoint
+- [ ] Step 2.4: Write integration tests for RBAC matrix on each mutating endpoint + cross-tenant per endpoint + MFA gate per endpoint
 - [ ] Step 2.5: Run tests — 100% on security/auth paths
-- [ ] Step 2.6: Commit — `feat(sp-1-c): RBAC enforcement audit — Approver gate on all billing mutating endpoints`
+- [ ] Step 2.6: Commit — `feat(sp-1-c): RBAC enforcement audit — Approver gate on real billing routes per router.py`
 
 ---
 
@@ -251,16 +300,20 @@ All carry `upload_id` where the entity chain has one; `null` for legacy records.
 
 Plan C is complete when ALL of the following are true:
 
-- [ ] `modules/billing` full test suite passes; 100% on all RBAC/auth paths added in this plan; 100% on all financial paths (Decimal amounts, MoneyDisplay, MoneyInput); ≥95% on all other new active code
+- [ ] `modules/billing` full test suite passes; 100% on all RBAC/auth paths added in this plan; 100% on all financial paths (Decimal amounts, MoneyDisplay, MoneyInput); **≥99% branch coverage** on all other new active code (CLAUDE.md Auto-Gate)
 - [ ] Migration `0012` runs upgrade + downgrade cleanly
 - [ ] `GET /api/v1/billing/inbox?role=approver` returns items of kinds `batch_drafted`, `ar_invoice_draft`, `ap_payment_run_held` when database is seeded with plan fixtures
-- [ ] `POST /api/v1/billing/payment-runs/{id}/release` by Auditor role returns 403
-- [ ] `POST /api/v1/billing/invoices/{id}/send` by Operator role returns 403
-- [ ] `npm --workspace=@infinityrx/module-paysync test` passes; 100% on `MoneyDisplay`/`MoneyInput`/`RbacGate`; ≥95% on all 6 new surfaces
+- [ ] `POST /api/v1/billing/payment-batches/{id}/approve` by Auditor role returns 403 (real route name per router.py line 602)
+- [ ] `POST /api/v1/billing/invoices/{id}/send` by Operator role returns 403 (real route per router.py line 961)
+- [ ] Cross-tenant isolation test passes for EVERY billing route (all 29 routes in router.py)
+- [ ] MFA gate test passes for every new or modified route
+- [ ] ORM class names used throughout plan match `tables.py`: `PaymentBatch` (not `Batch`/`PaymentRun`), `InvoiceLineItem` (not `InvoiceLine`), new `Carryover` model documented and committed
+- [ ] `BankSettlement` / `Reconciliation` surfaces read from payment-processing API — no duplicate ORM model in billing
+- [ ] `npm --workspace=@infinityrx/module-paysync test` passes; 100% on `MoneyDisplay`/`MoneyInput`/`RbacGate`; **≥99% branch coverage** on all 6 new surfaces
 - [ ] `tsc -b` clean across workspace
 - [ ] Batch detail page RTL test: Operator sees disabled release button with tooltip "Approver role required"
 - [ ] Invoice send confirmation dialog RTL test: amount shown via `MoneyDisplay`, not raw number
-- [ ] PaymentRun release fail-fast test: backend 500 → error toast with correlation_id; no optimistic state change
+- [ ] PaymentBatch release fail-fast test: backend 500 → error toast with correlation_id; no optimistic state change
 - [ ] All 10 fixture invoices have `total_amount` as string (Decimal) not number
 - [ ] 10 Inbox card components exist and are non-stub (Plan A stubs replaced for all except `journal_periodic_review`)
 
@@ -281,10 +334,19 @@ Plan C is complete when ALL of the following are true:
 ## Dependencies
 
 - SP-1 Plan B complete (Upload model + Cycles surface wired; `InboxClient` real impl)
-- Existing billing ORM models (Batch, Invoice, InvoiceLine, PaymentRun, Carryover, BankSettlement, Reconciliation) — confirmed present in `modules/billing/src/models/`
-- Existing billing API routes — confirmed in `modules/billing/src/api/`
+- Existing billing ORM models — all in `modules/billing/src/models/tables.py`:
+  - `PaymentBatch` (line 214) — the "batch" entity; no separate `Batch` or `PaymentRun` class
+  - `Payment` (line 254) — individual payment row
+  - `Invoice` (line 333) — AR invoice
+  - `InvoiceLineItem` (line 391) — not `InvoiceLine`
+  - `ARRecord` (line 416), `ARPayment` (line 451) — AR payment tracking
+  - `JournalEntry` (line 478) — immutable ledger
+  - `Carryover` — NEW model added by Plan C Task 1 (not pre-existing)
+  - `BankSettlement` / `Reconciliation` — NOT in billing; `Settlement` is in `modules/payment-processing/src/models/tables.py` (line 138); accessed via payment-processing API
+- Existing billing API routes — all in `modules/billing/src/api/router.py` (29 routes, see inventory §5)
 - `shared/auth/roles.py` (may need to create — Task 2 covers this)
 - `MoneyDisplay`, `MoneyInput`, `ProvenanceBreadcrumb`, `RbacGate` from Plan A (all present in `packages/modules/paysync/src/components/`)
+- `modules/payment-processing/src/api/router.py` — for reading settlements/reconciliations (see inventory §6)
 
 ---
 
@@ -294,4 +356,6 @@ Plan C is complete when ALL of the following are true:
 - Rules: `.claude/rules/financial-precision.md` (all monetary amounts as Decimal/string; ROUND_HALF_UP), `.claude/rules/security.md` (RBAC server-side enforcement), `.claude/rules/tenant-isolation.md`, `.claude/rules/testing.md` (100% financial + security coverage)
 - SP-1 Plan B: `docs/superpowers/plans/2026-05-16-sp1-plan-b-uploads-cycles.md`
 - SP-1 Plan D: consumes Batch/PaymentRun models for NACHA/835 file generation
-- Existing billing services: `modules/billing/src/services/{ap,ar,claims,journal,nacha}.py`
+- Existing billing models (all in `modules/billing/src/models/tables.py`): `PaymentBatch` (214), `Payment` (254), `Invoice` (333), `InvoiceLineItem` (391); `Settlement` is in payment-processing not billing
+- Existing billing services: `modules/billing/src/services/{ap,ar,nacha}.py`
+- Existing billing routes: `modules/billing/src/api/router.py` (all 29 routes — use these, not invented paths like `/billing/batches` or `/billing/payment-runs`)
