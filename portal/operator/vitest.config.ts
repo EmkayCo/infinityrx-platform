@@ -24,6 +24,10 @@ export default defineConfig({
       // (NOT the SC #17 proof — that's the Next-served route at
       // /api/b10-canary, hit by W1.13's run-canary-server.ps1.)
       "tests/canary/**/*.test.{ts,tsx}",
+      // B12 S7: co-located app-layer tests (e.g. login/page.test.tsx).
+      // Stub-only files (export {}; with no describe/it) are collected but
+      // produce zero tests — safe to include.
+      "app/**/*.test.{ts,tsx}",
     ],
     exclude: [
       "tests/e2e/**",
