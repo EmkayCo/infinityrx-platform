@@ -57,6 +57,8 @@ async def run_exclusion_refresh(
     _excl_table: str = "core.exclusion_list",
     _oig_table: str = "shared.oig_leie_exclusions",
     _sam_table: str = "shared.sam_exclusions",
+    _oig_min_rows: int | None = None,
+    _sam_min_rows: int | None = None,
 ) -> Dict[str, Any]:
     from scripts.aggregate_exclusion_list import run_aggregation  # noqa: PLC0415
 
@@ -96,14 +98,18 @@ async def run_exclusion_refresh(
             total_updated = oig_report.updated + sam_report.updated
             total_skipped = oig_report.skipped_malformed + sam_report.skipped_malformed
 
-            # Stage 3 — aggregate source shims → production core.exclusion_list
+            # Stage 3 — aggregate source shims → production core.exclusion_list.
+            # _oig_min_rows / _sam_min_rows default to None → env-driven thresholds
+            # apply (EXCL_OIG_MIN_ROWS, EXCL_SAM_MIN_ROWS), protecting against
+            # false-delisting when a source load is partial or interrupted.
+            # Tests pass 0 explicitly to bypass the guard for hermetic fixtures.
             agg_result = run_aggregation(
                 session,
                 oig_table=_oig_table,
                 sam_table=_sam_table,
                 excl_table=_excl_table,
-                oig_min_rows=0,
-                sam_min_rows=0,
+                oig_min_rows=_oig_min_rows,
+                sam_min_rows=_sam_min_rows,
             )
             session.commit()
             _job_logger.info(

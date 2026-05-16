@@ -59,12 +59,16 @@ def _source_shim_tables():
         """))
 
 
-# Table-name overrides used by all job-handler tests so the aggregator stage
-# reads from bare SQLite-compatible table names instead of schema-qualified ones.
+# Table-name and completeness-guard overrides for all job-handler tests:
+#   - bare table names (no schema prefix) → SQLite-compatible ORM path
+#   - _oig_min_rows=0 / _sam_min_rows=0 → bypass the completeness guard so
+#     test fixtures with 0-1 rows don't suppress delisting or aggregation
 _JH_TABLE_OVERRIDES = dict(
     _excl_table="core_exclusion_list",
     _oig_table="oig_leie_exclusions",
     _sam_table="sam_exclusions",
+    _oig_min_rows=0,
+    _sam_min_rows=0,
 )
 
 
@@ -177,14 +181,17 @@ async def test_exclusion_refresh_aggregates_to_production_table(_source_shim_tab
         f"Expected >= 2 aggregated rows in production table, got {result['aggregated_inserted']}"
     )
 
-    # Verify rows are actually in the shim table
+    # Verify both seeded rows (OIG + SAM) are in the production target table
     SessionLocal = db_shim.get_sessionmaker()
     s = SessionLocal()
     try:
         rows = s.query(ExclusionListEntry).all()
         npis = {r.npi for r in rows if r.npi}
-        assert "1111111111" in npis or "2222222222" in npis, (
-            f"Expected seeded NPIs in core_exclusion_list, found: {npis}"
+        assert "1111111111" in npis, (
+            f"OIG-seeded NPI 1111111111 must be in core_exclusion_list, found: {npis}"
+        )
+        assert "2222222222" in npis, (
+            f"SAM-seeded NPI 2222222222 must be in core_exclusion_list, found: {npis}"
         )
     finally:
         s.close()
