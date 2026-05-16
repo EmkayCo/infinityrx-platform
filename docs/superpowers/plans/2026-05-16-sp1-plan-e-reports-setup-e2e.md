@@ -1,4 +1,4 @@
-# SP-1 Plan E — Reports + Setup + End-to-End Round Trip
+﻿# SP-1 Plan E — Reports + Setup + End-to-End Round Trip
 
 **Date:** 2026-05-16
 **Sub-project:** SP-1 PaySync Operator Portal
@@ -49,7 +49,7 @@ Playwright, and reach a green result at every gate.
 | 1.1 | Copy + rewire cycle reports | `surfaces/reports/CycleReportsPage.tsx` | RTL: renders, all-roles access | Wired |
 | 1.2 | Copy + rewire journal-entry reports | `surfaces/reports/JournalEntriesReportPage.tsx` | RTL: renders | Wired |
 | 1.3 | Period summary report page | `surfaces/reports/PeriodSummaryPage.tsx` | RTL: renders period selector, all amounts via `MoneyDisplay` | Wired |
-| 1.4 | `ReportsClient` | `packages/contract/src/paysync/reports-client.ts` | — | RealImpl + MockImpl |
+| 1.4 | `ReportsClient` | `packages/contract/src/impls/paysync/reports-client.ts` | — | RealImpl + MockImpl |
 | 1.5 | BFF handlers | `surfaces/reports/bff/` | — | Route handlers |
 | 1.6 | Update surface `index.ts` | `surfaces/reports/index.ts` | — | Surface wired |
 
@@ -83,7 +83,7 @@ All monetary values in report tables use `MoneyDisplay`. Column totals computed 
 | 2.4 | GL account mappings page | `surfaces/setup/GlAccountMappingsPage.tsx` | RTL: Approver-only save | Wired |
 | 2.5 | Invoice sequences page | `surfaces/setup/InvoiceSequencesPage.tsx` | RTL | Wired |
 | 2.6 | Cycle schedules page | `surfaces/setup/CycleSchedulesPage.tsx` | RTL | Wired |
-| 2.7 | `SetupClient` | `packages/contract/src/paysync/setup-client.ts` | — | RealImpl + MockImpl |
+| 2.7 | `SetupClient` | `packages/contract/src/impls/paysync/setup-client.ts` | — | RealImpl + MockImpl |
 | 2.8 | BFF handlers | `surfaces/setup/bff/` | — | Route handlers |
 
 **RBAC:** all setup mutations are Approver-only per spec §5.4. `RbacGate role="approver"` on
@@ -287,7 +287,7 @@ Plan E wraps it into the module:
   surface-13, missed in original scope)
 - Create `packages/modules/paysync/src/surfaces/echo/EchoSpecPage.tsx` — wraps the existing
   page logic; replaces direct `paysync-api.ts` imports with `EchoClient` from contract layer
-- Add `EchoClient` to `packages/contract/src/paysync/echo-client.ts` — wraps
+- Add `EchoClient` to `packages/contract/src/impls/paysync/echo-client.ts` — wraps
   `listEchoRuns()`, `listEchoIngestions()`, `runEchoCandor()` from `portal/shared/lib/paysync-api.ts`
   (real functions confirmed in inventory §9)
 - Add `echo/` route to `module.config.ts` routes table:
@@ -324,7 +324,7 @@ Plan E wraps it into the module:
 imports referencing deleted paths. Fix any remaining cross-references.
 
 - [ ] Step 6.0: Create `packages/modules/paysync/src/surfaces/echo/` surface with `EchoSpecPage.tsx` wrapping existing page logic via `EchoClient`
-- [ ] Step 6.0b: Add `EchoClient` to `packages/contract/src/paysync/echo-client.ts` wrapping `listEchoRuns`, `listEchoIngestions`, `runEchoCandor`
+- [ ] Step 6.0b: Add `EchoClient` to `packages/contract/src/impls/paysync/echo-client.ts` wrapping `listEchoRuns`, `listEchoIngestions`, `runEchoCandor`
 - [ ] Step 6.0c: Add `echo_run_status_received` to `InboxItemKind`, `INBOX_KIND_ROLE`, `module.config.ts`, and `EchoRunStatusCard.tsx`
 - [ ] Step 6.0d: Add echo route to `module.config.ts` routes table
 - [ ] Step 6.0e: `grep -n "PAYSYNC_BASE\|baseURL\|API_BASE" portal/shared/lib/paysync-api.ts` — document base URL in `EchoClient` comments

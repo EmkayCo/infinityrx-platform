@@ -1,4 +1,4 @@
-# SP-1 Plan B — Upload Resource + Cycles Surface Wiring
+﻿# SP-1 Plan B — Upload Resource + Cycles Surface Wiring
 
 **Date:** 2026-05-16
 **Sub-project:** SP-1 PaySync Operator Portal
@@ -52,8 +52,8 @@ UploadDetailPage → Cycle view with provenance breadcrumb.
 - `modules/billing/tests/unit/test_verify_chain_sync.py` — placeholder (real tests in Plan D)
 - `modules/billing/tests/integration/test_uploads_router.py` — 5 routes × RBAC matrix (3 roles)
 - `modules/billing/tests/integration/test_inbox_router.py` — real items for each kind
-- `packages/contract/src/paysync/uploads-client.ts` — `RealImpl` completed
-- `packages/contract/src/paysync/cycles-client.ts` — `CyclesClient` interface + `RealImpl` + `MockImpl`
+- `packages/contract/src/impls/paysync/uploads-client.ts` — `RealImpl` completed
+- `packages/contract/src/impls/paysync/cycles-client.ts` — `CyclesClient` interface + `RealImpl` + `MockImpl`
 - `packages/modules/paysync/src/surfaces/uploads/` — all 4 upload UI components + BFF handlers
 - `packages/modules/paysync/src/surfaces/cycles/` — rewired cycles pages + BFF handlers
 - `packages/modules/paysync/src/bff/inbox.ts` — replaced stub with real call
@@ -293,15 +293,15 @@ unknown payload fields (forward-compat, per `.claude/rules/event-bus.md`).
 
 | # | Subject | Files touched | Test added | Deliverable |
 |---|---|---|---|---|
-| 4.1 | `UploadsClient` `RealImpl` | `packages/contract/src/paysync/uploads-client.ts` | type test: return types assignable to `Upload` | Real HTTP calls to billing |
-| 4.2 | `CyclesClient` interface + impls | `packages/contract/src/paysync/cycles-client.ts` | mock returns fixture data | Both impls present |
-| 4.3 | `InboxClient` `RealImpl` | `packages/contract/src/paysync/inbox-client.ts` | type test | Real `/inbox` call |
+| 4.1 | `UploadsClient` `RealImpl` | `packages/contract/src/impls/paysync/uploads-client.ts` | type test: return types assignable to `Upload` | Real HTTP calls to billing |
+| 4.2 | `CyclesClient` interface + impls | `packages/contract/src/impls/paysync/cycles-client.ts` | mock returns fixture data | Both impls present |
+| 4.3 | `InboxClient` `RealImpl` | `packages/contract/src/impls/paysync/inbox-client.ts` | type test | Real `/inbox` call |
 
 Pattern: each client follows existing `paysync-api.ts` conventions in `portal/shared/lib/`.
 `RealImpl` wraps `fetch` with the SP-0 auth header injection from `packages/auth`. `MockImpl`
 returns typed fixture data from `packages/modules/paysync/fixtures/`.
 
-**Shared `Upload` response type** (placed in `packages/contract/src/paysync/types.ts`):
+**Shared `Upload` response type** (placed in `packages/contract/src/impls/paysync/types.ts`):
 ```ts
 export type UploadStatus = 'parsing' | 'validation_failed' | 'validated' | 'superseded';
 
@@ -325,7 +325,7 @@ export type Upload = {
 - [ ] Step 4.1: Complete `UploadsClient` `RealImpl` + `MockImpl`
 - [ ] Step 4.2: Write `CyclesClient` interface + both impls
 - [ ] Step 4.3: Complete `InboxClient` `RealImpl`
-- [ ] Step 4.4: Add `Upload` type + `UploadStatus` to `packages/contract/src/paysync/types.ts`
+- [ ] Step 4.4: Add `Upload` type + `UploadStatus` to `packages/contract/src/impls/paysync/types.ts`
 - [ ] Step 4.5: `tsc -b` clean
 - [ ] Step 4.6: Commit — `feat(sp-1-b): contract UploadsClient + CyclesClient real/mock impls`
 

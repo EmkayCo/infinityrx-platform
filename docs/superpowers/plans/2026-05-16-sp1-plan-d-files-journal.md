@@ -1,4 +1,4 @@
-# SP-1 Plan D — Files (NACHA/835) + Journal Ledger + Hash-Chain Verifier
+﻿# SP-1 Plan D — Files (NACHA/835) + Journal Ledger + Hash-Chain Verifier
 
 **Date:** 2026-05-16
 **Sub-project:** SP-1 PaySync Operator Portal
@@ -44,7 +44,7 @@ This plan also wires the three backend capabilities that support these surfaces:
 - Backend: `modules/core-platform/src/api/journal_verify.py` — new thin sync verifier endpoint
 - Backend: `modules/billing/src/api/inbox.py` extended — `journal_periodic_review` derivation
 - Contract: `FilesClient`, `JournalClient` — interface + RealImpl + MockImpl
-- `packages/contract/src/paysync/types.ts` — `FileArtifact`, `JournalEntry`, `HashChainResult` types
+- `packages/contract/src/impls/paysync/types.ts` — `FileArtifact`, `JournalEntry`, `HashChainResult` types
 - `infrastructure/manifests/operator-dev.yml` — add `PAYSYNC_HASH_CHAIN_SYNC_LIMIT` to `required_env`
 - Unit tests: file artifact service, sync verifier (verified / broken / empty / too-large cases)
 - Integration tests: files router (3 roles × 4 endpoints), journal-verify router (Auditor only)
@@ -258,10 +258,10 @@ is older than 7 days, OR if no verification has ever been run. Priority: `normal
 
 | # | Client | File | Key methods |
 |---|---|---|---|
-| 5.1 | `FilesClient` | `packages/contract/src/paysync/files-client.ts` | `list`, `get`, `generate`, `download` |
-| 5.2 | `JournalClient` | `packages/contract/src/paysync/journal-client.ts` | `listEntries`, `verify` |
+| 5.1 | `FilesClient` | `packages/contract/src/impls/paysync/files-client.ts` | `list`, `get`, `generate`, `download` |
+| 5.2 | `JournalClient` | `packages/contract/src/impls/paysync/journal-client.ts` | `listEntries`, `verify` |
 
-**`HashChainResult` type** in `packages/contract/src/paysync/types.ts`:
+**`HashChainResult` type** in `packages/contract/src/impls/paysync/types.ts`:
 ```ts
 export type HashChainResult = {
   verified: boolean | null;   // null = too_large

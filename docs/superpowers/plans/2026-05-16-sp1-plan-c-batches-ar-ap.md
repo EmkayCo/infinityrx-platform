@@ -1,4 +1,4 @@
-# SP-1 Plan C — Batches + AR/AP + Payment Runs + Supporting Surfaces
+﻿# SP-1 Plan C — Batches + AR/AP + Payment Runs + Supporting Surfaces
 
 **Date:** 2026-05-16
 **Sub-project:** SP-1 PaySync Operator Portal
@@ -172,15 +172,15 @@ JWT + `mfa_required=True` tenant returns 403.
 
 | # | Client | File | Key methods |
 |---|---|---|---|
-| 3.1 | `BatchesClient` | `packages/contract/src/paysync/batches-client.ts` | `list`, `get`, `create`, `release`, `hold` |
-| 3.2 | `InvoicesClient` | `packages/contract/src/paysync/invoices-client.ts` | `list`, `get`, `send`, `createDraft` |
-| 3.3 | `PaymentRunsClient` | `packages/contract/src/paysync/payment-runs-client.ts` | `list`, `get`, `release`, `hold` |
-| 3.4 | `CarryoversClient` | `packages/contract/src/paysync/carryovers-client.ts` | `list`, `get` |
-| 3.5 | `BankSettlementsClient` | `packages/contract/src/paysync/bank-settlements-client.ts` | `list`, `get`, `resolveDiscrepancy` |
-| 3.6 | `ReconciliationsClient` | `packages/contract/src/paysync/reconciliations-client.ts` | `list`, `get`, `finalize` |
+| 3.1 | `BatchesClient` | `packages/contract/src/impls/paysync/batches-client.ts` | `list`, `get`, `create`, `release`, `hold` |
+| 3.2 | `InvoicesClient` | `packages/contract/src/impls/paysync/invoices-client.ts` | `list`, `get`, `send`, `createDraft` |
+| 3.3 | `PaymentRunsClient` | `packages/contract/src/impls/paysync/payment-runs-client.ts` | `list`, `get`, `release`, `hold` |
+| 3.4 | `CarryoversClient` | `packages/contract/src/impls/paysync/carryovers-client.ts` | `list`, `get` |
+| 3.5 | `BankSettlementsClient` | `packages/contract/src/impls/paysync/bank-settlements-client.ts` | `list`, `get`, `resolveDiscrepancy` |
+| 3.6 | `ReconciliationsClient` | `packages/contract/src/impls/paysync/reconciliations-client.ts` | `list`, `get`, `finalize` |
 
 Each follows the established RealImpl + MockImpl pattern from Plan B. Response types added to
-`packages/contract/src/paysync/types.ts`. All monetary amounts typed as `string` (Decimal
+`packages/contract/src/impls/paysync/types.ts`. All monetary amounts typed as `string` (Decimal
 serialised per `.claude/rules/financial-precision.md` — no `number` for money fields).
 
 **Financial precision in contract types** — critical:
@@ -193,7 +193,7 @@ type Batch = { total_amount: string; ... };
 ```
 
 - [ ] Step 3.1–3.6: Write all 6 client files with RealImpl + MockImpl
-- [ ] Step 3.7: Add response types to `packages/contract/src/paysync/types.ts`
+- [ ] Step 3.7: Add response types to `packages/contract/src/impls/paysync/types.ts`
 - [ ] Step 3.8: `tsc -b` clean
 - [ ] Step 3.9: Commit — `feat(sp-1-c): contract clients for batches/invoices/payment-runs/carryovers/settlements/reconciliations`
 

@@ -2,12 +2,22 @@
 
 **Date:** 2026-05-16
 **Sub-project:** SP-1 PaySync Operator Portal
-**Status:** Ready for execution (R2 — addresses pre-execute codex NO-GO of 2026-05-16; 6 items resolved, re-codex required before any code)
+**Status:** Ready for execution (R3 — addresses 2nd pre-execute codex NO-GO of 2026-05-16; 3 remaining items resolved on top of R2)
 **Depends on:** SP-0 Plans A–D (packages/contract, packages/auth, packages/ui, packages/qa-harness, packages/shell all shipped). Verified: `packages/{auth,contract,modules,qa-harness,scripts,shell,ui}/` all present at HEAD `d9c69152`.
 
 ---
 
-## R2 Revision Summary (pre-execute codex NO-GO fixes)
+## R3 Revision Summary (2nd pre-execute codex NO-GO fixes)
+
+After R2, codex re-review returned NO-GO with 3 remaining items. R3 fixes each:
+
+| # | Issue | Fix |
+|---|---|---|
+| R3.1 | Contract file naming: R2 used `impls/paysync/clients.ts` (plural); HEAD convention per PD is `client.ts` (singular). | Rename to `client.ts` holding BOTH `UploadsClient` + `InboxClient` interfaces in one file. Future plans (B/C/D/E) may append more client interfaces to the same file OR add `<domain>-client.ts` siblings. |
+| R3.2 | Cross-plan path consistency: Plans B/C/D/E all reference the OLD `packages/contract/src/paysync/` path (without `impls/`). | Normalize all 4 sibling plans in the same commit: `packages/contract/src/paysync/` → `packages/contract/src/impls/paysync/` everywhere. |
+| R3.3 | Task 1 atomicity: R2 added root `tsconfig.json` reference + manifest `modules:` entry in Task 1's commit, before `module.config.ts` exists at root, making both `typecheck` and `manifest:validate` fail-by-design at Task 1 boundary. That's a deferred-failure commit, not atomic. | Move Task 1.4 (root tsconfig reference) and Task 1.5 (manifest modules entry) into Task 5 (the commit that lands `module.config.ts`). Task 1's commit then only adds the new package's own files + npm install — independently verifiable (the new package's own `tsc -b` runs against just `src/` files; nothing breaks at the root). |
+
+## R2 Revision Summary (1st pre-execute codex NO-GO fixes)
 
 Pre-execute codex returned NO-GO with 6 items. R2 addresses each:
 
@@ -81,16 +91,16 @@ renders, filters by role, and click-throughs resolve.
 
 ## Tasks
 
-### Task 1 — Package scaffold
+### Task 1 — Package scaffold (self-contained, independently verifiable)
+
+R3 atomicity fix: Task 1 commits ONLY the new package's own files + workspace lockfile refresh. Root `tsconfig.json` references and manifest `modules:` entry move to Task 5 (the commit that lands `module.config.ts`), so Task 1 has no deferred-failure gates.
 
 | # | Subject | Files touched | Deliverable |
 |---|---|---|---|
-| 1.1 | `package.json` for `@infinityrx/module-paysync` | `packages/modules/paysync/package.json` | npm workspace recognised |
-| 1.2 | `tsconfig.json` extending `tsconfig.base.json` + refs to shell/contract/auth/ui/qa-harness | `packages/modules/paysync/tsconfig.json` | `tsc -b` clean |
-| 1.3 | `vitest.config.ts` mirroring PD pattern with `environment: 'happy-dom'` + workspace aliases | `packages/modules/paysync/vitest.config.ts` | `npm test` runnable |
-| 1.4 | Add `packages/modules/paysync` to root `tsconfig.json` references | `tsconfig.json` | project reference compiles |
-| 1.5 | Add `paysync` to `infrastructure/manifests/operator-dev.yml` modules list | `infrastructure/manifests/operator-dev.yml` | manifest valid |
-| 1.6 | Add `npm --workspace=@infinityrx/module-paysync test` to root `package.json` `test:packages` script | `package.json` | CI picks up paysync tests |
+| 1.1 | `package.json` for `@infinityrx/module-paysync` | `packages/modules/paysync/package.json` | npm workspace recognised on next install |
+| 1.2 | `tsconfig.json` extending `tsconfig.base.json` + refs to shell/contract/auth/ui/qa-harness | `packages/modules/paysync/tsconfig.json` | new package's own `tsc -b` runs against `src/` only (no `module.config.ts` root file yet — `tsconfig.json` `include` adds it but file is empty/absent; tsc skips missing optional includes) |
+| 1.3 | `vitest.config.ts` mirroring PD pattern with `environment: 'happy-dom'` + workspace aliases | `packages/modules/paysync/vitest.config.ts` | `npm --workspace=@infinityrx/module-paysync test` discoverable (returns "no tests" — no tests authored yet; that's fine for Task 1's commit) |
+| 1.4 | Append `&& npm --workspace=@infinityrx/module-paysync test` to root `package.json` `test:packages` script | `package.json` | CI picks up paysync tests (script edit only; running it currently returns "no tests" gracefully) |
 
 **Step 1.1 — `packages/modules/paysync/package.json`:**
 
@@ -194,13 +204,16 @@ export default defineConfig({
 - [ ] Step 1.1: Write `packages/modules/paysync/package.json` (literal content above)
 - [ ] Step 1.2: Write `packages/modules/paysync/tsconfig.json` (literal content above)
 - [ ] Step 1.3: Write `packages/modules/paysync/vitest.config.ts` (literal content above)
-- [ ] Step 1.4: Edit root `tsconfig.json` — add `{ "path": "./packages/modules/paysync" }` to references array
-- [ ] Step 1.5: Edit `infrastructure/manifests/operator-dev.yml` — add `paysync` to `modules:` array (`- paysync` line)
-- [ ] Step 1.6: Edit root `package.json` — append `&& npm --workspace=@infinityrx/module-paysync test` to `test:packages` script (and `&& npm --workspace=@infinityrx/module-paysync run build` is NOT needed; tsc -b walks references)
-- [ ] Step 1.7: `npm install` to refresh workspace lockfile (no new tanstack deps elsewhere; ensure no peer conflict)
-- [ ] Step 1.8: `npm run typecheck` — exits 0 (note: module.config.ts may fail until Task 5 lands; that's expected at this commit boundary; defer the typecheck verification to the Task 5 commit)
-- [ ] Step 1.9: `npm run manifest:validate` — exits 0 (note: `paysync` is now in modules list but `packages/modules/paysync/module.config.ts` doesn't exist yet → expected failure here; defer manifest validation to the Task 5 commit; for this commit, just confirm the YAML is parseable via `python -c "import yaml; yaml.safe_load(open('infrastructure/manifests/operator-dev.yml'))"`)
-- [ ] Step 1.10: Commit — `feat(sp-1-a): scaffold @infinityrx/module-paysync package`
+- [ ] Step 1.4: Edit root `package.json` — append `&& npm --workspace=@infinityrx/module-paysync test` to `test:packages` script
+- [ ] Step 1.5: `npm install` to refresh workspace lockfile (introduces `@tanstack/react-query@5.59.20` + `@tanstack/react-virtual@3.10.8`; verify no peer-dep conflicts)
+- [ ] Step 1.6: `npm --workspace=@infinityrx/module-paysync test` — exits 0 (returns "no tests" cleanly; vitest discoverable)
+- [ ] Step 1.7: Commit — `feat(sp-1-a): scaffold @infinityrx/module-paysync package`
+
+**Gate for Task 1 commit (independently verifiable):**
+- New package is registered as a workspace (verify: `npm ls --workspace=@infinityrx/module-paysync` resolves).
+- `package.json` parses (verify: `node -e "JSON.parse(require('fs').readFileSync('packages/modules/paysync/package.json','utf8'))"`).
+- `npm install` succeeded with no peer-dep errors.
+- Root `tsconfig.json` and `infrastructure/manifests/operator-dev.yml` are UNCHANGED at this commit boundary (they update in Task 5's commit when `module.config.ts` lands). This keeps Task 1's commit fully self-contained — `npm run typecheck` and `npm run manifest:validate` continue to pass against the prior baseline.
 
 ---
 
@@ -562,10 +575,12 @@ These are not empty stubs. Plans B–E replace the body without changing the int
 - [ ] Step 5.1: Write `packages/modules/paysync/module.config.ts` at ROOT (literal content above; both `config` and `paysyncComposition` exports)
 - [ ] Step 5.2: Create 11 card stubs under `src/inbox/cards/` — each typed + data-testid + co-located test
 - [ ] Step 5.3: Update `src/inbox/ItemRegistry.ts` (from Task 3.2) to import from `paysyncComposition.inboxItemKinds`
-- [ ] Step 5.4: `npm run typecheck` — exits 0 (now including all workspace refs; module.config.ts root file recognized)
-- [ ] Step 5.5: `npm run manifest:validate` — exits 0 (paysync now in modules list AND module.config.ts exists with required SD-4 shape)
-- [ ] Step 5.6: `npm --workspace=@infinityrx/module-paysync test` — all pass
-- [ ] Step 5.7: Commit — `feat(sp-1-a): module.config.ts (SD-4 + paysync composition) + 11 typed inbox card stubs`
+- [ ] Step 5.4: Edit root `tsconfig.json` — add `{ "path": "./packages/modules/paysync" }` to references array (R3: moved here from Task 1.4 for atomicity)
+- [ ] Step 5.5: Edit `infrastructure/manifests/operator-dev.yml` — add `paysync` to `modules:` array as `- paysync` line (R3: moved here from Task 1.5 for atomicity)
+- [ ] Step 5.6: `npm run typecheck` — exits 0 (all workspace refs including the new paysync reference; module.config.ts root file recognized)
+- [ ] Step 5.7: `npm run manifest:validate` — exits 0 (paysync in modules list AND module.config.ts exists with required SD-4 shape)
+- [ ] Step 5.8: `npm --workspace=@infinityrx/module-paysync test` — all pass
+- [ ] Step 5.9: Commit — `feat(sp-1-a): module.config.ts (SD-4 + paysync composition) + 11 typed inbox card stubs + wire into workspace tsconfig + operator-dev manifest`
 
 ---
 
@@ -573,9 +588,9 @@ These are not empty stubs. Plans B–E replace the body without changing the int
 
 **Contract extension** — match HEAD pattern at `packages/contract/src/impls/prescriber-directory/`:
 
-Files:
+Files (singular `client.ts` per PD convention; R3 fix):
 - `packages/contract/src/impls/paysync/types.ts` — Zod schemas for `Upload`, `InboxItem`, `RbacRole`
-- `packages/contract/src/impls/paysync/clients.ts` — `UploadsClient` interface (`list`, `get`, `create`, `getClaims`), `InboxClient` interface (`list`); cache policies for each
+- `packages/contract/src/impls/paysync/client.ts` — BOTH `UploadsClient` interface (`list`, `get`, `create`, `getClaims`) AND `InboxClient` interface (`list`); cache policies for each. Singular `client.ts` matches `packages/contract/src/impls/prescriber-directory/client.ts` convention. Subsequent plans (B/C/D/E) may append more client interfaces here OR add domain-specific `<name>-client.ts` siblings as the surface area grows.
 - `packages/contract/src/impls/paysync/real.ts` — `createRealUploadsClient`, `createRealInboxClient` (return objects; HTTP impl stubbed but typed)
 - `packages/contract/src/impls/paysync/mock.ts` — `createMockUploadsClient`, `createMockInboxClient` (return typed empty arrays / hard-coded fixtures)
 
@@ -597,7 +612,7 @@ export {
   PAYSYNC_INBOX_CACHE_POLICIES,
   type UploadsClient,
   type InboxClient,
-} from "./impls/paysync/clients.js";
+} from "./impls/paysync/client.js";
 
 export {
   createRealUploadsClient,
@@ -632,7 +647,7 @@ CSV header (per §10.3 minimum schema):
 ndc,npi,claim_id,date_of_service,quantity,days_supply,amount_billed,member_id
 ```
 
-- [ ] Step 6.1: Write `packages/contract/src/impls/paysync/{types,clients,real,mock}.ts`
+- [ ] Step 6.1: Write `packages/contract/src/impls/paysync/{types,client,real,mock}.ts` (singular `client.ts` holding both interfaces; R3 fix)
 - [ ] Step 6.2: Add named exports to `packages/contract/src/index.ts` (literal above)
 - [ ] Step 6.3: Add contract test in `packages/contract/src/__tests__/paysync.test.ts` — instantiate `createMockUploadsClient()` and `createMockInboxClient()`; assert `list()` returns typed arrays; assert schemas validate sample fixtures
 - [ ] Step 6.4: Create fixtures directory layout (3 CSV stubs with headers + 6 JSON stubs)
@@ -655,7 +670,7 @@ Plan A is complete when ALL of the following are true:
 - [ ] All 11 inbox card stubs exist, are typed (accept `item: InboxItem` prop), render `data-testid="inbox-card-{kind}"`, have unit tests, and dynamic imports in `paysyncComposition.inboxItemKinds` resolve — zero empty-file stubs
 - [ ] All 12 surface `index.ts` stubs exist and export a typed `SurfaceConfig` constant (not empty object) — `tsc -b` proves they satisfy the `SurfaceConfig` shape; **`echo/` surface is NOT in Plan A (deferred to Plan E §6) — gate does NOT claim echo coverage**
 - [ ] Fixtures directory exists with 3 CSV stubs (header rows only acceptable here) + 6 JSON stubs (empty arrays acceptable here — real data is Plan E)
-- [ ] Contract package: `packages/contract/src/impls/paysync/{types,clients,real,mock}.ts` present; named exports added to `packages/contract/src/index.ts`; mock factories instantiable in test (NOT just files present)
+- [ ] Contract package: `packages/contract/src/impls/paysync/{types,client,real,mock}.ts` present (singular `client.ts`); named exports added to `packages/contract/src/index.ts`; mock factories instantiable in test (NOT just files present)
 - [ ] No `RoleSwitcherChip` string in `packages/modules/paysync/src/components/index.ts` (checked by grep in commit; only re-exported via `paysyncComposition.qa.RoleSwitcherChip`)
 - [ ] `src/bff/inbox.ts` exists as a typed stub returning `[]: InboxItem[]` — gate explicitly accepts this as stub-scope; "real Inbox implementation" is Plan B gate criterion, not Plan A
 - [ ] Root `tsconfig.json` references include `{ "path": "./packages/modules/paysync" }`
