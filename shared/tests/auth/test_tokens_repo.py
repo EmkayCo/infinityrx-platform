@@ -72,7 +72,7 @@ class TestInMemoryRevokedTokenRepo:
         tid = _tid()
         jtis = [uuid.uuid4() for _ in range(3)]
         for jti in jtis:
-            repo._track_user_jti(uid, tid, jti)
+            repo._track_user_jti(uid, tid, jti, _future())
         repo.revoke_all_for_user(uid, tid)
         for jti in jtis:
             assert repo.is_revoked(jti, tid) is True
@@ -83,7 +83,7 @@ class TestInMemoryRevokedTokenRepo:
         tid_a = _tid()
         tid_b = _tid()
         jti = uuid.uuid4()
-        repo._track_user_jti(uid, tid_a, jti)
+        repo._track_user_jti(uid, tid_a, jti, _future())
         repo.revoke_all_for_user(uid, tid_a)
         # Same JTI, different tenant — must not be revoked
         assert repo.is_revoked(jti, tid_b) is False
@@ -179,12 +179,27 @@ class TestRedisRevokedTokenRepo:
         tid = _tid()
         jtis = [uuid.uuid4() for _ in range(3)]
         for jti in jtis:
-            repo.track_user_jti(uid, tid, jti, ttl=3600)
+            repo.track_user_jti(uid, tid, jti, _future())
 
         repo.revoke_all_for_user(uid, tid)
 
         for jti in jtis:
             assert repo.is_revoked(jti, tid) is True
+
+    def test_revoke_all_for_user_uses_token_ttl(self, redis) -> None:
+        """Revocation keys from revoke_all_for_user must have JWT-lifetime TTLs."""
+        repo = RedisRevokedTokenRepo(redis)
+        uid = uuid.uuid4()
+        tid = _tid()
+        jti = uuid.uuid4()
+        # Token expires in ~1 hour
+        expires_at = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+        repo.track_user_jti(uid, tid, jti, expires_at)
+        repo.revoke_all_for_user(uid, tid)
+        key = f"tenant:{tid}:revoked:{jti}"
+        ttl = redis.ttl(key)
+        # TTL should be approximately 3600s — tolerate small clock drift
+        assert 3550 <= ttl <= 3600
 
     def test_revoke_all_for_user_does_not_affect_other_tenant(self, redis) -> None:
         """revoke_all_for_user for tenant A must not affect tenant B."""
@@ -193,7 +208,7 @@ class TestRedisRevokedTokenRepo:
         tid_a = _tid()
         tid_b = _tid()
         jti = uuid.uuid4()
-        repo.track_user_jti(uid, tid_a, jti, ttl=3600)
+        repo.track_user_jti(uid, tid_a, jti, _future())
         repo.revoke_all_for_user(uid, tid_a)
         # Same JTI, different tenant — no revocation record
         assert repo.is_revoked(jti, tid_b) is False

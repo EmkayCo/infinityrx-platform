@@ -35,8 +35,8 @@ class InMemoryRevokedTokenRepo:
     def __init__(self) -> None:
         # key: (tenant_id, jti) → expires_at
         self._revoked: dict[tuple[uuid.UUID, uuid.UUID], datetime] = {}
-        # per-user JTI index: (tenant_id, user_id) → set[jti]
-        self._user_jtis: dict[tuple[uuid.UUID, uuid.UUID], set[uuid.UUID]] = {}
+        # per-user JTI index: (tenant_id, user_id) → {jti: expires_at}
+        self._user_jtis: dict[tuple[uuid.UUID, uuid.UUID], dict[uuid.UUID, datetime]] = {}
 
     def revoke(self, jti: uuid.UUID, tenant_id: uuid.UUID, expires_at: datetime) -> None:
         self._revoked[(tenant_id, jti)] = expires_at
@@ -54,27 +54,21 @@ class InMemoryRevokedTokenRepo:
     def revoke_all_for_user(self, user_id: uuid.UUID, tenant_id: uuid.UUID) -> None:
         """Revoke all JTIs tracked for ``user_id`` under ``tenant_id``.
 
-        Only covers JTIs that were registered via the user-index (i.e. those
-        added through ``_track_user_jti`` before revocation). In production use
-        the caller should pass all known JTIs explicitly; this method is
-        provided for the forced-logout / account-compromise use case where the
-        caller holds the JTI set from the session store.
+        Only covers JTIs that were registered via ``_track_user_jti``. Each JTI
+        is revoked with its actual ``expires_at`` so the revocation entry TTL
+        matches the token's remaining lifetime — no unbounded growth.
         """
         key = (tenant_id, user_id)
-        for jti in list(self._user_jtis.get(key, set())):
-            # Use a far-future expiry so the revocation outlives any plausible
-            # token lifetime; the session store is the source of truth for
-            # active JTIs.
-            far_future = datetime.now(tz=timezone.utc).replace(year=9999)
-            self._revoked[(tenant_id, jti)] = far_future
+        for jti, expires_at in list(self._user_jtis.get(key, {}).items()):
+            self._revoked[(tenant_id, jti)] = expires_at
         self._user_jtis.pop(key, None)
 
     def _track_user_jti(
-        self, user_id: uuid.UUID, tenant_id: uuid.UUID, jti: uuid.UUID
+        self, user_id: uuid.UUID, tenant_id: uuid.UUID, jti: uuid.UUID, expires_at: datetime
     ) -> None:
-        """Register a JTI under its user so ``revoke_all_for_user`` finds it."""
+        """Register a JTI + its expiry under its user so ``revoke_all_for_user`` finds it."""
         key = (tenant_id, user_id)
-        self._user_jtis.setdefault(key, set()).add(jti)
+        self._user_jtis.setdefault(key, {})[jti] = expires_at
 
     def clear(self) -> None:
         self._revoked.clear()
@@ -206,9 +200,10 @@ class RedisRevokedTokenRepo:
     def revoke_all_for_user(self, user_id: uuid.UUID, tenant_id: uuid.UUID) -> None:
         """Revoke all JTIs tracked for ``user_id`` under ``tenant_id``.
 
-        Reads the per-user JTI index set (``_user_index_key``), issues SETEX
-        for each JTI with a far-future TTL (1 year) so they survive until the
-        caller cleans up or they expire naturally, then deletes the index key.
+        Reads the per-user JTI index set (``_user_index_key``), computes each
+        token's remaining TTL from the stored ``{jti}:{exp_unix}`` member value
+        so revocation entries match the token's actual remaining lifetime (no
+        unbounded growth). Then deletes the index key.
 
         Fails-open on circuit open or Redis error — revocations that cannot
         be stored will self-expire via JWT ``exp`` claims.
@@ -217,7 +212,7 @@ class RedisRevokedTokenRepo:
 
         index_key = self._user_index_key(tenant_id, user_id)
         try:
-            raw_jtis: set[bytes] = self._breaker.call(self._redis.smembers, index_key)
+            raw_members: set[bytes] = self._breaker.call(self._redis.smembers, index_key)
         except CircuitOpenError:
             self._log.warning(
                 "revoked_token_user_index_circuit_open",
@@ -231,17 +226,26 @@ class RedisRevokedTokenRepo:
             )
             return
 
-        if not raw_jtis:
+        if not raw_members:
             return
 
-        # Pipeline: SETEX each JTI key (1 year TTL) + DEL the index set.
-        _ONE_YEAR_SECONDS = 365 * 24 * 3600
+        # Each member is stored as "{jti}:{exp_unix_timestamp}" by track_user_jti.
+        # Parse out the JTI and compute the remaining TTL from exp_unix.
+        now_ts = datetime.now(tz=timezone.utc).timestamp()
         try:
             pipe = self._redis.pipeline()
-            for raw in raw_jtis:
-                jti_str = raw.decode() if isinstance(raw, bytes) else raw
+            for raw in raw_members:
+                member = raw.decode() if isinstance(raw, bytes) else raw
+                # member format: "{jti}:{exp_unix}"
+                jti_str, _, exp_str = member.rpartition(":")
+                if not jti_str or not exp_str:
+                    continue
+                ttl = int(float(exp_str) - now_ts)
+                if ttl <= 0:
+                    # Already expired — no revocation key needed.
+                    continue
                 jti = uuid.UUID(jti_str)
-                pipe.setex(self._revoked_key(tenant_id, jti), _ONE_YEAR_SECONDS, b"")
+                pipe.setex(self._revoked_key(tenant_id, jti), ttl, b"")
             pipe.delete(index_key)
             self._breaker.call(pipe.execute)
         except CircuitOpenError:
@@ -256,20 +260,25 @@ class RedisRevokedTokenRepo:
             )
 
     def track_user_jti(
-        self, user_id: uuid.UUID, tenant_id: uuid.UUID, jti: uuid.UUID, ttl: int
+        self, user_id: uuid.UUID, tenant_id: uuid.UUID, jti: uuid.UUID, expires_at: datetime
     ) -> None:
         """Add ``jti`` to the per-user index set so ``revoke_all_for_user`` finds it.
 
-        The index key has the same TTL as the JTI so it self-cleans.
-        Callers (e.g. login/token-issue path) should call this after minting
-        each token. Fails-open on Redis error so login is never blocked.
+        Members are stored as ``{jti}:{exp_unix}`` so ``revoke_all_for_user``
+        can compute per-token TTLs without a separate lookup.
+        The index key TTL is the token's remaining lifetime so it self-cleans.
+        Fails-open on Redis error so login is never blocked.
         """
         from shared.resilience.circuit_breaker import CircuitOpenError  # noqa: PLC0415
 
+        ttl = int((expires_at - datetime.now(tz=timezone.utc)).total_seconds())
+        if ttl <= 0:
+            return  # token already expired — nothing to track
+        member = f"{jti}:{int(expires_at.timestamp())}"
         index_key = self._user_index_key(tenant_id, user_id)
         try:
             pipe = self._redis.pipeline()
-            pipe.sadd(index_key, str(jti))
+            pipe.sadd(index_key, member)
             pipe.expire(index_key, ttl)
             self._breaker.call(pipe.execute)
         except CircuitOpenError:
