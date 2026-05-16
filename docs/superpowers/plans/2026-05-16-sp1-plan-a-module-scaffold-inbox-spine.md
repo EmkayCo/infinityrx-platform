@@ -2,10 +2,21 @@
 
 **Date:** 2026-05-16
 **Sub-project:** SP-1 PaySync Operator Portal
-**Status:** Ready for execution (R3 — addresses 2nd pre-execute codex NO-GO of 2026-05-16; 3 remaining items resolved on top of R2)
+**Status:** Ready for execution (R4 — addresses 3rd pre-execute codex NO-GO of 2026-05-16; 4 items resolved on top of R3)
 **Depends on:** SP-0 Plans A–D (packages/contract, packages/auth, packages/ui, packages/qa-harness, packages/shell all shipped). Verified: `packages/{auth,contract,modules,qa-harness,scripts,shell,ui}/` all present at HEAD `d9c69152`.
 
 ---
+
+## R4 Revision Summary (3rd pre-execute codex NO-GO fixes)
+
+After R3, codex re-review returned NO-GO with 4 remaining items. R4 fixes each:
+
+| # | Issue | Fix |
+|---|---|---|
+| R4.1 | R3.1 historical-reference inconsistency: Plan A's R1/R2 fix-summary table cells still cited the OLD plural `clients` form (`packages/contract/src/impls/paysync/{types,clients,real,mock}.ts` at file lines 31 & 75) while Task 6 + gates used the singular `client`. Reads as internal inconsistency. | Update both historical cells to use the singular `client` form to match the corrected Task 6 spec. The R1/R2 history now consistently describes "Plan A used `clients.ts` plural → corrected to `client.ts` singular in R3." |
+| R4.2 | Task 1 vitest gate is not atomic: shown vitest config lacks `passWithNoTests: true`. Vitest fails by default when no tests are found. Task 1's "exits 0" claim is wrong. | Add `passWithNoTests: true` to `vitest.config.ts` (Task 1.3). Task 1's commit then truly is independently verifiable. Subsequent task commits add tests and the flag becomes a no-op. |
+| R4.3 | Task 3 deferred-failure risk: `ItemRegistry.ts` was instructed to import card modules whose stub files only land in Task 5 — Task 3's commit had unresolved dynamic imports. Task 3 gate ran tests but not `tsc -b`. | Make Task 3's `ItemRegistry.ts` self-contained: typed registry map with inline placeholder card factories (`card: async () => ({ default: () => null })`). Task 5 replaces these with real dynamic imports + creates the 11 card stubs in the same commit. Task 3's commit now passes `tsc -b` independently. |
+| R4.4 | Echo handling conflicts with inventory §200: inventory says "wrap into `packages/modules/paysync/src/surfaces/echo/` (NEW surface, add to the surface mapping in Plan A/B/E)." R3 deferred ALL echo work to Plan E. | Add `echo` as 13th surface stub in Plan A Task 2 (typed SurfaceConfig only; no implementation). Inbox kind `echo_run_status_received` + EchoClient wrapping still land in Plan E §6 (BFF returns empty in Plan A anyway, so the card stub isn't useful until Plan E wires the backend). |
 
 ## R3 Revision Summary (2nd pre-execute codex NO-GO fixes)
 
@@ -28,7 +39,7 @@ Pre-execute codex returned NO-GO with 6 items. R2 addresses each:
 | 3 | `@tanstack/react-query` and `@tanstack/react-virtual` cited by `useInboxItems`/`InboxQueue` are absent from root, `packages/ui`, `packages/contract`. Plan A's package.json did not add them. | Add `@tanstack/react-query@5.59.20` and `@tanstack/react-virtual@3.10.8` to `packages/modules/paysync/package.json` dependencies. Add React peer deps. |
 | 4 | Plan A claimed "complete folder skeleton" but omitted the `echo/` surface that wraps real operational functionality (`portal/operator/app/admin/paysync/echo/`, inventory §9). | Explicitly defer `echo/` to Plan E §6 (which already wraps it). Plan A scope = 12 surfaces; gate criterion does NOT claim echo coverage. |
 | 5 | Task 2.6 cited `portal/operator/app/payments/manual-ap` — does not exist. Real path is `portal/operator/app/admin/paysync/manual-ap`. | Fix Task 2.6 wrapping note. |
-| 6 | Plan A's contract extension at `packages/contract/src/paysync/*` doesn't match HEAD convention (`packages/contract/src/impls/<domain>/{types,client,real,mock}.ts` + named exports from `index.ts`, per `prescriber-directory`). Gate only checked file presence, not exportability. | Restructure Task 6 to `packages/contract/src/impls/paysync/{types,clients,real,mock}.ts` + add named exports to `packages/contract/src/index.ts`. Gate requires factories instantiable in test, not just files present. |
+| 6 | Plan A's contract extension at `packages/contract/src/paysync/*` doesn't match HEAD convention (`packages/contract/src/impls/<domain>/{types,client,real,mock}.ts` + named exports from `index.ts`, per `prescriber-directory`). Gate only checked file presence, not exportability. | Restructure Task 6 to `packages/contract/src/impls/paysync/{types,client,real,mock}.ts` (singular `client.ts` per R3 fix) + add named exports to `packages/contract/src/index.ts`. Gate requires factories instantiable in test, not just files present. |
 
 ---
 
@@ -70,9 +81,9 @@ renders, filters by role, and click-throughs resolve.
 - `src/components/` — `ProvenanceBreadcrumb`, `MoneyDisplay`, `MoneyInput`, `HashChainBadge`, `RbacGate`, `RoleSwitcherChip` (under `dev-only/`)
 - `src/types/surface.ts` — `SurfaceConfig` type (module-local; not shared in `@infinityrx/shell`)
 - `src/bff/inbox.ts` — BFF stub returning `[]` typed as `InboxItem[]` (real impl Plan B)
-- `src/surfaces/` — 12 surface folders with `index.ts` stubs exporting typed `SurfaceConfig` constants
+- `src/surfaces/` — 13 surface folders (R4: includes `echo/`) with `index.ts` stubs exporting typed `SurfaceConfig` constants
 - `fixtures/` — directory layout + header-only CSV stubs + empty-array JSON stubs (real data in Plan E)
-- `packages/contract/src/impls/paysync/` — `{types,clients,real,mock}.ts` matching `prescriber-directory` pattern; named exports from `packages/contract/src/index.ts`
+- `packages/contract/src/impls/paysync/` — `{types,client,real,mock}.ts` (singular `client.ts`) matching `prescriber-directory` pattern; named exports from `packages/contract/src/index.ts`
 - `infrastructure/manifests/operator-dev.yml` — add `paysync` to `modules` list
 - Root `tsconfig.json` references — add `{ "path": "./packages/modules/paysync" }`
 - Root `package.json` `test:packages` — add `&& npm --workspace=@infinityrx/module-paysync test`
@@ -80,7 +91,7 @@ renders, filters by role, and click-throughs resolve.
 
 **Out:**
 - Any real backend wiring (Plans B–E)
-- `echo/` surface — DEFERRED to Plan E §6 (already wraps it; not in Plan A scope)
+- `echo/` Inbox item kind (`echo_run_status_received`), `EchoClient` in contract, page wrapping — DEFERRED to Plan E §6. R4: surface folder + typed stub for `echo` IS in Plan A scope per inventory §200; only the live backend wiring is deferred.
 - Playwright E2E (Plan E)
 - Upload resource backend (Plan B)
 - Real fixture data in seed JSON files (Plan E)
@@ -197,6 +208,10 @@ export default defineConfig({
   test: {
     include: ["__tests__/**/*.test.{ts,tsx}", "src/**/*.test.{ts,tsx}"],
     environment: "happy-dom",
+    // R4 atomicity: Task 1's commit ships no tests yet (added in Tasks 3–6).
+    // Without this flag, vitest exits non-zero on empty test discovery and
+    // Task 1's gate would fail by design. Tests added later don't change behavior.
+    passWithNoTests: true,
   },
 });
 ```
@@ -217,7 +232,7 @@ export default defineConfig({
 
 ---
 
-### Task 2 — Surface skeleton (12 surfaces)
+### Task 2 — Surface skeleton (13 surfaces)
 
 Create one folder per surface under `packages/modules/paysync/src/surfaces/` with an `index.ts`
 that exports a typed `SurfaceConfig` constant. Each stub is a typed constant that satisfies the
@@ -237,7 +252,7 @@ that exports a typed `SurfaceConfig` constant. Each stub is a typed constant tha
 | 2.10 | `journal/` | — | NEW surface |
 | 2.11 | `reports/` | `portal/operator/app/accounting/` | |
 | 2.12 | `setup/` | `portal/operator/app/admin/paysync/{cycle-schedules,email-recipients,email-templates,export-templates,gl-account-mappings,invoice-sequences}/` | aggregates setup surfaces |
-| — | `echo/` | `portal/operator/app/admin/paysync/echo/` | **DEFERRED to Plan E §6.** Plan A does NOT create this surface. |
+| 2.13 | `echo/` | `portal/operator/app/admin/paysync/echo/` | **R4 FIX (inventory §200):** typed SurfaceConfig stub created in Plan A. Inbox kind `echo_run_status_received` + `EchoClient` wrapping + actual page logic land in Plan E §6 (BFF returns empty in Plan A; card stub not useful until backend wired). |
 
 **`SurfaceConfig` type** (`src/types/surface.ts`):
 
@@ -264,9 +279,9 @@ export const <Name>Surface: SurfaceConfig = {
 ```
 
 - [ ] Step 2.0: Write `src/types/surface.ts` with `SurfaceConfig` type
-- [ ] Step 2.1–2.12: Create all 12 surface stubs (each typed as `SurfaceConfig`, NOT empty objects)
-- [ ] Step 2.13: `tsc -b` exits 0 in module (still expected to fail at workspace level until Task 5 lands)
-- [ ] Step 2.14: Commit — `feat(sp-1-a): surface skeleton stubs (12 surfaces; echo deferred to Plan E)`
+- [ ] Step 2.1–2.13: Create all 13 surface stubs (each typed as `SurfaceConfig`, NOT empty objects; includes `echo/` per R4 inventory alignment)
+- [ ] Step 2.14: `npm --workspace=@infinityrx/module-paysync exec tsc -b` exits 0 in module (proves all surface stubs satisfy `SurfaceConfig` shape)
+- [ ] Step 2.15: Commit — `feat(sp-1-a): surface skeleton stubs (13 surfaces; echo Plan-E-wraps backend)`
 
 ---
 
@@ -348,14 +363,15 @@ The Plan A gate criterion below explicitly accepts this as stub-scope.
   state when array is empty.
 
 - [ ] Step 3.1: Write `src/inbox/types.ts` exactly as shown
-- [ ] Step 3.2: Write `src/inbox/ItemRegistry.ts` — map of `InboxItemKind → { card: () => Promise<unknown>; rbac_required: RbacRole }` (card imports point at `../inbox/cards/<Name>Card.js` — actual stubs land in Task 5)
+- [ ] Step 3.2: Write `src/inbox/ItemRegistry.ts` — **self-contained map** of `InboxItemKind → { card: () => Promise<{ default: React.ComponentType<{ item: InboxItem }> }>; rbac_required: RbacRole }`. Each entry uses an INLINE placeholder card factory: `card: async () => ({ default: () => null })`. R4 fix: NO imports of `../inbox/cards/*.js` at this commit boundary — those files don't exist until Task 5. Task 5 replaces the inline placeholders with real `import("./cards/<Name>Card.js")` calls in the same commit that creates the 11 stub files.
 - [ ] Step 3.3: Write `src/inbox/useInboxItems.ts` — `function useInboxItems(role: RbacRole)` returns TanStack Query result; calls `fetch('/api/paysync/inbox?role=' + role)` for now (BFF route added in Plan A; real backend in Plan B)
 - [ ] Step 3.4: Write `src/inbox/InboxQueue.tsx` — uses `@tanstack/react-virtual` for virtualization; props `{ items: InboxItem[]; role: RbacRole }`; filters `items.filter(i => i.rbac_required === role)`; renders via `ItemRegistry`
 - [ ] Step 3.5: Write `src/inbox/index.ts` barrel (re-export types, hook, component, registry)
 - [ ] Step 3.6: Write `src/bff/inbox.ts` stub returning `[] as InboxItem[]`
 - [ ] Step 3.7: Write `__tests__/inbox/types.test.ts` (exhaustiveness) and `__tests__/inbox/InboxQueue.test.tsx` (render + filter + empty)
-- [ ] Step 3.8: `npm --workspace=@infinityrx/module-paysync test` — all pass
-- [ ] Step 3.9: Commit — `feat(sp-1-a): Inbox spine — taxonomy, registry, hook, queue component`
+- [ ] Step 3.8: `npm --workspace=@infinityrx/module-paysync exec tsc -b` exits 0 (R4 atomicity: proves no unresolved imports in `ItemRegistry.ts`)
+- [ ] Step 3.9: `npm --workspace=@infinityrx/module-paysync test` — all pass
+- [ ] Step 3.10: Commit — `feat(sp-1-a): Inbox spine — taxonomy, self-contained registry, hook, queue component`
 
 ---
 
@@ -574,7 +590,7 @@ These are not empty stubs. Plans B–E replace the body without changing the int
 
 - [ ] Step 5.1: Write `packages/modules/paysync/module.config.ts` at ROOT (literal content above; both `config` and `paysyncComposition` exports)
 - [ ] Step 5.2: Create 11 card stubs under `src/inbox/cards/` — each typed + data-testid + co-located test
-- [ ] Step 5.3: Update `src/inbox/ItemRegistry.ts` (from Task 3.2) to import from `paysyncComposition.inboxItemKinds`
+- [ ] Step 5.3: Replace the placeholder card factories in `src/inbox/ItemRegistry.ts` (from Task 3.2) with REAL dynamic imports: `card: () => import("./cards/UploadPendingReviewCard.js")` etc. This step lands in the SAME commit as the 11 card stub files created in Step 5.2 — together they form an atomic unit (R4 fix). Registry may also import from `paysyncComposition.inboxItemKinds` as a single source of truth — either approach is acceptable as long as `tsc -b` proves all imports resolve in this commit.
 - [ ] Step 5.4: Edit root `tsconfig.json` — add `{ "path": "./packages/modules/paysync" }` to references array (R3: moved here from Task 1.4 for atomicity)
 - [ ] Step 5.5: Edit `infrastructure/manifests/operator-dev.yml` — add `paysync` to `modules:` array as `- paysync` line (R3: moved here from Task 1.5 for atomicity)
 - [ ] Step 5.6: `npm run typecheck` — exits 0 (all workspace refs including the new paysync reference; module.config.ts root file recognized)
@@ -668,7 +684,7 @@ Plan A is complete when ALL of the following are true:
 - [ ] `npm run manifest:validate` exits 0 with `paysync` in modules list AND `packages/modules/paysync/module.config.ts` exporting valid `config` matching SD-4 `ModuleConfig` shape
 - [ ] `packages/modules/paysync/module.config.ts` at ROOT (not src/) exports BOTH `config` (SD-4 shape) AND `paysyncComposition` (runtime fields); tsc confirms via `as const`
 - [ ] All 11 inbox card stubs exist, are typed (accept `item: InboxItem` prop), render `data-testid="inbox-card-{kind}"`, have unit tests, and dynamic imports in `paysyncComposition.inboxItemKinds` resolve — zero empty-file stubs
-- [ ] All 12 surface `index.ts` stubs exist and export a typed `SurfaceConfig` constant (not empty object) — `tsc -b` proves they satisfy the `SurfaceConfig` shape; **`echo/` surface is NOT in Plan A (deferred to Plan E §6) — gate does NOT claim echo coverage**
+- [ ] All 13 surface `index.ts` stubs exist (R4: includes `echo/` per inventory §200) and export a typed `SurfaceConfig` constant (not empty object) — `tsc -b` proves they satisfy the `SurfaceConfig` shape; **echo's Inbox kind, BFF wiring, and `EchoClient` are scoped to Plan E §6 — Plan A only ships the surface folder + typed stub**
 - [ ] Fixtures directory exists with 3 CSV stubs (header rows only acceptable here) + 6 JSON stubs (empty arrays acceptable here — real data is Plan E)
 - [ ] Contract package: `packages/contract/src/impls/paysync/{types,client,real,mock}.ts` present (singular `client.ts`); named exports added to `packages/contract/src/index.ts`; mock factories instantiable in test (NOT just files present)
 - [ ] No `RoleSwitcherChip` string in `packages/modules/paysync/src/components/index.ts` (checked by grep in commit; only re-exported via `paysyncComposition.qa.RoleSwitcherChip`)
