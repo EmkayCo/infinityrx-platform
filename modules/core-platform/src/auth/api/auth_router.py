@@ -250,7 +250,7 @@ def logout(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "token_user_mismatch", "message": "refresh token does not belong to caller"},
         )
-    repo.revoke(refresh_claims.jti, refresh_claims.exp)
+    repo.revoke(refresh_claims.jti, user.tenant_id, refresh_claims.exp)
     # Best effort: also revoke the access-token jti if we can read it from
     # the same request. FastAPI doesn't pass the raw header through the
     # dependency tree here, so tests rely on refresh-revoke only.
@@ -270,18 +270,19 @@ def refresh(
         raise HTTPException(status_code=401, detail={"error": "token_expired"})
     except (InvalidTokenError, WrongTokenTypeError) as exc:
         raise HTTPException(status_code=401, detail={"error": "invalid_token", "message": str(exc)})
-    if repo.is_revoked(claims.jti):
-        raise HTTPException(status_code=401, detail={"error": "token_revoked"})
-
+    # Refresh tokens have no tid claim — load the user first to get tenant_id.
     auth = load_authenticated(session, claims.sub)
     if auth is None or auth.user.status != "active":
         raise HTTPException(status_code=401, detail={"error": "user_unavailable"})
+
+    if repo.is_revoked(claims.jti, auth.user.tenant_id):
+        raise HTTPException(status_code=401, detail={"error": "token_revoked"})
 
     s = get_auth_settings()
     new_access = create_access_token(auth.user.id, auth.user.tenant_id, auth.roles)
     new_refresh = create_refresh_token(auth.user.id)
     # Rotate refresh: revoke the old one
-    repo.revoke(claims.jti, claims.exp)
+    repo.revoke(claims.jti, auth.user.tenant_id, claims.exp)
     return TokenResponse(
         access_token=new_access,
         refresh_token=new_refresh,

@@ -372,8 +372,9 @@ class TestB12S1V2SecurityClosures:
         from shared.auth.jwt_tokens import decode_token
 
         claims = decode_token(jwt)
+        assert claims.tenant_id is not None
         # Revoke the token
-        repo.revoke(claims.jti, expires_at=claims.exp)
+        repo.revoke(claims.jti, claims.tenant_id, expires_at=claims.exp)
 
         with pytest.raises(HTTPException) as exc_info:
             current_user(token=jwt)
