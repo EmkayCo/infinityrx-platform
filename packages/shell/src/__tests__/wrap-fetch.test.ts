@@ -149,4 +149,57 @@ describe("wrapFetch", () => {
     expect(typeof entries[0]!.responseBody).toBe("string");
     expect(entries[0]!.responseBody as string).toMatch(/^<TRUNCATED:\d+ bytes>$/);
   });
+
+  // Header capture tests (Fix 1 — C-shell deferred)
+  it("redacts Authorization request header value", async () => {
+    const innerFetch = vi.fn().mockResolvedValue(makeJsonResponse({ ok: true }));
+    const entries: InspectorEntry[] = [];
+    await wrapFetch(innerFetch, (e) => entries.push(e))(
+      "https://x.test/",
+      { method: "GET", headers: { Authorization: "Bearer secret-token" } }
+    );
+    expect(entries[0]!.requestHeaders?.["Authorization"]).toBe("<REDACTED>");
+  });
+
+  it("preserves non-sensitive request header value (X-Tenant-ID)", async () => {
+    const innerFetch = vi.fn().mockResolvedValue(makeJsonResponse({ ok: true }));
+    const entries: InspectorEntry[] = [];
+    await wrapFetch(innerFetch, (e) => entries.push(e))(
+      "https://x.test/",
+      { method: "GET", headers: { "X-Tenant-ID": "tenant-abc" } }
+    );
+    expect(entries[0]!.requestHeaders?.["X-Tenant-ID"]).toBe("tenant-abc");
+  });
+
+  it("redacts Cookie request header value", async () => {
+    const innerFetch = vi.fn().mockResolvedValue(makeJsonResponse({ ok: true }));
+    const entries: InspectorEntry[] = [];
+    await wrapFetch(innerFetch, (e) => entries.push(e))(
+      "https://x.test/",
+      { method: "GET", headers: { cookie: "session=abc123" } }
+    );
+    expect(entries[0]!.requestHeaders?.["cookie"]).toBe("<REDACTED>");
+  });
+
+  it("captures and redacts x-api-key response header", async () => {
+    // Note: set-cookie is a browser-forbidden response header — it is not
+    // accessible via Headers.entries() or .get() in browser/happy-dom envs.
+    // In the Node.js server environment (where this middleware actually runs),
+    // set-cookie IS captured and redacted via the explicit REDACTED_HEADERS probe.
+    // We use x-api-key here as a proxy for the redaction path test.
+    const innerFetch = vi.fn().mockResolvedValue(
+      makeJsonResponse({ ok: true }, 200, { "x-api-key": "exposed-key" })
+    );
+    const entries: InspectorEntry[] = [];
+    await wrapFetch(innerFetch, (e) => entries.push(e))("https://x.test/");
+    expect(entries[0]!.responseHeaders?.["x-api-key"]).toBe("<REDACTED>");
+  });
+
+  it("does not crash when no request headers are provided", async () => {
+    const innerFetch = vi.fn().mockResolvedValue(makeJsonResponse({ ok: true }));
+    const entries: InspectorEntry[] = [];
+    await wrapFetch(innerFetch, (e) => entries.push(e))("https://x.test/");
+    // No requestHeaders key when headers are absent.
+    expect(entries[0]!.requestHeaders).toBeUndefined();
+  });
 });
