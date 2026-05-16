@@ -15,7 +15,7 @@ export type { AppShellMountProps } from "./shell/app-shell-mount.js";
 export { AppShellMount } from "./shell/app-shell-mount.js";
 
 export type { QaMode } from "./qa/qa-mode-cookie.js";
-export { QA_MODE_COOKIE, parseQaMode } from "./qa/qa-mode-cookie.js";
+export { QA_MODE_COOKIE, parseQaMode, buildQaModeCookieValue } from "./qa/qa-mode-cookie.js";
 export { QA_MODE_HEADER, applyQaModeMiddleware } from "./qa/qa-mode-middleware.js";
 export { SHELL_MIDDLEWARE_MATCHER } from "./middleware.js";
 
