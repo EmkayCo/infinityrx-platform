@@ -4,6 +4,13 @@ import path from "path";
 
 export default defineConfig({
   plugins: [react()],
+  // Disable PostCSS so @tailwindcss/postcss → lightningcss native binding
+  // is never loaded. Unit tests do not exercise CSS output.
+  css: {
+    postcss: {
+      plugins: [],
+    },
+  },
   test: {
     environment: "jsdom",
     globals: true,

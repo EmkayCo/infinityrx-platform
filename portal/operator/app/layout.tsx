@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { Lato, IBM_Plex_Mono } from "next/font/google";
 import { Providers } from "@/components/providers";
 import { AppShell } from "@/components/layout/app-shell";
+import { ManifestNav } from "./_nav/manifest-nav";
 import { themeInitScript } from "@shared/components/theme-toggle";
 import "./globals.css";
 
@@ -48,7 +49,7 @@ export default async function RootLayout({
         </a>
 
         <Providers>
-          <AppShell isAuthenticated={isAuthenticated}>
+          <AppShell isAuthenticated={isAuthenticated} nav={<ManifestNav />}>
             {children}
           </AppShell>
         </Providers>

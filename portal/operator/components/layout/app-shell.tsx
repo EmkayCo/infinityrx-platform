@@ -17,9 +17,11 @@ import { searchEntities } from "./entity-search";
 interface AppShellProps {
   isAuthenticated: boolean;
   children: React.ReactNode;
+  /** Optional manifest-driven nav slot (Plan D SP-0 composition). */
+  nav?: React.ReactNode;
 }
 
-export function AppShell({ isAuthenticated, children }: AppShellProps) {
+export function AppShell({ isAuthenticated, children, nav: _nav }: AppShellProps) {
   const router = useRouter();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
