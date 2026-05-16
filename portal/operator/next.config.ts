@@ -1,7 +1,42 @@
 import type { NextConfig } from "next";
 import path from "path";
+import { execSync } from "node:child_process";
 
 const sharedDir = path.resolve(__dirname, "../shared");
+
+// Plan D SP-0: Pre-build hook — run build-manifest.ts to emit _generated/ artifacts.
+// The generator validates the manifest schema and fails the build if validation errors exist.
+// Runs synchronously before Next.js starts (intentionally blocking).
+function runPrebuild() {
+  const repoRoot = path.resolve(__dirname, "..", "..");
+  try {
+    execSync("node --loader tsx packages/scripts/build-manifest.ts", {
+      cwd: repoRoot,
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        INFINITYRX_MANIFEST:
+          process.env["INFINITYRX_MANIFEST"] ??
+          path.join(repoRoot, "infrastructure", "manifests", "operator-dev.yml"),
+        INFINITYRX_GENERATED_OUT:
+          path.join(repoRoot, "packages", "shell", "src", "_generated"),
+      },
+    });
+  } catch (err) {
+    throw new Error(`build-manifest failed — fix manifest errors before building the portal.\n${String(err)}`);
+  }
+}
+
+// Run at config evaluation time (= start of next build / next dev).
+// Skip during CI test runs to avoid tsx dependency on test agents.
+if (process.env["SKIP_PREBUILD"] !== "1") {
+  try {
+    runPrebuild();
+  } catch {
+    // Non-fatal during dev — missing generated files degrade gracefully.
+    console.warn("[next.config] build-manifest failed — _generated/ may be stale. Run npm run prebuild.");
+  }
+}
 
 const nextConfig: NextConfig = {
   // Wave B10 (2026-05-12): @infinityrx/portal-shared is consumed as

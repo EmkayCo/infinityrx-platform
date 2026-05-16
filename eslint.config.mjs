@@ -8,19 +8,27 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 import importPlugin from "eslint-plugin-import";
 
-// Plan D will replace this sentinel with the generated zones import:
-//   import { GENERATED_MODULE_ZONES } from "./packages/shell/src/_generated/eslint-zones.js";
-// ESLint 9 + eslint-plugin-import 2.31.0 rejects an empty `zones` array
-// (schema minItems: 1). The sentinel below is a no-op: it restricts the
-// _generated/ directory from importing itself, which never fires in Plan A
-// because that directory does not exist yet.
-const GENERATED_MODULE_ZONES = [
+// Generated composition-zone enforcement (SD-4 §4).
+// STILL-OPEN-3 fix: import .mjs (not .js or .ts) — generator emits pure ESM .mjs
+// which Node can import at runtime without a TS loader.
+// STILL-OPEN-3b fix: fallback is the sentinel constant, not [] — avoids minItems:1 schema
+// violation from eslint-plugin-import; console.warn makes the missing-file case visible.
+// Run `npm run prebuild` (or `npm run composition:check`) to populate the generated file.
+const GENERATED_MODULE_ZONES_SENTINEL = [
   {
     target: "./packages/shell/src/_generated/**",
     from: "./packages/shell/src/_generated/**",
-    message: "SENTINEL — replaced by generate-eslint-zones.ts in Plan D.",
+    message: "SENTINEL — replaced by generate-eslint-zones.ts output (run npm run prebuild).",
   },
 ];
+let GENERATED_MODULE_ZONES = GENERATED_MODULE_ZONES_SENTINEL;
+try {
+  const generated = await import("./packages/shell/src/_generated/eslint-zones.mjs");
+  GENERATED_MODULE_ZONES = generated.GENERATED_MODULE_ZONES;
+} catch {
+  // Cold checkout — zones not yet generated. ESLint runs with sentinel (no-op).
+  console.warn("[eslint] WARN: packages/shell/src/_generated/eslint-zones.mjs not found. Run npm run prebuild.");
+}
 
 export default tseslint.config(
   {
@@ -119,9 +127,8 @@ export default tseslint.config(
       "@typescript-eslint/consistent-type-imports": ["error",
         { prefer: "type-imports", fixStyle: "separate-type-imports" }],
 
-      // Empty in Plan A — Plan D's scripts/generate-eslint-zones.ts emits
-      // a concrete N*(N-1) zone array into _generated/eslint-zones.ts and
-      // this rule's `zones` becomes that import.
+      // Plan D (STILL-OPEN-3): zones loaded from _generated/eslint-zones.mjs via dynamic import
+      // above. Falls back to GENERATED_MODULE_ZONES_SENTINEL (no-op zone) on cold checkout.
       "import/no-restricted-paths": ["error", { zones: GENERATED_MODULE_ZONES }],
     },
   },
