@@ -68,7 +68,8 @@ def test_tenant_isolation_files(client, tenant_admin_a):
             id=_uuid.uuid4(),
             tenant_id=_uuid.UUID("22222222-2222-2222-2222-222222222222"),
             email="b@example.com",
-            roles=["tenant_admin"],
+            status="active",
+            roles=("tenant_admin",),
         )
     )
     lst_b = client.get("/api/v1/files").json()
