@@ -1,6 +1,6 @@
 # SP-2 — Directories Portal / Reference Data Control Plane
 
-**Status:** Spec complete; pending codex review then plan-writing.
+**Status:** Spec revised (r1 codex NO-GO addressed); pending r2 codex review then plan-writing.
 **Date:** 2026-05-16
 **Owner:** Mike
 **Sub-project of:** Operator Portal & Platform Frontend milestone
@@ -98,7 +98,7 @@ built on the SP-0 spine, analogous to SP-1 (PaySync) in structure.
 |---|---|---|---|
 | D1 | Vertical | Directories portal (Reference Data Control Plane) | user brainstorm 2026-05-16 |
 | D2 | B9 dependency posture | SP-2 is UI-only. B9 closes as a parallel B-wave. FDB surfaces show "pending B9" banner + mock data until B9 lands. | user 2026-05-16 |
-| D3 | Datasets in scope | All 15 active reference datasets: `nppes`, `ncpdp`, `ncpdp-dataq`, `relay-health` (pharmacies), `fdb`, `fda-ndc`, `fda-orange-book`, `fda-purple-book`, `fda-drug-shortages`, `fda-rems` (drugs), `hcpcs`, `icd10-cm` (procedure/diagnosis), `cms-asp`, `cms-nadac`, `bpg` (pricing), `cms-opt-out`, `ofac-sdn`, `sam_exclusions`, `medicaid` (exclusions/sanctions). Format-only dirs (`835`, `nacha`, `ncpdp-d.0`) and doc/audit-only dirs (`brd`, `extracted`, `IPS`, `ips-audit`, `echo-health`) are excluded. | user + `ls data/reference/` verified |
+| D3 | Datasets in scope | **19 source datasets → 6 browse clusters.** Source datasets (each has a distinct loader file in `shared/data_ingestion/sources/`): `nppes`, `ncpdp`, `ncpdp-dataq`, `relay-health` (→ pharmacies cluster), `fdb`, `fda-ndc`, `fda-orange-book`, `fda-purple-book`, `fda-drug-shortages`, `fda-rems` (→ drugs cluster), `hcpcs`, `icd10-cm` (→ codes cluster), `cms-asp`, `cms-nadac`, `bpg` (→ pricing cluster), `cms-opt-out`, `ofac-sdn`, `sam_exclusions`, `medicaid` (→ exclusions cluster). Browse surfaces consolidate sources into 6 clusters: prescribers / pharmacies / drugs / codes / pricing / exclusions. Format-only dirs (`835`, `nacha`, `ncpdp-d.0`) and doc/audit-only dirs (`brd`, `extracted`, `IPS`, `ips-audit`, `echo-health`) are excluded from both source and browse count. | user + `ls data/reference/` verified |
 | D4 | IA shape | Search-First — Cmd+K command palette as centerpiece; federated typeahead across all datasets; data-quality dashboard as secondary spine in sidebar (freshness chips, ingestion alerts, record counts) | user 2026-05-16 |
 | D5 | Shippable bar | Cross-dataset round trip on synthetic data: Cmd+K → search → drill → provenance/freshness/audit → trigger ingestion → watch complete → record-count delta → dismiss/escalate alert. Every dataset browsable. B9-dependent surfaces mocked with banner. | user 2026-05-16 |
 | D6 | Build approach | Approach A — Search spine first (federated search infra + Cmd+K + ranking in Plan 1; per-dataset surfaces wired into search from day 1 in subsequent plans). | user 2026-05-16 |
@@ -138,10 +138,12 @@ packages/modules/directories/          ← NEW: the SP-2 deliverable
   tests/                                ← Unit + integration; E2E lives at portal level
 ```
 
-Composed via `infrastructure/manifests/operator.yml` adding `directories` to
-the module list. SP-0's `scripts/generate-composition.ts` emits the static
-import; SP-0's `scripts/audit-composition.ts` verifies presence in `.nft.json`
-and `.next/trace`.
+Composed via `infrastructure/manifests/operator-dev.yml` (the existing dev
+manifest, verified at `infrastructure/manifests/operator-dev.yml`) adding
+`directories` to the module list. The SP-0 composition scripts
+(`scripts/generate-composition.ts`, `scripts/audit-composition.ts`) are built
+as part of SP-0 execution — they do not exist yet in the repo; SP-2 depends on
+SP-0 having shipped them before plan execution begins.
 
 ### 5.2 Dataset inventory and per-dataset attribute model
 
@@ -170,12 +172,14 @@ index, the browse surface, and the freshness dashboard.
 | 18 | `sam_exclusions` | `sam_exclusions/` | `shared/data_ingestion/sources/sam_exclusions.py` | prescriber-directory | SAM GUID | No |
 | 19 | `medicaid` | `medicaid/` | `shared/data_ingestion/sources/state_medicaid_bins.py` | billing | BIN | No |
 
-> Note: `data/reference/` count is 19 rows but D3 says "15–16" because NCPDP,
-> NCPDP-DataQ, and Relay Health all feed the same pharmacy entity
-> (3 source files → 1 browse surface), and `cms-opt-out`, `sam_exclusions`
-> both feed the exclusions surface. The dataset inventory table above lists
-> every distinct source file; the browse surfaces consolidate them into 6
-> clusters (prescribers, pharmacies, drugs, codes, pricing, exclusions).
+> Note: D3 specifies **19 source datasets → 6 browse clusters**. NCPDP,
+> NCPDP-DataQ, and Relay Health all feed the pharmacy cluster (3 sources → 1
+> surface); `cms-opt-out`, `ofac-sdn`, `sam_exclusions`, and `medicaid` all
+> feed the exclusions cluster (4 sources → 1 surface); `fdb`, `fda-ndc`,
+> `fda-orange-book`, `fda-purple-book`, `fda-drug-shortages`, `fda-rems` feed
+> the drugs cluster (6 sources → 1 surface). The 19-row inventory table is the
+> authoritative source list; the 6 browse clusters are the authoritative UI
+> grouping.
 
 **Per-dataset attribute model (minimum fields for search index):**
 
@@ -264,9 +268,16 @@ valid JWT from `packages/auth`, per SD-1) can:
 Rationale: reference data is not customer-specific or financially sensitive.
 It is the same NPPES/FDA/CMS data that is publicly available. The risk of an
 operator triggering a spurious NPPES refresh is operational (extra load), not
-a security or PHI issue. The `POST /{source}/trigger` endpoint already
-requires an authenticated session and prevents duplicate in-flight runs
-(`shared/data_ingestion/api/routes.py:158`).
+a security or PHI issue.
+
+**Auth boundary:** The shared ingestion router (`shared/data_ingestion/api/routes.py`)
+has **no auth dependency** — it carries no `Depends(get_current_user)`. Auth is
+enforced exclusively at the BFF layer (`/api/directories/ingest/{source}/trigger`),
+which validates the JWT via `packages/auth` before proxying to the backend. The
+backend trigger endpoint prevents duplicate in-flight runs (409 if status=running,
+`routes.py:158`) but relies on the BFF for auth gating. Plan-writer must ensure
+the ingestion router is NOT exposed directly on a public-facing port without BFF
+mediation.
 
 The BFF route handler still validates the JWT (per SP-0 §6.5 auth contract)
 and rejects unauthenticated requests with 401. No role check beyond
@@ -294,11 +305,18 @@ authentication.
 | Drug REMS | `GET /api/v1/drugs/rems/{ndc}` | drug-database `router.py:307` |
 | Drug shortages | `GET /api/v1/drugs/shortages` + `/{ndc}` | drug-database `router.py:320,332` |
 | Drug refresh status | `GET /api/v1/drugs/refresh/status` | drug-database `router.py:345` |
-| Ingestion trigger (generic) | `POST /ingest/{source}/trigger` | shared ingestion `routes.py:127` |
-| Ingestion upload + trigger | `POST /ingest/upload/{source}` | shared ingestion `routes.py:202` |
-| Ingestion run status | `GET /ingest/runs/{run_id}` | shared ingestion `routes.py:260` |
-| Ingestion run list | `GET /ingest/runs` | shared ingestion `routes.py:295` |
-| Schedule list | `GET /ingest/schedules` | shared ingestion `routes.py:333` |
+| Ingestion trigger (generic) | `POST /api/v1/data-ingestion/{source}/trigger` | shared ingestion `routes.py:127` — `async def trigger_run` |
+| Ingestion upload + trigger | `POST /api/v1/data-ingestion/upload/{source}` | shared ingestion `routes.py:202` — `async def upload_and_ingest` |
+| All-sources status | `GET /api/v1/data-ingestion/status` | shared ingestion `routes.py:260` — `async def get_all_status` — returns list[SourceStatus] (schedule + last_run per source) |
+| Source run history | `GET /api/v1/data-ingestion/{source}/history` | shared ingestion `routes.py:295` — `async def get_source_history` |
+| Single run detail | `GET /api/v1/data-ingestion/runs/{run_id}` | shared ingestion `routes.py:333` — `async def get_run_detail` |
+| Cancel run | `POST /api/v1/data-ingestion/{source}/cancel` | shared ingestion `routes.py:355` — `async def cancel_run` |
+| Field catalog | `GET /api/v1/data-ingestion/field-catalog` | shared ingestion `routes.py:406` — `async def get_field_catalog` |
+
+> Note: the router is defined without a prefix in `routes.py`; it is mounted by each
+> module's `create_app()` with `prefix="/api/v1/data-ingestion"` per the docstring at
+> `routes.py:3–6`. Plan-writer must verify which module(s) currently mount this router
+> (see §10.3).
 
 **Needs wiring in SP-2 (new BFF-level routes that aggregate existing backends):**
 
@@ -438,10 +456,11 @@ Module-owned Next.js route handlers. Mounted by the shell into `app/api/director
 | Route | Method | Description |
 |---|---|---|
 | `/api/directories/search` | GET | Fan-out search: calls all backend search endpoints in parallel, merges, ranks. |
-| `/api/directories/quality` | GET | Freshness summary: reads `GET /ingest/runs` (last run per source) + each module's `/stats` endpoint; returns merged quality summary. |
+| `/api/directories/quality` | GET | Freshness summary: reads `GET /api/v1/data-ingestion/status` (all-sources status) + each module's `/stats` endpoint; returns merged quality summary. See §9.6 for cross-tenant handling of stats endpoints. |
 | `/api/directories/audit` | GET | Ingestion audit events: reads core-platform audit log filtered to ingestion actions. |
-| `/api/directories/ingest/{source}/trigger` | POST | Proxy to shared ingestion `POST /ingest/{source}/trigger`; logs actor from JWT `sub`. |
-| `/api/directories/ingest/runs/{run_id}` | GET | Proxy to `GET /ingest/runs/{run_id}`; used for polling. |
+| `/api/directories/ingest/{source}/trigger` | POST | Proxy to shared ingestion `POST /api/v1/data-ingestion/{source}/trigger` (`routes.py:127`); authenticates at BFF — the backend router has no auth dependency (`routes.py` has no `Depends(get_current_user)`); BFF is the auth boundary. Logs actor from JWT `sub`. |
+| `/api/directories/ingest/runs/{run_id}` | GET | Proxy to `GET /api/v1/data-ingestion/runs/{run_id}` (`routes.py:333`); used for polling run completion. |
+| `/api/directories/ingest/{source}/history` | GET | Proxy to `GET /api/v1/data-ingestion/{source}/history` (`routes.py:295`); used by RunHistoryDrawer. |
 
 All BFF route handlers:
 - Extract and validate JWT via `packages/auth` (rejects 401 if missing/invalid).
@@ -539,14 +558,14 @@ Step 5: Returns single DatasetRecord immediately; no fan-out needed
 ```
 1. Operator clicks "Re-trigger" on a data-quality alert for source 'nppes'
 2. POST /api/directories/ingest/nppes/trigger (BFF route)
-3. BFF validates JWT → extracts {sub, tid} → logs actor
-4. BFF calls shared ingestion API: POST /ingest/nppes/trigger (body: {run_type:'full', triggered_by: sub})
+3. BFF validates JWT via packages/auth → extracts {sub, tid} → logs actor (auth boundary; backend has none)
+4. BFF calls shared ingestion API: POST /api/v1/data-ingestion/nppes/trigger (body: {run_type:'full', triggered_by: sub})
 5. Shared ingestion API checks for in-flight run (routes.py:158) → 409 if already running
 6. On success: shared ingestion API creates IngestionRun row (status='running'), returns {run_id}
 7. BFF returns {run_id, status:'running'} to client
 8. Client begins polling: GET /api/directories/ingest/runs/{run_id} every 5s
-   → BFF proxies to GET /ingest/runs/{run_id}
-   → returns {status, records_processed, records_in_source, records_inserted, records_errored}
+   → BFF proxies to GET /api/v1/data-ingestion/runs/{run_id} (routes.py:333)
+   → returns RunDetail {status, records_processed, records_in_source, records_inserted, records_errored, error_samples}
 9. RunProgressBar updates live
 10. When status = 'completed': show record-count delta (records_inserted + records_updated)
     When status = 'failed': show error toast with error_message + correlation_id
@@ -558,10 +577,10 @@ Step 5: Returns single DatasetRecord immediately; no fan-out needed
 ```
 1. On QualityDashboardPanel mount (or focus): GET /api/directories/quality
 2. BFF fans out:
-   - GET /ingest/runs?source=nppes&limit=1 (per source, ~15 calls in parallel)
-   - GET /api/v1/prescribers/stats
-   - GET /api/v1/pharmacies/stats
-   - GET /api/v1/drugs/refresh/status
+   - GET /api/v1/data-ingestion/status (routes.py:260 — returns list[SourceStatus] with last_run per source; one call for all sources, no per-source looping needed)
+   - GET /api/v1/prescribers/stats (router.py:381)
+   - GET /api/v1/pharmacies/stats (router.py:440 — NOTE: includes tenant-scoped fields; BFF must discard or segregate tenant fields; see §9.6)
+   - GET /api/v1/drugs/refresh/status (router.py:345)
 3. BFF merges into []DatasetQuality {source, last_run_at, last_run_status, records_in_db, records_errored}
 4. BFF caches result (TTL 60s, tag: dir:quality)
 5. QualityDashboardPanel renders FreshnessChips + IngestionAlertList
@@ -682,19 +701,27 @@ backend required.
 Reference data (`nppes`, `fda-ndc`, etc.) is **not tenant-scoped** — it is
 shared read-only data. Ingestion runs in `shared.ingestion_runs` use the
 shared schema, not per-tenant. No cross-tenant test is required for the
-reference data browse surfaces.
+reference data browse surfaces themselves.
 
-Exception: if a surface displays tenant-specific overrides (e.g.,
-drug-database MAC overrides from `GET /api/v1/drugs/overrides`), that
-surface MUST have a per-endpoint cross-tenant isolation test per
-`.claude/rules/tenant-isolation.md`. No such surface is in SP-2 scope, but
-this rule is stated explicitly.
+**Exception 1 — pharmacy stats endpoint.** `GET /api/v1/pharmacies/stats`
+(pharmacy-directory `router.py:440`) returns aggregate counts that include
+tenant-scoped values (e.g., `total_networks`, `pending_credentialing`). The
+BFF `/api/directories/quality` route that calls this endpoint MUST:
+- Strip or clearly label tenant-scoped fields in the quality dashboard output
+- Have a per-endpoint cross-tenant isolation test: call with `tid_A`, call
+  with `tid_B`, assert that global reference-data fields are identical and
+  that tenant-scoped fields reflect each tenant's own data only.
 
-The BFF `/api/directories/search` route does extract `tid` from the JWT (for
+**Exception 2 — drug overrides surface (NOT in SP-2 scope).** If a future
+surface displays tenant-specific overrides (e.g., `GET /api/v1/drugs/overrides`),
+that surface MUST have a per-endpoint cross-tenant isolation test per
+`.claude/rules/tenant-isolation.md`. This is excluded from SP-2 per §3.
+
+The BFF `/api/directories/search` route extracts `tid` from the JWT (for
 structured logging correlation) but does NOT use `tid` to filter reference
 data queries — correct behavior for shared reference data. An integration
 test asserts that requests with `tid_A` and `tid_B` return identical results
-for the same query (no tenant leakage in either direction).
+for the same search query (no tenant leakage in either direction).
 
 ### 9.7 Performance posture
 
