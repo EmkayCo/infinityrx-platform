@@ -147,8 +147,10 @@ Extend `packages/qa-harness` with PaySync-specific dev tooling per spec §9.1.
 and return 403 if in production. The qa-harness seed button is excluded from production builds
 via the same tree-shaking mechanism as `RoleSwitcherChip`.
 
-**`RoleSwitcherChip` production exclusion CI check** (spec §6.6):
-Add a step to `.github/workflows/sp0-foundation.yml` (or a new `sp1-paysync.yml`):
+**`RoleSwitcherChip` production exclusion CI check** (spec §6.6 + CONCERN fix):
+The check must prove not just that `RoleSwitcherChip` string is absent, but also that the
+`qa-harness` module's exports are unreachable from production bundle entry points (tree-shaking
+is working, not just that the string was renamed/minified). Add TWO steps:
 
 ```yaml
 - name: Check RoleSwitcherChip absent from production bundle
@@ -158,9 +160,38 @@ Add a step to `.github/workflows/sp0-foundation.yml` (or a new `sp1-paysync.yml`
       exit 1
     fi
     echo "RoleSwitcherChip absent from production bundle — OK"
+
+- name: Check qa-harness exports unreachable from production chunks
+  run: |
+    # Verify no production chunk imports from @infinityrx/qa-harness
+    # (checks the bundle manifest, not just string presence)
+    if node -e "
+      const manifest = require('./portal/operator/.next/build-manifest.json');
+      const chunks = Object.values(manifest.pages).flat();
+      const fs = require('fs');
+      let found = false;
+      chunks.forEach(chunk => {
+        const path = './portal/operator/.next/static/' + chunk;
+        try {
+          const content = fs.readFileSync(path, 'utf8');
+          if (content.includes('qa-harness') || content.includes('RoleSwitcher')) {
+            console.error('FATAL: qa-harness reference in chunk:', chunk);
+            found = true;
+          }
+        } catch(e) {}
+      });
+      process.exit(found ? 1 : 0);
+    "; then
+      echo "qa-harness exports unreachable from production chunks — OK"
+    else
+      exit 1
+    fi
 ```
 
-This step runs after `next build` in the CI workflow.
+Both steps run after `next build` in the CI workflow. The second step checks the build manifest
+to enumerate actual production chunks — this catches cases where tree-shaking fails silently
+(e.g., the string `RoleSwitcherChip` was minified to `r` but the qa-harness module is still
+bundled).
 
 - [ ] Step 4.1: Write `paysync-seed.ts` + backend seed endpoint
 - [ ] Step 4.2: Wire `RoleSwitcherChip` through qa-harness re-export
@@ -240,10 +271,37 @@ as seed endpoint.
 
 ---
 
-### Task 6 — Cleanup: delete copied portal scaffolding
+### Task 6 — Cleanup: delete copied portal scaffolding + wrap echo/ surface
 
 Now that module surfaces are wired and E2E confirms they work, delete the original portal pages
-that were copied (not moved) in Plans B and C.
+that were copied (not moved) in Plans B and C. Also wrap the `echo/` surface (B12 fix).
+
+**echo/ surface disposition (B12 fix — KEEP and wrap):**
+`portal/operator/app/admin/paysync/echo/page.tsx` is REAL operational functionality — the
+Echo Spec 400 operations page (Wave 41 M6). It lists Spec 400 runs with status, totals,
+sha256 hashes; provides a manual-trigger button for the daily candor pipeline; surfaces recent
+status file ingestions. It is NOT a debug route and must NOT be deleted.
+
+Plan E wraps it into the module:
+- Create `packages/modules/paysync/src/surfaces/echo/index.ts` — surface stub (Plan A's
+  surface-13, missed in original scope)
+- Create `packages/modules/paysync/src/surfaces/echo/EchoSpecPage.tsx` — wraps the existing
+  page logic; replaces direct `paysync-api.ts` imports with `EchoClient` from contract layer
+- Add `EchoClient` to `packages/contract/src/paysync/echo-client.ts` — wraps
+  `listEchoRuns()`, `listEchoIngestions()`, `runEchoCandor()` from `portal/shared/lib/paysync-api.ts`
+  (real functions confirmed in inventory §9)
+- Add `echo/` route to `module.config.ts` routes table:
+  `{ path: '/admin/paysync/echo', surface: 'echo', label: 'Echo Spec 400' }`
+- Add Inbox item kind `echo_run_status_received` for echo run status changes:
+  - Add to `InboxItemKind` union in `src/inbox/types.ts`
+  - Add to `INBOX_KIND_ROLE` map: `echo_run_status_received: 'approver'`
+  - Add `EchoRunStatusCard.tsx` stub (Plan D/E fills real implementation)
+  - Add to `module.config.ts` `inboxItemKinds` array
+- Backend paysync-api base path: check `portal/shared/lib/paysync-api.ts` for `PAYSYNC_BASE`
+  to find the existing base URL (inventory §10 CONCERN: may point at adjudication-engine
+  `/admin/paysync`). Document migration path in `EchoClient` comments.
+
+**Portal pages to delete** (9 paths confirmed copied-not-moved in Plans B/C):
 
 | Path to delete | Replaced by |
 |---|---|
@@ -257,19 +315,25 @@ that were copied (not moved) in Plans B and C.
 | `portal/operator/app/payments/batches/` | `packages/modules/paysync/src/surfaces/payment-runs/` |
 | `portal/operator/app/admin/paysync/manual-ap/` | `packages/modules/paysync/src/surfaces/payment-runs/ManualApForm.tsx` |
 
-**DO NOT delete** surfaces not yet rewired by any plan:
-- `portal/operator/app/admin/paysync/page.tsx` — top-level paysync route; now redirects to Inbox
-- `portal/operator/app/admin/paysync/echo/` — if this is a test/debug route, evaluate; do not delete without checking
-- `portal/operator/app/admin/paysync/invoice-sequences/`, `cycle-schedules/`, `email-*/`, `export-templates/`, `gl-account-mappings/` — check if these were rewired in Task 2 of this plan; delete if yes
+**DO NOT delete:**
+- `portal/operator/app/admin/paysync/page.tsx` — top-level paysync route; redirects to Inbox
+- `portal/operator/app/admin/paysync/echo/` — KEPT; now mirrored by module surface (delete original only after E2E step 6.4 confirms module route works end-to-end)
+- `portal/operator/app/admin/paysync/invoice-sequences/`, `cycle-schedules/`, `email-*/`, `export-templates/`, `gl-account-mappings/` — delete only after Task 2 confirms rewired
 
 **After deletion:** run `npm run build` (portal) and `npm run typecheck` — confirm no broken
 imports referencing deleted paths. Fix any remaining cross-references.
 
+- [ ] Step 6.0: Create `packages/modules/paysync/src/surfaces/echo/` surface with `EchoSpecPage.tsx` wrapping existing page logic via `EchoClient`
+- [ ] Step 6.0b: Add `EchoClient` to `packages/contract/src/paysync/echo-client.ts` wrapping `listEchoRuns`, `listEchoIngestions`, `runEchoCandor`
+- [ ] Step 6.0c: Add `echo_run_status_received` to `InboxItemKind`, `INBOX_KIND_ROLE`, `module.config.ts`, and `EchoRunStatusCard.tsx`
+- [ ] Step 6.0d: Add echo route to `module.config.ts` routes table
+- [ ] Step 6.0e: `grep -n "PAYSYNC_BASE\|baseURL\|API_BASE" portal/shared/lib/paysync-api.ts` — document base URL in `EchoClient` comments
 - [ ] Step 6.1: Delete all 9 copied surface directories listed above
 - [ ] Step 6.2: Delete setup directories if rewired in Task 2
 - [ ] Step 6.3: Run `npm run typecheck` + `npm run build` (portal) — clean
-- [ ] Step 6.4: Run E2E again to confirm no regressions after deletion
-- [ ] Step 6.5: Commit — `chore(sp-1-e): delete original portal scaffolding replaced by paysync module surfaces`
+- [ ] Step 6.4: Run E2E again to confirm no regressions after deletion (including echo/ surface accessible via module route)
+- [ ] Step 6.5: Delete `portal/operator/app/admin/paysync/echo/` only after Step 6.4 confirms module route works
+- [ ] Step 6.6: Commit — `feat(sp-1-e): wrap echo/ into module surface + delete copied portal scaffolding`
 
 ---
 
@@ -305,13 +369,17 @@ their results, what was shipped, what is explicitly deferred.
 Plan E is complete when ALL of the following are true:
 
 - [ ] E2E: all 25 steps of `sp1-paysync-round-trip.spec.ts` pass against docker-compose stack
-- [ ] `npm --workspace=@infinityrx/module-paysync test` passes; 100% coverage on all financial (MoneyDisplay/Input, all Decimal paths), PHI (tenant isolation, access logging), security (RBAC on every surface); ≥95% on all other module code
+- [ ] `npm --workspace=@infinityrx/module-paysync test` passes; 100% coverage on all financial (MoneyDisplay/Input, all Decimal paths), PHI (tenant isolation, access logging), security (RBAC on every surface); **≥99% branch coverage** on all other module code (CLAUDE.md Auto-Gate)
 - [ ] `modules/billing` full suite passes; 100% on seed endpoint production-guard path
 - [ ] `modules/core-platform` full suite passes; 100% on test-auth endpoint production-guard path
 - [ ] `npm run typecheck` clean across workspace
 - [ ] `npm run manifest:validate` passes with final `operator-dev.yml`
 - [ ] Production-bundle check CI step: no `RoleSwitcherChip` string in `.next/static/chunks/`
+- [ ] qa-harness exports unreachable CI step: build-manifest.json scan confirms no production chunk references `qa-harness` or `RoleSwitcher` (catches tree-shaking failures not caught by string grep alone)
+- [ ] echo/ surface wrapped into `packages/modules/paysync/src/surfaces/echo/` with `EchoClient`; `echo_run_status_received` Inbox kind added to taxonomy + INBOX_KIND_ROLE + module.config.ts
+- [ ] E2E step added for echo/ surface: navigate to `/admin/paysync/echo` via module route → page renders Echo Spec 400 runs table
 - [ ] All 9 original portal surface directories deleted; no broken imports
+- [ ] `portal/operator/app/admin/paysync/echo/` deleted only AFTER E2E confirms module route functional
 - [ ] `packages/modules/paysync/README.md` exists and covers WHAT/WHY/HOW
 - [ ] `fixtures/uploads/upload-001-healthy.csv` has 20 data rows (not header-only)
 - [ ] `fixtures/seeds/invoices.json` has 10 invoices with amounts as strings
