@@ -52,24 +52,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:  # pragma: no cover — best-effort; missing DB is fine in tests
         pass
 
+    from shared.events.factory import get_event_bus, reset_event_bus  # noqa: PLC0415
+    from .events import wire_consumers  # noqa: PLC0415
+
+    bus = get_event_bus()
     try:
-        from shared.events.factory import get_event_bus, reset_event_bus  # noqa: PLC0415
-        bus = get_event_bus()
         await bus.start()
+        await wire_consumers(bus)  # CR-01 v2: wire consumers (publisher-only no-op, future-safe)
         logger.info("edi-compliance service started", extra={"svc_name": "edi-compliance"})
         yield
+    finally:
         await bus.stop()
         reset_event_bus()
-    except Exception:  # pragma: no cover
-        logger.info("edi-compliance service started (standalone mode)", extra={"svc_name": "edi-compliance"})
-        yield
-
-    try:
-        from shared.db.engine import dispose_engine  # noqa: PLC0415  # pragma: no cover
-        await dispose_engine()  # pragma: no cover
-    except Exception:  # pragma: no cover
-        pass
-    logger.info("edi-compliance service stopped", extra={"svc_name": "edi-compliance"})
+        logger.info("edi-compliance service stopped", extra={"svc_name": "edi-compliance"})
 
 
 class _EmptyDLQRepository:

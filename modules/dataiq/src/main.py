@@ -7,7 +7,10 @@ by integration tests — not just tested in isolation.
 from __future__ import annotations
 
 import logging
+import os
 import uuid
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,6 +43,49 @@ async def _get_dlq_permissions() -> set[str]:
     return set()
 
 
+async def _build_redis_or_fail():
+    """Build an aioredis client from REDIS_URL, or raise RuntimeError if missing.
+
+    CR-01 v2 BLOCK-1 fix: dataiq event consumers require a real Redis client
+    for KPI counter updates. Proceeding with None silently drops all counters.
+    Fail fast at startup so the problem is visible immediately.
+    """
+    import redis.asyncio as redis_async  # noqa: PLC0415
+    redis_url = os.environ.get("REDIS_URL")
+    if not redis_url:
+        raise RuntimeError(
+            "REDIS_URL environment variable is required for dataiq event consumers "
+            "but is not set. Set it to a valid Redis connection URL (e.g., "
+            "redis://localhost:6379/0)."
+        )
+    return redis_async.from_url(redis_url, decode_responses=True)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Wire event consumers with real Redis client at startup.
+
+    CR-01 v2 BLOCK-1 fix: redis=None was silently no-opping all KPI counter
+    updates. Now we fail fast at startup if REDIS_URL is missing.
+    """
+    redis_client = await _build_redis_or_fail()
+
+    from shared.events.factory import get_event_bus, reset_event_bus  # noqa: PLC0415
+    from src.events import wire_consumers  # noqa: PLC0415
+
+    bus = get_event_bus()
+    try:
+        await bus.start()
+        await wire_consumers(bus, redis=redis_client)
+        logger.info("dataiq service started", extra={"svc_name": "dataiq"})
+        yield
+    finally:
+        await bus.stop()
+        reset_event_bus()
+        await redis_client.aclose()
+        logger.info("dataiq service stopped", extra={"svc_name": "dataiq"})
+
+
 def create_app() -> FastAPI:
     """Create and configure the DataIQ FastAPI application."""
     from shared.config import get_settings  # noqa: PLC0415 — deferred to allow test override
@@ -49,6 +95,7 @@ def create_app() -> FastAPI:
     cors_origins = getattr(settings, "CORS_ALLOW_ORIGINS", [])
 
     app = FastAPI(
+        lifespan=lifespan,
         title="InfinityRx DataIQ",
         version="1.0.0",
         description=(

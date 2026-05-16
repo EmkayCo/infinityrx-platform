@@ -23,20 +23,31 @@ CONSUMER_ROUTING = {
 }
 
 
-async def wire_consumers(bus: EventBus, *, openai_client: Any, db_factory: Any) -> None:
+async def wire_consumers(
+    bus: EventBus,
+    *,
+    openai_client: Any,
+    db_factory: Any,
+    idempotency_store: Any | None = None,
+) -> None:
     """Subscribe all ai-nlp consumers at application startup.
 
     AiNlpEventConsumer is class-based and requires injected dependencies.
     A new consumer instance is created per envelope — stateless pattern.
 
+    CR-01 v2 BLOCK-3 fix: openai_client must be a real OpenAIClient, not None.
+    With None, events were marked as processed but NLP analysis was skipped —
+    silent data loss. Fail-fast startup in app.py ensures this is never None.
+
     Args:
         bus: The event bus to subscribe to.
-        openai_client: An initialized OpenAIClient instance.
+        openai_client: An initialized OpenAIClient instance (must not be None).
         db_factory: Callable that returns an AsyncSession (or None for no-DB mode).
+        idempotency_store: Optional override for tests — use a fresh store per test.
     """
     from .consumers import AiNlpEventConsumer
 
-    store = _idempotency_store
+    store = idempotency_store if idempotency_store is not None else _idempotency_store
 
     async def _handle_fwa_claim_flagged(envelope: EventEnvelope) -> None:
         key = envelope.idempotency_key

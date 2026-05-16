@@ -43,16 +43,35 @@ async def _get_dlq_permissions() -> set[str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Startup: install slow-query logger (M-04). Medical claims uses sync sessions
-    injected via request.state.db — instrument the shared DB session factory engine."""
+    """Startup: install slow-query logger (M-04) and wire event consumers.
+
+    CR-01 v2 BLOCK-2 fix: wire_consumers() now receives the module's own
+    get_db_session as the session_factory. Services (ClaimService,
+    UnifiedDrugSpendService) are created per event delivery, not once at
+    startup with a long-lived session.
+    """
+    # M-04: slow-query logger (best-effort, sync engine from module's own factory)
     try:
         from shared.observability.slow_query import install_slow_query_logger  # noqa: PLC0415
-        from shared.db.engine import get_engine  # noqa: PLC0415
+        from src.db.session import _get_engine  # noqa: PLC0415
         threshold = int(os.getenv("SLOW_QUERY_THRESHOLD_MS", "1000"))
-        install_slow_query_logger(get_engine().sync_engine, threshold_ms=threshold)
+        install_slow_query_logger(_get_engine(), threshold_ms=threshold)
     except Exception:  # pragma: no cover — best-effort; missing DB is fine in tests
         pass
-    yield
+
+    # CR-01 v2 BLOCK-2: wire event consumers with per-delivery session factory
+    from shared.events.factory import get_event_bus, reset_event_bus  # noqa: PLC0415
+    from src.events import wire_consumers  # noqa: PLC0415
+    from src.db.session import get_db_session  # noqa: PLC0415
+
+    bus = get_event_bus()
+    try:
+        await bus.start()
+        await wire_consumers(bus, session_factory=get_db_session)
+        yield
+    finally:
+        await bus.stop()
+        reset_event_bus()
 
 
 def create_app() -> FastAPI:
