@@ -250,6 +250,10 @@ def _audit_user_resolver(request: Request) -> AuditContext | None:
 class _TenantResolver:
     """Resolve auth context from bearer JWT for TenantIsolationMiddleware.
 
+    Routes through ``get_current_user`` so that revoked tokens and inactive
+    users are rejected at the middleware layer (defense-in-depth) rather than
+    only at the route-level ``Depends(get_current_user)`` gate.
+
     Returns None for requests without a valid bearer token so that
     unauthenticated routes (health, /auth/login) can be made explicitly
     exempt via the ``@tenant_exempt_route`` decorator without breaking the
@@ -258,21 +262,27 @@ class _TenantResolver:
 
     def __call__(self, request: Request) -> AuthContext | None:
         try:
-            from shared.auth.jwt_tokens import decode_token  # noqa: PLC0415
+            from shared.auth.dependencies import get_current_user  # noqa: PLC0415
+            from fastapi import HTTPException  # noqa: PLC0415
             from fastapi.security.utils import get_authorization_scheme_param  # noqa: PLC0415
+            from shared.auth.exceptions import AuthError  # noqa: PLC0415
 
             auth_header = request.headers.get("Authorization", "")
             scheme, token = get_authorization_scheme_param(auth_header)
             if scheme.lower() != "bearer" or not token:
                 return None
-            claims = decode_token(token)
-            roles: frozenset[str] = frozenset()
+            # Route through the full auth stack (decode + revocation + inactive check).
+            # Rejects revoked tokens and inactive users — same decision the route
+            # Depends(get_current_user) gate would make, applied one layer earlier.
+            user = get_current_user(token=token)
             return AuthContext(
-                user_id=claims.user_id,
-                tenant_id=claims.tenant_id,
-                roles=roles,
+                user_id=user.id,
+                tenant_id=user.tenant_id,
+                roles=frozenset(user.roles),
             )
-        except Exception:  # noqa: BLE001 Ã¢â‚¬â€ best-effort resolver
+        except (AuthError, HTTPException):
+            return None
+        except Exception:  # noqa: BLE001 — best-effort resolver; never fail the request
             return None
 
 

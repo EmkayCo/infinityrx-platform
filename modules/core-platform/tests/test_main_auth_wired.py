@@ -190,3 +190,120 @@ def test_auth_router_mounted_route_path_exists() -> None:
         f"/api/v1/auth/login not in routes â€” auth_api_router not mounted. "
         f"paths: {sorted(paths)}"
     )
+
+
+def test_tenant_resolver_rejects_revoked_token_via_middleware() -> None:
+    """_TenantResolver must return None for revoked tokens.
+
+    Defense-in-depth: tenant context must NOT be set when the token is in the
+    revocation list, so the middleware 401s before any route logic executes.
+    This verifies that _TenantResolver routes through get_current_user (which
+    checks the revocation repo) rather than calling decode_token directly.
+    """
+    from datetime import datetime, timezone, timedelta
+    from shared.auth.dependencies import configure_auth
+    from shared.auth.jwt_tokens import decode_token
+    from shared.auth.tokens_repo import InMemoryRevokedTokenRepo
+    from src.auth.wiring import build_user_loader
+
+    admin = _seed_admin_user()
+    tenant_id = admin.tenant_id
+    admin_id = admin.id
+
+    # Build the live app first (its create_app() calls configure_core_auth
+    # internally, installing a fresh InMemoryRevokedTokenRepo). We then
+    # replace the repo with one that holds a revoked entry AFTER app creation.
+    app, stack = _build_live_app()
+
+    repo = InMemoryRevokedTokenRepo()
+    SessionLocal = db_shim.get_sessionmaker()
+    # Re-configure auth with our repo that has the revocation entry.
+    configure_auth(build_user_loader(SessionLocal), repo)
+
+    token = create_access_token(admin_id, tenant_id, ["tenant_admin"])
+    # Decode to get jti, then immediately revoke it
+    claims = decode_token(token)
+    expires_at = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    repo.revoke(claims.jti, tenant_id, expires_at)
+
+    with stack, TestClient(app) as client:
+        resp = client.get(
+            "/api/v1/users",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    # Middleware must 401 with its own response shape — distinguishes middleware-level
+    # rejection from route-level get_current_user rejection.
+    # Middleware shape: {"error": "unauthenticated", "detail": "Missing or invalid credentials"}
+    # Route-level shape: {"detail": {"error": "unauthorized", "message": "..."}}
+    assert resp.status_code == 401, (
+        f"_TenantResolver must reject revoked tokens via get_current_user. "
+        f"Got {resp.status_code}: {resp.text}"
+    )
+    body = resp.json()
+    assert body.get("error") == "unauthenticated", (
+        "Response must be the middleware-level 401 (not a route-level auth rejection). "
+        f"Expected error='unauthenticated' but got: {body}"
+    )
+
+
+def test_tenant_resolver_rejects_inactive_user() -> None:
+    """_TenantResolver must return None for tokens belonging to inactive users.
+
+    Defense-in-depth: tenant context must NOT be set when the user's status is
+    not 'active', so the middleware 401s before any route logic executes.
+    This verifies that _TenantResolver routes through get_current_user (which
+    checks user.status) rather than only doing JWT signature verification.
+    """
+    from shared.auth.dependencies import configure_auth
+    from shared.auth.tokens_repo import InMemoryRevokedTokenRepo
+    from src.auth.wiring import build_user_loader
+
+    # Seed a suspended user
+    AuthBase.metadata.create_all(db_shim.get_engine())
+    SessionLocal = db_shim.get_sessionmaker()
+    with SessionLocal() as session:
+        seed_system_roles(session)
+        tenant = Tenant(name="InactiveTestTenant", slug="inactive-test-tenant", status="active")
+        session.add(tenant)
+        session.flush()
+        user = User(
+            tenant_id=tenant.id,
+            email="suspended@example.com",
+            display_name="Suspended User",
+            password_hash=hash_password("irrelevant"),
+            status="suspended",
+        )
+        session.add(user)
+        session.flush()
+        _assign_roles(session, user, ["tenant_admin"])
+        session.commit()
+        session.refresh(user)
+        user_id = user.id
+        tenant_id = user.tenant_id
+
+    token = create_access_token(user_id, tenant_id, ["tenant_admin"])
+
+    # Build live app first (its create_app() calls configure_core_auth with a
+    # fresh repo), then re-configure auth so our loader is active for the request.
+    app, stack = _build_live_app()
+    repo = InMemoryRevokedTokenRepo()
+    configure_auth(build_user_loader(SessionLocal), repo)
+
+    with stack, TestClient(app) as client:
+        resp = client.get(
+            "/api/v1/users",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    # Middleware must 401 with its own response shape — distinguishes middleware-level
+    # rejection from route-level get_current_user rejection.
+    assert resp.status_code == 401, (
+        f"_TenantResolver must reject inactive users via get_current_user. "
+        f"Got {resp.status_code}: {resp.text}"
+    )
+    body = resp.json()
+    assert body.get("error") == "unauthenticated", (
+        "Response must be the middleware-level 401 (not a route-level auth rejection). "
+        f"Expected error='unauthenticated' but got: {body}"
+    )
