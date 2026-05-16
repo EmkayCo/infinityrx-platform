@@ -16,8 +16,7 @@ this file; do not duplicate state in `~/.claude/.../memory/*.md`.
 |---|---|---|---|---|
 | B9.A | Infra + contracts | **CLOSED** (gate-close R1+R2+R3 absorbed) | `503cd7b..a114303` (13 commits) | C0-C14 + 3 gate-close absorptions |
 | B9.B | Tier A — **107 specs / FDW 173 / migration (99 PK + 8 UQ) / generic loader / GATE-CLOSE GO** | **CLOSED** (R1→R2→R3, GO at R3) | `93c9d8b..82617b9` | Scope amended: B9.B closes at 107 (not 113); B9.C absorbs the 6 NDC/GCN/MEDID-keyed reclassifieds (now 72 tables, not 66) |
-| B9.C | Tier B — 72 NDC/GCN-keyed joins (was 66; +6 from B9.B reclassification) | NOT STARTED | — | Opens next session |
-| B9.C | Tier B — 66 NDC/GCN joins | NOT STARTED | — | Blocked on B9.B |
+| B9.C | Tier B — 72 NDC/GCN-keyed joins (was 66; +6 from B9.B reclassification) | **STARTED** (schema scaffold only) | `e8eb8d17..` | 8 batch files (72 specs), 8 test files, alembic 0010_fdb_tier_b.py, FDW manifest 131→203. Row population + FK tests deferred to Docker-up. |
 | B9.D | Tier C non-RNDC14 — 16 complex | NOT STARTED | — | Blocked on B9.C |
 | B9.E | RNDC14 standalone | NOT STARTED | — | Blocked on B9.D |
 | B9.F | Pricing big — RNP2 + RPRDPP0 | NOT STARTED | — | Blocked on B9.E |
