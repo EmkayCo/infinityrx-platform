@@ -2,12 +2,22 @@
 
 **Purpose:** self-contained handoff for a fresh Claude Code session window to execute SP-1.
 **Branch:** `wave/B10-w5`
-**Status:** ⛔ **NO-GO — plans require rewrite.** Codex returned 12 BLOCK + 4 CONCERN items on 2026-05-16. Plan-writer drafted against imagined paths (invented SP-0 shell contract, wrong billing model paths, wrong ORM class names, wrong endpoint matrix, invented NACHA function, hash-verifier algorithm mismatch). Spec is mostly fine; plans A-D need rewrite. Full review: `docs/superpowers/codex-sp1-review-r1.md`.
+**Status:** ✅ **GO** — Codex r2 (`docs/superpowers/codex-sp1-review-r2.md`) returned GO-WITH-CHANGES; the last B11 wording change landed in commit `f2fc9626`. All 12 BLOCKs from r1 fixed, all 4 CONCERNs addressed. Plans rewritten on the actual-paths inventory at `docs/superpowers/sp1-actual-paths-inventory.md`. The originating session believes this is ready to execute — verify Codex r2 verdict yourself before starting.
 **Created:** 2026-05-16 by the SP-0 → SP-1 brainstorm session.
 
 ---
 
-## ⛔ DO NOT EXECUTE — Codex NO-GO
+## ✅ Ready to execute (Codex r2 GO)
+
+**History:** Codex r1 returned NO-GO with 12 BLOCK + 4 CONCERN items because the original plan-writer drafted against imagined paths. The plans were rewritten using a verified-from-HEAD path inventory (`docs/superpowers/sp1-actual-paths-inventory.md`) and re-reviewed by Codex r2 (`docs/superpowers/codex-sp1-review-r2.md`) — verdict: GO-WITH-CHANGES, with the last B11 wording fix landed in commit `f2fc9626`.
+
+**Fresh session must:**
+1. Open this file (you already did).
+2. Re-read `docs/superpowers/codex-sp1-review-r2.md` and confirm the GO verdict yourself.
+3. Read `docs/superpowers/sp1-actual-paths-inventory.md` — the verified path/class/function reference. Trust it for paths the plans cite, but verify additions before extending.
+4. Start with Plan A. Before any code, fire pre-execute Codex on Plan A (per Wave Control Ledger): `codex exec "Pre-execute review of SP-1 Plan A at docs/superpowers/plans/2026-05-16-sp1-plan-a-module-scaffold-inbox-spine.md. Identify any task that lacks an atomic commit unit or measurable gate criterion. Output GO/NO-GO."`
+
+## Original NO-GO history (for context)
 
 **Plans A-D were drafted against imagined code paths.** Executing as written will:
 - Break alembic migrations against wrong model paths (`models/claims.py` does not exist; actual is `models/tables.py`)
@@ -31,18 +41,23 @@ The spec itself is broadly fine (broadly-covered intent). The 12 BLOCK items are
 ### Spec
 - `docs/superpowers/specs/2026-05-16-sp1-paysync-operator-portal-design.md` (commit `5e8abf88`)
 
-### Plans (5 sequential, A → E)
-| Commit | Plan | Goal |
-|---|---|---|
-| `e3ff11a1` | `2026-05-16-sp1-plan-a-module-scaffold-inbox-spine.md` | `packages/modules/paysync` skeleton, Inbox spine + item taxonomy, 6 shared primitives, 12 surface stubs, BFF skeleton, fixtures layout |
-| `ff8af128` | `2026-05-16-sp1-plan-b-uploads-cycles.md` | Upload backend resource (model, alembic 0011, parser, dedup, router), Inbox feed endpoint, uploads surface (dropzone/list/detail/viewer), cycles rewire to contract layer |
-| `0476fdd1` | `2026-05-16-sp1-plan-c-batches-ar-ap.md` | `upload_id` FK on Batch/InvoiceLine/PaymentRun (alembic 0012), RBAC server-side audit + gap-fill, 6 financial surfaces wired, 6 contract clients, 10 Inbox cards |
-| `dea5fa57` | `2026-05-16-sp1-plan-d-files-journal.md` | FileArtifact model (alembic 0013), NACHA/835 generate+download router, sync hash-chain verifier on core-platform, Files + Journal surfaces, `HashChainBadge` 4 states |
-| `25c70bd0` | `2026-05-16-sp1-plan-e-reports-setup-e2e.md` | Reports + Setup surfaces, fixture population, QA-harness seed button + role-switcher, 25-step Playwright E2E, `RoleSwitcherChip` prod-bundle CI check, portal scaffolding cleanup |
+### Plans (5 sequential, A → E) — REWRITTEN against verified paths
 
-### Codex review (pending)
-- `docs/superpowers/codex-sp1-review-r1.md` — being generated; output expected by start of execution.
-- **Hard rule:** do NOT begin Plan A execution until codex review returns and any BLOCK items are resolved.
+The original plan commits (`e3ff11a1` Plan A, `ff8af128` Plan B, `0476fdd1` Plan C, `dea5fa57` Plan D, `25c70bd0` Plan E) had imagined paths and triggered Codex r1 NO-GO. They were rewritten as:
+
+| Commit | Plan | Codex BLOCKs fixed |
+|---|---|---|
+| `e397e782` | `2026-05-16-sp1-plan-b-uploads-cycles.md` | B2 (`models/tables.py`), B7 (PHI on member_id), B8 (per-endpoint cross-tenant), B9 (EventEnvelope), B10 (99% coverage) |
+| `365b94b0` | `2026-05-16-sp1-plan-c-batches-ar-ap.md` | B3 (real ORM names), B4 (real routes), B8, B10 |
+| `a99b83bf` | `2026-05-16-sp1-plan-d-files-journal.md` | B5 (NACHA in payment-processing), B6 (`compute_entry_hash` kwargs), B8, B10 |
+| `587724b1` | `2026-05-16-sp1-plan-a-module-scaffold-inbox-spine.md` | B1 (real shell paths), B10, B11 (no stub-as-done) |
+| `dc861fbc` | `2026-05-16-sp1-plan-e-reports-setup-e2e.md` | B12 (echo/ wrap not delete), C4 (RoleSwitcherChip CI), B10 |
+| `f2fc9626` | _r2 follow-up: B11 wording tightening + codex r2 review_ | B11 final |
+
+### Codex reviews
+- `docs/superpowers/codex-sp1-review-r1.md` — r1 NO-GO (12 BLOCK + 4 CONCERN). Historical.
+- `docs/superpowers/codex-sp1-review-r2.md` — r2 GO-WITH-CHANGES. Effective verdict after `f2fc9626`: **GO**.
+- `docs/superpowers/sp1-actual-paths-inventory.md` — verified inventory used in the rewrites. Trust it; verify additions before extending.
 
 ---
 
