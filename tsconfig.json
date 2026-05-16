@@ -5,6 +5,7 @@
     { "path": "./packages/contract" },
     { "path": "./packages/auth" },
     { "path": "./packages/ui" },
-    { "path": "./packages/qa-harness" }
+    { "path": "./packages/qa-harness" },
+    { "path": "./packages/shell" }
   ]
 }
