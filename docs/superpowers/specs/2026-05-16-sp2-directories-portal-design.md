@@ -1,6 +1,6 @@
 # SP-2 — Directories Portal / Reference Data Control Plane
 
-**Status:** Spec revised (r1+r2 codex NO-GO addressed); pending r3 codex review then plan-writing.
+**Status:** Spec revised (r1+r2+r3 codex NO-GO addressed); ready for plan-writing.
 **Date:** 2026-05-16
 **Owner:** Mike
 **Sub-project of:** Operator Portal & Platform Frontend milestone
@@ -12,8 +12,8 @@
 
 ## 1. Problem statement
 
-The InfinityRx platform consumes ~15–16 static reference datasets spanning
-prescribers, pharmacies, drugs, procedure/diagnosis codes, pricing, and
+The InfinityRx platform consumes reference datasets spanning prescribers,
+pharmacies, drugs, procedure/diagnosis codes, pricing, and
 exclusions/sanctions. These datasets power claim adjudication, eligibility
 checks, and regulatory compliance on every transaction. Today:
 
@@ -21,10 +21,11 @@ checks, and regulatory compliance on every transaction. Today:
   module's narrow API. There is no single place an operator can search
   "prescriber NPI 1234567890," "NDC 00069-0010-83," or "SAM excluded entity
   ACME Corp" and get a coherent answer.
-- **Ingestion is opaque.** All 15 loaders run on cron schedules in
-  `shared/data_ingestion/`. When a loader fails, the operator sees nothing
-  in the portal — no freshness timestamp, no record count, no error. They
-  discover data rot through a downstream adjudication failure.
+- **Ingestion is opaque.** Batch loaders run on varying schedules (or
+  manually, as with NCPDP) in `shared/data_ingestion/`. When a loader
+  fails, the operator sees nothing in the portal — no freshness timestamp,
+  no record count, no error. They discover data rot through a downstream
+  adjudication failure.
 - **Provenance is missing.** There is no portal surface that tells an
   operator "this claim was adjudicated against NPPES data loaded on
   2026-05-10 with 9,494,438 records." That linkage exists in the DB but is
@@ -35,7 +36,8 @@ checks, and regulatory compliance on every transaction. Today:
   on any exclusion list — the data is there, the navigation is not.
 
 SP-2 delivers a Reference Data Control Plane: a unified search spine over
-all 19 source datasets (6 browse clusters) plus an ingestion console that makes freshness, record
+18 inventoried reference directories (15 with confirmed batch loaders → 6
+browse clusters) plus an ingestion console that makes freshness, record
 counts, and errors observable and actionable. It is the second vertical
 built on the SP-0 spine, analogous to SP-1 (PaySync) in structure.
 
@@ -43,15 +45,16 @@ built on the SP-0 spine, analogous to SP-1 (PaySync) in structure.
 
 ## 2. Goals
 
-1. **Federated Cmd+K search** — typeahead across all 19 source datasets (6 browse clusters) in a single
-   command palette. An operator can find any NPI, NDC, NPI, HCPCS code,
+1. **Federated Cmd+K search** — typeahead across all 6 browse clusters in a single
+   command palette. An operator can find any NPI, NDC, HCPCS code,
    ICD-10 code, SAM exclusion, OFAC entity, or Medicaid BIN in one keypress.
 2. **Per-dataset browse surfaces** — every dataset is viewable, filterable,
    and drillable. Detail pages surface provenance (source, load date, record
    count of the containing run) and freshness indicators.
 3. **Ingestion console** — operators can see the status of every ingestion
    run (`shared.ingestion_runs`), trigger a manual refresh via the existing
-   `POST /{source}/trigger` API at `shared/data_ingestion/api/routes.py:127`,
+   `POST /api/v1/data-ingestion/{source}/trigger` API
+   (`shared/data_ingestion/api/routes.py:127` — proxied through BFF),
    and watch it complete with a record-count delta.
 4. **Data-quality dashboard** — sidebar showing freshness chips (last-loaded
    date per dataset), ingestion alerts (non-zero `records_errored`), and
@@ -71,9 +74,9 @@ built on the SP-0 spine, analogous to SP-1 (PaySync) in structure.
 ## 3. Non-goals (explicitly out of SP-2)
 
 - **No row-level edits.** Reference data is read-only in the portal. The
-  only write operation is `POST /{source}/trigger` (ingestion refresh).
-  Tenant-level overrides (e.g., MAC price overrides in drug-database) are a
-  separate surface not in SP-2.
+  only write operation is `POST /api/v1/data-ingestion/{source}/trigger`
+  (ingestion refresh). Tenant-level overrides (e.g., MAC price overrides in
+  drug-database) are a separate surface not in SP-2.
 - **No network management.** Pharmacy network CRUD (add/remove pharmacies,
   set network tiers, PSAO management) is a separate later layer. SP-2 shows
   network membership as a read-only attribute on pharmacy records.
@@ -98,7 +101,7 @@ built on the SP-0 spine, analogous to SP-1 (PaySync) in structure.
 |---|---|---|---|
 | D1 | Vertical | Directories portal (Reference Data Control Plane) | user brainstorm 2026-05-16 |
 | D2 | B9 dependency posture | SP-2 is UI-only. B9 closes as a parallel B-wave. FDB surfaces show "pending B9" banner + mock data until B9 lands. | user 2026-05-16 |
-| D3 | Datasets in scope | **15 confirmed loader sources → 6 browse clusters.** Confirmed ingestion source keys (from `_SOURCE_NAME` constants in `shared/data_ingestion/sources/`): `nppes` (prescribers), `ncpdp` (pharmacy — loaded by `ncpdp_dataq.py`), `fda_ndc`, `fda_orange_book`, `fda_purple_book`, `fda_drug_shortages`, `fda_rems` (drugs), `hcpcs`, `icd10_cm` (codes), `cms_asp`, `cms_nadac` (pricing), `cms_opt_out`, `ofac_sdn`, `sam_exclusions`, `state_medicaid_bins` (exclusions). **No confirmed loaders for:** `relay-health` (reference files only in `data/reference/relay-health/`), `fdb` (B9-blocked), `bpg` (live external API — no batch loader). These 3 are present in `data/reference/` but have no `_SOURCE_NAME` in `shared/data_ingestion/sources/`. Browse surfaces: prescribers / pharmacies / drugs / codes / pricing / exclusions. Format-only dirs excluded. | user + `ls data/reference/` + `_SOURCE_NAME` grep verified |
+| D3 | Datasets in scope | **15 confirmed loader sources → 6 browse clusters.** Confirmed ingestion source keys (from source-name constants in `shared/data_ingestion/sources/`; note: most files use `_SOURCE_NAME`, but `nppes.py` uses `_SOURCE = "nppes"`, `sam_exclusions.py` uses `_SOURCE = "sam_exclusions"`, `state_medicaid_bins.py` uses `source_name = "state_medicaid_bins"` — the string values are what the ingestion API validates): `nppes` (prescribers), `ncpdp` (pharmacy — loaded by `ncpdp_dataq.py`; **manual-only** per `DEFAULT_SCHEDULES["ncpdp"] = None`), `fda_ndc`, `fda_orange_book`, `fda_purple_book`, `fda_drug_shortages`, `fda_rems` (drugs), `hcpcs`, `icd10_cm` (codes), `cms_asp`, `cms_nadac` (pricing), `cms_opt_out`, `ofac_sdn`, `sam_exclusions`, `state_medicaid_bins` (exclusions). **`DEFAULT_SCHEDULES` also contains:** `nppes_monthly`, `nppes_deactivation`, `rxnorm`, `oig_leie`, `dea_registrations` — these additional scheduler source keys represent sub-modes or additional sources not in the 15 primary loader files above; plan-writer must reconcile which appear in the ingestion console. **No confirmed loaders for:** `relay-health` (reference files only in `data/reference/relay-health/`), `fdb` (B9-blocked), `bpg` (live external API — no batch loader). These 3 are present in `data/reference/` but have no source-name constant in `shared/data_ingestion/sources/`. Browse surfaces: prescribers / pharmacies / drugs / codes / pricing / exclusions. Format-only dirs excluded. | user + `ls data/reference/` + source-name grep verified |
 | D4 | IA shape | Search-First — Cmd+K command palette as centerpiece; federated typeahead across all datasets; data-quality dashboard as secondary spine in sidebar (freshness chips, ingestion alerts, record counts) | user 2026-05-16 |
 | D5 | Shippable bar | Cross-dataset round trip on synthetic data: Cmd+K → search → drill → provenance/freshness/audit → trigger ingestion → watch complete → record-count delta → dismiss/escalate alert. Every dataset browsable. B9-dependent surfaces mocked with banner. | user 2026-05-16 |
 | D6 | Build approach | Approach A — Search spine first (federated search infra + Cmd+K + ranking in Plan 1; per-dataset surfaces wired into search from day 1 in subsequent plans). | user 2026-05-16 |
@@ -150,10 +153,10 @@ SP-0 having shipped them before plan execution begins.
 Each dataset has a canonical attribute model used by the federated search
 index, the browse surface, and the freshness dashboard.
 
-| # | Source key (`_SOURCE_NAME`) | `data/reference/` dir | Loader file | Owning module | Record identifier | Has batch loader? | B9-blocked? |
+| # | Source key (string value) | `data/reference/` dir | Loader file | Owning module | Record identifier | Has batch loader? | B9-blocked? |
 |---|---|---|---|---|---|---|---|
-| 1 | `nppes` | `nppes/` | `sources/nppes.py` | prescriber-directory | `npi` (10-digit) | Yes | No |
-| 2 | `ncpdp` | `ncpdp/` + `ncpdp-dataq/` | `sources/ncpdp_dataq.py` (`_SOURCE_NAME="ncpdp"`) | pharmacy-directory | `nabp` | Yes | No |
+| 1 | `nppes` | `nppes/` | `sources/nppes.py` (`_SOURCE = "nppes"`) | prescriber-directory | `npi` (10-digit) | Yes | No |
+| 2 | `ncpdp` | `ncpdp/` + `ncpdp-dataq/` | `sources/ncpdp_dataq.py` (`_SOURCE_NAME = "ncpdp"`) — **manual-only** (`DEFAULT_SCHEDULES["ncpdp"] = None`) | pharmacy-directory | `nabp` | Yes — manual | No |
 | 3 | _(no loader)_ | `relay-health/` + `RelayHealth/` | No `_SOURCE_NAME` found — reference files only | pharmacy-directory | `nabp` | **No — open question §10.7** | No |
 | 4 | _(no loader — B9)_ | `fdb/` | B9-blocked (FDB Tier B–D) | drug-database | `ndc` | **No — B9 parallel track** | **Yes — B9** |
 | 5 | `fda_ndc` | `fda-ndc/` | `sources/fda_ndc.py` | drug-database | `ndc` (11-digit) | Yes | No |
@@ -168,23 +171,39 @@ index, the browse surface, and the freshness dashboard.
 | 14 | _(no loader)_ | `bpg/` | No `_SOURCE_NAME` — live external API (`patientlens-api`); no batch ingestion | drug-database | `ndc` | **No — live API §10.6** | No |
 | 15 | `cms_opt_out` | `cms-opt-out/` | `sources/cms_opt_out.py` | prescriber-directory | `npi` | Yes | No |
 | 16 | `ofac_sdn` | `ofac-sdn/` | `sources/ofac_sdn.py` | payment-processing | entity name | Yes | No |
-| 17 | `sam_exclusions` | `sam_exclusions/` | `sources/sam_exclusions.py` | prescriber-directory | SAM GUID | Yes | No |
-| 18 | `state_medicaid_bins` | `medicaid/` | `sources/state_medicaid_bins.py` | billing | BIN | Yes | No |
+| 17 | `sam_exclusions` | `sam_exclusions/` | `sources/sam_exclusions.py` (`_SOURCE = "sam_exclusions"`) | prescriber-directory | SAM GUID | Yes | No |
+| 18 | `state_medicaid_bins` | `medicaid/` | `sources/state_medicaid_bins.py` (`source_name = "state_medicaid_bins"`) | billing | BIN | Yes | No |
 
-> **Source key usage:** The `_SOURCE_NAME` value is what `IngestionSchedule.source` stores
-> and what `POST /api/v1/data-ingestion/{source}/trigger` validates against. The ingestion
-> console and trigger BFF routes MUST use these underscore-form keys (e.g., `fda_ndc`,
+> **Source key usage:** The source-name string value (whether from `_SOURCE_NAME`, `_SOURCE`,
+> or `source_name` — three different constant names across loader files, same semantic meaning)
+> is what `IngestionSchedule.source` stores and what
+> `POST /api/v1/data-ingestion/{source}/trigger` validates against. The ingestion console
+> and trigger BFF routes MUST use these underscore-form string values (e.g., `fda_ndc`,
 > `cms_opt_out`), NOT hyphenated directory names. Sources with "no loader" (relay-health,
 > fdb, bpg) have no `IngestionSchedule` row and cannot be triggered; the ingestion console
 > shows them as "No ingestion schedule" per §6.4.
+>
+> **DEFAULT_SCHEDULES note:** The scheduler (`shared/data_ingestion/scheduler.py`) defines
+> `DEFAULT_SCHEDULES` with these keys that are NOT among the 15 primary loader source names:
+> `nppes_monthly`, `nppes_deactivation` (NPPES sub-modes), `rxnorm`, `oig_leie`,
+> `dea_registrations` (additional exclusion/drug sources). Plan-writer must determine whether
+> to expose these in the ingestion console and whether their loaders exist in
+> `shared/data_ingestion/sources/`. (Confirmed: `rxnorm.py` (`_SOURCE_NAME = "rxnorm"`),
+> `oig_leie.py` (`_SOURCE = "oig_leie"`), `dea_registrations.py` (`_SOURCE = "dea_registrations"`)
+> DO exist — these are 3 additional batch loaders not listed in D3's 15. Plan-writer must
+> reconcile whether to include them in the ingestion console and browse clusters.)
 
 > Note: D3 specifies **15 confirmed batch-loader sources → 6 browse clusters**.
 > 3 additional `data/reference/` directories (`relay-health/`, `fdb/`, `bpg/`)
-> have no confirmed `_SOURCE_NAME` in `shared/data_ingestion/sources/` —
+> have no confirmed loader source-name constant in `shared/data_ingestion/sources/` —
 > relay-health and bpg are open questions (§10.6, §10.7); fdb is B9-blocked.
 > The 18-row table above is the authoritative inventory; the 6 browse clusters
 > are the authoritative UI grouping. Sources 3, 4, 14 ("no loader") display
 > in the portal browse surfaces but have no ingestion-console trigger row.
+> Additionally, `rxnorm`, `oig_leie`, and `dea_registrations` have confirmed
+> loaders in `shared/data_ingestion/sources/` and are in `DEFAULT_SCHEDULES`
+> but are NOT in D3's 15 — plan-writer must reconcile whether to include them
+> in the ingestion console and which browse cluster (if any) they belong to.
 
 **Per-dataset attribute model (minimum fields for search index):**
 
@@ -318,10 +337,10 @@ authentication.
 | Cancel run | `POST /api/v1/data-ingestion/{source}/cancel` | shared ingestion `routes.py:355` — `async def cancel_run` |
 | Field catalog | `GET /api/v1/data-ingestion/field-catalog` | shared ingestion `routes.py:406` — `async def get_field_catalog` |
 
-> Note: the router is defined without a prefix in `routes.py`; it is mounted by each
-> module's `create_app()` with `prefix="/api/v1/data-ingestion"` per the docstring at
-> `routes.py:3–6`. Plan-writer must verify which module(s) currently mount this router
-> (see §10.3).
+> Note: the router is defined without a prefix in `routes.py`. The docstring at
+> `routes.py:3–6` describes the intended mount pattern (`prefix="/api/v1/data-ingestion"`),
+> but no `include_router(ingestion_router)` was found in any module's `main.py` — mount is
+> unconfirmed. Plan-writer must verify which module(s) currently mount this router (see §10.3).
 
 **Needs wiring in SP-2 (new BFF-level routes that aggregate existing backends):**
 
@@ -425,15 +444,18 @@ pattern.
 
 ### 6.4 Ingestion console (`src/ingestion/`)
 
-- `IngestionConsolePage` — table of all registered sources (from
-  `GET /ingest/schedules`) with last-run status, last-run time, record
-  counts, error count, next scheduled run time.
-- `RunHistoryDrawer` — drawer showing run history for a single source:
+- `IngestionConsolePage` — table of all registered sources (from BFF
+  `GET /api/directories/quality` which reads `GET /api/v1/data-ingestion/status`)
+  with last-run status, last-run time, record counts, error count, next
+  scheduled run time.
+- `RunHistoryDrawer` — drawer showing run history for a single source via BFF
+  `GET /api/directories/ingest/{source}/history` (proxied to `routes.py:295`):
   `records_inserted`, `records_updated`, `records_errored`, wall time,
   status (`completed` / `completed_core` / `failed` / `skipped_unchanged`).
-- `TriggerRefreshButton` — calls `POST /ingest/{source}/trigger` (via BFF);
-  shows in-progress spinner; polls `GET /ingest/runs/{run_id}` every 5s
-  until `status !== 'running'`; on completion shows record-count delta.
+- `TriggerRefreshButton` — calls BFF `POST /api/directories/ingest/{source}/trigger`
+  (which proxies to `POST /api/v1/data-ingestion/{source}/trigger`, `routes.py:127`);
+  shows in-progress spinner; polls BFF `GET /api/directories/ingest/runs/{run_id}`
+  every 5s until `status !== 'running'`; on completion shows record-count delta.
 - `RunProgressBar` — live progress visualization while a run is in flight:
   `records_processed` / `records_in_source` (if known) from polling.
 
@@ -655,7 +677,7 @@ Per SP-0 §9 + project Auto-Gate + `.claude/rules/testing.md`.
 ### 9.2 Coverage gates
 
 Per `.claude/rules/testing.md` (corrected from SP-1 plans which erroneously
-used 95%):
+used an insufficient branch coverage percentage):
 - 100% on security paths (auth validation in BFF route handlers, JWT
   extraction, 401 guard).
 - 100% on any financial logic — SP-2 has none (pricing data is displayed,
@@ -686,7 +708,7 @@ used 95%):
 | `exclusions-ofac.json` | 5 OFAC SDN records (real public data from `data/reference/ofac-sdn/sdn.csv`) |
 | `exclusions-sam.json` | 5 SAM exclusion records (real public data from `data/reference/sam_exclusions/`) |
 | `ingestion-runs.json` | 3 ingestion run records: one completed, one failed (records_errored=3), one running |
-| `ingestion-schedules.json` | Schedules for sources with confirmed loader source_name keys (see §5.2 source key table); 15 confirmed loaders in `shared/data_ingestion/sources/` |
+| `ingestion-schedules.json` | Schedules for sources with confirmed loader source-name keys (see §5.2 source key table); includes the 15 primary loaders plus `rxnorm`, `oig_leie`, `dea_registrations` if plan-writer includes them; `ncpdp` shows schedule=null (manual-only) |
 
 ### 9.4 Search relevance regression tests
 
@@ -830,7 +852,7 @@ Intentionally deferred to plan-writing. Plan-writer must resolve:
 - `modules/pharmacy-directory/src/api/router.py` — pharmacy backend routes
 - `modules/drug-database/src/api/router.py` — drug backend routes
 - `shared/data_ingestion/api/routes.py` — ingestion trigger + run status API
-- `shared/data_ingestion/sources/` — 15 confirmed batch loaders (verified `_SOURCE_NAME` keys: `nppes`, `ncpdp`, `fda_ndc`, `fda_orange_book`, `fda_purple_book`, `fda_drug_shortages`, `fda_rems`, `hcpcs`, `icd10_cm`, `cms_asp`, `cms_nadac`, `cms_opt_out`, `ofac_sdn`, `sam_exclusions`, `state_medicaid_bins`); 3 additional `data/reference/` dirs (`relay-health/`, `fdb/`, `bpg/`) have no confirmed `_SOURCE_NAME`
+- `shared/data_ingestion/sources/` — 15 confirmed batch loaders (verified source-name string values: `nppes`, `ncpdp`, `fda_ndc`, `fda_orange_book`, `fda_purple_book`, `fda_drug_shortages`, `fda_rems`, `hcpcs`, `icd10_cm`, `cms_asp`, `cms_nadac`, `cms_opt_out`, `ofac_sdn`, `sam_exclusions`, `state_medicaid_bins`; plus 3 additional schedulable loaders in `DEFAULT_SCHEDULES`: `rxnorm`, `oig_leie`, `dea_registrations`); 3 `data/reference/` dirs (`relay-health/`, `fdb/`, `bpg/`) have no confirmed loader source-name
 - `shared/data_ingestion/models.py` — `IngestionRun` + `IngestionSchedule` ORM models
 - `data/reference/` — reference data directory verified by `ls data/reference/`
 
@@ -851,8 +873,9 @@ Intentionally deferred to plan-writing. Plan-writer must resolve:
 3. Plans must: verify ingestion API mount host (§10.3), confirm `members/`
    exclusion from scope (§10.4), resolve `relay-health/` canonical source
    (§10.7), clarify `medicaid/` surface label (§10.8), and not repeat the
-   SP-1 NO-GO failure modes (invented paths, wrong ORM names, 95% coverage
-   gate, missing EventEnvelope, missing cross-tenant tests).
+   SP-1 NO-GO failure modes (invented paths, wrong ORM names, insufficient
+   coverage gate below 99%/100% thresholds, missing EventEnvelope,
+   missing cross-tenant tests).
 
 ---
 
