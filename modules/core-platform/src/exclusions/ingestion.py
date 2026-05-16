@@ -39,11 +39,12 @@ def _parse_date(raw: str | None) -> Optional[datetime]:
     raw = raw.strip()
     if not raw:
         return None
-    for fmt in ("%Y%m%d", "%Y-%m-%d", "%m/%d/%Y"):
+    for fmt in ("%Y%m%d", "%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y"):
         try:
             return datetime.strptime(raw, fmt)
         except ValueError:
             continue
+    logger.warning("excl_parse_date_unrecognized excl_raw_date=%r", raw)
     return None
 
 
