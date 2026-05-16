@@ -8,6 +8,7 @@ branding:
   primary_color: "#1f2937"
 modules:
   - prescriber-directory
+  - paysync
 required_backends: []
 required_shared_services:
   - postgres
