@@ -308,11 +308,65 @@ Plan B replaces the stub with a real call to `GET /api/v1/billing/inbox?role=<ro
 **File:** `packages/modules/paysync/src/module.config.ts`
 
 This is the composition entry point consumed by SP-0's `generate-composition.ts`. It must
-satisfy the `ModuleConfig` type from `packages/shell/src/types/module-config.ts` (confirmed
-on disk per SP-0 Plan D).
+satisfy the `ModuleConfig` type. **IMPORTANT (B1 fix):** `packages/shell/src/types/module-config.ts`
+does NOT exist. The `packages/shell/src/` directory contains only: `__mocks__/`, `__tests__/`,
+`_generated/`, `auth/`, `index.ts`, `middleware.ts`, `qa/`, `routes/`, `shell/`. There is no
+`types/` subdirectory.
+
+**Resolution:** Plan A creates `packages/shell/src/types/module-config.ts` as new scope. This
+file defines the `ModuleConfig` interface that the shell's composition layer will import. The
+builder must:
+1. `grep -rn "ModuleConfig" packages/shell/src/` before writing to check if it already exists
+   under a different path or is exported from `index.ts`.
+2. If no existing export is found: create `packages/shell/src/types/module-config.ts` with the
+   explicit interface (see below) and re-export from `packages/shell/src/index.ts`.
+3. If an existing export is found: use that import path instead of the invented one.
+
+**`ModuleConfig` interface** (to be created if not already present):
+
+```ts
+// packages/shell/src/types/module-config.ts
+export interface RouteConfig {
+  path: string;
+  surface: string;
+  label: string;
+}
+
+export interface NavItem {
+  label: string;
+  path: string;
+  icon: string;
+}
+
+export interface InboxKindRegistration {
+  kind: string;
+  card: () => Promise<unknown>;
+}
+
+export interface ModuleConfig {
+  id: string;
+  displayName: string;
+  routes: RouteConfig[];
+  rbac: Record<string, string[]>;
+  inboxItemKinds: InboxKindRegistration[];
+  navTree: {
+    primary: NavItem[];
+  };
+  qa?: {
+    RoleSwitcherChip?: () => Promise<unknown>;
+  };
+}
+```
+
+This interface must also be added to `packages/shell/src/index.ts` as a named export so
+other packages can `import type { ModuleConfig } from '@infinityrx/shell'`.
 
 ```ts
 // packages/modules/paysync/src/module.config.ts
+// Import path depends on what Task 5 Step 5.0 finds:
+// - If types/module-config.ts was created new: import from '@infinityrx/shell/types/module-config.js'
+// - If ModuleConfig is already exported from shell index.ts: use that path
+// The builder MUST grep before choosing the import path.
 import type { ModuleConfig } from '@infinityrx/shell/types/module-config.js';
 
 export default {
@@ -381,14 +435,32 @@ export default {
 } satisfies ModuleConfig;
 ```
 
-**Inbox card stubs** (Plan A creates empty card stubs; Plans B/C/D/E replace with real components):
-Create `src/inbox/cards/<Name>.tsx` for each of the 11 kinds — each renders a one-line
-`<div>` with the kind name. These satisfy the dynamic import references in `module.config.ts`.
+**Inbox card stubs — stub-as-done policy (B11 fix):**
+Plan A MUST NOT count stub files as task-complete at any gate. The 11 card stubs created here
+render a minimal but functional skeleton: they accept typed props (the `InboxItem` shape from
+`types.ts`) and render the kind name + a placeholder body. They are NOT empty `<div>` files
+that pass no props — that would be a dead stub. Plans B/C/D replace each stub with a real
+component; the stub must be type-safe so the replacement is a drop-in.
 
-- [ ] Step 5.1: Write `src/module.config.ts` exactly as shown
-- [ ] Step 5.2: Create 11 card stubs under `src/inbox/cards/`
-- [ ] Step 5.3: Verify `tsc -b` clean
-- [ ] Step 5.4: Commit — `feat(sp-1-a): module.config.ts entry point + 11 inbox card stubs`
+Each stub must:
+- Accept `item: InboxItem` as a prop (typed from `types.ts`)
+- Render `<div data-testid="inbox-card-{kind}">{item.kind}</div>`
+- Have a unit test asserting it renders without crashing given a minimal `InboxItem` fixture
+
+These stubs are functional enough to verify dynamic imports in `module.config.ts` resolve, and
+type-safe enough that Plans B/C/D can replace the body without touching the interface.
+
+**Surface `index.ts` stubs — same policy:** each surface `index.ts` stub (Task 2) exports a
+typed `SurfaceConfig` constant. It must satisfy the surface shape from `module.config.ts` routes
+so that the route table compiles. A plain `export const UploadsSurface = {}` without the correct
+shape will fail `tsc -b` — which is the desired gate.
+
+- [ ] Step 5.0: `grep -rn "ModuleConfig" packages/shell/src/` — determine if type already exists and at which path
+- [ ] Step 5.1: If not found: create `packages/shell/src/types/module-config.ts` with the `ModuleConfig` interface above; add named re-export to `packages/shell/src/index.ts`
+- [ ] Step 5.2: Write `src/module.config.ts` using the import path confirmed in Step 5.0
+- [ ] Step 5.3: Create 11 typed card stubs under `src/inbox/cards/` — each accepts `item: InboxItem`, renders kind + data-testid, has a unit test
+- [ ] Step 5.4: Verify `tsc -b` clean
+- [ ] Step 5.5: Commit — `feat(sp-1-a): module.config.ts entry point + ModuleConfig type (new in shell/types/) + 11 typed card stubs`
 
 ---
 
@@ -431,14 +503,16 @@ Plan A is complete when ALL of the following are true:
 
 - [ ] `npm run typecheck` exits 0 (all workspace project references compile)
 - [ ] `npm --workspace=@infinityrx/module-paysync test` — all tests pass, 0 failing
-- [ ] Coverage gates: 100% branch on `MoneyDisplay`, `MoneyInput`, `RbacGate` (financial + security paths); ≥95% on Inbox components
+- [ ] Coverage gates: 100% branch on `MoneyDisplay`, `MoneyInput`, `RbacGate` (financial + security paths); **≥99% branch coverage** on Inbox components (CLAUDE.md Auto-Gate)
 - [ ] `npm run manifest:validate` exits 0 with `paysync` in modules list
-- [ ] `packages/modules/paysync/src/module.config.ts` exports a value satisfying `ModuleConfig` (tsc confirms)
-- [ ] All 11 inbox card stubs exist and dynamic imports in `module.config.ts` resolve
-- [ ] All 12 surface `index.ts` stubs exist
-- [ ] Fixtures directory layout exists with 3 CSV stubs + 6 JSON stubs (even if stub content)
+- [ ] `packages/shell/src/types/module-config.ts` exists (created by Plan A or confirmed pre-existing at a verified path)
+- [ ] `packages/modules/paysync/src/module.config.ts` exports a value satisfying `ModuleConfig` (tsc confirms via `satisfies ModuleConfig`)
+- [ ] All 11 inbox card stubs exist, are typed (accept `item: InboxItem` prop), have unit tests, and dynamic imports in `module.config.ts` resolve — zero empty-file stubs
+- [ ] All 12 surface `index.ts` stubs exist and export a typed `SurfaceConfig` constant (not an empty object) — `tsc -b` proves they satisfy the surface shape
+- [ ] Fixtures directory layout exists with 3 CSV stubs (header rows only acceptable here) + 6 JSON stubs (empty arrays acceptable here — real data is Plan E)
 - [ ] `UploadsClient` and `InboxClient` interfaces present in `packages/contract/`
 - [ ] No `RoleSwitcherChip` in module's main barrel export (checked by grep in commit hook)
+- [ ] `packages/shell/src/index.ts` exports `ModuleConfig` type (so dependents can import it)
 
 ---
 
@@ -457,7 +531,8 @@ Plan A is complete when ALL of the following are true:
 ## Dependencies
 
 - SP-0 Plans A–D fully executed (packages/contract, packages/auth, packages/ui, packages/shell all present)
-- `packages/shell/src/types/module-config.ts` exists and exports `ModuleConfig` type (SP-0 Plan D)
+- `packages/shell/src/types/module-config.ts` — **does NOT exist in HEAD** (verified from directory listing). Plan A creates it as new scope (Task 5 Step 5.1). The builder must `grep -rn "ModuleConfig" packages/shell/src/` first to check for a pre-existing export at a different path.
+- `packages/shell/src/` confirmed structure: `__mocks__/`, `__tests__/`, `_generated/`, `auth/`, `index.ts`, `middleware.ts`, `qa/`, `routes/`, `shell/` — no `types/` directory exists yet
 - `@tanstack/react-query` present in `packages/ui` or `packages/contract` (SP-0 Plan C/D)
 - `@tanstack/react-virtual` present (SP-0 Plan C)
 
@@ -469,3 +544,5 @@ Plan A is complete when ALL of the following are true:
 - Rules: `.claude/rules/financial-precision.md` (MoneyDisplay/Input), `.claude/rules/security.md` (RbacGate), `.claude/rules/testing.md` (100% financial/security coverage), `.claude/rules/architecture.md` (module structure), `.claude/rules/code-standards.md` (dead code ban)
 - SP-0 Plan D: `docs/superpowers/plans/2026-05-15-sp0-plan-d-composition-portal-wiring.md`
 - SP-1 Plans B–E: depend on all deliverables above
+- Shell package structure (verified): `packages/shell/src/` has no `types/` dir — Plan A adds it
+- B1 fix: `ModuleConfig` type must be created or found by grep; not pre-confirmed
