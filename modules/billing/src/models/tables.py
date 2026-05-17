@@ -551,7 +551,7 @@ class JournalEntry(BillingBase):
         Index("idx_journal_category", "tenant_id", "category"),
         Index("idx_journal_exported", "tenant_id", "exported_to_accounting"),
         # Chain ordering index (SP-1 Plan D Task 3) -- used by verify-chain.
-        Index("idx_journal_chain_order", "tenant_id", "created_at"),
+        Index("idx_journal_chain_order", "tenant_id", "created_at", "id"),
         {"schema": "billing"},
     )
 
