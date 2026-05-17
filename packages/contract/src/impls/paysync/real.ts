@@ -6,23 +6,64 @@
 import type { ClientConfig } from "../../client-base.js";
 import { isErrorEnvelope } from "../../error-envelope.js";
 import {
+  PAYSYNC_BANK_SETTLEMENTS_CACHE_POLICIES,
+  PAYSYNC_BATCHES_CACHE_POLICIES,
+  PAYSYNC_CARRYOVERS_CACHE_POLICIES,
   PAYSYNC_CYCLES_CACHE_POLICIES,
   PAYSYNC_INBOX_CACHE_POLICIES,
+  PAYSYNC_INVOICES_CACHE_POLICIES,
+  PAYSYNC_PAYMENT_RUNS_CACHE_POLICIES,
+  PAYSYNC_RECONCILIATIONS_CACHE_POLICIES,
   PAYSYNC_UPLOADS_CACHE_POLICIES,
+  type BankSettlementsClient,
+  type BatchesClient,
+  type CarryoversClient,
   type CyclesClient,
   type InboxClient,
+  type InvoicesClient,
+  type PaymentRunsClient,
+  type ReconciliationsClient,
   type UploadsClient,
 } from "./client.js";
 import {
+  BankSettlementListResponseSchema,
+  BankSettlementSchema,
+  BatchListResponseSchema,
+  BatchSchema,
+  CarryoverListResponseSchema,
+  CarryoverSchema,
   CycleListResponseSchema,
   CycleSchema,
+  InvoiceListResponseSchema,
+  InvoiceSchema,
+  PaymentRunListResponseSchema,
+  PaymentRunSchema,
+  ReconciliationListResponseSchema,
+  ReconciliationSchema,
   UploadListResponseSchema,
   UploadSchema,
+  type Batch,
+  type BankSettlement,
+  type BankSettlementListResponse,
+  type BankSettlementStatus,
+  type BatchListResponse,
+  type BatchStatus,
+  type Carryover,
+  type CarryoverListResponse,
   type Cycle,
   type CycleListResponse,
   type CycleStatus,
   type InboxItem,
+  type Invoice,
+  type InvoiceListResponse,
+  type InvoiceStatus,
+  type PaymentRun,
+  type PaymentRunListResponse,
+  type PaymentRunStatus,
   type RbacRole,
+  type Reconciliation,
+  type ReconciliationListResponse,
+  type ReconciliationStatus,
   type Upload,
   type UploadListRequest,
   type UploadListResponse,
@@ -227,6 +268,184 @@ export function createRealCyclesClient(config: ClientConfig): CyclesClient {
         method: "POST",
       });
       return unwrap(res, CycleSchema);
+    },
+
+    probeHealth,
+  };
+}
+
+export function createRealBatchesClient(config: ClientConfig): BatchesClient {
+  if (!config.baseUrl) {
+    throw new Error("createRealBatchesClient: baseUrl is required");
+  }
+  const { authedFetch, unwrap, probeHealth } = makeAuthedFetch(config);
+
+  return {
+    name: "paysync.batches" as const,
+    cachePolicies: PAYSYNC_BATCHES_CACHE_POLICIES,
+
+    async list(req: { status?: BatchStatus; limit?: number; cursor?: string }): Promise<BatchListResponse> {
+      const qs = new URLSearchParams();
+      if (req.status) qs.set("status", req.status);
+      qs.set("limit", String(req.limit ?? 50));
+      if (req.cursor) qs.set("cursor", req.cursor);
+      const res = await authedFetch(`/api/v1/billing/batches?${qs.toString()}`);
+      return unwrap(res, BatchListResponseSchema);
+    },
+
+    async get(id: string): Promise<Batch | null> {
+      const res = await authedFetch(`/api/v1/billing/batches/${encodeURIComponent(id)}`);
+      if (res.status === 404) return null;
+      return unwrap(res, BatchSchema);
+    },
+
+    probeHealth,
+  };
+}
+
+export function createRealInvoicesClient(config: ClientConfig): InvoicesClient {
+  if (!config.baseUrl) {
+    throw new Error("createRealInvoicesClient: baseUrl is required");
+  }
+  const { authedFetch, unwrap, probeHealth } = makeAuthedFetch(config);
+
+  return {
+    name: "paysync.invoices" as const,
+    cachePolicies: PAYSYNC_INVOICES_CACHE_POLICIES,
+
+    async list(req: { status?: InvoiceStatus; client_id?: string; limit?: number; cursor?: string }): Promise<InvoiceListResponse> {
+      const qs = new URLSearchParams();
+      if (req.status) qs.set("status", req.status);
+      if (req.client_id) qs.set("client_id", req.client_id);
+      qs.set("limit", String(req.limit ?? 50));
+      if (req.cursor) qs.set("cursor", req.cursor);
+      const res = await authedFetch(`/api/v1/billing/invoices?${qs.toString()}`);
+      return unwrap(res, InvoiceListResponseSchema);
+    },
+
+    async get(id: string): Promise<Invoice | null> {
+      const res = await authedFetch(`/api/v1/billing/invoices/${encodeURIComponent(id)}`);
+      if (res.status === 404) return null;
+      return unwrap(res, InvoiceSchema);
+    },
+
+    probeHealth,
+  };
+}
+
+export function createRealPaymentRunsClient(config: ClientConfig): PaymentRunsClient {
+  if (!config.baseUrl) {
+    throw new Error("createRealPaymentRunsClient: baseUrl is required");
+  }
+  const { authedFetch, unwrap, probeHealth } = makeAuthedFetch(config);
+
+  return {
+    name: "paysync.payment-runs" as const,
+    cachePolicies: PAYSYNC_PAYMENT_RUNS_CACHE_POLICIES,
+
+    async list(req: { status?: PaymentRunStatus; batch_id?: string; limit?: number; cursor?: string }): Promise<PaymentRunListResponse> {
+      const qs = new URLSearchParams();
+      if (req.status) qs.set("status", req.status);
+      if (req.batch_id) qs.set("batch_id", req.batch_id);
+      qs.set("limit", String(req.limit ?? 50));
+      if (req.cursor) qs.set("cursor", req.cursor);
+      const res = await authedFetch(`/api/v1/billing/payment-runs?${qs.toString()}`);
+      return unwrap(res, PaymentRunListResponseSchema);
+    },
+
+    async get(id: string): Promise<PaymentRun | null> {
+      const res = await authedFetch(`/api/v1/billing/payment-runs/${encodeURIComponent(id)}`);
+      if (res.status === 404) return null;
+      return unwrap(res, PaymentRunSchema);
+    },
+
+    probeHealth,
+  };
+}
+
+export function createRealCarryoversClient(config: ClientConfig): CarryoversClient {
+  if (!config.baseUrl) {
+    throw new Error("createRealCarryoversClient: baseUrl is required");
+  }
+  const { authedFetch, unwrap, probeHealth } = makeAuthedFetch(config);
+
+  return {
+    name: "paysync.carryovers" as const,
+    cachePolicies: PAYSYNC_CARRYOVERS_CACHE_POLICIES,
+
+    async list(req: { member_id?: string; from_period?: string; limit?: number; cursor?: string }): Promise<CarryoverListResponse> {
+      const qs = new URLSearchParams();
+      if (req.member_id) qs.set("member_id", req.member_id);
+      if (req.from_period) qs.set("from_period", req.from_period);
+      qs.set("limit", String(req.limit ?? 50));
+      if (req.cursor) qs.set("cursor", req.cursor);
+      const res = await authedFetch(`/api/v1/billing/carryovers?${qs.toString()}`);
+      return unwrap(res, CarryoverListResponseSchema);
+    },
+
+    async get(id: string): Promise<Carryover | null> {
+      const res = await authedFetch(`/api/v1/billing/carryovers/${encodeURIComponent(id)}`);
+      if (res.status === 404) return null;
+      return unwrap(res, CarryoverSchema);
+    },
+
+    probeHealth,
+  };
+}
+
+export function createRealBankSettlementsClient(config: ClientConfig): BankSettlementsClient {
+  if (!config.baseUrl) {
+    throw new Error("createRealBankSettlementsClient: baseUrl is required");
+  }
+  const { authedFetch, unwrap, probeHealth } = makeAuthedFetch(config);
+
+  return {
+    name: "paysync.bank-settlements" as const,
+    cachePolicies: PAYSYNC_BANK_SETTLEMENTS_CACHE_POLICIES,
+
+    async list(req: { status?: BankSettlementStatus; batch_id?: string; limit?: number; cursor?: string }): Promise<BankSettlementListResponse> {
+      const qs = new URLSearchParams();
+      if (req.status) qs.set("status", req.status);
+      if (req.batch_id) qs.set("batch_id", req.batch_id);
+      qs.set("limit", String(req.limit ?? 50));
+      if (req.cursor) qs.set("cursor", req.cursor);
+      const res = await authedFetch(`/api/v1/billing/bank-settlements?${qs.toString()}`);
+      return unwrap(res, BankSettlementListResponseSchema);
+    },
+
+    async get(id: string): Promise<BankSettlement | null> {
+      const res = await authedFetch(`/api/v1/billing/bank-settlements/${encodeURIComponent(id)}`);
+      if (res.status === 404) return null;
+      return unwrap(res, BankSettlementSchema);
+    },
+
+    probeHealth,
+  };
+}
+
+export function createRealReconciliationsClient(config: ClientConfig): ReconciliationsClient {
+  if (!config.baseUrl) {
+    throw new Error("createRealReconciliationsClient: baseUrl is required");
+  }
+  const { authedFetch, unwrap, probeHealth } = makeAuthedFetch(config);
+
+  return {
+    name: "paysync.reconciliations" as const,
+    cachePolicies: PAYSYNC_RECONCILIATIONS_CACHE_POLICIES,
+
+    async list(req: { status?: ReconciliationStatus; limit?: number; cursor?: string }): Promise<ReconciliationListResponse> {
+      const qs = new URLSearchParams();
+      if (req.status) qs.set("status", req.status);
+      qs.set("limit", String(req.limit ?? 50));
+      if (req.cursor) qs.set("cursor", req.cursor);
+      const res = await authedFetch(`/api/v1/billing/reconciliations?${qs.toString()}`);
+      return unwrap(res, ReconciliationListResponseSchema);
+    },
+
+    async get(id: string): Promise<Reconciliation | null> {
+      const res = await authedFetch(`/api/v1/billing/reconciliations/${encodeURIComponent(id)}`);
+      if (res.status === 404) return null;
+      return unwrap(res, ReconciliationSchema);
     },
 
     probeHealth,

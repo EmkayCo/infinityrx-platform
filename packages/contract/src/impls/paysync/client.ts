@@ -12,11 +12,28 @@
 import type { BaseClient } from "../../client-base.js";
 import type { CachePolicy } from "../../cache-policy.js";
 import type {
+  Batch,
+  BankSettlement,
+  BankSettlementListResponse,
+  BankSettlementStatus,
+  BatchListResponse,
+  BatchStatus,
+  Carryover,
+  CarryoverListResponse,
   Cycle,
   CycleListResponse,
   CycleStatus,
   InboxItem,
+  Invoice,
+  InvoiceListResponse,
+  InvoiceStatus,
+  PaymentRun,
+  PaymentRunListResponse,
+  PaymentRunStatus,
   RbacRole,
+  Reconciliation,
+  ReconciliationListResponse,
+  ReconciliationStatus,
   Upload,
   UploadListRequest,
   UploadListResponse,
@@ -121,5 +138,161 @@ export const PAYSYNC_CYCLES_CACHE_POLICIES: Record<string, CachePolicy> = {
     key: ["paysync", "cycles", "close", "{tenant_id}", "{id}"],
     invalidation_tags: ["paysync:cycles", "paysync:inbox"],
     backend_down: "fail-fast",
+  },
+};
+
+// ── BatchesClient ─────────────────────────────────────────────────────────
+export interface BatchesClient extends BaseClient {
+  readonly name: "paysync.batches";
+
+  /** List payment batches for the active tenant. */
+  list(req: { status?: BatchStatus; limit?: number; cursor?: string }): Promise<BatchListResponse>;
+
+  /** Fetch one batch by id. Returns null if not found. */
+  get(id: string): Promise<Batch | null>;
+}
+
+export const PAYSYNC_BATCHES_CACHE_POLICIES: Record<string, CachePolicy> = {
+  list: {
+    ttl_seconds: 30,
+    key: ["paysync", "batches", "list", "{tenant_id}", "{status}", "{cursor}", "{limit}"],
+    invalidation_tags: ["paysync:batches"],
+    backend_down: "stale-ok",
+  },
+  get: {
+    ttl_seconds: 60,
+    key: ["paysync", "batches", "by-id", "{tenant_id}", "{id}"],
+    invalidation_tags: ["paysync:batches"],
+    backend_down: "stale-ok",
+  },
+};
+
+// ── InvoicesClient ────────────────────────────────────────────────────────
+export interface InvoicesClient extends BaseClient {
+  readonly name: "paysync.invoices";
+
+  /** List invoices for the active tenant. */
+  list(req: { status?: InvoiceStatus; client_id?: string; limit?: number; cursor?: string }): Promise<InvoiceListResponse>;
+
+  /** Fetch one invoice by id. Returns null if not found. */
+  get(id: string): Promise<Invoice | null>;
+}
+
+export const PAYSYNC_INVOICES_CACHE_POLICIES: Record<string, CachePolicy> = {
+  list: {
+    ttl_seconds: 30,
+    key: ["paysync", "invoices", "list", "{tenant_id}", "{status}", "{client_id}", "{cursor}", "{limit}"],
+    invalidation_tags: ["paysync:invoices"],
+    backend_down: "stale-ok",
+  },
+  get: {
+    ttl_seconds: 60,
+    key: ["paysync", "invoices", "by-id", "{tenant_id}", "{id}"],
+    invalidation_tags: ["paysync:invoices"],
+    backend_down: "stale-ok",
+  },
+};
+
+// ── PaymentRunsClient ─────────────────────────────────────────────────────
+export interface PaymentRunsClient extends BaseClient {
+  readonly name: "paysync.payment-runs";
+
+  /** List payment runs for the active tenant. */
+  list(req: { status?: PaymentRunStatus; batch_id?: string; limit?: number; cursor?: string }): Promise<PaymentRunListResponse>;
+
+  /** Fetch one payment run by id. Returns null if not found. */
+  get(id: string): Promise<PaymentRun | null>;
+}
+
+export const PAYSYNC_PAYMENT_RUNS_CACHE_POLICIES: Record<string, CachePolicy> = {
+  list: {
+    ttl_seconds: 30,
+    key: ["paysync", "payment-runs", "list", "{tenant_id}", "{status}", "{batch_id}", "{cursor}", "{limit}"],
+    invalidation_tags: ["paysync:payment-runs"],
+    backend_down: "stale-ok",
+  },
+  get: {
+    ttl_seconds: 60,
+    key: ["paysync", "payment-runs", "by-id", "{tenant_id}", "{id}"],
+    invalidation_tags: ["paysync:payment-runs"],
+    backend_down: "stale-ok",
+  },
+};
+
+// ── CarryoversClient ──────────────────────────────────────────────────────
+export interface CarryoversClient extends BaseClient {
+  readonly name: "paysync.carryovers";
+
+  /** List carryovers for the active tenant. */
+  list(req: { member_id?: string; from_period?: string; limit?: number; cursor?: string }): Promise<CarryoverListResponse>;
+
+  /** Fetch one carryover by id. Returns null if not found. */
+  get(id: string): Promise<Carryover | null>;
+}
+
+export const PAYSYNC_CARRYOVERS_CACHE_POLICIES: Record<string, CachePolicy> = {
+  list: {
+    ttl_seconds: 30,
+    key: ["paysync", "carryovers", "list", "{tenant_id}", "{member_id}", "{from_period}", "{cursor}", "{limit}"],
+    invalidation_tags: ["paysync:carryovers"],
+    backend_down: "stale-ok",
+  },
+  get: {
+    ttl_seconds: 60,
+    key: ["paysync", "carryovers", "by-id", "{tenant_id}", "{id}"],
+    invalidation_tags: ["paysync:carryovers"],
+    backend_down: "stale-ok",
+  },
+};
+
+// ── BankSettlementsClient ─────────────────────────────────────────────────
+export interface BankSettlementsClient extends BaseClient {
+  readonly name: "paysync.bank-settlements";
+
+  /** List bank settlements for the active tenant. */
+  list(req: { status?: BankSettlementStatus; batch_id?: string; limit?: number; cursor?: string }): Promise<BankSettlementListResponse>;
+
+  /** Fetch one bank settlement by id. Returns null if not found. */
+  get(id: string): Promise<BankSettlement | null>;
+}
+
+export const PAYSYNC_BANK_SETTLEMENTS_CACHE_POLICIES: Record<string, CachePolicy> = {
+  list: {
+    ttl_seconds: 30,
+    key: ["paysync", "bank-settlements", "list", "{tenant_id}", "{status}", "{batch_id}", "{cursor}", "{limit}"],
+    invalidation_tags: ["paysync:bank-settlements"],
+    backend_down: "stale-ok",
+  },
+  get: {
+    ttl_seconds: 60,
+    key: ["paysync", "bank-settlements", "by-id", "{tenant_id}", "{id}"],
+    invalidation_tags: ["paysync:bank-settlements"],
+    backend_down: "stale-ok",
+  },
+};
+
+// ── ReconciliationsClient ─────────────────────────────────────────────────
+export interface ReconciliationsClient extends BaseClient {
+  readonly name: "paysync.reconciliations";
+
+  /** List reconciliations for the active tenant. */
+  list(req: { status?: ReconciliationStatus; limit?: number; cursor?: string }): Promise<ReconciliationListResponse>;
+
+  /** Fetch one reconciliation by id. Returns null if not found. */
+  get(id: string): Promise<Reconciliation | null>;
+}
+
+export const PAYSYNC_RECONCILIATIONS_CACHE_POLICIES: Record<string, CachePolicy> = {
+  list: {
+    ttl_seconds: 30,
+    key: ["paysync", "reconciliations", "list", "{tenant_id}", "{status}", "{cursor}", "{limit}"],
+    invalidation_tags: ["paysync:reconciliations"],
+    backend_down: "stale-ok",
+  },
+  get: {
+    ttl_seconds: 60,
+    key: ["paysync", "reconciliations", "by-id", "{tenant_id}", "{id}"],
+    invalidation_tags: ["paysync:reconciliations"],
+    backend_down: "stale-ok",
   },
 };

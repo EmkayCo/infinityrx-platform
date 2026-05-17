@@ -4,17 +4,46 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  createMockBankSettlementsClient,
+  createMockBatchesClient,
+  createMockCarryoversClient,
   createMockCyclesClient,
   createMockInboxClient,
+  createMockInvoicesClient,
+  createMockPaymentRunsClient,
+  createMockReconciliationsClient,
   createMockUploadsClient,
+  createRealBankSettlementsClient,
+  createRealBatchesClient,
+  createRealCarryoversClient,
   createRealCyclesClient,
   createRealInboxClient,
+  createRealInvoicesClient,
+  createRealPaymentRunsClient,
+  createRealReconciliationsClient,
   createRealUploadsClient,
+  BankSettlementSchema,
+  BankSettlementStatusSchema,
+  BatchSchema,
+  BatchStatusSchema,
+  CarryoverSchema,
   CycleSchema,
   CycleStatusSchema,
   InboxItemSchema,
+  InvoiceSchema,
+  InvoiceStatusSchema,
+  PaymentRunSchema,
+  PaymentRunStatusSchema,
+  ReconciliationSchema,
+  ReconciliationStatusSchema,
+  PAYSYNC_BANK_SETTLEMENTS_CACHE_POLICIES,
+  PAYSYNC_BATCHES_CACHE_POLICIES,
+  PAYSYNC_CARRYOVERS_CACHE_POLICIES,
   PAYSYNC_CYCLES_CACHE_POLICIES,
   PAYSYNC_INBOX_CACHE_POLICIES,
+  PAYSYNC_INVOICES_CACHE_POLICIES,
+  PAYSYNC_PAYMENT_RUNS_CACHE_POLICIES,
+  PAYSYNC_RECONCILIATIONS_CACHE_POLICIES,
   PAYSYNC_UPLOADS_CACHE_POLICIES,
   RbacRoleSchema,
   UploadListRequestSchema,
@@ -442,5 +471,472 @@ describe("paysync contract — schemas", () => {
       created_at: "2026-05-01T00:00:00.000+00:00",
       updated_at: "2026-05-16T19:30:00.000+00:00",
     })).toThrow();
+  });
+});
+
+
+// ── Plan C additions: Batches, Invoices, PaymentRuns, Carryovers, BankSettlements, Reconciliations ──
+
+describe("paysync contract — batches mock factory", () => {
+  it("createMockBatchesClient instantiates with expected shape", async () => {
+    const c = createMockBatchesClient();
+    expect(c.name).toBe("paysync.batches");
+    expect(c.cachePolicies).toBe(PAYSYNC_BATCHES_CACHE_POLICIES);
+    const health = await c.probeHealth();
+    expect(health.ok).toBe(true);
+  });
+
+  it("createMockBatchesClient.list returns fixture batches", async () => {
+    const c = createMockBatchesClient();
+    const page = await c.list({});
+    expect(page.results.length).toBeGreaterThan(0);
+    expect(typeof page.total).toBe("number");
+  });
+
+  it("createMockBatchesClient.get returns batch by id", async () => {
+    const c = createMockBatchesClient();
+    const all = await c.list({});
+    const first = all.results[0]!;
+    const found = await c.get(first.id);
+    expect(found?.id).toBe(first.id);
+  });
+
+  it("createMockBatchesClient.get returns null for unknown id", async () => {
+    const c = createMockBatchesClient();
+    expect(await c.get("00000000-0000-0000-0000-000000000000")).toBeNull();
+  });
+
+  it("BatchSchema validates a well-formed batch", () => {
+    expect(() => BatchSchema.parse({
+      id: "b1000000-0000-0000-0000-000000000001",
+      tenant_id: "a0000000-0000-0000-0000-000000000001",
+      batch_number: "BATCH-2026-001",
+      payment_route: "ach",
+      total_amount: "12345.67",
+      payment_count: 10,
+      ap_count: 10,
+      status: "generated",
+      created_at: "2026-05-01T00:00:00.000+00:00",
+      updated_at: "2026-05-01T00:00:00.000+00:00",
+    })).not.toThrow();
+  });
+
+  it("BatchStatusSchema accepts all valid statuses", () => {
+    for (const s of ["generated", "validated", "approved", "submitted", "settled", "void"] as const) {
+      expect(BatchStatusSchema.parse(s)).toBe(s);
+    }
+    expect(() => BatchStatusSchema.parse("unknown")).toThrow();
+  });
+
+  it("PAYSYNC_BATCHES_CACHE_POLICIES has list and get operations", () => {
+    expect(PAYSYNC_BATCHES_CACHE_POLICIES).toHaveProperty("list");
+    expect(PAYSYNC_BATCHES_CACHE_POLICIES).toHaveProperty("get");
+  });
+});
+
+describe("paysync contract — batches real client (HTTP)", () => {
+  function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
+    return new Response(JSON.stringify(body), {
+      ...init,
+      headers: { "content-type": "application/json", ...(init.headers ?? {}) },
+    });
+  }
+
+  it("createRealBatchesClient sends Bearer + X-Tenant-Id on list", async () => {
+    const captured: { headers: Headers; url: string }[] = [];
+    const fakeFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      captured.push({ headers: new Headers(init?.headers), url });
+      return jsonResponse({ results: [], total: 0 });
+    };
+    const c = createRealBatchesClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok-b",
+      getTenantId: async () => "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      fetch: fakeFetch,
+    });
+    await c.list({});
+    expect(captured[0]?.headers.get("authorization")).toBe("Bearer tok-b");
+    expect(captured[0]?.headers.get("x-tenant-id")).toBe("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    expect(captured[0]?.url).toContain("/api/v1/billing/batches");
+  });
+
+  it("createRealBatchesClient.get returns null on HTTP 404", async () => {
+    const fakeFetch: typeof fetch = async () => new Response(null, { status: 404 });
+    const c = createRealBatchesClient({ baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch });
+    expect(await c.get("missing-id")).toBeNull();
+  });
+});
+
+describe("paysync contract — invoices mock factory", () => {
+  it("createMockInvoicesClient instantiates with expected shape", async () => {
+    const c = createMockInvoicesClient();
+    expect(c.name).toBe("paysync.invoices");
+    expect(c.cachePolicies).toBe(PAYSYNC_INVOICES_CACHE_POLICIES);
+    const health = await c.probeHealth();
+    expect(health.ok).toBe(true);
+  });
+
+  it("createMockInvoicesClient.list returns fixture invoices", async () => {
+    const c = createMockInvoicesClient();
+    const page = await c.list({});
+    expect(page.results.length).toBeGreaterThan(0);
+    expect(typeof page.total).toBe("number");
+  });
+
+  it("createMockInvoicesClient.get returns invoice by id", async () => {
+    const c = createMockInvoicesClient();
+    const all = await c.list({});
+    const first = all.results[0]!;
+    const found = await c.get(first.id);
+    expect(found?.id).toBe(first.id);
+  });
+
+  it("InvoiceSchema validates a well-formed invoice", () => {
+    expect(() => InvoiceSchema.parse({
+      id: "11000000-0000-0000-0000-000000000001",
+      tenant_id: "a0000000-0000-0000-0000-000000000001",
+      invoice_number: "INV-2026-001",
+      invoice_type: "client_billing",
+      client_id: "c1000000-0000-0000-0000-000000000001",
+      client_name: "Acme Corp",
+      period_start: "2026-05-01",
+      period_end: "2026-05-31",
+      claims_subtotal: "10000.00",
+      fees_subtotal: "500.00",
+      adjustments: "0.00",
+      late_fees: "0.00",
+      total: "10500.00",
+      paid_amount: "0.00",
+      claim_count: 100,
+      status: "draft",
+      due_date: "2026-06-15",
+      created_at: "2026-05-31T00:00:00.000+00:00",
+    })).not.toThrow();
+  });
+
+  it("InvoiceStatusSchema accepts all valid statuses", () => {
+    for (const s of ["draft", "approved", "sent", "paid", "void", "overdue"] as const) {
+      expect(InvoiceStatusSchema.parse(s)).toBe(s);
+    }
+    expect(() => InvoiceStatusSchema.parse("unknown")).toThrow();
+  });
+
+  it("PAYSYNC_INVOICES_CACHE_POLICIES has list and get operations", () => {
+    expect(PAYSYNC_INVOICES_CACHE_POLICIES).toHaveProperty("list");
+    expect(PAYSYNC_INVOICES_CACHE_POLICIES).toHaveProperty("get");
+  });
+});
+
+describe("paysync contract — invoices real client (HTTP)", () => {
+  function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
+    return new Response(JSON.stringify(body), {
+      ...init,
+      headers: { "content-type": "application/json", ...(init.headers ?? {}) },
+    });
+  }
+
+  it("createRealInvoicesClient sends Bearer + X-Tenant-Id on list", async () => {
+    const captured: { headers: Headers; url: string }[] = [];
+    const fakeFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      captured.push({ headers: new Headers(init?.headers), url });
+      return jsonResponse({ results: [], total: 0 });
+    };
+    const c = createRealInvoicesClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok-i",
+      getTenantId: async () => "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      fetch: fakeFetch,
+    });
+    await c.list({});
+    expect(captured[0]?.headers.get("authorization")).toBe("Bearer tok-i");
+    expect(captured[0]?.headers.get("x-tenant-id")).toBe("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    expect(captured[0]?.url).toContain("/api/v1/billing/invoices");
+  });
+
+  it("createRealInvoicesClient.get returns null on HTTP 404", async () => {
+    const fakeFetch: typeof fetch = async () => new Response(null, { status: 404 });
+    const c = createRealInvoicesClient({ baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch });
+    expect(await c.get("missing-id")).toBeNull();
+  });
+});
+
+describe("paysync contract — payment-runs mock factory", () => {
+  it("createMockPaymentRunsClient instantiates with expected shape", async () => {
+    const c = createMockPaymentRunsClient();
+    expect(c.name).toBe("paysync.payment-runs");
+    expect(c.cachePolicies).toBe(PAYSYNC_PAYMENT_RUNS_CACHE_POLICIES);
+    const health = await c.probeHealth();
+    expect(health.ok).toBe(true);
+  });
+
+  it("createMockPaymentRunsClient.list returns fixture payment runs", async () => {
+    const c = createMockPaymentRunsClient();
+    const page = await c.list({});
+    expect(page.results.length).toBeGreaterThan(0);
+    expect(typeof page.total).toBe("number");
+  });
+
+  it("PaymentRunSchema validates a well-formed payment run", () => {
+    expect(() => PaymentRunSchema.parse({
+      id: "20000000-0000-0000-0000-000000000001",
+      tenant_id: "a0000000-0000-0000-0000-000000000001",
+      batch_id: "b1000000-0000-0000-0000-000000000001",
+      status: "completed",
+      total_amount: "12345.67",
+      payment_count: 10,
+      run_at: "2026-05-01T00:00:00.000+00:00",
+      completed_at: "2026-05-01T00:01:00.000+00:00",
+      created_at: "2026-05-01T00:00:00.000+00:00",
+    })).not.toThrow();
+  });
+
+  it("PaymentRunStatusSchema accepts all valid statuses", () => {
+    for (const s of ["pending", "running", "completed", "failed", "held"] as const) {
+      expect(PaymentRunStatusSchema.parse(s)).toBe(s);
+    }
+    expect(() => PaymentRunStatusSchema.parse("unknown")).toThrow();
+  });
+
+  it("PAYSYNC_PAYMENT_RUNS_CACHE_POLICIES has list and get operations", () => {
+    expect(PAYSYNC_PAYMENT_RUNS_CACHE_POLICIES).toHaveProperty("list");
+    expect(PAYSYNC_PAYMENT_RUNS_CACHE_POLICIES).toHaveProperty("get");
+  });
+});
+
+describe("paysync contract — payment-runs real client (HTTP)", () => {
+  function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
+    return new Response(JSON.stringify(body), {
+      ...init,
+      headers: { "content-type": "application/json", ...(init.headers ?? {}) },
+    });
+  }
+
+  it("createRealPaymentRunsClient sends Bearer + X-Tenant-Id on list", async () => {
+    const captured: { headers: Headers; url: string }[] = [];
+    const fakeFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      captured.push({ headers: new Headers(init?.headers), url });
+      return jsonResponse({ results: [], total: 0 });
+    };
+    const c = createRealPaymentRunsClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok-pr",
+      getTenantId: async () => "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      fetch: fakeFetch,
+    });
+    await c.list({});
+    expect(captured[0]?.headers.get("authorization")).toBe("Bearer tok-pr");
+    expect(captured[0]?.headers.get("x-tenant-id")).toBe("cccccccc-cccc-cccc-cccc-cccccccccccc");
+    expect(captured[0]?.url).toContain("/api/v1/billing/payment-runs");
+  });
+});
+
+describe("paysync contract — carryovers mock factory", () => {
+  it("createMockCarryoversClient instantiates with expected shape", async () => {
+    const c = createMockCarryoversClient();
+    expect(c.name).toBe("paysync.carryovers");
+    expect(c.cachePolicies).toBe(PAYSYNC_CARRYOVERS_CACHE_POLICIES);
+    const health = await c.probeHealth();
+    expect(health.ok).toBe(true);
+  });
+
+  it("createMockCarryoversClient.list returns fixture carryovers", async () => {
+    const c = createMockCarryoversClient();
+    const page = await c.list({});
+    expect(page.results.length).toBeGreaterThan(0);
+    expect(typeof page.total).toBe("number");
+  });
+
+  it("CarryoverSchema validates a well-formed carryover", () => {
+    expect(() => CarryoverSchema.parse({
+      id: "d0000000-0000-0000-0000-000000000001",
+      tenant_id: "a0000000-0000-0000-0000-000000000001",
+      member_id: "e0000000-0000-0000-0000-000000000001",
+      carried_amount: "250.00",
+      original_amount: "500.00",
+      reason: "deductible_carryover",
+      from_period: "2026-04",
+      to_period: "2026-05",
+      created_at: "2026-05-01T00:00:00.000+00:00",
+    })).not.toThrow();
+  });
+
+  it("PAYSYNC_CARRYOVERS_CACHE_POLICIES has list and get operations", () => {
+    expect(PAYSYNC_CARRYOVERS_CACHE_POLICIES).toHaveProperty("list");
+    expect(PAYSYNC_CARRYOVERS_CACHE_POLICIES).toHaveProperty("get");
+  });
+});
+
+describe("paysync contract — carryovers real client (HTTP)", () => {
+  function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
+    return new Response(JSON.stringify(body), {
+      ...init,
+      headers: { "content-type": "application/json", ...(init.headers ?? {}) },
+    });
+  }
+
+  it("createRealCarryoversClient sends Bearer + X-Tenant-Id on list", async () => {
+    const captured: { headers: Headers; url: string }[] = [];
+    const fakeFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      captured.push({ headers: new Headers(init?.headers), url });
+      return jsonResponse({ results: [], total: 0 });
+    };
+    const c = createRealCarryoversClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok-co",
+      getTenantId: async () => "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      fetch: fakeFetch,
+    });
+    await c.list({});
+    expect(captured[0]?.headers.get("authorization")).toBe("Bearer tok-co");
+    expect(captured[0]?.headers.get("x-tenant-id")).toBe("dddddddd-dddd-dddd-dddd-dddddddddddd");
+    expect(captured[0]?.url).toContain("/api/v1/billing/carryovers");
+  });
+});
+
+describe("paysync contract — bank-settlements mock factory", () => {
+  it("createMockBankSettlementsClient instantiates with expected shape", async () => {
+    const c = createMockBankSettlementsClient();
+    expect(c.name).toBe("paysync.bank-settlements");
+    expect(c.cachePolicies).toBe(PAYSYNC_BANK_SETTLEMENTS_CACHE_POLICIES);
+    const health = await c.probeHealth();
+    expect(health.ok).toBe(true);
+  });
+
+  it("createMockBankSettlementsClient.list returns fixture settlements", async () => {
+    const c = createMockBankSettlementsClient();
+    const page = await c.list({});
+    expect(page.results.length).toBeGreaterThan(0);
+    expect(typeof page.total).toBe("number");
+  });
+
+  it("BankSettlementSchema validates a well-formed settlement", () => {
+    expect(() => BankSettlementSchema.parse({
+      id: "f0000000-0000-0000-0000-000000000001",
+      tenant_id: "a0000000-0000-0000-0000-000000000001",
+      batch_id: "b1000000-0000-0000-0000-000000000001",
+      bank_reference: "ACH-20260501-001",
+      expected_amount: "12345.67",
+      actual_amount: "12345.67",
+      status: "matched",
+      settlement_date: "2026-05-01",
+      resolved_at: null,
+      created_at: "2026-05-01T00:00:00.000+00:00",
+    })).not.toThrow();
+  });
+
+  it("BankSettlementStatusSchema accepts all valid statuses", () => {
+    for (const s of ["matched", "unmatched", "discrepancy", "resolved"] as const) {
+      expect(BankSettlementStatusSchema.parse(s)).toBe(s);
+    }
+    expect(() => BankSettlementStatusSchema.parse("unknown")).toThrow();
+  });
+
+  it("PAYSYNC_BANK_SETTLEMENTS_CACHE_POLICIES has list and get operations", () => {
+    expect(PAYSYNC_BANK_SETTLEMENTS_CACHE_POLICIES).toHaveProperty("list");
+    expect(PAYSYNC_BANK_SETTLEMENTS_CACHE_POLICIES).toHaveProperty("get");
+  });
+});
+
+describe("paysync contract — bank-settlements real client (HTTP)", () => {
+  function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
+    return new Response(JSON.stringify(body), {
+      ...init,
+      headers: { "content-type": "application/json", ...(init.headers ?? {}) },
+    });
+  }
+
+  it("createRealBankSettlementsClient sends Bearer + X-Tenant-Id on list", async () => {
+    const captured: { headers: Headers; url: string }[] = [];
+    const fakeFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      captured.push({ headers: new Headers(init?.headers), url });
+      return jsonResponse({ results: [], total: 0 });
+    };
+    const c = createRealBankSettlementsClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok-bs",
+      getTenantId: async () => "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+      fetch: fakeFetch,
+    });
+    await c.list({});
+    expect(captured[0]?.headers.get("authorization")).toBe("Bearer tok-bs");
+    expect(captured[0]?.headers.get("x-tenant-id")).toBe("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
+    expect(captured[0]?.url).toContain("/api/v1/billing/bank-settlements");
+  });
+});
+
+describe("paysync contract — reconciliations mock factory", () => {
+  it("createMockReconciliationsClient instantiates with expected shape", async () => {
+    const c = createMockReconciliationsClient();
+    expect(c.name).toBe("paysync.reconciliations");
+    expect(c.cachePolicies).toBe(PAYSYNC_RECONCILIATIONS_CACHE_POLICIES);
+    const health = await c.probeHealth();
+    expect(health.ok).toBe(true);
+  });
+
+  it("createMockReconciliationsClient.list returns fixture reconciliations", async () => {
+    const c = createMockReconciliationsClient();
+    const page = await c.list({});
+    expect(page.results.length).toBeGreaterThan(0);
+    expect(typeof page.total).toBe("number");
+  });
+
+  it("ReconciliationSchema validates a well-formed reconciliation", () => {
+    expect(() => ReconciliationSchema.parse({
+      id: "10000000-0000-0000-0000-000000000001",
+      tenant_id: "a0000000-0000-0000-0000-000000000001",
+      period_label: "2026-04",
+      status: "complete",
+      total_billed: "98765.43",
+      total_paid: "98765.43",
+      variance: "0.00",
+      finalized_at: "2026-05-05T00:00:00.000+00:00",
+      created_at: "2026-05-01T00:00:00.000+00:00",
+      updated_at: "2026-05-05T00:00:00.000+00:00",
+    })).not.toThrow();
+  });
+
+  it("ReconciliationStatusSchema accepts all valid statuses", () => {
+    for (const s of ["pending", "in_progress", "complete", "failed"] as const) {
+      expect(ReconciliationStatusSchema.parse(s)).toBe(s);
+    }
+    expect(() => ReconciliationStatusSchema.parse("unknown")).toThrow();
+  });
+
+  it("PAYSYNC_RECONCILIATIONS_CACHE_POLICIES has list and get operations", () => {
+    expect(PAYSYNC_RECONCILIATIONS_CACHE_POLICIES).toHaveProperty("list");
+    expect(PAYSYNC_RECONCILIATIONS_CACHE_POLICIES).toHaveProperty("get");
+  });
+});
+
+describe("paysync contract — reconciliations real client (HTTP)", () => {
+  function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
+    return new Response(JSON.stringify(body), {
+      ...init,
+      headers: { "content-type": "application/json", ...(init.headers ?? {}) },
+    });
+  }
+
+  it("createRealReconciliationsClient sends Bearer + X-Tenant-Id on list", async () => {
+    const captured: { headers: Headers; url: string }[] = [];
+    const fakeFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      captured.push({ headers: new Headers(init?.headers), url });
+      return jsonResponse({ results: [], total: 0 });
+    };
+    const c = createRealReconciliationsClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok-r",
+      getTenantId: async () => "ffffffff-ffff-ffff-ffff-ffffffffffff",
+      fetch: fakeFetch,
+    });
+    await c.list({});
+    expect(captured[0]?.headers.get("authorization")).toBe("Bearer tok-r");
+    expect(captured[0]?.headers.get("x-tenant-id")).toBe("ffffffff-ffff-ffff-ffff-ffffffffffff");
+    expect(captured[0]?.url).toContain("/api/v1/billing/reconciliations");
   });
 });
