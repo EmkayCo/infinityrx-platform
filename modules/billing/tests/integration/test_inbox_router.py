@@ -269,3 +269,53 @@ class TestInboxEnvelope:
         assert isinstance(item["payload"], dict)
         assert item["rbac_required"] in ("operator", "approver", "auditor")
         assert item["kind"] == "upload_pending_review"
+
+
+class TestInboxCycleQueryErrorLogging:
+    """C4: bare except: pass in cycle query must log the exception."""
+
+    def test_cycle_query_exception_is_logged_not_swallowed(self, _client):
+        """C4: When the PaymentBatch query raises, inbox must log the exception
+        at ERROR level (logger.exception) and still return a 200 with the
+        upload items collected before the error -- not silently drop the error.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+
+        with patch("src.api.inbox.logger") as mock_logger:
+            # Patch db.execute inside the route to raise on the third call
+            # (first two are for Upload queries; third is PaymentBatch pending_close)
+            original_execute_calls = []
+
+            def _failing_execute(stmt, *args, **kwargs):
+                # Let the first two Upload selects through; raise on PaymentBatch
+                import sqlalchemy
+                compiled = str(stmt.compile(compile_kwargs={"literal_binds": False}))
+                if "payment_batch" in compiled.lower():
+                    raise RuntimeError("simulated PaymentBatch query failure")
+                # Fall through — but we need the real session here.
+                # This test just verifies logger.exception is called, not the
+                # full data path, so return an empty result for upload queries.
+                mock_result = MagicMock()
+                mock_result.scalars.return_value.all.return_value = []
+                return mock_result
+
+            with patch("sqlalchemy.orm.Session.execute", side_effect=_failing_execute):
+                resp = _client.get(
+                    "/api/v1/billing/inbox",
+                    headers={"X-Tenant-Id": TENANT_A},
+                    params={"role": "operator"},
+                )
+
+            # Must still return 200 (best-effort degraded response)
+            assert resp.status_code == 200, resp.text
+            # Must have logged the exception
+            mock_logger.exception.assert_called_once()
+            call_args = mock_logger.exception.call_args
+            assert "billing.inbox.cycle_query_failed" in call_args[0][0], (
+                f"Expected 'billing.inbox.cycle_query_failed' in log message, got: {call_args}"
+            )

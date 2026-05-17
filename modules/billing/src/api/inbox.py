@@ -128,7 +128,10 @@ async def get_inbox(
                 "payload": {"cycle_id": str(b.id), "status": b.status},
             })
     except Exception:
-        pass  # PaymentBatch status values may differ -- best-effort
+        logger.exception(
+            "billing.inbox.cycle_query_failed",
+            extra={"svc_tenant_id": str(tenant_id)},
+        )  # best-effort: return upload items even when cycle query fails
 
     return JSONResponse(
         content=items,
