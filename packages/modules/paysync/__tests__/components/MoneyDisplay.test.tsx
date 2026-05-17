@@ -32,10 +32,11 @@ describe("MoneyDisplay", () => {
   });
 
   it("renders em-dash when value is empty string", () => {
-    // Number("") === 0 → "$0.00". This is intentional defensive behavior.
-    // Documenting the actual behavior for the empty-string case.
+    // Empty string is NOT a valid Decimal serialization — must format as the
+    // invalid-input placeholder. (Gate-close fix: previous code routed through
+    // Number("") which coerced to 0; the regex-based validation rejects it.)
     render(<MoneyDisplay value="" />);
-    expect(screen.queryByTestId("money-display")?.textContent).toBe("$0.00");
+    expect(screen.getByTestId("money-display-invalid").textContent).toBe("—");
   });
 
   it("honors custom currency code", () => {

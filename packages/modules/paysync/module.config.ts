@@ -130,7 +130,15 @@ export const paysyncComposition = {
       { label: "Setup",    path: "/admin/paysync/setup",       icon: "settings"   },
     ],
   },
+  // qa namespace is the only path under paysyncComposition that may load
+  // dev-only/ symbols. Gate-close fix (Codex): wrap the dynamic import in a
+  // NODE_ENV guard so production bundles see `undefined` and tree-shake the
+  // module reference entirely. Plan E CI bundle-scan against
+  // .next/static/chunks/*.js is the second line of defense; this is the first.
   qa: {
-    RoleSwitcherChip: () => import("./src/components/dev-only/RoleSwitcherChip.js"),
+    RoleSwitcherChip:
+      process.env.NODE_ENV === "production"
+        ? undefined
+        : () => import("./src/components/dev-only/RoleSwitcherChip.js"),
   },
-} as const;
+};

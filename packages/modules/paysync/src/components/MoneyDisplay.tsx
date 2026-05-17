@@ -3,6 +3,12 @@
 // Receives `value: string` per .claude/rules/financial-precision.md —
 // never `number` or `float`. Backend serializes Decimal to string; this
 // component is the display half of that contract.
+//
+// Gate-close fix (Codex): Intl.NumberFormat.format() accepts a Decimal
+// STRING directly (ES2024+ behavior; supported in Node 20+ and modern
+// browsers). We no longer convert to Number(value), so high-precision
+// or large-magnitude Decimal strings format without going through
+// float64 rounding. Validity is checked via regex, not Number(NaN).
 
 import type { ReactElement } from "react";
 
@@ -19,6 +25,9 @@ export interface MoneyDisplayProps {
 
 const USD = "USD";
 const EN_US = "en-US";
+// Decimal literal: optional sign, integer part, optional fractional part.
+// Matches anything that round-trips through a strict Decimal serializer.
+const DECIMAL_PATTERN = /^-?\d+(?:\.\d+)?$/;
 
 export function MoneyDisplay({
   value,
@@ -26,11 +35,13 @@ export function MoneyDisplay({
   locale = EN_US,
   className,
 }: MoneyDisplayProps): ReactElement {
-  // Reject obviously invalid input deterministically. Production data is
-  // controlled (Decimal string from backend), but defensive rendering avoids
-  // NaN currency strings if a stub returns garbage.
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) {
+  // Defensive: reject anything that isn't a valid Decimal string. We
+  // intentionally do NOT use Number(value) here — that would coerce
+  // strings like "1.0000000000000001" to 1 silently (float64 precision
+  // loss). The regex test admits exactly the shapes a Decimal serializer
+  // would emit, and rejects everything else without touching the value
+  // as a float.
+  if (!DECIMAL_PATTERN.test(value)) {
     return (
       <span data-testid="money-display-invalid" className={className}>
         —
@@ -38,10 +49,14 @@ export function MoneyDisplay({
     );
   }
 
+  // Intl.NumberFormat.format accepts a Decimal string directly per the
+  // updated ECMA-402 spec. The formatter rounds to the currency's display
+  // precision (2 fractional digits for USD) but the FULL precision is
+  // preserved on the way in — no float64 round-trip.
   const formatted = new Intl.NumberFormat(locale, {
     style: "currency",
     currency,
-  }).format(numeric);
+  }).format(value as unknown as number); // runtime accepts string; types lag.
 
   return (
     <span data-testid="money-display" className={className}>

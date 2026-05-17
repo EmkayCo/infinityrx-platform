@@ -3,6 +3,11 @@
 // Plan A R3 fix: singular client.ts holds BOTH interfaces in one file (matches
 // the prescriber-directory pattern). Future plans (B/C/D/E) may append more
 // client interfaces here OR add domain-specific <name>-client.ts siblings.
+//
+// Gate-close fix (Codex): every cache key includes {tenant_id} as the first
+// scoping segment, matching the tenant-isolation rule that all Redis keys
+// MUST be prefixed `tenant:{tenant_id}:`. The cache layer interpolates
+// {tenant_id} from the active tenant context.
 
 import type { BaseClient } from "../../client-base.js";
 import type { CachePolicy } from "../../cache-policy.js";
@@ -41,19 +46,19 @@ export interface UploadsClient extends BaseClient {
 export const PAYSYNC_UPLOADS_CACHE_POLICIES: Record<string, CachePolicy> = {
   list: {
     ttl_seconds: 30,
-    key: ["paysync", "uploads", "list", "{status}", "{cursor}", "{limit}"],
+    key: ["paysync", "uploads", "list", "{tenant_id}", "{status}", "{cursor}", "{limit}"],
     invalidation_tags: ["paysync:uploads"],
     backend_down: "stale-ok",
   },
   get: {
     ttl_seconds: 60,
-    key: ["paysync", "uploads", "by-id", "{id}"],
+    key: ["paysync", "uploads", "by-id", "{tenant_id}", "{id}"],
     invalidation_tags: ["paysync:uploads"],
     backend_down: "stale-ok",
   },
   getClaims: {
     ttl_seconds: 60,
-    key: ["paysync", "uploads", "claims", "{uploadId}", "{cursor}", "{limit}"],
+    key: ["paysync", "uploads", "claims", "{tenant_id}", "{uploadId}", "{cursor}", "{limit}"],
     invalidation_tags: ["paysync:uploads", "paysync:claims"],
     backend_down: "stale-ok",
   },
@@ -71,7 +76,7 @@ export const PAYSYNC_INBOX_CACHE_POLICIES: Record<string, CachePolicy> = {
   list: {
     // 10s matches the spec §10.5 useInboxItems staleTime — same data, same TTL.
     ttl_seconds: 10,
-    key: ["paysync", "inbox", "list", "{role}"],
+    key: ["paysync", "inbox", "list", "{tenant_id}", "{role}"],
     invalidation_tags: ["paysync:inbox"],
     backend_down: "stale-ok",
   },
