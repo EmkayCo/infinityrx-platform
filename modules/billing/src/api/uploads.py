@@ -87,7 +87,7 @@ def _upload_to_dict(
     # Compute total_billed_amount from ClaimRecord rows when a db session is available.
     total_billed: str | None = None
     if db is not None:
-        from decimal import Decimal  # noqa: PLC0415
+        from decimal import ROUND_HALF_UP, Decimal  # noqa: PLC0415
         from sqlalchemy import func as sa_func  # noqa: PLC0415
         raw = db.execute(
             select(sa_func.sum(ClaimRecord.amount_billed)).where(
@@ -96,7 +96,10 @@ def _upload_to_dict(
             )
         ).scalar()
         if raw is not None:
-            total_billed = str(Decimal(str(raw)).quantize(Decimal("0.0000")))
+            # .claude/rules/financial-precision.md: ROUND_HALF_UP required on every quantize.
+            total_billed = str(
+                Decimal(str(raw)).quantize(Decimal("0.0000"), rounding=ROUND_HALF_UP)
+            )
     data: dict[str, Any] = {
         "id": str(upload.id),
         "tenant_id": str(upload.tenant_id),
