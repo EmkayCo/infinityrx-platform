@@ -412,7 +412,9 @@ test.describe.serial("SP-1 PaySync round trip: Operator -> Approver -> Auditor",
       // Step 22: Navigate to Reports -> all report pages render; no errors
       const reportPaths = [
         "/admin/paysync/reports",
-        "/admin/paysync/reports/period-summary",
+        "/admin/paysync/reports/cycles",
+        "/admin/paysync/reports/journal",
+        "/admin/paysync/reports/period",
       ];
       for (const reportPath of reportPaths) {
         const consoleErrors: string[] = [];

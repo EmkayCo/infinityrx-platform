@@ -24,7 +24,7 @@ export function ReportsListPage(): ReactElement {
         <li>
           <a
             data-testid="reports-link-journal"
-            href="/admin/paysync/reports/journal-entries"
+            href="/admin/paysync/reports/journal"
           >
             Journal Entries Report
           </a>
@@ -33,7 +33,7 @@ export function ReportsListPage(): ReactElement {
         <li>
           <a
             data-testid="reports-link-period-summary"
-            href="/admin/paysync/reports/period-summary"
+            href="/admin/paysync/reports/period"
           >
             Period Summary
           </a>
