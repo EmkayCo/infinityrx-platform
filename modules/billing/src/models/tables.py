@@ -256,6 +256,11 @@ class PaymentBatch(BillingBase):
 
     payment_file_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
 
+    # Upload provenance (SP-1 Plan C Task 1): nullable so legacy batches remain valid.
+    upload_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("billing.uploads.id", ondelete="SET NULL"), nullable=True
+    )
+
     data_lock: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -424,6 +429,12 @@ class InvoiceLineItem(BillingBase):
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
 
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Upload provenance (SP-1 Plan C Task 1): nullable so legacy line items remain valid.
+    upload_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("billing.uploads.id", ondelete="SET NULL"), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     invoice: Mapped[Invoice] = relationship(back_populates="line_items")
@@ -484,6 +495,45 @@ class ARPayment(BillingBase):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     ar_record: Mapped[ARRecord] = relationship(back_populates="payments")
+
+
+class Carryover(BillingBase):
+    """AP amount carried forward to the next payment cycle.
+
+    Created when an APRecord cannot be fully paid in the current batch
+    (e.g. vendor hold, partial funding). The original APRecord keeps its
+    status; the Carryover represents the outstanding balance that must be
+    included in the next PaymentBatch generation run.
+
+    upload_id is nullable: legacy carryovers pre-dating SP-1 have no upload
+    provenance; new carryovers created from an upload-originated APRecord
+    MUST have upload_id set at the service layer.
+    """
+
+    __tablename__ = "carryovers"
+    __table_args__ = ({"schema": "billing"},)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+
+    ap_record_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("billing.ap_records.id", ondelete="RESTRICT"), nullable=False
+    )
+
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    reason: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # Upload provenance (SP-1 Plan C Task 1).
+    upload_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("billing.uploads.id", ondelete="SET NULL"), nullable=True
+    )
+
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 # ---------------------------------------------------------------------------
