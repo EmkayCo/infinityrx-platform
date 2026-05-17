@@ -1,7 +1,7 @@
 [
   {
     "id": "up000000-0000-0000-0000-000000000001",
-    "tenant_id": "t0000000-0000-0000-0000-000000000001",
+    "tenant_id": "00000000-0000-0000-0000-000000000001",
     "filename": "claims-2026-05-001.csv",
     "source_platform": "adjudication-engine",
     "status": "received",
@@ -16,7 +16,7 @@
   },
   {
     "id": "up000000-0000-0000-0000-000000000002",
-    "tenant_id": "t0000000-0000-0000-0000-000000000001",
+    "tenant_id": "00000000-0000-0000-0000-000000000001",
     "filename": "claims-2026-04-001.csv",
     "source_platform": "switch-connectivity",
     "status": "parsing",
@@ -31,7 +31,7 @@
   },
   {
     "id": "up000000-0000-0000-0000-000000000003",
-    "tenant_id": "t0000000-0000-0000-0000-000000000001",
+    "tenant_id": "00000000-0000-0000-0000-000000000001",
     "filename": "claims-2026-03-healthyclaims.csv",
     "source_platform": "adjudication-engine",
     "status": "validated",
@@ -46,7 +46,7 @@
   },
   {
     "id": "up000000-0000-0000-0000-000000000004",
-    "tenant_id": "t0000000-0000-0000-0000-000000000001",
+    "tenant_id": "00000000-0000-0000-0000-000000000001",
     "filename": "claims-2026-05-bad-ndcs.csv",
     "source_platform": "adjudication-engine",
     "status": "rejected",
@@ -62,7 +62,7 @@
   },
   {
     "id": "up000000-0000-0000-0000-000000000005",
-    "tenant_id": "t0000000-0000-0000-0000-000000000001",
+    "tenant_id": "00000000-0000-0000-0000-000000000001",
     "filename": "claims-2026-02-final.csv",
     "source_platform": "switch-connectivity",
     "status": "validated",

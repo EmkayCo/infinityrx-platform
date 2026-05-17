@@ -35,7 +35,7 @@ const PORTAL_BASE_URL = process.env["PORTAL_BASE_URL"] ?? "http://localhost:3000
 const OPERATOR_USER_ID = "usr-00000000-0000-0000-0000-000000000001";
 const APPROVER_USER_ID = "usr-00000000-0000-0000-0000-000000000002";
 const AUDITOR_USER_ID  = "usr-00000000-0000-0000-0000-000000000003";
-const DEMO_TENANT_ID   = "t0000000-0000-0000-0000-000000000001";
+const DEMO_TENANT_ID   = "00000000-0000-0000-0000-000000000001";
 
 // ── Upload fixture path ───────────────────────────────────────────────────────
 

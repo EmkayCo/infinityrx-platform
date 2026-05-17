@@ -96,15 +96,24 @@ def _get_session() -> Session:
 
 
 class SeedRequest(BaseModel):
-    tenant_id: str = "t0000000-0000-0000-0000-000000000001"
+    tenant_id: str = "00000000-0000-0000-0000-000000000001"
 
 
 def _load_seed_file(stem: str) -> list[dict[str, Any]]:
-    path = _SEEDS_DIR / f"{stem}.json"
-    if not path.exists():
-        logger.warning("billing.seed: fixture file not found — %s", path)
-        return []
-    return json.loads(path.read_text(encoding="utf-8"))
+    """Load a fixture JSON file by canonical snake_case stem.
+
+    Fixture files on disk use hyphenated filenames (payment-runs.json), so
+    snake_case stems from `_INSERT_ORDER` are mapped to hyphenated names
+    before lookup. Both forms are tried so the function is robust to either
+    naming convention.
+    """
+    candidates = [stem, stem.replace("_", "-")]
+    for name in candidates:
+        path = _SEEDS_DIR / f"{name}.json"
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    logger.warning("billing.seed: fixture file not found — %s.json", stem)
+    return []
 
 
 def _upsert_rows(
