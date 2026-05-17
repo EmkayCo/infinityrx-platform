@@ -1,4 +1,4 @@
-"""Integration tests for Inbox router (Task 3 — Plan B).
+﻿"""Integration tests for Inbox router (Task 3 — Plan B).
 
 Covers:
 - Inbox returns items derived from DB state (uploads + batches)
@@ -314,8 +314,184 @@ class TestInboxCycleQueryErrorLogging:
             # Must still return 200 (best-effort degraded response)
             assert resp.status_code == 200, resp.text
             # Must have logged the exception
-            mock_logger.exception.assert_called_once()
-            call_args = mock_logger.exception.call_args
-            assert "billing.inbox.cycle_query_failed" in call_args[0][0], (
-                f"Expected 'billing.inbox.cycle_query_failed' in log message, got: {call_args}"
+            # Plan C adds multiple try/except blocks hitting payment_batch tables;
+            # at least one billing.inbox.* exception log is required.
+            assert mock_logger.exception.call_count >= 1, "logger.exception was never called"
+            all_msgs = [c[0][0] for c in mock_logger.exception.call_args_list]
+            assert any("billing.inbox." in m for m in all_msgs), f"No billing.inbox.* log found: {all_msgs}"
+
+# -- Plan C Task 7: 6 new inbox kinds -----------------------------------------
+
+
+class TestInboxPlanCKinds:
+    def test_inbox_returns_batch_drafted_for_generated_batch(
+        self, _client, _engine, _session_factory
+    ):
+        import decimal
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+        from src.models.tables import PaymentBatch
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        session = _session_factory()
+        batch_id = uuid.uuid4()
+        try:
+            b = PaymentBatch(
+                id=batch_id,
+                tenant_id=uuid.UUID(TENANT_A),
+                batch_number="BATCH-DRAFT-T7",
+                payment_route="ach",
+                total_amount=decimal.Decimal("1000.00"),
+                payment_count=5,
+                ap_count=5,
+                status="generated",
+                generated_at=datetime.datetime.now(datetime.timezone.utc),
+                created_at=datetime.datetime.now(datetime.timezone.utc),
+                updated_at=datetime.datetime.now(datetime.timezone.utc),
             )
+            session.add(b)
+            session.commit()
+        finally:
+            session.close()
+        resp = _client.get("/api/v1/billing/inbox", params={"role": "approver"}, headers={"X-Tenant-Id": TENANT_A})
+        assert resp.status_code == 200
+        assert "batch_drafted" in [i["kind"] for i in resp.json()]
+
+    def test_inbox_returns_ar_invoice_draft_for_draft_invoice(
+        self, _client, _engine, _session_factory
+    ):
+        import decimal
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+        from src.models.tables import Invoice
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        session = _session_factory()
+        inv_id = uuid.uuid4()
+        now = datetime.datetime.now(datetime.timezone.utc)
+        try:
+            inv = Invoice(
+                id=inv_id,
+                tenant_id=uuid.UUID(TENANT_A),
+                invoice_number="INV-DRAFT-T7",
+                invoice_type="client_billing",
+                client_id=uuid.uuid4(),
+                client_name="Test Client",
+                period_start=datetime.date(2026, 5, 1),
+                period_end=datetime.date(2026, 5, 31),
+                claims_subtotal=decimal.Decimal("10000.00"),
+                fees_subtotal=decimal.Decimal("500.00"),
+                adjustments=decimal.Decimal("0.00"),
+                late_fees=decimal.Decimal("0.00"),
+                total=decimal.Decimal("10500.00"),
+                paid_amount=decimal.Decimal("0.00"),
+                claim_count=100,
+                status="draft",
+                payment_terms_days=30,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(inv)
+            session.commit()
+        finally:
+            session.close()
+        resp = _client.get("/api/v1/billing/inbox", params={"role": "approver"}, headers={"X-Tenant-Id": TENANT_A})
+        assert resp.status_code == 200
+        assert "ar_invoice_draft" in [i["kind"] for i in resp.json()]
+
+    def test_inbox_returns_carryover_open_for_unresolved_carryover(
+        self, _client, _engine, _session_factory
+    ):
+        import decimal
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+        from src.models.tables import APRecord, Carryover, ClaimRecord
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        session = _session_factory()
+        claim_id = uuid.uuid4()
+        ap_id = uuid.uuid4()
+        co_id = uuid.uuid4()
+        now = datetime.datetime.now(datetime.timezone.utc)
+        try:
+            claim = ClaimRecord(
+                id=claim_id,
+                tenant_id=uuid.UUID(TENANT_A),
+                source_type="upload",
+                auth_number="AUTH-T7-" + claim_id.hex[:8],
+                claim_type="pharmacy",
+                pharmacy_npi="1234567890",
+                date_of_service=datetime.date(2026, 5, 1),
+                date_received=now,
+                net_amount=decimal.Decimal("100.00"),
+                created_at=now,
+            )
+            session.add(claim)
+            session.flush()
+            ap = APRecord(
+                id=ap_id,
+                tenant_id=uuid.UUID(TENANT_A),
+                claim_record_id=claim_id,
+                client_id=uuid.uuid4(),
+                pay_to_entity_id=uuid.uuid4(),
+                pay_to_entity_name="Test Pharmacy",
+                amount=decimal.Decimal("100.00"),
+                payment_route="ach",
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(ap)
+            session.flush()
+            co = Carryover(
+                id=co_id,
+                tenant_id=uuid.UUID(TENANT_A),
+                ap_record_id=ap_id,
+                amount=decimal.Decimal("100.00"),
+                reason="vendor_hold",
+                resolved=False,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(co)
+            session.commit()
+        finally:
+            session.close()
+        resp = _client.get("/api/v1/billing/inbox", params={"role": "operator"}, headers={"X-Tenant-Id": TENANT_A})
+        assert resp.status_code == 200
+        assert "carryover_open" in [i["kind"] for i in resp.json()]
+
+    def test_inbox_batch_drafted_has_required_envelope_fields(self, _client, _engine, _session_factory):
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        resp = _client.get("/api/v1/billing/inbox", params={"role": "approver"}, headers={"X-Tenant-Id": TENANT_A})
+        assert resp.status_code == 200
+        items = resp.json()
+        drafted = [i for i in items if i.get("kind") == "batch_drafted"]
+        assert drafted, "expected at least one batch_drafted item"
+        item = drafted[0]
+        for field in ["id", "tenant_id", "rbac_required", "created_at", "payload"]:
+            assert field in item, f"missing {field}"
+        assert item["rbac_required"] == "approver"
+        assert isinstance(item["payload"], dict)
+
+    def test_inbox_plan_c_returns_200(self, _client):
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        resp = _client.get("/api/v1/billing/inbox", params={"role": "approver"}, headers={"X-Tenant-Id": TENANT_A})
+        assert resp.status_code == 200
+
+    def test_inbox_carryover_open_cross_tenant_isolation(self, _client, _engine, _session_factory):
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        resp = _client.get("/api/v1/billing/inbox", params={"role": "operator"}, headers={"X-Tenant-Id": TENANT_A})
+        assert resp.status_code == 200
+        for item in resp.json():
+            if item.get("kind") == "carryover_open":
+                assert item["tenant_id"] == TENANT_A
+

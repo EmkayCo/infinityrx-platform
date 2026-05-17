@@ -1,4 +1,4 @@
-"""SP-1 Plan B Task 3.2 -- Inbox router.
+﻿"""SP-1 Plan B Task 3.2 -- Inbox router.
 
 GET /api/v1/billing/inbox?role=<role>
 Returns InboxItem[] derived from current DB state of uploads + payment batches.
@@ -25,7 +25,7 @@ from sqlalchemy import select
 
 from shared.auth.dependencies import CurrentUser, get_current_user
 from src.api.dependencies import DBSession, TenantId
-from src.models.tables import PaymentBatch, Upload, UploadStatus
+from src.models.tables import Carryover, Invoice, PaymentBatch, Upload, UploadStatus
 
 logger = logging.getLogger("billing.api.inbox")
 
@@ -133,10 +133,99 @@ async def get_inbox(
             extra={"svc_tenant_id": str(tenant_id)},
         )  # best-effort: return upload items even when cycle query fails
 
+
+    # Plan C Task 7: batch_drafted -- PaymentBatch status=generated (no BatchIds released)
+    try:
+        for b in db.execute(
+            select(PaymentBatch).where(
+                PaymentBatch.tenant_id == tenant_id,
+                PaymentBatch.status == "generated",
+            )
+        ).scalars().all():
+            items.append({
+                "id": str(b.id),
+                "kind": "batch_drafted",
+                "tenant_id": str(tenant_id),
+                "upload_id": str(b.upload_id) if b.upload_id else None,
+                "rbac_required": "approver",
+                "created_at": b.created_at.isoformat() if b.created_at else now_iso,
+                "priority": "normal",
+                "payload": {
+                    "batch_number": b.batch_number,
+                    "total_amount": str(b.total_amount),
+                    "batch_id": str(b.id),
+                    "status": b.status,
+                },
+            })
+    except Exception:
+        logger.exception(
+            "billing.inbox.batch_drafted_query_failed",
+            extra={"svc_tenant_id": str(tenant_id)},
+        )
+
+    # Plan C Task 7: ar_invoice_draft -- Invoice status=draft
+    try:
+        for inv in db.execute(
+            select(Invoice).where(
+                Invoice.tenant_id == tenant_id,
+                Invoice.status == "draft",
+            )
+        ).scalars().all():
+            items.append({
+                "id": str(inv.id),
+                "kind": "ar_invoice_draft",
+                "tenant_id": str(tenant_id),
+                "upload_id": None,
+                "rbac_required": "approver",
+                "created_at": inv.created_at.isoformat() if inv.created_at else now_iso,
+                "priority": "normal",
+                "payload": {
+                    "invoice_number": inv.invoice_number,
+                    "client_name": inv.client_name,
+                    "total": str(inv.total),
+                    "invoice_id": str(inv.id),
+                    "status": inv.status,
+                },
+            })
+    except Exception:
+        logger.exception(
+            "billing.inbox.ar_invoice_draft_query_failed",
+            extra={"svc_tenant_id": str(tenant_id)},
+        )
+
+    # Plan C Task 7: carryover_open -- Carryover resolved=False
+    try:
+        for co in db.execute(
+            select(Carryover).where(
+                Carryover.tenant_id == tenant_id,
+                Carryover.resolved == False,  # noqa: E712
+            )
+        ).scalars().all():
+            items.append({
+                "id": str(co.id),
+                "kind": "carryover_open",
+                "tenant_id": str(tenant_id),
+                "upload_id": str(co.upload_id) if co.upload_id else None,
+                "rbac_required": "operator",
+                "created_at": co.created_at.isoformat() if co.created_at else now_iso,
+                "priority": "normal",
+                "payload": {
+                    "carryover_id": str(co.id),
+                    "amount": str(co.amount),
+                    "reason": co.reason,
+                },
+            })
+    except Exception:
+        logger.exception(
+            "billing.inbox.carryover_open_query_failed",
+            extra={"svc_tenant_id": str(tenant_id)},
+        )
     return JSONResponse(
         content=items,
         headers={"Cache-Control": "no-store"},
     )
+
+
 
 
 
