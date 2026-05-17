@@ -60,9 +60,14 @@ def write_upload_file(
     filename: str,
     content: bytes,
 ) -> Path:
+    # P1-security: strip all directory components so an attacker-supplied
+    # filename like "../../etc/passwd" or an absolute Windows path cannot
+    # escape the tenant/upload directory.  Path.name gives only the
+    # final component; fall back to "upload.bin" for empty results.
+    safe_name = Path(filename).name or "upload.bin"
     target_dir = base_dir / str(tenant_id) / str(upload_id)
     target_dir.mkdir(parents=True, exist_ok=True)
-    final = target_dir / filename
+    final = target_dir / safe_name
     tmp = final.with_suffix(final.suffix + ".tmp")
     tmp.write_bytes(content)
     os.replace(tmp, final)
@@ -220,7 +225,15 @@ class UploadParseResult:
 def parse_upload(
     session: Session, *, upload: Upload, file_bytes: bytes
 ) -> UploadParseResult:
-    rows = parse_csv_bytes(file_bytes)
+    # P2-xlsx: dispatch to the correct parser based on mime_type/filename.
+    # Callers that pass raw bytes from an xlsx file must set upload.mime_type
+    # to "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    # or upload.filename ending in ".xlsx".
+    _xlsx_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    _is_xlsx = (upload.mime_type or "").startswith(_xlsx_mime) or (
+        upload.filename or ""
+    ).lower().endswith(".xlsx")
+    rows = parse_xlsx_bytes(file_bytes) if _is_xlsx else parse_csv_bytes(file_bytes)
     row_count = len(rows)
     errors: list[dict[str, Any]] = []
     valid_rows: list[dict[str, Any]] = []
@@ -276,6 +289,23 @@ def supersede_upload(
 ) -> None:
     if old_upload.tenant_id != new_upload.tenant_id:
         raise ValueError("cannot supersede across tenants")
+    # P2-supersede: delete ClaimRecord rows from the old upload before
+    # parse_upload inserts replacements.  The unique constraint
+    # uq_claim_tenant_auth (tenant_id, auth_number) fires when the replacement
+    # file re-uses the same claim_id values — there is no way to retain old
+    # rows with the same (tenant_id, auth_number) while inserting new ones.
+    # Provenance immutability covers the Upload row (status → superseded,
+    # supersedes_upload_id chain preserved); individual ClaimRecord rows are
+    # processing artifacts replaced in full by the superseding upload.
+    old_claims = session.execute(
+        select(ClaimRecord).where(
+            ClaimRecord.upload_id == old_upload.id,
+            ClaimRecord.tenant_id == old_upload.tenant_id,
+        )
+    ).scalars().all()
+    for c in old_claims:
+        session.delete(c)
+    session.flush()
     old_upload.status = UploadStatus.superseded.value
     new_upload.supersedes_upload_id = old_upload.id
     session.flush()

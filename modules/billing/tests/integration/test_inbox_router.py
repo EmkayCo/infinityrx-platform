@@ -208,3 +208,64 @@ class TestInboxCrossTenant:
         assert resp.status_code == 200
         upload_ids = [i.get("upload_id") for i in resp.json()]
         assert str(b_upload_id) not in upload_ids
+
+
+# ── Inbox envelope contract (P2-inbox-envelope fix) ───────────────────────────
+
+
+class TestInboxEnvelope:
+    """InboxItemSchema requires id, tenant_id, rbac_required, created_at, payload."""
+
+    def test_inbox_item_has_required_contract_fields(
+        self, _client, _engine, _session_factory
+    ):
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+        from src.models.tables import Upload, UploadStatus
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+
+        session = _session_factory()
+        upload_id = uuid.uuid4()
+        try:
+            u = Upload(
+                id=upload_id,
+                tenant_id=uuid.UUID(TENANT_A),
+                filename="envelope_test.csv",
+                sha256="e" * 63 + "3",
+                file_size=50,
+                mime_type="text/csv",
+                uploaded_by=USER_OP,
+                uploaded_at=datetime.datetime.now(datetime.timezone.utc),
+                status=UploadStatus.validation_failed.value,
+                row_count=1,
+                error_count=1,
+                row_errors=[],
+            )
+            session.add(u)
+            session.commit()
+        finally:
+            session.close()
+
+        resp = _client.get(
+            "/api/v1/billing/inbox",
+            params={"role": "operator"},
+            headers={"X-Tenant-Id": TENANT_A},
+        )
+        assert resp.status_code == 200
+        assert resp.headers.get("cache-control") == "no-store"
+
+        items = resp.json()
+        matching = [i for i in items if i.get("upload_id") == str(upload_id)]
+        assert matching, "expected inbox item for this upload"
+        item = matching[0]
+
+        # P2-inbox-envelope: InboxItemSchema required fields
+        assert "id" in item, "missing id"
+        assert "tenant_id" in item, "missing tenant_id"
+        assert "rbac_required" in item, "missing rbac_required — items disappear from UI"
+        assert "created_at" in item, "missing created_at"
+        assert "payload" in item, "missing payload object"
+        assert isinstance(item["payload"], dict)
+        assert item["rbac_required"] in ("operator", "approver", "auditor")
+        assert item["kind"] == "upload_pending_review"

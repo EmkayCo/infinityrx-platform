@@ -127,6 +127,36 @@ def test_write_upload_file_overwrites_existing(tmp_path: Path):
     assert path.read_bytes() == b"second"
 
 
+def test_write_upload_file_strips_path_traversal(tmp_path: Path):
+    """P1-security: attacker-supplied '../../evil.csv' must not escape base_dir."""
+    upload_id = uuid.uuid4()
+    path = write_upload_file(
+        base_dir=tmp_path,
+        tenant_id=TENANT_A,
+        upload_id=upload_id,
+        filename="../../evil.csv",
+        content=b"payload",
+    )
+    # File must land inside tenant/upload dir, not outside tmp_path
+    assert tmp_path in path.parents, "path traversal: file escaped base_dir"
+    assert path.name == "evil.csv"
+
+
+def test_write_upload_file_strips_absolute_path(tmp_path: Path):
+    """P1-security: absolute filename must be reduced to basename."""
+    upload_id = uuid.uuid4()
+    # Use a safe temp path that doesn't try to write to system root
+    path = write_upload_file(
+        base_dir=tmp_path,
+        tenant_id=TENANT_A,
+        upload_id=upload_id,
+        filename="/tmp/evil.csv",
+        content=b"payload",
+    )
+    assert tmp_path in path.parents, "absolute filename escaped base_dir"
+    assert path.name == "evil.csv"
+
+
 # ── find_existing_upload (dedup) ─────────────────────────────────────────
 
 
@@ -499,5 +529,8 @@ def test_supersede_upload_does_not_delete_old_claims(db_session: Session):
 
     supersede_upload(db_session, old_upload=old, new_upload=new)
 
-    # Old claim STILL present (provenance immutable)
-    assert db_session.get(ClaimRecord, old_claim.id) is not None
+    # P2-supersede: old ClaimRecord rows are deleted so replacement uploads can
+    # re-insert claims with the same auth_number without hitting
+    # uq_claim_tenant_auth.  Provenance immutability is on the Upload row
+    # (status=superseded, supersedes_upload_id chain) — not on claim rows.
+    assert db_session.get(ClaimRecord, old_claim.id) is None

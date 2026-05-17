@@ -72,24 +72,30 @@ def _emit_phi_audit(
 def _upload_to_dict(
     upload: Upload, *, include_row_errors: bool = False
 ) -> dict[str, Any]:
+    # P1-contract: field names must match UploadSchema in packages/contract/src/impls/paysync/types.ts.
+    # content_sha256 (not sha256), uploaded_by_user_id (not uploaded_by),
+    # claim_count (not row_count), row_error_count (not error_count),
+    # total_billed_amount (Decimal string or null).
+    # UploadStatus enum values: received/parsing/validated/rejected/applied.
+    # validation_failed maps to "rejected" for the TS contract.
+    _STATUS_MAP = {
+        "validation_failed": "rejected",
+        "superseded": "applied",
+    }
+    contract_status = _STATUS_MAP.get(upload.status, upload.status)
     data: dict[str, Any] = {
         "id": str(upload.id),
         "tenant_id": str(upload.tenant_id),
         "filename": upload.filename,
-        "sha256": upload.sha256,
-        "file_size": upload.file_size,
-        "mime_type": upload.mime_type,
-        "uploaded_at": upload.uploaded_at.isoformat() if upload.uploaded_at else None,
-        "uploaded_by": str(upload.uploaded_by),
-        "source_platform": upload.source_platform,
-        "supersedes_upload_id": (
-            str(upload.supersedes_upload_id)
-            if upload.supersedes_upload_id
-            else None
+        "content_sha256": upload.sha256,
+        "status": contract_status,
+        "claim_count": upload.row_count or 0,
+        "row_error_count": upload.error_count or 0,
+        "total_billed_amount": None,  # populated by billing cycle aggregation
+        "uploaded_by_user_id": str(upload.uploaded_by),
+        "uploaded_at": (
+            upload.uploaded_at.isoformat() if upload.uploaded_at else None
         ),
-        "status": upload.status,
-        "row_count": upload.row_count,
-        "error_count": upload.error_count,
     }
     if include_row_errors:
         data["row_errors"] = upload.row_errors or []
@@ -211,7 +217,9 @@ async def list_uploads(
         .order_by(Upload.uploaded_at.desc())
     )
     uploads = db.execute(stmt).scalars().all()
-    return JSONResponse(content=[_upload_to_dict(u) for u in uploads])
+    results = [_upload_to_dict(u) for u in uploads]
+    # P2-pagination: UploadListResponseSchema expects { results, next_cursor, total }.
+    return JSONResponse(content={"results": results, "total": len(results)})
 
 
 @router.get("/{upload_id}")
@@ -254,10 +262,13 @@ async def get_upload_claims(
         ClaimRecord.tenant_id == tenant_id,
     )
     claims = db.execute(claims_stmt).scalars().all()
-    data = [
+    # P2-claims-shape: getClaims contract expects { results, next_cursor, total }
+    # and field name "claim_id" (contract alias for auth_number — the business
+    # identifier stored in ClaimRecord.auth_number per Plan B data model).
+    results = [
         {
             "id": str(c.id),
-            "auth_number": c.auth_number,
+            "claim_id": c.auth_number,
             "claim_type": c.claim_type,
             "date_of_service": (
                 c.date_of_service.isoformat() if c.date_of_service else None
@@ -267,14 +278,11 @@ async def get_upload_claims(
             "amount_billed": (
                 str(c.amount_billed) if c.amount_billed is not None else None
             ),
-            "net_amount": (
-                str(c.net_amount) if c.net_amount is not None else None
-            ),
             "status": c.status,
         }
         for c in claims
     ]
-    return _no_store(data)
+    return _no_store({"results": results, "total": len(results)})
 
 
 @router.post("/{upload_id}/supersede")
@@ -299,8 +307,11 @@ async def supersede_upload_endpoint(
 
     content = await file.read()
     sha256 = compute_sha256(content)
+    # uq_uploads_tenant_sha256 forbids reusing identical content for ANY upload
+    # on this tenant, including the one being superseded.  Return 409 rather
+    # than attempting an insert that the DB will reject anyway.
     existing = find_existing_upload(db, tenant_id=tenant_id, sha256=sha256)
-    if existing is not None and existing.id != upload_id:
+    if existing is not None:
         return _no_store(
             {
                 "error": {
@@ -334,8 +345,12 @@ async def supersede_upload_endpoint(
     )
     db.add(new_upload)
     db.flush()
-    parse_upload(db, upload=new_upload, file_bytes=content)
+    # P2-supersede: void old claim rows before parsing so the unique constraint
+    # (tenant_id, auth_number) doesn't fire when the replacement file reuses
+    # the same claim_id values.  supersede_upload deletes old ClaimRecord rows
+    # and marks the old upload superseded; parse_upload then inserts fresh rows.
     supersede_upload(db, old_upload=old_upload, new_upload=new_upload)
+    parse_upload(db, upload=new_upload, file_bytes=content)
     db.commit()
 
     await _publish_parsed(request, upload=new_upload, correlation_id=uuid.uuid4())

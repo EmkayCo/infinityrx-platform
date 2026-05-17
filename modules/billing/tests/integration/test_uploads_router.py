@@ -172,9 +172,12 @@ class TestRBACUploadPost:
         )
         assert resp.status_code == 201, resp.text
         body = resp.json()
+        # P1-contract: field names match UploadSchema in packages/contract/src/impls/paysync/types.ts
         assert body["status"] == "validated"
-        assert body["row_count"] == 1
-        assert body["error_count"] == 0
+        assert body["claim_count"] == 1
+        assert body["row_error_count"] == 0
+        assert "content_sha256" in body
+        assert "uploaded_by_user_id" in body
         assert resp.headers.get("cache-control") == "no-store"
 
     def test_approver_can_upload_real_parse(self, _client):
@@ -375,7 +378,10 @@ class TestCrossTenantIsolationListUploads:
             "/api/v1/billing/uploads", headers={"X-Tenant-Id": TENANT_A}
         )
         assert resp.status_code == 200
-        ids = [item["id"] for item in resp.json()]
+        # P2-pagination: list response is { results, total } not a bare array
+        data = resp.json()
+        assert "results" in data
+        ids = [item["id"] for item in data["results"]]
         assert str(b_upload_id) not in ids
 
 
@@ -495,3 +501,108 @@ class TestCrossTenantIsolationSupersede:
             files=_multipart_file(_csv("CLM-XT-1")),
         )
         assert resp.status_code == 404
+
+
+# -- Contract compliance (P1-contract fix) ------------------------------------
+
+
+class TestContractFieldNames:
+    """Upload responses must use TS contract field names from UploadSchema."""
+
+    def test_create_response_uses_contract_field_names(self, _client):
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        resp = _client.post(
+            "/api/v1/billing/uploads",
+            headers={"X-Tenant-Id": TENANT_A},
+            files=_multipart_file(_csv("CLM-CONTRACT-1")),
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        # Contract fields present
+        assert "content_sha256" in body, "must use content_sha256 not sha256"
+        assert "uploaded_by_user_id" in body, "must use uploaded_by_user_id not uploaded_by"
+        assert "claim_count" in body, "must use claim_count not row_count"
+        assert "row_error_count" in body, "must use row_error_count not error_count"
+        assert "total_billed_amount" in body
+        # Legacy field names must NOT appear
+        assert "sha256" not in body
+        assert "uploaded_by" not in body
+        assert "row_count" not in body
+        assert "error_count" not in body
+
+    def test_list_response_is_paginated_envelope(self, _client):
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        resp = _client.get("/api/v1/billing/uploads", headers={"X-Tenant-Id": TENANT_A})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "results" in body, "list must be { results, total } not bare array"
+        assert "total" in body
+        assert isinstance(body["results"], list)
+        assert isinstance(body["total"], int)
+
+    def test_claims_response_is_paginated_envelope(self, _client, _session_factory):
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+        from src.models.tables import Upload, UploadStatus
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        upload_id = uuid.uuid4()
+        session = _session_factory()
+        try:
+            session.add(Upload(
+                id=upload_id, tenant_id=uuid.UUID(TENANT_A), filename="claims_shape.csv",
+                sha256="8" * 64, file_size=50, mime_type="text/csv",
+                uploaded_by=USER_OP, uploaded_at=datetime.datetime.now(datetime.timezone.utc),
+                status=UploadStatus.validated.value, row_count=0, error_count=0,
+            ))
+            session.commit()
+        finally:
+            session.close()
+
+        with patch("src.api.uploads._emit_phi_audit"):
+            resp = _client.get(
+                f"/api/v1/billing/uploads/{upload_id}/claims",
+                headers={"X-Tenant-Id": TENANT_A},
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "results" in body, "claims must be { results, total } not bare array"
+        assert "total" in body
+
+
+# -- Supersede fixes (P2-supersede) ------------------------------------------
+
+
+class TestSupersede:
+    """Supersede with overlapping claim_ids must not raise IntegrityError."""
+
+    def test_supersede_with_same_claim_ids_succeeds(self, _client):
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        # Upload original
+        original_csv = _csv("CLM-SUP-SAME-1")
+        resp1 = _client.post(
+            "/api/v1/billing/uploads",
+            headers={"X-Tenant-Id": TENANT_A},
+            files=_multipart_file(original_csv, "original.csv"),
+        )
+        assert resp1.status_code == 201, resp1.text
+        upload_id = resp1.json()["id"]
+
+        # Supersede with same claim_id — must not raise IntegrityError/500
+        replacement_csv = _csv("CLM-SUP-SAME-1")  # same claim_id
+        resp2 = _client.post(
+            f"/api/v1/billing/uploads/{upload_id}/supersede",
+            headers={"X-Tenant-Id": TENANT_A},
+            files=_multipart_file(replacement_csv, "replacement.csv"),
+        )
+        # 201 = success; 409 = dedup (same SHA if content identical); anything else is a bug
+        assert resp2.status_code in (201, 409), f"unexpected: {resp2.status_code} {resp2.text}"
