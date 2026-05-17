@@ -82,7 +82,7 @@ async def handle_upload_parsed(envelope: EventEnvelope, **_: object) -> None:
         logger.warning("billing.upload_consumer.redis_unavailable")
         return
 
-    pattern = f"paysync:inbox:list:{tenant_id}:*"
+    pattern = f"tenant:{tenant_id}:paysync:inbox:list:*"
     keys = list(redis_client.scan_iter(pattern))
     if keys:
         redis_client.delete(*keys)

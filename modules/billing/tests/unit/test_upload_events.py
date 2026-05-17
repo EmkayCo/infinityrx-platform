@@ -147,13 +147,60 @@ class TestUploadParsedConsumer:
         mock_redis = MagicMock()
         mock_redis.delete = MagicMock()
         mock_redis.scan_iter = MagicMock(return_value=[
-            f"paysync:inbox:list:{tenant_id}:operator"
+            f"tenant:{tenant_id}:paysync:inbox:list:operator"
         ])
 
         with patch("src.events.upload_events._get_redis", return_value=mock_redis):
             await handle_upload_parsed(envelope)
 
         mock_redis.delete.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_consumer_uses_tenant_prefixed_redis_key_pattern(self):
+        """B6: Redis scan pattern must use tenant:{tenant_id}: prefix.
+
+        The tenant-isolation hard rule (tenant-isolation.md) requires ALL Redis
+        keys to be prefixed with tenant:{tenant_id}:. The old pattern
+        paysync:inbox:list:{tenant_id}:* violates this rule.
+        Correct pattern: tenant:{tenant_id}:paysync:inbox:list:*
+        """
+        from src.events.upload_events import handle_upload_parsed
+        from shared.events.types import EventEnvelope
+
+        tenant_id = uuid.uuid4()
+        upload_id = uuid.uuid4()
+        envelope = EventEnvelope(
+            event_type="paysync.upload.parsed",
+            tenant_id=tenant_id,
+            correlation_id=uuid.uuid4(),
+            source_module="billing",
+            schema_version="1.0",
+            ordering_key=str(upload_id),
+            idempotency_key=f"paysync:upload:{upload_id}:parsed",
+            payload={
+                "upload_id": str(upload_id),
+                "tenant_id": str(tenant_id),
+                "status": "validated",
+                "row_count": 10,
+                "error_count": 0,
+            },
+        )
+        mock_redis = MagicMock()
+        mock_redis.delete = MagicMock()
+        mock_redis.scan_iter = MagicMock(return_value=[])
+
+        with patch("src.events.upload_events._get_redis", return_value=mock_redis):
+            await handle_upload_parsed(envelope)
+
+        # Assert scan_iter was called with the tenant-prefixed pattern
+        mock_redis.scan_iter.assert_called_once()
+        actual_pattern = mock_redis.scan_iter.call_args[0][0]
+        expected_pattern = f"tenant:{tenant_id}:paysync:inbox:list:*"
+        assert actual_pattern == expected_pattern, (
+            f"B6: Redis scan pattern must be tenant-prefixed. "
+            f"Expected: {expected_pattern!r}, got: {actual_pattern!r}. "
+            f"See .claude/rules/tenant-isolation.md"
+        )
 
     @pytest.mark.asyncio
     async def test_consumer_handles_unknown_fields_gracefully(self):

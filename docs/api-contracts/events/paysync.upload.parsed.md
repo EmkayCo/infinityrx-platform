@@ -44,7 +44,7 @@ Consumers MUST ignore unknown payload fields (forward compatibility).
 
 | Module | Handler | Action |
 |--------|---------|--------|
-| `billing` | `handle_upload_parsed` | Invalidate Redis keys matching `paysync:inbox:list:{tenant_id}:*` |
+| `billing` | `handle_upload_parsed` | Invalidate Redis keys matching `tenant:{tenant_id}:paysync:inbox:list:*` |
 
 ---
 
