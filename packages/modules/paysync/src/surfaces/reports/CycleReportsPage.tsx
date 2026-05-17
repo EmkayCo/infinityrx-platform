@@ -84,7 +84,7 @@ export function CycleReportsPage({
             {cycles.map((cycle) => (
               <tr key={cycle.id} data-testid="cycle-report-row">
                 <td>
-                  <a href={`/admin/paysync/accounting/cycles/${cycle.id}`}>
+                  <a href={`/admin/paysync/cycles/${cycle.id}`}>
                     {cycle.period_label}
                   </a>
                 </td>
