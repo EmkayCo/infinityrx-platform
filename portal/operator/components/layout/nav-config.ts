@@ -200,15 +200,16 @@ export const NAV_MODULES: NavModule[] = [
   {
     label: "PaySync Config",
     icon: SlidersHorizontal,
-    href: "/admin/paysync/cycle-schedules",
+    href: "/admin/paysync/setup",
     permission: Permission.AdminFull,
     children: [
-      { label: "Cycle Schedules", href: "/admin/paysync/cycle-schedules" },
-      { label: "Export Templates", href: "/admin/paysync/export-templates" },
-      { label: "Email Templates", href: "/admin/paysync/email-templates" },
-      { label: "Email Recipients", href: "/admin/paysync/email-recipients" },
-      { label: "GL Mappings", href: "/admin/paysync/gl-account-mappings" },
-      { label: "Invoice Sequences", href: "/admin/paysync/invoice-sequences" },
+      { label: "Setup", href: "/admin/paysync/setup" },
+      { label: "Cycle Schedules", href: "/admin/paysync/setup/cycle-schedules" },
+      { label: "Export Templates", href: "/admin/paysync/setup/export-templates" },
+      { label: "Email Templates", href: "/admin/paysync/setup/email-templates" },
+      { label: "Email Recipients", href: "/admin/paysync/setup/email-recipients" },
+      { label: "GL Mappings", href: "/admin/paysync/setup/gl-account-mappings" },
+      { label: "Invoice Sequences", href: "/admin/paysync/setup/invoice-sequences" },
     ],
   },
   {
