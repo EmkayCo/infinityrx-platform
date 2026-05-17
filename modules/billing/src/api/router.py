@@ -1272,83 +1272,7 @@ def write_off_ar_record(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/journal", response_model=list[dict])
-def query_journal(
-    tenant_id: TenantId,
-    db: DBSession,
-    client_id: uuid.UUID | None = Query(default=None),
-    program_id: uuid.UUID | None = Query(default=None),
-    category: str | None = Query(default=None),
-    entry_type: str | None = Query(default=None),
-    date_from: date | None = Query(default=None),
-    date_to: date | None = Query(default=None),
-    unexported_only: bool = Query(default=False),
-    limit: int = Query(default=500, ge=1, le=5000),
-    offset: int = Query(default=0, ge=0),
-) -> list[dict]:
-    """Query journal entries with filters. READ ONLY — journal is append-only."""
-    correlation_id = str(uuid.uuid4())
-    try:
-        stmt = (
-            select(JournalEntry)
-            .where(JournalEntry.tenant_id == tenant_id)
-            .order_by(JournalEntry.entry_date.desc(), JournalEntry.entry_timestamp.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-        if client_id is not None:
-            stmt = stmt.where(JournalEntry.client_id == client_id)
-        if program_id is not None:
-            stmt = stmt.where(JournalEntry.program_id == program_id)
-        if category is not None:
-            stmt = stmt.where(JournalEntry.category == category)
-        if entry_type is not None:
-            stmt = stmt.where(JournalEntry.entry_type == entry_type)
-        if date_from is not None:
-            stmt = stmt.where(JournalEntry.entry_date >= date_from)
-        if date_to is not None:
-            stmt = stmt.where(JournalEntry.entry_date <= date_to)
-        if unexported_only:
-            stmt = stmt.where(JournalEntry.exported_to_accounting.is_(False))
-        rows = db.execute(stmt).scalars().all()
-        return [
-            {
-                "id": str(r.id),
-                "tenant_id": str(r.tenant_id),
-                "entry_date": r.entry_date.isoformat() if r.entry_date else None,
-                "entry_timestamp": r.entry_timestamp.isoformat() if r.entry_timestamp else None,
-                "entry_type": r.entry_type,
-                "amount": str(r.amount),
-                "category": r.category,
-                "description": r.description,
-                "client_id": str(r.client_id) if r.client_id else None,
-                "client_name": r.client_name,
-                "program_id": str(r.program_id) if r.program_id else None,
-                "program_name": r.program_name,
-                "gl_account_code": r.gl_account_code,
-                "gl_class": r.gl_class,
-                "reference_type": r.reference_type,
-                "reference_id": str(r.reference_id) if r.reference_id else None,
-                "exported_to_accounting": r.exported_to_accounting,
-                "exported_at": r.exported_at.isoformat() if r.exported_at else None,
-                "export_reference": r.export_reference,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-            }
-            for r in rows
-        ]
-    except Exception as exc:
-        logger.error(
-            "query_journal failed",
-            extra={"billing_correlation_id": correlation_id, "billing_tenant_id": str(tenant_id)},
-            exc_info=exc,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": {"code": "QUERY_JOURNAL_ERROR", "message": "Failed to query journal", "correlation_id": correlation_id}},
-        ) from exc
-
-
-@router.get("/journal/summary", response_model=dict)
+@router.get("/journal-summary", response_model=dict)
 def journal_summary(
     tenant_id: TenantId,
     db: DBSession,
@@ -1403,7 +1327,7 @@ def journal_summary(
         ) from exc
 
 
-@router.get("/journal/export", response_model=dict)
+@router.get("/journal-export", response_model=dict)
 def export_journal(
     tenant_id: TenantId,
     db: DBSession,
