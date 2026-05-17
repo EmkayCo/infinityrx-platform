@@ -22,6 +22,7 @@ from .api.router import router
 from .api.uploads import router as uploads_router
 from .api.inbox import router as inbox_router
 from .api.cycles import router as cycles_router
+from .api.carryovers import router as carryovers_router
 
 logger = logging.getLogger("billing.main")
 
@@ -167,6 +168,7 @@ def create_app() -> FastAPI:
     app.include_router(uploads_router)
     app.include_router(inbox_router)
     app.include_router(cycles_router)
+    app.include_router(carryovers_router)
     app.include_router(
         build_dlq_router(
             get_service=_get_dlq_service,
