@@ -66,3 +66,40 @@ export const UploadListRequestSchema = z.object({
   cursor: z.string().optional(),
 });
 export type UploadListRequest = z.infer<typeof UploadListRequestSchema>;
+
+// ── Cycle (paysync billing cycle — Plan B adds CyclesClient) ────────────
+export const CycleStatusSchema = z.enum([
+  "open",
+  "closing",
+  "closed",
+  "error",
+]);
+export type CycleStatus = z.infer<typeof CycleStatusSchema>;
+
+export const CycleSchema = z.object({
+  id: z.string().uuid(),
+  tenant_id: z.string().uuid(),
+  // Human-readable period label e.g. "2026-05" or "Q2-2026".
+  period_label: z.string().min(1).max(64),
+  status: CycleStatusSchema,
+  // ISO 8601 datetime when the billing window closed.
+  // null when the cycle is still open.
+  window_closed_at: z.string().datetime({ offset: true }).nullable(),
+  // Provenance: which upload opened this cycle. null for system-initiated.
+  origin_upload_id: z.string().uuid().nullable(),
+  // Decimal-string total billed across all claims in this cycle.
+  // null until the cycle transitions out of "open".
+  total_billed_amount: z.string().nullable(),
+  claim_count: z.number().int().nonnegative(),
+  created_at: z.string().datetime({ offset: true }),
+  updated_at: z.string().datetime({ offset: true }),
+});
+export type Cycle = z.infer<typeof CycleSchema>;
+
+// Paginated cycle list response.
+export const CycleListResponseSchema = z.object({
+  results: z.array(CycleSchema),
+  next_cursor: z.string().optional(),
+  total: z.number().int().nonnegative(),
+});
+export type CycleListResponse = z.infer<typeof CycleListResponseSchema>;

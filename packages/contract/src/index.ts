@@ -46,10 +46,16 @@ export {
   UploadListResponseSchema,
   InboxItemSchema,
   RbacRoleSchema,
+  CycleSchema,
+  CycleStatusSchema,
+  CycleListResponseSchema,
   type Upload,
   type UploadStatus,
   type UploadListRequest,
   type UploadListResponse,
+  type Cycle,
+  type CycleStatus,
+  type CycleListResponse,
   type InboxItem as PaysyncInboxItem,
   type RbacRole as PaysyncRbacRole,
 } from "./impls/paysync/types.js";
@@ -57,16 +63,20 @@ export {
 export {
   PAYSYNC_UPLOADS_CACHE_POLICIES,
   PAYSYNC_INBOX_CACHE_POLICIES,
+  PAYSYNC_CYCLES_CACHE_POLICIES,
   type UploadsClient,
   type InboxClient,
+  type CyclesClient,
 } from "./impls/paysync/client.js";
 
 export {
   createRealUploadsClient,
   createRealInboxClient,
+  createRealCyclesClient,
 } from "./impls/paysync/real.js";
 
 export {
   createMockUploadsClient,
   createMockInboxClient,
+  createMockCyclesClient,
 } from "./impls/paysync/mock.js";
