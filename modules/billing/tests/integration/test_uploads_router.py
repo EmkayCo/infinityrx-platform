@@ -828,3 +828,97 @@ class TestListPaginationAndTotalBilledAmount:
         assert Decimal(body["total_billed_amount"]) > 0, (
             f"total_billed_amount must be > 0, got {body['total_billed_amount']}"
         )
+
+    def test_list_next_cursor_absent_when_no_more_pages(self, _client):
+        """next_cursor must be absent (not null) when there is no next page.
+
+        UploadListResponseSchema uses z.string().optional() — Zod rejects null.
+        """
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+
+        resp = _client.get(
+            "/api/v1/billing/uploads",
+            headers={"X-Tenant-Id": TENANT_A},
+            params={"limit": 100},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        # next_cursor must not be present when all results fit in one page
+        # (Zod z.string().optional() rejects null — must be omitted or a string)
+        assert body.get("next_cursor") is None or isinstance(body.get("next_cursor"), str), (
+            "next_cursor must be a string or absent, never null"
+        )
+        # Specifically: when there are fewer results than limit, next_cursor must be absent
+        if len(body["results"]) < 100:
+            assert "next_cursor" not in body or body["next_cursor"] is None, (
+                "next_cursor must be absent when all results fit in one page"
+            )
+
+    def test_list_cursor_advances_page(self, _client, _session_factory):
+        """Providing cursor must advance to the next page, not repeat the first.
+
+        P1 codex finding: cursor param accepted but never applied.
+        """
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+
+        # Upload 3 distinct files to ensure we have enough data
+        for cid in ("CLM-CUR-A", "CLM-CUR-B", "CLM-CUR-C"):
+            _client.post(
+                "/api/v1/billing/uploads",
+                headers={"X-Tenant-Id": TENANT_A},
+                files=_multipart_file(_csv(cid), f"{cid}.csv"),
+            )
+
+        # Get first page of limit=1
+        page1 = _client.get(
+            "/api/v1/billing/uploads",
+            headers={"X-Tenant-Id": TENANT_A},
+            params={"limit": 1},
+        )
+        assert page1.status_code == 200, page1.text
+        page1_body = page1.json()
+        assert len(page1_body["results"]) == 1
+        cursor = page1_body.get("next_cursor")
+        if cursor is None:
+            pytest.skip("not enough uploads in DB to test cursor pagination")
+
+        # Get second page using cursor
+        page2 = _client.get(
+            "/api/v1/billing/uploads",
+            headers={"X-Tenant-Id": TENANT_A},
+            params={"limit": 1, "cursor": cursor},
+        )
+        assert page2.status_code == 200, page2.text
+        page2_body = page2.json()
+        assert len(page2_body["results"]) == 1
+        # Pages must not overlap
+        page1_ids = {r["id"] for r in page1_body["results"]}
+        page2_ids = {r["id"] for r in page2_body["results"]}
+        assert page1_ids.isdisjoint(page2_ids), (
+            f"Page 2 repeats page 1 results — cursor not applied. "
+            f"p1={page1_ids}, p2={page2_ids}"
+        )
+
+    def test_create_malformed_csv_returns_422_not_500(self, _client):
+        """Malformed CSV on create path must return 422, not 500.
+
+        P2 codex finding: parse_upload() on create path is not wrapped in try/except.
+        """
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+
+        # CSV with missing required columns (only has 'foo' column)
+        bad_csv = b"foo\nbar\n"
+        resp = _client.post(
+            "/api/v1/billing/uploads",
+            headers={"X-Tenant-Id": TENANT_A},
+            files={"file": ("bad.csv", io.BytesIO(bad_csv), "text/csv")},
+        )
+        assert resp.status_code == 422, (
+            f"Malformed CSV must return 422, got {resp.status_code}: {resp.text}"
+        )

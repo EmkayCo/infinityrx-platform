@@ -211,7 +211,38 @@ async def create_upload(
     )
     db.add(upload)
     db.flush()
-    parse_upload(db, upload=upload, file_bytes=content)
+    # P2-create-parse: wrap parse_upload so malformed files return 422 (not 500).
+    # Mirrors the supersede path pattern.
+    try:
+        parse_upload(db, upload=upload, file_bytes=content)
+    except ValueError as exc:
+        db.rollback()
+        return _no_store(
+            {
+                "error": {
+                    "code": "PARSE_ERROR",
+                    "message": f"File is invalid: {exc}",
+                    "correlation_id": str(uuid.uuid4()),
+                }
+            },
+            status_code=422,
+        )
+    if upload.status == UploadStatus.validation_failed.value:
+        db.rollback()
+        return _no_store(
+            {
+                "error": {
+                    "code": "VALIDATION_FAILED",
+                    "message": "File failed validation -- all rows rejected.",
+                    "correlation_id": str(uuid.uuid4()),
+                    "details": {
+                        "row_error_count": upload.error_count or 0,
+                        "row_errors": upload.row_errors or [],
+                    },
+                }
+            },
+            status_code=422,
+        )
     db.commit()
 
     await _publish_parsed(request, upload=upload, correlation_id=uuid.uuid4())
@@ -234,15 +265,23 @@ async def list_uploads(
     stmt = select(Upload).where(Upload.tenant_id == tenant_id)
     if db_status:
         stmt = stmt.where(Upload.status == db_status)
+    # P1-cursor: apply cursor as a keyset filter (uploaded_at < cursor ISO string).
+    # Cursor is the ISO timestamp of the last item on the previous page.
+    if cursor:
+        from datetime import datetime  # noqa: PLC0415
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+            stmt = stmt.where(Upload.uploaded_at < cursor_dt)
+        except ValueError:
+            pass  # malformed cursor -- ignore and return from the start
     stmt = stmt.order_by(Upload.uploaded_at.desc()).limit(limit + 1)
     uploads = list(db.execute(stmt).scalars().all())
-    next_cursor: str | None = None
+    # P1-schema: UploadListResponseSchema uses z.string().optional() -- Zod rejects null.
+    # Omit next_cursor key entirely when there is no next page.
+    body: dict[str, object] = {"results": [_upload_to_dict(u) for u in uploads[:limit]], "total": len(uploads[:limit])}
     if len(uploads) > limit:
-        next_cursor = str(uploads[limit - 1].uploaded_at.isoformat())
-        uploads = uploads[:limit]
-    results = [_upload_to_dict(u) for u in uploads]
-    # P2-pagination: UploadListResponseSchema expects { results, next_cursor, total }.
-    return JSONResponse(content={"results": results, "next_cursor": next_cursor, "total": len(results)})
+        body["next_cursor"] = str(uploads[limit - 1].uploaded_at.isoformat())
+    return JSONResponse(content=body)
 
 
 @router.get("/{upload_id}")
