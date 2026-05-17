@@ -224,7 +224,15 @@ class TestRBACSupersede:
 
 
 class TestDuplicateUpload:
-    def test_duplicate_returns_409_with_existing_id(self, _client):
+    def test_duplicate_returns_409_with_canonical_envelope(self, _client):
+        """B7: 409 duplicate upload must use canonical error envelope.
+
+        Canonical shape per error-handling.md:
+          {"error": {"code": "...", "message": "...", "correlation_id": "...",
+                     "details": {"existing_upload_id": "..."}}}
+
+        existing_upload_id must NOT appear at error root level.
+        """
         from shared.auth.dependencies import get_current_user
         from src.main import app
 
@@ -246,8 +254,17 @@ class TestDuplicateUpload:
         )
         assert second.status_code == 409
         body = second.json()
-        assert body["error"]["code"] == "DUPLICATE_UPLOAD"
-        assert body["error"]["existing_upload_id"] == existing_id
+        err = body["error"]
+        assert err["code"] == "DUPLICATE_UPLOAD"
+        assert err["message"]
+        # correlation_id must be present in canonical envelope
+        assert "correlation_id" in err, "canonical envelope requires correlation_id"
+        # existing_upload_id must be nested inside details, not at error root
+        assert "details" in err, "existing_upload_id must be in error.details"
+        assert err["details"]["existing_upload_id"] == existing_id
+        assert "existing_upload_id" not in err, (
+            "existing_upload_id must NOT appear at error root level"
+        )
         assert second.headers.get("cache-control") == "no-store"
 
 

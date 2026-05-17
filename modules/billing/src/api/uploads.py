@@ -169,7 +169,8 @@ async def create_upload(
                 "error": {
                     "code": "DUPLICATE_UPLOAD",
                     "message": "File already uploaded",
-                    "existing_upload_id": str(existing.id),
+                    "correlation_id": str(uuid.uuid4()),
+                    "details": {"existing_upload_id": str(existing.id)},
                 }
             },
             status_code=409,
@@ -317,7 +318,8 @@ async def supersede_upload_endpoint(
                 "error": {
                     "code": "DUPLICATE_UPLOAD",
                     "message": "File already uploaded",
-                    "existing_upload_id": str(existing.id),
+                    "correlation_id": str(uuid.uuid4()),
+                    "details": {"existing_upload_id": str(existing.id)},
                 }
             },
             status_code=409,
