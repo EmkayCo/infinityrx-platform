@@ -132,6 +132,8 @@ async def get_cycle(
     return JSONResponse(content=_batch_to_cycle(batch))
 
 
+_APPROVER_ROLE = "approver"
+
 @router.post("/{cycle_id}/close")
 async def close_cycle(
     cycle_id: uuid.UUID,
@@ -139,7 +141,16 @@ async def close_cycle(
     tenant_id: TenantId,
     current_user: CurrentUser = Depends(get_current_user),
 ) -> JSONResponse:
-    """Transition a cycle to 'closing' status (approver-initiated close action)."""
+    """Transition a cycle to 'closing' status (approver-initiated close action).
+
+    B8: close is approver-only server-side -- RbacGate in the frontend is
+    defense-in-depth only; this check is the authoritative enforcement layer.
+    """
+    if not current_user.has_role(_APPROVER_ROLE):
+        raise HTTPException(
+            status_code=403,
+            detail="Only approvers can close billing cycles",
+        )
     stmt = select(PaymentBatch).where(
         PaymentBatch.id == cycle_id,
         PaymentBatch.tenant_id == tenant_id,

@@ -14,11 +14,18 @@ from sqlalchemy.pool import StaticPool
 
 TENANT_A = str(uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaac"))
 USER_OP = uuid.UUID("11111111-1111-1111-1111-111111111113")
+USER_APR = uuid.UUID("22222222-2222-2222-2222-222222222224")
 OPERATOR_USER = MagicMock(
     id=USER_OP,
     tenant_id=uuid.UUID(TENANT_A),
     roles=("operator",),
     has_role=lambda r: r == "operator",
+)
+APPROVER_USER = MagicMock(
+    id=USER_APR,
+    tenant_id=uuid.UUID(TENANT_A),
+    roles=("approver",),
+    has_role=lambda r: r == "approver",
 )
 
 
@@ -150,10 +157,22 @@ class TestCyclesGetById:
 
 
 class TestCyclesClose:
-    def test_close_transitions_to_closing(self, _client, _session_factory):
+    def test_operator_cannot_close_cycle(self, _client):
+        """B8: close is approver-only — operator must receive 403."""
         from shared.auth.dependencies import get_current_user
         from src.main import app
         app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        resp = _client.post(
+            f"/api/v1/billing/cycles/{uuid.uuid4()}/close",
+            headers={"X-Tenant-Id": TENANT_A},
+        )
+        assert resp.status_code == 403, f"expected 403, got {resp.status_code}: {resp.text}"
+
+    def test_close_transitions_to_closing(self, _client, _session_factory):
+        """B8: approver can close a cycle."""
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+        app.dependency_overrides[get_current_user] = lambda: APPROVER_USER
         batch = _make_batch(uuid.UUID(TENANT_A), batch_number="2026-05-close", status="pending_close")
         session = _session_factory()
         try:
@@ -161,5 +180,5 @@ class TestCyclesClose:
         finally:
             session.close()
         resp = _client.post(f"/api/v1/billing/cycles/{batch_id}/close", headers={"X-Tenant-Id": TENANT_A})
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         assert resp.json()["status"] == "closing"
