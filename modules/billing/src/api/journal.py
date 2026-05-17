@@ -122,44 +122,14 @@ def _no_store(data: Any, status_code: int = 200) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 
-def _canonical_amount(amount: Any) -> str:
-    """Quantize to 2dp ROUND_HALF_UP and return as string."""
-    return str(Decimal(str(amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
-
-
-def _naive_utc_iso(dt: datetime | None) -> str:
-    """Return a timezone-naive UTC ISO string for *dt*.
-
-    SQLite drops tzinfo on SELECT; Postgres preserves it.  Stripping tzinfo
-    before formatting makes the canonical string identical across both drivers
-    so that hashes computed during migration backfill match what the verifier
-    recomputes on a live SELECT.
-    """
-    if dt is None:
-        return ""
-    # If tz-aware, convert to UTC then strip; if already naive, use as-is.
-    if dt.tzinfo is not None:
-        dt = dt.astimezone(UTC).replace(tzinfo=None)
-    return dt.isoformat()
-
-
-def _compute_entry_hash(entry: JournalEntry, prev_hash: str | None) -> str:
-    """SHA-256 of the pipe-delimited canonical representation of *entry*."""
-    ph = prev_hash or ""
-    ref_type = entry.reference_type or ""
-    ref_id = str(entry.reference_id) if entry.reference_id else ""
-    created_iso = _naive_utc_iso(entry.created_at)
-    canonical = "|".join([
-        str(entry.tenant_id),
-        str(entry.entry_type),
-        _canonical_amount(entry.amount),
-        str(entry.category),
-        ref_type,
-        ref_id,
-        created_iso,
-        ph,
-    ])
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+# Shared hash helpers live in models/journal_hash so the before_insert event
+# listener can call them too. Re-export under the previous private names so
+# the rest of this module is unchanged.
+from src.models.journal_hash import (  # noqa: PLC0415
+    canonical_amount as _canonical_amount,
+    compute_entry_hash as _compute_entry_hash,
+    naive_utc_iso as _naive_utc_iso,
+)
 
 
 # ---------------------------------------------------------------------------

@@ -1272,7 +1272,7 @@ def write_off_ar_record(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/journal-summary", response_model=dict)
+@router.get("/journal/summary", response_model=dict)
 def journal_summary(
     tenant_id: TenantId,
     db: DBSession,
@@ -1327,7 +1327,7 @@ def journal_summary(
         ) from exc
 
 
-@router.get("/journal-export", response_model=dict)
+@router.get("/journal/export", response_model=dict)
 def export_journal(
     tenant_id: TenantId,
     db: DBSession,

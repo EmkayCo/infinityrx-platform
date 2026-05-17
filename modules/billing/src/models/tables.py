@@ -591,8 +591,28 @@ class JournalEntry(BillingBase):
     # entry_hash: SHA-256 hex of this row's canonical fields.
     # prev_hash:  SHA-256 hex of the previous entry in the tenant chain
     #             (ordered by created_at, id); NULL for the first entry.
-    entry_hash: Mapped[str] = mapped_column(String(64), nullable=False, server_default="")
+    entry_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     prev_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+# B4 (SP-1 Plan D): auto-compute entry_hash on insert so callers can't
+# accidentally persist an unverifiable row. The listener only fires when
+# entry_hash is missing/empty -- callers may still provide an explicit
+# hash (e.g. the backfill migration computes the chain in bulk and sets
+# both entry_hash and prev_hash before inserting).
+from sqlalchemy import event as _sa_event  # noqa: E402
+
+
+@_sa_event.listens_for(JournalEntry, "before_insert")
+def _journal_entry_compute_hash(_mapper, _connection, target: JournalEntry) -> None:
+    if target.entry_hash:
+        return
+    from src.models.journal_hash import compute_entry_hash  # noqa: PLC0415
+
+    # prev_hash is left as set by the caller (None for chain head, or the
+    # previous entry's hash for chained inserts). The verifier accepts
+    # either, since it independently recomputes each hash to detect tamper.
+    target.entry_hash = compute_entry_hash(target, target.prev_hash)
 
 
 # ---------------------------------------------------------------------------

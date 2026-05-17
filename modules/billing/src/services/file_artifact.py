@@ -126,8 +126,15 @@ def generate_nacha(
 
     result = generate_nacha_file(file_cfg, batch_cfg, entries)
 
-    # Resolve upload_id provenance from the source batch
-    batch: PaymentBatch | None = db.get(PaymentBatch, batch_id)
+    # Resolve upload_id provenance from the source batch (tenant-scoped per
+    # .claude/rules/tenant-isolation.md - cross-tenant batch_id must not leak)
+    from sqlalchemy import select as _select  # noqa: PLC0415
+    batch: PaymentBatch | None = db.execute(
+        _select(PaymentBatch).where(
+            PaymentBatch.id == batch_id,
+            PaymentBatch.tenant_id == tenant_id,
+        )
+    ).scalar_one_or_none()
     upload_id: uuid.UUID | None = batch.upload_id if batch else None
 
     timestamp = datetime.now(UTC)
@@ -193,8 +200,15 @@ def generate_835(
 
     file_content: str = gen_835_fn(request_835)
 
-    # Resolve upload_id provenance from the source payment run (also a batch)
-    batch: PaymentBatch | None = db.get(PaymentBatch, source_payment_run_id)
+    # Resolve upload_id provenance from the source payment run (tenant-scoped
+    # per .claude/rules/tenant-isolation.md - cross-tenant id must not leak)
+    from sqlalchemy import select as _select  # noqa: PLC0415
+    batch: PaymentBatch | None = db.execute(
+        _select(PaymentBatch).where(
+            PaymentBatch.id == source_payment_run_id,
+            PaymentBatch.tenant_id == tenant_id,
+        )
+    ).scalar_one_or_none()
     upload_id: uuid.UUID | None = batch.upload_id if batch else None
 
     timestamp = datetime.now(UTC)
