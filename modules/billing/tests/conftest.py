@@ -45,13 +45,29 @@ def _engine():
 
 @pytest.fixture
 def db_session(_engine) -> Iterator[Session]:
-    SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
-    session = SessionLocal()
+    """SAVEPOINT-based isolation per LESSON-001.
+
+    Uses begin_nested() + after_transaction_end listener so that code under
+    test which calls db.commit() is safe: the outer transaction is never
+    committed and all writes are rolled back after each test.
+    """
+    connection = _engine.connect()
+    outer = connection.begin()
+    nested = connection.begin_nested()
+    session = Session(bind=connection, join_transaction_mode="create_savepoint", expire_on_commit=False)
+
+    @event.listens_for(session, "after_transaction_end")
+    def _restart_savepoint(sess: Session, transaction: object) -> None:
+        nonlocal nested
+        if transaction.nested and not transaction._parent.nested:  # type: ignore[attr-defined]
+            nested = connection.begin_nested()
+
     try:
         yield session
-        session.rollback()
     finally:
         session.close()
+        outer.rollback()
+        connection.close()
 
 
 # Standard tenant and user IDs for tests
