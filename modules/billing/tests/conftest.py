@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from src.models.tables import BillingBase
+from src.models.file_artifact import FileArtifact as _FileArtifact  # noqa: F401
 
 
 @pytest.fixture(scope="session")
