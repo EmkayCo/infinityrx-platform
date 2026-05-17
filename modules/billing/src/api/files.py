@@ -327,7 +327,7 @@ async def list_file_artifacts(
         stmt = stmt.where(FileArtifact.kind == kind)
     stmt = stmt.order_by(FileArtifact.generated_at.desc()).limit(limit)
     artifacts = db.execute(stmt).scalars().all()
-    return JSONResponse(content=[_artifact_to_dict(a) for a in artifacts])
+    return _no_store([_artifact_to_dict(a) for a in artifacts])
 
 
 @router.get("/{artifact_id}/download")

@@ -388,6 +388,7 @@ class TestReadRBAC:
         app.dependency_overrides[get_current_user] = lambda: APPROVER_USER
         resp = _client.get("/api/v1/billing/files", headers={"X-Tenant-Id": TENANT_A})
         assert resp.status_code == 200
+        assert resp.headers.get("cache-control") == "no-store"
 
     def test_operator_can_get_detail(self, _client, _session_factory, tmp_path):
         from shared.auth.dependencies import get_current_user
