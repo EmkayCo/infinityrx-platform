@@ -1143,10 +1143,10 @@ describe("paysync contract — files mock factory", () => {
     expect(() => FileArtifactSchema.parse(artifact)).not.toThrow();
   });
 
-  it("createMockFilesClient.generate returns x12_835 for kind='835'", async () => {
+  it("createMockFilesClient.generate returns 835 for kind='835'", async () => {
     const c = createMockFilesClient();
     const artifact = await c.generate({ kind: "835", source_id: "22222222-2222-2222-2222-222222222222" });
-    expect(artifact.kind).toBe("x12_835");
+    expect(artifact.kind).toBe("835");
   });
 
   it("createMockFilesClient.download returns an empty Blob", async () => {
@@ -1493,10 +1493,11 @@ describe("paysync contract — schemas: FileArtifact + JournalEntry + HashChainV
   });
 
   it("FileArtifactKindSchema accepts all valid kinds", () => {
-    for (const k of ["nacha", "x12_835", "x12_837", "x12_270", "x12_271", "x12_276", "x12_277", "x12_278", "x12_834", "x12_999", "ncpdp_batch"] as const) {
+    for (const k of ["nacha", "835"] as const) {
       expect(FileArtifactKindSchema.parse(k)).toBe(k);
     }
     expect(() => FileArtifactKindSchema.parse("unknown")).toThrow();
+    expect(() => FileArtifactKindSchema.parse("x12_835")).toThrow();
   });
 
   it("FileGenerateRequestSchema validates a well-formed generate request", () => {

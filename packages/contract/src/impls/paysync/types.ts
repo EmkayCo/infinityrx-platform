@@ -241,19 +241,7 @@ export const PaymentRunListResponseSchema = z.union([
 export type PaymentRunListResponse = z.infer<typeof PaymentRunListResponseSchema>;
 
 // ── FileArtifact (paysync generated files — Plan D adds FilesClient) ──────────
-export const FileArtifactKindSchema = z.enum([
-  "nacha",
-  "x12_835",
-  "x12_837",
-  "x12_270",
-  "x12_271",
-  "x12_276",
-  "x12_277",
-  "x12_278",
-  "x12_834",
-  "x12_999",
-  "ncpdp_batch",
-]);
+export const FileArtifactKindSchema = z.enum(["nacha", "835"]);
 export type FileArtifactKind = z.infer<typeof FileArtifactKindSchema>;
 
 export const FileArtifactSchema = z.object({

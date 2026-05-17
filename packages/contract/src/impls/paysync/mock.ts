@@ -615,7 +615,7 @@ export function createMockFilesClient(): FilesClient {
       return {
         id: "00000000-0000-0000-0000-000000000000",
         tenant_id: "00000000-0000-0000-0000-000000000000",
-        kind: input.kind === "835" ? "x12_835" : "nacha",
+        kind: input.kind,
         source_batch_id: input.source_id,
         source_payment_run_id: null,
         sha256: "0".repeat(64),
