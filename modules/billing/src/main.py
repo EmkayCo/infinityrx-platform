@@ -23,6 +23,7 @@ from .api.uploads import router as uploads_router
 from .api.inbox import router as inbox_router
 from .api.cycles import router as cycles_router
 from .api.carryovers import router as carryovers_router
+from .api.journal import router as journal_router
 from .api.payment_runs import router as payment_runs_router
 from .api.bank_settlements import router as bank_settlements_router
 from .api.files import router as files_router
@@ -188,6 +189,7 @@ def create_app() -> FastAPI:
     app.include_router(inbox_router)
     app.include_router(cycles_router)
     app.include_router(carryovers_router)
+    app.include_router(journal_router)
     app.include_router(files_router)
     app.include_router(payment_runs_router)
     app.include_router(bank_settlements_router)

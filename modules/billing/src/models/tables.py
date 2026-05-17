@@ -550,6 +550,8 @@ class JournalEntry(BillingBase):
         Index("idx_journal_type", "tenant_id", "entry_type"),
         Index("idx_journal_category", "tenant_id", "category"),
         Index("idx_journal_exported", "tenant_id", "exported_to_accounting"),
+        # Chain ordering index (SP-1 Plan D Task 3) -- used by verify-chain.
+        Index("idx_journal_chain_order", "tenant_id", "created_at"),
         {"schema": "billing"},
     )
 
@@ -584,6 +586,13 @@ class JournalEntry(BillingBase):
     export_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    # Hash chain columns (SP-1 Plan D Task 3).
+    # entry_hash: SHA-256 hex of this row's canonical fields.
+    # prev_hash:  SHA-256 hex of the previous entry in the tenant chain
+    #             (ordered by created_at, id); NULL for the first entry.
+    entry_hash: Mapped[str] = mapped_column(String(64), nullable=False, server_default="")
+    prev_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 # ---------------------------------------------------------------------------
