@@ -750,3 +750,81 @@ class TestTenantHeaderAuthorizationB2:
             files=_multipart_file(_csv("CLM-B2-SUP-1")),
         )
         assert resp.status_code == 403
+
+
+class TestListPaginationAndTotalBilledAmount:
+    """Concerns from codex R3: list ignores status/limit/cursor; total_billed_amount always None."""
+
+    def test_list_respects_limit(self, _client):
+        """List endpoint must honour ?limit= query param."""
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+
+        # Upload two distinct files
+        for cid in ("CLM-LIMIT-1", "CLM-LIMIT-2", "CLM-LIMIT-3"):
+            _client.post(
+                "/api/v1/billing/uploads",
+                headers={"X-Tenant-Id": TENANT_A},
+                files=_multipart_file(_csv(cid), f"{cid}.csv"),
+            )
+
+        resp = _client.get(
+            "/api/v1/billing/uploads",
+            headers={"X-Tenant-Id": TENANT_A},
+            params={"limit": 1},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert len(body["results"]) <= 1, (
+            f"limit=1 must return at most 1 result, got {len(body['results'])}"
+        )
+
+    def test_list_respects_status_filter(self, _client):
+        """List endpoint must filter by ?status= query param."""
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+
+        resp = _client.get(
+            "/api/v1/billing/uploads",
+            headers={"X-Tenant-Id": TENANT_A},
+            params={"status": "validated"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        for item in body["results"]:
+            assert item["status"] == "validated", (
+                f"All results must have status=validated, got {item['status']}"
+            )
+
+    def test_total_billed_amount_computed_from_claims(self, _client):
+        """total_billed_amount must be a Decimal string sum of claim amount_billed values."""
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+
+        # Upload a file with one claim (amount_billed = 99.9900 from _csv helper)
+        resp = _client.post(
+            "/api/v1/billing/uploads",
+            headers={"X-Tenant-Id": TENANT_A},
+            files=_multipart_file(_csv("CLM-TBA-1"), "tba.csv"),
+        )
+        assert resp.status_code == 201, resp.text
+        upload_id = resp.json()["id"]
+
+        # Fetch the upload and check total_billed_amount is not None
+        detail_resp = _client.get(
+            f"/api/v1/billing/uploads/{upload_id}",
+            headers={"X-Tenant-Id": TENANT_A},
+        )
+        assert detail_resp.status_code == 200, detail_resp.text
+        body = detail_resp.json()
+        assert body["total_billed_amount"] is not None, (
+            "total_billed_amount must be computed from claim amount_billed values, not always None"
+        )
+        # The CSV helper uses amount_billed=99.9900
+        from decimal import Decimal
+        assert Decimal(body["total_billed_amount"]) > 0, (
+            f"total_billed_amount must be > 0, got {body['total_billed_amount']}"
+        )

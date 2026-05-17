@@ -70,7 +70,7 @@ def _emit_phi_audit(
 
 
 def _upload_to_dict(
-    upload: Upload, *, include_row_errors: bool = False
+    upload: Upload, *, include_row_errors: bool = False, db: Any = None
 ) -> dict[str, Any]:
     # P1-contract: field names must match UploadSchema in packages/contract/src/impls/paysync/types.ts.
     # content_sha256 (not sha256), uploaded_by_user_id (not uploaded_by),
@@ -83,6 +83,19 @@ def _upload_to_dict(
         "superseded": "applied",
     }
     contract_status = _STATUS_MAP.get(upload.status, upload.status)
+    # Compute total_billed_amount from ClaimRecord rows when a db session is available.
+    total_billed: str | None = None
+    if db is not None:
+        from decimal import Decimal  # noqa: PLC0415
+        from sqlalchemy import func as sa_func  # noqa: PLC0415
+        raw = db.execute(
+            select(sa_func.sum(ClaimRecord.amount_billed)).where(
+                ClaimRecord.upload_id == upload.id,
+                ClaimRecord.tenant_id == upload.tenant_id,
+            )
+        ).scalar()
+        if raw is not None:
+            total_billed = str(Decimal(str(raw)).quantize(Decimal("0.0000")))
     data: dict[str, Any] = {
         "id": str(upload.id),
         "tenant_id": str(upload.tenant_id),
@@ -91,7 +104,7 @@ def _upload_to_dict(
         "status": contract_status,
         "claim_count": upload.row_count or 0,
         "row_error_count": upload.error_count or 0,
-        "total_billed_amount": None,  # populated by billing cycle aggregation
+        "total_billed_amount": total_billed,
         "uploaded_by_user_id": str(upload.uploaded_by),
         "uploaded_at": (
             upload.uploaded_at.isoformat() if upload.uploaded_at else None
@@ -203,7 +216,7 @@ async def create_upload(
 
     await _publish_parsed(request, upload=upload, correlation_id=uuid.uuid4())
 
-    return _no_store(_upload_to_dict(upload, include_row_errors=True), status_code=201)
+    return _no_store(_upload_to_dict(upload, include_row_errors=True, db=db), status_code=201)
 
 
 @router.get("")
@@ -211,16 +224,25 @@ async def list_uploads(
     db: DBSession,
     tenant_id: TenantId,
     current_user: CurrentUser = Depends(get_current_user),
+    status: str | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
 ) -> JSONResponse:
-    stmt = (
-        select(Upload)
-        .where(Upload.tenant_id == tenant_id)
-        .order_by(Upload.uploaded_at.desc())
-    )
-    uploads = db.execute(stmt).scalars().all()
+    # Map contract status values back to DB values for filtering.
+    _CONTRACT_TO_DB = {"rejected": "validation_failed", "applied": "superseded"}
+    db_status = _CONTRACT_TO_DB.get(status, status) if status else None
+    stmt = select(Upload).where(Upload.tenant_id == tenant_id)
+    if db_status:
+        stmt = stmt.where(Upload.status == db_status)
+    stmt = stmt.order_by(Upload.uploaded_at.desc()).limit(limit + 1)
+    uploads = list(db.execute(stmt).scalars().all())
+    next_cursor: str | None = None
+    if len(uploads) > limit:
+        next_cursor = str(uploads[limit - 1].uploaded_at.isoformat())
+        uploads = uploads[:limit]
     results = [_upload_to_dict(u) for u in uploads]
     # P2-pagination: UploadListResponseSchema expects { results, next_cursor, total }.
-    return JSONResponse(content={"results": results, "total": len(results)})
+    return JSONResponse(content={"results": results, "next_cursor": next_cursor, "total": len(results)})
 
 
 @router.get("/{upload_id}")
@@ -239,7 +261,7 @@ async def get_upload(
     _emit_phi_audit(
         tenant_id=tenant_id, user_id=current_user.id, entity_id=upload_id
     )
-    return _no_store(_upload_to_dict(upload, include_row_errors=True))
+    return _no_store(_upload_to_dict(upload, include_row_errors=True, db=db))
 
 
 @router.get("/{upload_id}/claims")
@@ -413,4 +435,4 @@ async def supersede_upload_endpoint(
 
     await _publish_parsed(request, upload=new_upload, correlation_id=uuid.uuid4())
 
-    return _no_store(_upload_to_dict(new_upload, include_row_errors=True))
+    return _no_store(_upload_to_dict(new_upload, include_row_errors=True, db=db))

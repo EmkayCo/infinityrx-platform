@@ -313,7 +313,8 @@ def supersede_upload(
         old_claim_ids = [c.id for c in old_claims]
         ap_count = session.execute(
             select(APRecord).where(
-                APRecord.claim_record_id.in_(old_claim_ids)
+                APRecord.claim_record_id.in_(old_claim_ids),
+                APRecord.tenant_id == old_upload.tenant_id,
             ).limit(1)
         ).scalars().first()
         if ap_count is not None:
