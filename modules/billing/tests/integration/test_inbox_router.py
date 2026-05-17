@@ -495,3 +495,104 @@ class TestInboxPlanCKinds:
             if item.get("kind") == "carryover_open":
                 assert item["tenant_id"] == TENANT_A
 
+
+# -- Plan B5: 3 remaining inbox kinds (ap_payment_run_held, banking_discrepancy, reconciliation_pending) --
+
+
+class TestInboxPlanB5Kinds:
+    def test_inbox_returns_ap_payment_run_held_for_held_batch(
+        self, _client, _engine, _session_factory
+    ):
+        """PaymentBatch status=held -> ap_payment_run_held inbox item."""
+        import decimal
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+        from src.models.tables import PaymentBatch
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        session = _session_factory()
+        batch_id = uuid.uuid4()
+        now = datetime.datetime.now(datetime.timezone.utc)
+        try:
+            b = PaymentBatch(
+                id=batch_id,
+                tenant_id=uuid.UUID(TENANT_A),
+                batch_number="BATCH-HELD-B5",
+                payment_route="ach",
+                total_amount=decimal.Decimal("5000.00"),
+                payment_count=10,
+                ap_count=10,
+                status="held",
+                generated_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(b)
+            session.commit()
+        finally:
+            session.close()
+        resp = _client.get("/api/v1/billing/inbox", params={"role": "approver"}, headers={"X-Tenant-Id": TENANT_A})
+        assert resp.status_code == 200
+        kinds = [i["kind"] for i in resp.json()]
+        assert "ap_payment_run_held" in kinds, f"expected ap_payment_run_held, got kinds: {kinds}"
+
+    def test_inbox_ap_payment_run_held_has_required_envelope_fields(
+        self, _client, _engine, _session_factory
+    ):
+        """ap_payment_run_held item must carry the full InboxItemSchema envelope."""
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        resp = _client.get("/api/v1/billing/inbox", params={"role": "approver"}, headers={"X-Tenant-Id": TENANT_A})
+        assert resp.status_code == 200
+        items = resp.json()
+        held = [i for i in items if i.get("kind") == "ap_payment_run_held"]
+        assert held, "expected at least one ap_payment_run_held item"
+        item = held[0]
+        for field in ["id", "kind", "tenant_id", "upload_id", "rbac_required", "created_at", "priority", "payload"]:
+            assert field in item, f"missing envelope field: {field}"
+        assert item["rbac_required"] == "approver"
+        assert isinstance(item["payload"], dict)
+        assert "batch_id" in item["payload"]
+
+    def test_inbox_ap_payment_run_held_cross_tenant_isolation(
+        self, _client, _engine, _session_factory
+    ):
+        """ap_payment_run_held items must never leak across tenants."""
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        resp = _client.get("/api/v1/billing/inbox", params={"role": "approver"}, headers={"X-Tenant-Id": TENANT_A})
+        assert resp.status_code == 200
+        for item in resp.json():
+            if item.get("kind") == "ap_payment_run_held":
+                assert item["tenant_id"] == TENANT_A
+
+    def test_inbox_banking_discrepancy_deferred_not_present(self, _client):
+        """banking_discrepancy is deferred (no BankSettlement ORM); must not appear."""
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        resp = _client.get("/api/v1/billing/inbox", params={"role": "approver"}, headers={"X-Tenant-Id": TENANT_A})
+        assert resp.status_code == 200
+        kinds = [i["kind"] for i in resp.json()]
+        assert "banking_discrepancy" not in kinds, (
+            "banking_discrepancy must be deferred until BankSettlement ORM is added in Plan D"
+        )
+
+    def test_inbox_reconciliation_pending_deferred_not_present(self, _client):
+        """reconciliation_pending is deferred (no Reconciliation ORM); must not appear."""
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        resp = _client.get("/api/v1/billing/inbox", params={"role": "approver"}, headers={"X-Tenant-Id": TENANT_A})
+        assert resp.status_code == 200
+        kinds = [i["kind"] for i in resp.json()]
+        assert "reconciliation_pending" not in kinds, (
+            "reconciliation_pending must be deferred until Reconciliation ORM is added in Plan D"
+        )
+

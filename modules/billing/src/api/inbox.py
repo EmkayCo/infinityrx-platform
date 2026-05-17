@@ -1,4 +1,4 @@
-﻿"""SP-1 Plan B Task 3.2 -- Inbox router.
+"""SP-1 Plan B Task 3.2 -- Inbox router.
 
 GET /api/v1/billing/inbox?role=<role>
 Returns InboxItem[] derived from current DB state of uploads + payment batches.
@@ -220,6 +220,42 @@ async def get_inbox(
             "billing.inbox.carryover_open_query_failed",
             extra={"svc_tenant_id": str(tenant_id)},
         )
+
+    # Plan B5: ap_payment_run_held -- PaymentBatch status=held
+    try:
+        for b in db.execute(
+            select(PaymentBatch).where(
+                PaymentBatch.tenant_id == tenant_id,
+                PaymentBatch.status == "held",
+            )
+        ).scalars().all():
+            items.append({
+                "id": str(b.id),
+                "kind": "ap_payment_run_held",
+                "tenant_id": str(tenant_id),
+                "upload_id": str(b.upload_id) if b.upload_id else None,
+                "rbac_required": "approver",
+                "created_at": b.created_at.isoformat() if b.created_at else now_iso,
+                "priority": "high",
+                "payload": {
+                    "batch_id": str(b.id),
+                    "batch_number": b.batch_number,
+                    "total_amount": str(b.total_amount),
+                    "status": b.status,
+                },
+            })
+    except Exception:
+        logger.exception(
+            "billing.inbox.ap_payment_run_held_query_failed",
+            extra={"svc_tenant_id": str(tenant_id)},
+        )
+
+    # Plan B5: banking_discrepancy -- deferred; BankSettlement ORM does not exist yet.
+    # Plan D will add BankSettlement; derivation deferred.
+
+    # Plan B5: reconciliation_pending -- deferred; Reconciliation ORM does not exist yet.
+    # Plan D will add Reconciliation; derivation deferred.
+
     return JSONResponse(
         content=items,
         headers={"Cache-Control": "no-store"},
