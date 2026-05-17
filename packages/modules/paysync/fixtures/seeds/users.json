@@ -1,1 +1,23 @@
-[]
+[
+  {
+    "id": "usr-00000000-0000-0000-0000-000000000001",
+    "email": "operator@demo.infinityrx.test",
+    "display_name": "Demo Operator",
+    "role": "operator",
+    "tenant_id": "t0000000-0000-0000-0000-000000000001"
+  },
+  {
+    "id": "usr-00000000-0000-0000-0000-000000000002",
+    "email": "approver@demo.infinityrx.test",
+    "display_name": "Demo Approver",
+    "role": "approver",
+    "tenant_id": "t0000000-0000-0000-0000-000000000001"
+  },
+  {
+    "id": "usr-00000000-0000-0000-0000-000000000003",
+    "email": "auditor@demo.infinityrx.test",
+    "display_name": "Demo Auditor",
+    "role": "auditor",
+    "tenant_id": "t0000000-0000-0000-0000-000000000001"
+  }
+]

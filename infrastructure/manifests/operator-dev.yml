@@ -22,7 +22,8 @@ required_env:
 required_health: []
 required_seed_data: []
 required_queues: []
-required_jobs: []
+required_jobs:
+  - paysync.cleanup_old_uploads
 required_buckets: []
 required_integrations: []
 required_secrets:
