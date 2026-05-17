@@ -8,9 +8,10 @@ from datetime import UTC, date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
+from shared.auth.dependencies import CurrentUser, get_current_user
 from src.api.dependencies import DBSession, TenantId
 from src.api.schemas.ap import (
     BatchGenerateRequest,
@@ -82,6 +83,9 @@ from src.utils.constants import (
 
 logger = logging.getLogger(__name__)
 
+_WRITE_ROLES = frozenset({"operator", "approver"})
+_APPROVER_ONLY = frozenset({"approver"})
+
 router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
 
 
@@ -95,8 +99,13 @@ def submit_claim(
     body: ClaimSubmitRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Submit a single claim via API."""
+    if not any(current_user.has_role(r) for r in _WRITE_ROLES):
+        raise HTTPException(status_code=403, detail="Operator or Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     return {
         "id": str(uuid.uuid4()),
         "tenant_id": str(tenant_id),
@@ -282,8 +291,13 @@ def create_routing_rule(
     body: RoutingRuleCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Create a new routing rule."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     return {"id": str(uuid.uuid4()), "tenant_id": str(tenant_id), **body.model_dump()}
 
 
@@ -293,8 +307,13 @@ def update_routing_rule(
     body: RoutingRuleUpdateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Update an existing routing rule."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
 
 
@@ -535,8 +554,13 @@ def generate_payment_batch(
     body: BatchGenerateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Generate a payment batch for a given route."""
+    if not any(current_user.has_role(r) for r in _WRITE_ROLES):
+        raise HTTPException(status_code=403, detail="Operator or Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     return {"id": str(uuid.uuid4()), "status": "generated", "batch_number": body.batch_number}
 
 
@@ -594,8 +618,13 @@ def validate_payment_batch(
     batch_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> BatchValidateResponse:
     """Validate a payment batch before submission."""
+    if not any(current_user.has_role(r) for r in _WRITE_ROLES):
+        raise HTTPException(status_code=403, detail="Operator or Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     return BatchValidateResponse(valid=True, errors=[])
 
 
@@ -604,8 +633,13 @@ def approve_payment_batch(
     batch_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Approve a payment batch."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found")
 
 
@@ -614,8 +648,13 @@ def submit_payment_batch(
     batch_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Submit a payment batch to vendor."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found")
 
 
@@ -624,8 +663,13 @@ def void_payment_batch(
     batch_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Void a payment batch."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found")
 
 
@@ -688,8 +732,13 @@ def record_settlement(
     body: SettlementRecordRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Manually record a settlement."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     return {"payment_id": str(body.payment_id), "status": "settled"}
 
 
@@ -788,8 +837,13 @@ def create_invoicing_config(
     body: InvoicingConfigCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Create invoicing configuration for a client."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     return {"id": str(uuid.uuid4()), "tenant_id": str(tenant_id), **body.model_dump()}
 
 
@@ -799,8 +853,13 @@ def update_invoicing_config(
     body: InvoicingConfigCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Update invoicing configuration."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Config not found")
 
 
@@ -873,8 +932,13 @@ def generate_invoice(
     body: InvoiceGenerateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Generate a new invoice for a client and period."""
+    if not any(current_user.has_role(r) for r in _WRITE_ROLES):
+        raise HTTPException(status_code=403, detail="Operator or Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     return {"id": str(uuid.uuid4()), "status": "draft", "invoice_number": body.invoice_number}
 
 
@@ -953,8 +1017,13 @@ def approve_invoice(
     invoice_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Approve a draft invoice."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
 
 
@@ -963,8 +1032,13 @@ def send_invoice(
     invoice_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Send invoice to client."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
 
 
@@ -974,8 +1048,13 @@ def void_invoice(
     body: dict,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Void an invoice."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
 
 

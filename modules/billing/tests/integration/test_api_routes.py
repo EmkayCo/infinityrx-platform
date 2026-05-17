@@ -24,8 +24,9 @@ HEADERS = {"X-Tenant-Id": TENANT}
 _MOCK_USER = MagicMock(
     id=uuid.UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
     tenant_id=uuid.UUID(TENANT),
-    roles=("operator",),
-    has_role=lambda r: r in ("operator",),
+    roles=("operator", "approver"),
+    has_role=lambda r: r in ("operator", "approver"),
+    mfa_verified=True,
 )
 
 
