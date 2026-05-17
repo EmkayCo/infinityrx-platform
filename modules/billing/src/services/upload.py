@@ -33,7 +33,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.models.tables import ClaimRecord, Upload, UploadStatus
+from src.models.tables import APRecord, ClaimRecord, Upload, UploadStatus
 
 # LESSON-004 anchors: \A...\Z reject trailing newlines that ^...$ would accept
 _NDC_RE = re.compile(r"\A\d{11}\Z")
@@ -297,12 +297,32 @@ def supersede_upload(
     # Provenance immutability covers the Upload row (status → superseded,
     # supersedes_upload_id chain preserved); individual ClaimRecord rows are
     # processing artifacts replaced in full by the superseding upload.
+    #
+    # C1: APRecord.claim_record_id has ondelete=RESTRICT.  Attempting to
+    # delete a ClaimRecord that is referenced by an APRecord (i.e., a claim
+    # already in AP processing) would crash with an IntegrityError.  Check
+    # first and raise a descriptive ValueError so the router returns 409.
     old_claims = session.execute(
         select(ClaimRecord).where(
             ClaimRecord.upload_id == old_upload.id,
             ClaimRecord.tenant_id == old_upload.tenant_id,
         )
     ).scalars().all()
+
+    if old_claims:
+        old_claim_ids = [c.id for c in old_claims]
+        ap_count = session.execute(
+            select(APRecord).where(
+                APRecord.claim_record_id.in_(old_claim_ids)
+            ).limit(1)
+        ).scalars().first()
+        if ap_count is not None:
+            raise ValueError(
+                "CLAIMS_IN_AP_PROCESSING: cannot supersede upload — one or more "
+                "claims are already referenced by AP records in payment processing. "
+                "Void or settle those AP records before superseding."
+            )
+
     for c in old_claims:
         session.delete(c)
     session.flush()

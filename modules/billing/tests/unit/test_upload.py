@@ -534,3 +534,66 @@ def test_supersede_upload_does_not_delete_old_claims(db_session: Session):
     # uq_claim_tenant_auth.  Provenance immutability is on the Upload row
     # (status=superseded, supersedes_upload_id chain) — not on claim rows.
     assert db_session.get(ClaimRecord, old_claim.id) is None
+
+
+def test_supersede_upload_raises_if_claims_have_ap_references(db_session: Session):
+    """C1: supersede_upload must refuse to delete claims that have APRecord references.
+
+    APRecord.claim_record_id has ondelete=RESTRICT, so a blind delete would crash
+    at the DB level with an IntegrityError. The service must detect this and raise
+    ValueError with a clear message so the router can return 409 CLAIMS_IN_AP_PROCESSING.
+    """
+    from src.models.tables import APRecord
+
+    old = Upload(
+        id=uuid.uuid4(),
+        tenant_id=TENANT_A, filename="v1.csv", sha256="e" * 64,
+        file_size=10, mime_type="text/csv",
+        uploaded_at=datetime.now(UTC), uploaded_by=uuid.uuid4(),
+        status=UploadStatus.validated.value,
+    )
+    db_session.add(old)
+    db_session.flush()
+
+    claim = ClaimRecord(
+        id=uuid.uuid4(), tenant_id=TENANT_A,
+        source_type="upload", auth_number="AP-REF-1", claim_type="rx",
+        pharmacy_npi="1234567893",
+        date_of_service=datetime(2026, 5, 1).date(),
+        date_received=datetime.now(UTC),
+        net_amount=Decimal("10.00"),
+        created_at=datetime.now(UTC),
+        upload_id=old.id, amount_billed=Decimal("10.0000"),
+    )
+    db_session.add(claim)
+    db_session.flush()
+
+    # Create an APRecord that references this claim
+    ap = APRecord(
+        id=uuid.uuid4(),
+        tenant_id=TENANT_A,
+        claim_record_id=claim.id,
+        client_id=uuid.uuid4(),
+        pay_to_entity_id=uuid.uuid4(),
+        pay_to_entity_name="Test Pharmacy",
+        amount=Decimal("10.00"),
+        payment_route="ach",
+        status="created",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    db_session.add(ap)
+    db_session.flush()
+
+    new = Upload(
+        id=uuid.uuid4(),
+        tenant_id=TENANT_A, filename="v2.csv", sha256="f" * 64,
+        file_size=20, mime_type="text/csv",
+        uploaded_at=datetime.now(UTC), uploaded_by=uuid.uuid4(),
+        status=UploadStatus.validated.value,
+    )
+    db_session.add(new)
+    db_session.flush()
+
+    with pytest.raises(ValueError, match="CLAIMS_IN_AP_PROCESSING"):
+        supersede_upload(db_session, old_upload=old, new_upload=new)

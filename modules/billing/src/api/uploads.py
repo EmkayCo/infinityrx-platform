@@ -351,7 +351,28 @@ async def supersede_upload_endpoint(
     # (tenant_id, auth_number) doesn't fire when the replacement file reuses
     # the same claim_id values.  supersede_upload deletes old ClaimRecord rows
     # and marks the old upload superseded; parse_upload then inserts fresh rows.
-    supersede_upload(db, old_upload=old_upload, new_upload=new_upload)
+    # C1: supersede_upload raises ValueError if any claims are in AP processing
+    # (RESTRICT FK prevents deletion); surface as 409 with canonical envelope.
+    try:
+        supersede_upload(db, old_upload=old_upload, new_upload=new_upload)
+    except ValueError as exc:
+        msg = str(exc)
+        if "CLAIMS_IN_AP_PROCESSING" in msg:
+            return _no_store(
+                {
+                    "error": {
+                        "code": "CLAIMS_IN_AP_PROCESSING",
+                        "message": (
+                            "Cannot supersede: one or more claims from this upload "
+                            "are already in AP payment processing. Void or settle "
+                            "those AP records before superseding."
+                        ),
+                        "correlation_id": str(uuid.uuid4()),
+                    }
+                },
+                status_code=409,
+            )
+        raise
     parse_upload(db, upload=new_upload, file_bytes=content)
     db.commit()
 
