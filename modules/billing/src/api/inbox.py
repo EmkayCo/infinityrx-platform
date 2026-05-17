@@ -8,6 +8,7 @@ Item kinds:
   upload_validated_awaiting_batching  -- uploads status=validated
   cycle_pending_close                 -- PaymentBatch status=pending_close
   cycle_close_review                  -- PaymentBatch status=closing
+  journal_periodic_review             -- JournalEntry rows exist AND today is day 1-7
 
 Priority = "high" when upload error_count > 0.
 """
@@ -21,11 +22,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from shared.auth.dependencies import CurrentUser, get_current_user
 from src.api.dependencies import DBSession, TenantId
-from src.models.tables import Carryover, Invoice, PaymentBatch, Upload, UploadStatus
+from src.models.tables import Carryover, Invoice, JournalEntry, PaymentBatch, Upload, UploadStatus
 
 logger = logging.getLogger("billing.api.inbox")
 
@@ -255,6 +256,37 @@ async def get_inbox(
 
     # Plan B5: reconciliation_pending -- deferred; Reconciliation ORM does not exist yet.
     # Plan D will add Reconciliation; derivation deferred.
+
+    # Plan D Task 4: journal_periodic_review -- Auditor inbox item for monthly chain review.
+    # Pragmatic: emit once per month per tenant when any JournalEntry exists AND today is
+    # in the first week of the month (day <= 7). Future enhancement: track last verify-chain
+    # run (via audit.journal.verified event) and emit only when overdue.
+    try:
+        now_utc = datetime.now(UTC)
+        if now_utc.day <= 7:
+            entry_count_row = db.execute(
+                select(func.count()).select_from(JournalEntry).where(
+                    JournalEntry.tenant_id == tenant_id,
+                )
+            ).scalar()
+            entry_count = entry_count_row or 0
+            if entry_count > 0:
+                yyyy_mm = now_utc.strftime("%Y-%m")
+                items.append({
+                    "id": f"journal-periodic-review-{tenant_id}-{yyyy_mm}",
+                    "kind": "journal_periodic_review",
+                    "tenant_id": str(tenant_id),
+                    "upload_id": None,
+                    "rbac_required": "auditor",
+                    "created_at": now_iso,
+                    "priority": "normal",
+                    "payload": {"entry_count": entry_count},
+                })
+    except Exception:
+        logger.exception(
+            "billing.inbox.journal_periodic_review_query_failed",
+            extra={"svc_tenant_id": str(tenant_id)},
+        )
 
     return JSONResponse(
         content=items,

@@ -596,3 +596,132 @@ class TestInboxPlanB5Kinds:
             "reconciliation_pending must be deferred until Reconciliation ORM is added in Plan D"
         )
 
+
+# -- Plan D Task 4: journal_periodic_review inbox kind -------------------------
+
+
+AUDITOR_USER = MagicMock(
+    id=USER_OP,
+    tenant_id=uuid.UUID(TENANT_A),
+    roles=("auditor",),
+    has_role=lambda r: r == "auditor",
+)
+
+
+class TestInboxPlanDJournalPeriodicReview:
+    """journal_periodic_review appears in Auditor inbox when entries exist + first week."""
+
+    def _insert_journal_entry(self, session_factory, tenant_id: str) -> None:
+        from decimal import Decimal
+        from src.models.tables import JournalEntry
+
+        session = session_factory()
+        now = datetime.datetime.now(datetime.timezone.utc)
+        try:
+            entry = JournalEntry(
+                id=uuid.uuid4(),
+                tenant_id=uuid.UUID(tenant_id),
+                entry_date=now.date(),
+                entry_timestamp=now,
+                entry_type="payment",
+                amount=Decimal("100.00"),
+                category="ap",
+                description="Test journal entry",
+                exported_to_accounting=False,
+                created_at=now,
+                entry_hash="a" * 64,
+                prev_hash=None,
+            )
+            session.add(entry)
+            session.commit()
+        finally:
+            session.close()
+
+    def test_journal_periodic_review_appears_first_week_of_month(
+        self, _client, _engine, _session_factory
+    ):
+        """day=5, entry exists -> journal_periodic_review item in inbox."""
+        from unittest.mock import patch
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: AUDITOR_USER
+        self._insert_journal_entry(_session_factory, TENANT_A)
+
+        fake_now = datetime.datetime(2026, 5, 5, 10, 0, 0, tzinfo=datetime.timezone.utc)
+        with patch("src.api.inbox.datetime") as mock_dt:
+            mock_dt.now.return_value = fake_now
+            mock_dt.now.side_effect = None
+            resp = _client.get(
+                "/api/v1/billing/inbox",
+                params={"role": "auditor"},
+                headers={"X-Tenant-Id": TENANT_A},
+            )
+
+        assert resp.status_code == 200
+        kinds = [i["kind"] for i in resp.json()]
+        assert "journal_periodic_review" in kinds, (
+            f"expected journal_periodic_review in inbox on day 5, got: {kinds}"
+        )
+
+    def test_journal_periodic_review_absent_outside_first_week(
+        self, _client, _engine, _session_factory
+    ):
+        """day=15, entry exists -> journal_periodic_review must NOT appear."""
+        from unittest.mock import patch
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: AUDITOR_USER
+        self._insert_journal_entry(_session_factory, TENANT_A)
+
+        fake_now = datetime.datetime(2026, 5, 15, 10, 0, 0, tzinfo=datetime.timezone.utc)
+        with patch("src.api.inbox.datetime") as mock_dt:
+            mock_dt.now.return_value = fake_now
+            mock_dt.now.side_effect = None
+            resp = _client.get(
+                "/api/v1/billing/inbox",
+                params={"role": "auditor"},
+                headers={"X-Tenant-Id": TENANT_A},
+            )
+
+        assert resp.status_code == 200
+        kinds = [i["kind"] for i in resp.json()]
+        assert "journal_periodic_review" not in kinds, (
+            f"journal_periodic_review must not appear on day 15, got: {kinds}"
+        )
+
+    def test_journal_periodic_review_absent_when_no_entries(
+        self, _client, _engine, _session_factory
+    ):
+        """day=5, no JournalEntry rows for a fresh tenant -> kind must NOT appear."""
+        from unittest.mock import patch
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        # Use a distinct tenant that has no journal entries
+        TENANT_C = str(uuid.UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"))
+        auditor_c = MagicMock(
+            id=USER_OP,
+            tenant_id=uuid.UUID(TENANT_C),
+            roles=("auditor",),
+            has_role=lambda r: r == "auditor",
+        )
+        app.dependency_overrides[get_current_user] = lambda: auditor_c
+
+        fake_now = datetime.datetime(2026, 5, 5, 10, 0, 0, tzinfo=datetime.timezone.utc)
+        with patch("src.api.inbox.datetime") as mock_dt:
+            mock_dt.now.return_value = fake_now
+            mock_dt.now.side_effect = None
+            resp = _client.get(
+                "/api/v1/billing/inbox",
+                params={"role": "auditor"},
+                headers={"X-Tenant-Id": TENANT_C},
+            )
+
+        assert resp.status_code == 200
+        kinds = [i["kind"] for i in resp.json()]
+        assert "journal_periodic_review" not in kinds, (
+            f"journal_periodic_review must not appear when no entries exist, got: {kinds}"
+        )
+
