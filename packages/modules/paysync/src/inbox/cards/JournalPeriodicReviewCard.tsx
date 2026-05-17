@@ -1,14 +1,45 @@
 // packages/modules/paysync/src/inbox/cards/JournalPeriodicReviewCard.tsx
-// Typed stub card. Real card lands in a later SP-1 plan. Plan A's only job
-// is to ship a type-safe, render-able skeleton so ItemRegistry's dynamic
-// imports resolve and the InboxQueue can mount cards without error.
+// Rich inbox card for journal_periodic_review items.
+// Renders entry_count and a "Run verify-chain" CTA link to the journal surface.
+
 import type { ReactElement } from "react";
 import type { InboxItem } from "../types.js";
 
 export default function JournalPeriodicReviewCard({ item }: { readonly item: InboxItem }): ReactElement {
+  const entryCount = typeof item.payload["entry_count"] === "number" ? item.payload["entry_count"] : null;
+  const lastVerifiedAt = typeof item.payload["last_verified_at"] === "string" ? item.payload["last_verified_at"] : null;
+
   return (
     <div data-testid="inbox-card-journal_periodic_review">
-      {item.kind}
+      {item.priority === "high" && (
+        <span data-testid="card-priority-high" aria-label="High priority">
+          High Priority
+        </span>
+      )}
+
+      <strong>Journal Periodic Review</strong>
+
+      {entryCount !== null && (
+        <span data-testid="card-entry-count" aria-label={`${entryCount} journal entries`}>
+          {" "}({entryCount} {entryCount !== 1 ? "entries" : "entry"})
+        </span>
+      )}
+
+      {lastVerifiedAt !== null && (
+        <span data-testid="card-last-verified">
+          {" "}Last verified:{" "}
+          <time dateTime={lastVerifiedAt}>
+            {new Date(lastVerifiedAt).toLocaleDateString()}
+          </time>
+        </span>
+      )}
+
+      <a
+        data-testid="card-action-link"
+        href="/admin/paysync/journal"
+      >
+        Run verify-chain
+      </a>
     </div>
   );
 }

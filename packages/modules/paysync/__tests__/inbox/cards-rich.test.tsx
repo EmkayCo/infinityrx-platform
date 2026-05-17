@@ -264,3 +264,44 @@ describe("ReconciliationPendingCard (rich)", () => {
   });
 });
 
+// ── JournalPeriodicReviewCard ─────────────────────────────────────────────
+
+describe("JournalPeriodicReviewCard (rich)", () => {
+  let Card: typeof import("../../src/inbox/cards/JournalPeriodicReviewCard.js").default;
+
+  beforeEach(async () => {
+    ({ default: Card } = await import("../../src/inbox/cards/JournalPeriodicReviewCard.js"));
+  });
+
+  it("renders the expected data-testid (interface guard)", () => {
+    render(<Card item={makeItem("journal_periodic_review")} />);
+    expect(screen.getByTestId("inbox-card-journal_periodic_review")).toBeTruthy();
+  });
+
+  it("renders entry_count from payload", () => {
+    render(<Card item={makeItem("journal_periodic_review", { entry_count: 42 })} />);
+    expect(screen.getByTestId("card-entry-count")).toBeTruthy();
+  });
+
+  it("renders last_verified_at from payload as a time element", () => {
+    render(
+      <Card
+        item={makeItem("journal_periodic_review", { last_verified_at: "2026-05-10T00:00:00.000Z" })}
+      />,
+    );
+    expect(screen.getByTestId("card-last-verified")).toBeTruthy();
+  });
+
+  it("renders priority=high indicator when item.priority is high", () => {
+    const item = { ...makeItem("journal_periodic_review"), priority: "high" as const };
+    render(<Card item={item} />);
+    expect(screen.getByTestId("card-priority-high")).toBeTruthy();
+  });
+
+  it("renders CTA action link to the journal surface", () => {
+    render(<Card item={makeItem("journal_periodic_review")} />);
+    const link = screen.getByTestId("card-action-link") as HTMLAnchorElement;
+    expect(link.href).toContain("journal");
+  });
+});
+
