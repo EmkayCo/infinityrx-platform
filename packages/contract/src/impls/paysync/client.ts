@@ -1,0 +1,78 @@
+// packages/contract/src/impls/paysync/client.ts
+// UploadsClient + InboxClient interfaces + cache policies.
+// Plan A R3 fix: singular client.ts holds BOTH interfaces in one file (matches
+// the prescriber-directory pattern). Future plans (B/C/D/E) may append more
+// client interfaces here OR add domain-specific <name>-client.ts siblings.
+
+import type { BaseClient } from "../../client-base.js";
+import type { CachePolicy } from "../../cache-policy.js";
+import type {
+  InboxItem,
+  RbacRole,
+  Upload,
+  UploadListRequest,
+  UploadListResponse,
+} from "./types.js";
+
+// ── UploadsClient ───────────────────────────────────────────────────────
+export interface UploadsClient extends BaseClient {
+  readonly name: "paysync.uploads";
+
+  /** List uploads for the active tenant. Filters via status; paginates via cursor. */
+  list(req: UploadListRequest): Promise<UploadListResponse>;
+
+  /** Fetch one upload by id. Returns null if not found / not visible to tenant. */
+  get(id: string): Promise<Upload | null>;
+
+  /** Create an upload by streaming bytes. Backend computes content_sha256.
+   *  Plan A: signature only — real impl in Plan B. */
+  create(args: {
+    readonly filename: string;
+    readonly content: Blob | ReadableStream<Uint8Array>;
+  }): Promise<Upload>;
+
+  /** Stream/list parsed claims for an upload. Plan A signature only. */
+  getClaims(uploadId: string, opts?: {
+    readonly limit?: number;
+    readonly cursor?: string;
+  }): Promise<{ results: Array<Record<string, unknown>>; next_cursor?: string; total: number }>;
+}
+
+export const PAYSYNC_UPLOADS_CACHE_POLICIES: Record<string, CachePolicy> = {
+  list: {
+    ttl_seconds: 30,
+    key: ["paysync", "uploads", "list", "{status}", "{cursor}", "{limit}"],
+    invalidation_tags: ["paysync:uploads"],
+    backend_down: "stale-ok",
+  },
+  get: {
+    ttl_seconds: 60,
+    key: ["paysync", "uploads", "by-id", "{id}"],
+    invalidation_tags: ["paysync:uploads"],
+    backend_down: "stale-ok",
+  },
+  getClaims: {
+    ttl_seconds: 60,
+    key: ["paysync", "uploads", "claims", "{uploadId}", "{cursor}", "{limit}"],
+    invalidation_tags: ["paysync:uploads", "paysync:claims"],
+    backend_down: "stale-ok",
+  },
+};
+
+// ── InboxClient ─────────────────────────────────────────────────────────
+export interface InboxClient extends BaseClient {
+  readonly name: "paysync.inbox";
+
+  /** List inbox items for the given role within the active tenant. */
+  list(role: RbacRole): Promise<InboxItem[]>;
+}
+
+export const PAYSYNC_INBOX_CACHE_POLICIES: Record<string, CachePolicy> = {
+  list: {
+    // 10s matches the spec §10.5 useInboxItems staleTime — same data, same TTL.
+    ttl_seconds: 10,
+    key: ["paysync", "inbox", "list", "{role}"],
+    invalidation_tags: ["paysync:inbox"],
+    backend_down: "stale-ok",
+  },
+};

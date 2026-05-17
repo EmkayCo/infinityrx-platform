@@ -37,3 +37,36 @@ export {
 
 export { createRealPrescriberDirectoryClient } from "./impls/prescriber-directory/real.js";
 export { createMockPrescriberDirectoryClient } from "./impls/prescriber-directory/mock.js";
+
+// PaySync clients — SP-1.
+export {
+  UploadSchema,
+  UploadStatusSchema,
+  UploadListRequestSchema,
+  UploadListResponseSchema,
+  InboxItemSchema,
+  RbacRoleSchema,
+  type Upload,
+  type UploadStatus,
+  type UploadListRequest,
+  type UploadListResponse,
+  type InboxItem as PaysyncInboxItem,
+  type RbacRole as PaysyncRbacRole,
+} from "./impls/paysync/types.js";
+
+export {
+  PAYSYNC_UPLOADS_CACHE_POLICIES,
+  PAYSYNC_INBOX_CACHE_POLICIES,
+  type UploadsClient,
+  type InboxClient,
+} from "./impls/paysync/client.js";
+
+export {
+  createRealUploadsClient,
+  createRealInboxClient,
+} from "./impls/paysync/real.js";
+
+export {
+  createMockUploadsClient,
+  createMockInboxClient,
+} from "./impls/paysync/mock.js";
