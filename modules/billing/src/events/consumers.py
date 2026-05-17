@@ -346,3 +346,15 @@ async def handle_ach_return_received(
             "svc_payment_id": str(payload.get("payment_id", "")),
         },
     )
+
+
+# B5: Cache-invalidation shim — delegates to upload_events.handle_upload_parsed.
+# Placed here so _make_wrapper can dispatch it via getattr(_consumers, ...).
+async def handle_upload_parsed_cache(envelope, *, db=None, bus=None, **_):
+    """Shim that delegates to upload_events.handle_upload_parsed for cache invalidation.
+
+    Wired via _make_wrapper so idempotency is handled uniformly across all
+    billing consumers (B5 fix — replaces hand-rolled seen/mark block).
+    """
+    from .upload_events import handle_upload_parsed  # noqa: PLC0415
+    await handle_upload_parsed(envelope)

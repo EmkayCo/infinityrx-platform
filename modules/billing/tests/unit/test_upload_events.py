@@ -187,3 +187,44 @@ class TestUploadParsedConsumer:
         with patch("src.events.upload_events._get_redis", return_value=mock_redis):
             # Must not raise
             await handle_upload_parsed(envelope)
+
+    @pytest.mark.asyncio
+    async def test_upload_parsed_wired_via_make_wrapper_not_hand_rolled(self):
+        """B5: paysync.upload.parsed consumer must be wired via _make_wrapper
+        (the shared idempotency wrapper), not a hand-rolled seen/mark block.
+
+        Verifies that the wire_consumers subscription for paysync.upload.parsed
+        goes through _make_wrapper by confirming the registered handler name
+        follows the billing_{consumer_name} convention set by _make_wrapper.
+        """
+        from unittest.mock import AsyncMock, MagicMock
+
+        from shared.events.bus import EventBus
+        from src.events import wire_consumers
+
+        class _FakeBus(EventBus):
+            def __init__(self):
+                self._subs: dict[str, object] = {}
+
+            async def start(self) -> None:
+                pass
+
+            async def stop(self) -> None:
+                pass
+
+            async def publish(self, envelope):
+                pass
+
+            async def subscribe(self, topic: str, handler) -> None:
+                self._subs[topic] = handler
+
+        bus = _FakeBus()
+        await wire_consumers(bus)
+
+        handler = bus._subs.get("paysync.upload.parsed")
+        assert handler is not None, "paysync.upload.parsed must be subscribed"
+        # _make_wrapper sets __name__ = f"billing_{consumer_name}"
+        assert handler.__name__.startswith("billing_"), (
+            f"Handler must be wrapped via _make_wrapper (name starts with 'billing_'), "
+            f"got: {handler.__name__!r}. B5: replace hand-rolled idempotency with _make_wrapper."
+        )

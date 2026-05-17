@@ -92,18 +92,13 @@ async def wire_consumers(
         _make_wrapper("handle_member_enrolled", "billing.member_enrolled"),
     )
 
-    # Task 3b: paysync.upload.parsed cache-invalidation consumer
-    from .upload_events import handle_upload_parsed as _handle_upload_parsed  # noqa: PLC0415
-
-    async def _upload_parsed_handler(envelope) -> None:
-        key = envelope.idempotency_key
-        consumer_name = "billing.upload_parsed"
-        if await store.seen(key, consumer_name=consumer_name):
-            return
-        await _handle_upload_parsed(envelope)
-        await store.mark(key, consumer_name=consumer_name)
-
-    await bus.subscribe("paysync.upload.parsed", _upload_parsed_handler)
+    # Task 3b / B5: paysync.upload.parsed cache-invalidation consumer.
+    # Wired via _make_wrapper (not hand-rolled) so idempotency is handled
+    # uniformly across all billing consumers per event-bus rules.
+    await bus.subscribe(
+        "paysync.upload.parsed",
+        _make_wrapper("handle_upload_parsed_cache", "billing.upload_parsed"),
+    )
 
     logger.info(
         "billing.consumers_wired",

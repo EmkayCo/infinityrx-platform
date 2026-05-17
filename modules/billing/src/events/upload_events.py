@@ -69,11 +69,12 @@ async def publish_upload_parsed(
     await bus.publish(envelope)
 
 
-async def handle_upload_parsed(envelope: EventEnvelope) -> None:
+async def handle_upload_parsed(envelope: EventEnvelope, **_: object) -> None:
     """Invalidate inbox cache when an upload finishes parsing.
 
     Forward-compat: unknown payload fields are silently ignored.
-    Idempotency: Redis DEL on non-existent key is a no-op.
+    Idempotency: handled by _make_wrapper in events/__init__.py (B5).
+    Extra kwargs (db, bus) from _make_wrapper are accepted and ignored.
     """
     tenant_id = envelope.payload.get("tenant_id") or str(envelope.tenant_id)
     redis_client = _get_redis()
