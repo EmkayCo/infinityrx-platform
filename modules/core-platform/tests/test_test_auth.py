@@ -51,7 +51,11 @@ class TestTestAuthProductionGuard:
         )
         assert resp.status_code == 403
         body = resp.json()
-        assert "production" in body.get("detail", "").lower()
+        # B7: errors must use canonical envelope {"error": {"code", "message", "correlation_id"}}
+        assert "error" in body, f"Expected canonical envelope, got: {body}"
+        assert body["error"]["code"] == "FORBIDDEN"
+        assert "production" in body["error"]["message"].lower()
+        assert "correlation_id" in body["error"]
 
     def test_returns_token_in_development_for_operator(self, client, dev_env):
         resp = client.post(
@@ -96,3 +100,8 @@ class TestTestAuthProductionGuard:
             json={"user_id": "usr-99999999-0000-0000-0000-000000000000", "tenant_id": DEMO_TENANT_ID},
         )
         assert resp.status_code == 404
+        body = resp.json()
+        # B7: errors must use canonical envelope
+        assert "error" in body, f"Expected canonical envelope, got: {body}"
+        assert body["error"]["code"] == "NOT_FOUND"
+        assert "correlation_id" in body["error"]

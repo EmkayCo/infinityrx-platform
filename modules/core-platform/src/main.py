@@ -335,6 +335,53 @@ def create_app() -> FastAPI:
     app.add_middleware(RateLimitMiddleware, config=RateLimitConfig())
     app.add_middleware(SecurityHeadersMiddleware)
 
+    # B7: canonical error envelope per .claude/rules/error-handling.md.
+    # Maps every HTTPException to {"error": {"code", "message", "correlation_id"}}
+    # so all modules (and the Playwright E2E spec) can parse errors consistently.
+    from fastapi import HTTPException as _HTTPException, Request as _Request  # noqa: PLC0415
+    from fastapi.responses import JSONResponse as _JSONResponse  # noqa: PLC0415
+    import uuid as _uuid  # noqa: PLC0415
+
+    _STATUS_CODE_MAP = {
+        400: "BAD_REQUEST",
+        401: "UNAUTHORIZED",
+        403: "FORBIDDEN",
+        404: "NOT_FOUND",
+        409: "CONFLICT",
+        422: "VALIDATION_ERROR",
+        429: "RATE_LIMITED",
+    }
+
+    @app.exception_handler(_HTTPException)
+    async def _canonical_http_exception_handler(request: _Request, exc: _HTTPException):
+        _no_store_headers = {"Cache-Control": "no-store"}
+        _err = exc.detail.get("error") if isinstance(exc.detail, dict) else None
+        if (
+            isinstance(_err, dict)
+            and "code" in _err
+            and "message" in _err
+            and "correlation_id" in _err
+        ):
+            return _JSONResponse(
+                status_code=exc.status_code,
+                content=exc.detail,
+                headers=_no_store_headers,
+            )
+        code = _STATUS_CODE_MAP.get(exc.status_code, "ERROR")
+        message = exc.detail if isinstance(exc.detail, str) else "Request failed"
+        body = {
+            "error": {
+                "code": code,
+                "message": message,
+                "correlation_id": str(_uuid.uuid4()),
+            }
+        }
+        return _JSONResponse(
+            status_code=exc.status_code,
+            content=body,
+            headers=_no_store_headers,
+        )
+
     app.include_router(api_router)
     app.include_router(auth_api_router)
     app.include_router(test_auth_router)
