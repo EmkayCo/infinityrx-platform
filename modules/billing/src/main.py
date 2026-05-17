@@ -28,6 +28,7 @@ from .api.payment_runs import router as payment_runs_router
 from .api.bank_settlements import router as bank_settlements_router
 from .api.files import router as files_router
 from .api.reconciliations import router as reconciliations_router
+from .api.seed import router as seed_router
 
 logger = logging.getLogger("billing.main")
 
@@ -194,6 +195,7 @@ def create_app() -> FastAPI:
     app.include_router(payment_runs_router)
     app.include_router(bank_settlements_router)
     app.include_router(reconciliations_router)
+    app.include_router(seed_router)
     app.include_router(
         build_dlq_router(
             get_service=_get_dlq_service,

@@ -41,6 +41,7 @@ from shared.observability.slow_query import install_slow_query_logger
 
 from ._shim import db as db_shim
 from .api import router as api_router
+from .api.test_auth import router as test_auth_router
 from .jobs.seed import ensure_audit_chain_job
 from .audit.middleware import AuditContext, AuditMiddleware
 from .auth import auth_api_router, configure_core_auth
@@ -321,6 +322,9 @@ def create_app() -> FastAPI:
             "/api/v1/auth/token/refresh",
             "/api/v1/auth/mfa/verify",
             "/health",
+            # E2E-only shortcut: issues JWTs for fixture users without an
+            # existing token. Blocked in production by the endpoint itself.
+            "/api/v1/core/test-auth/token",
         }
     )
     app.add_middleware(
@@ -333,6 +337,7 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router)
     app.include_router(auth_api_router)
+    app.include_router(test_auth_router)
     app.include_router(
         build_dlq_router(
             get_service=_get_dlq_service,
