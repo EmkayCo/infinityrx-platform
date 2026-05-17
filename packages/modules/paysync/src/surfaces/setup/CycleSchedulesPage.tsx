@@ -21,20 +21,20 @@ export interface CycleSchedule {
 }
 
 export interface CycleSchedulesPageProps {
-  readonly schedules: ReadonlyArray<CycleSchedule>;
-  readonly isLoading: boolean;
-  readonly error: string | null;
-  readonly currentRole: RbacRole;
-  readonly onSave: (data: Omit<CycleSchedule, "id" | "tenant_id" | "created_at">) => void;
+  readonly schedules?: ReadonlyArray<CycleSchedule>;
+  readonly isLoading?: boolean;
+  readonly error?: string | null;
+  readonly currentRole?: RbacRole;
+  readonly onSave?: (data: Omit<CycleSchedule, "id" | "tenant_id" | "created_at">) => void;
 }
 
 export function CycleSchedulesPage({
-  schedules,
-  isLoading,
-  error,
-  currentRole,
-  onSave,
-}: CycleSchedulesPageProps): ReactElement {
+  schedules = [],
+  isLoading = false,
+  error = null,
+  currentRole = "auditor",
+  onSave = () => undefined,
+}: CycleSchedulesPageProps = {}): ReactElement {
   if (isLoading) {
     return (
       <div data-testid="cycle-schedules-page">

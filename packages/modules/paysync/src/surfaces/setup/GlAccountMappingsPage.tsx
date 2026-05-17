@@ -19,20 +19,20 @@ export interface GlAccountMapping {
 }
 
 export interface GlAccountMappingsPageProps {
-  readonly mappings: ReadonlyArray<GlAccountMapping>;
-  readonly isLoading: boolean;
-  readonly error: string | null;
-  readonly currentRole: RbacRole;
-  readonly onSave: (data: Omit<GlAccountMapping, "id" | "tenant_id" | "created_at">) => void;
+  readonly mappings?: ReadonlyArray<GlAccountMapping>;
+  readonly isLoading?: boolean;
+  readonly error?: string | null;
+  readonly currentRole?: RbacRole;
+  readonly onSave?: (data: Omit<GlAccountMapping, "id" | "tenant_id" | "created_at">) => void;
 }
 
 export function GlAccountMappingsPage({
-  mappings,
-  isLoading,
-  error,
-  currentRole,
-  onSave,
-}: GlAccountMappingsPageProps): ReactElement {
+  mappings = [],
+  isLoading = false,
+  error = null,
+  currentRole = "auditor",
+  onSave = () => undefined,
+}: GlAccountMappingsPageProps = {}): ReactElement {
   if (isLoading) {
     return (
       <div data-testid="gl-account-mappings-page">

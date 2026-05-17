@@ -20,20 +20,20 @@ export interface ExportTemplate {
 }
 
 export interface ExportTemplatesPageProps {
-  readonly templates: ReadonlyArray<ExportTemplate>;
-  readonly isLoading: boolean;
-  readonly error: string | null;
-  readonly currentRole: RbacRole;
-  readonly onSave: (data: Omit<ExportTemplate, "id" | "tenant_id" | "created_at">) => void;
+  readonly templates?: ReadonlyArray<ExportTemplate>;
+  readonly isLoading?: boolean;
+  readonly error?: string | null;
+  readonly currentRole?: RbacRole;
+  readonly onSave?: (data: Omit<ExportTemplate, "id" | "tenant_id" | "created_at">) => void;
 }
 
 export function ExportTemplatesPage({
-  templates,
-  isLoading,
-  error,
-  currentRole,
-  onSave,
-}: ExportTemplatesPageProps): ReactElement {
+  templates = [],
+  isLoading = false,
+  error = null,
+  currentRole = "auditor",
+  onSave = () => undefined,
+}: ExportTemplatesPageProps = {}): ReactElement {
   if (isLoading) {
     return (
       <div data-testid="export-templates-page">

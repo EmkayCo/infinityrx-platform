@@ -18,20 +18,20 @@ export interface EmailTemplate {
 }
 
 export interface EmailTemplatesPageProps {
-  readonly templates: ReadonlyArray<EmailTemplate>;
-  readonly isLoading: boolean;
-  readonly error: string | null;
-  readonly currentRole: RbacRole;
-  readonly onSave: (data: Omit<EmailTemplate, "id" | "tenant_id" | "created_at">) => void;
+  readonly templates?: ReadonlyArray<EmailTemplate>;
+  readonly isLoading?: boolean;
+  readonly error?: string | null;
+  readonly currentRole?: RbacRole;
+  readonly onSave?: (data: Omit<EmailTemplate, "id" | "tenant_id" | "created_at">) => void;
 }
 
 export function EmailTemplatesPage({
-  templates,
-  isLoading,
-  error,
-  currentRole,
-  onSave,
-}: EmailTemplatesPageProps): ReactElement {
+  templates = [],
+  isLoading = false,
+  error = null,
+  currentRole = "auditor",
+  onSave = () => undefined,
+}: EmailTemplatesPageProps = {}): ReactElement {
   if (isLoading) {
     return (
       <div data-testid="email-templates-page">

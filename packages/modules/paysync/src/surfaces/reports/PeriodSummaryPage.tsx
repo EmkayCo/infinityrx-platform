@@ -7,34 +7,34 @@ import type { ReactElement } from "react";
 import { MoneyDisplay } from "../../components/MoneyDisplay.js";
 
 export interface PeriodSummaryPageProps {
-  readonly periodLabel: string;
-  readonly totalBilled: string | null;
-  readonly totalPaid: string | null;
-  readonly totalVariance: string | null;
-  readonly totalAdjustments: string | null;
-  readonly totalFees: string | null;
-  readonly claimCount: number;
-  readonly cycleCount: number;
-  readonly invoiceCount: number;
-  readonly paymentRunCount: number;
-  readonly isLoading: boolean;
-  readonly error: string | null;
+  readonly periodLabel?: string;
+  readonly totalBilled?: string | null;
+  readonly totalPaid?: string | null;
+  readonly totalVariance?: string | null;
+  readonly totalAdjustments?: string | null;
+  readonly totalFees?: string | null;
+  readonly claimCount?: number;
+  readonly cycleCount?: number;
+  readonly invoiceCount?: number;
+  readonly paymentRunCount?: number;
+  readonly isLoading?: boolean;
+  readonly error?: string | null;
 }
 
 export function PeriodSummaryPage({
-  periodLabel,
-  totalBilled,
-  totalPaid,
-  totalVariance,
-  totalAdjustments,
-  totalFees,
-  claimCount,
-  cycleCount,
-  invoiceCount,
-  paymentRunCount,
-  isLoading,
-  error,
-}: PeriodSummaryPageProps): ReactElement {
+  periodLabel = "",
+  totalBilled = null,
+  totalPaid = null,
+  totalVariance = null,
+  totalAdjustments = null,
+  totalFees = null,
+  claimCount = 0,
+  cycleCount = 0,
+  invoiceCount = 0,
+  paymentRunCount = 0,
+  isLoading = false,
+  error = null,
+}: PeriodSummaryPageProps = {}): ReactElement {
   if (isLoading) {
     return (
       <div data-testid="period-summary-page">

@@ -18,20 +18,20 @@ export interface InvoiceSequence {
 }
 
 export interface InvoiceSequencesPageProps {
-  readonly sequences: ReadonlyArray<InvoiceSequence>;
-  readonly isLoading: boolean;
-  readonly error: string | null;
-  readonly currentRole: RbacRole;
-  readonly onSave: (data: Omit<InvoiceSequence, "id" | "tenant_id" | "created_at">) => void;
+  readonly sequences?: ReadonlyArray<InvoiceSequence>;
+  readonly isLoading?: boolean;
+  readonly error?: string | null;
+  readonly currentRole?: RbacRole;
+  readonly onSave?: (data: Omit<InvoiceSequence, "id" | "tenant_id" | "created_at">) => void;
 }
 
 export function InvoiceSequencesPage({
-  sequences,
-  isLoading,
-  error,
-  currentRole,
-  onSave,
-}: InvoiceSequencesPageProps): ReactElement {
+  sequences = [],
+  isLoading = false,
+  error = null,
+  currentRole = "auditor",
+  onSave = () => undefined,
+}: InvoiceSequencesPageProps = {}): ReactElement {
   if (isLoading) {
     return (
       <div data-testid="invoice-sequences-page">

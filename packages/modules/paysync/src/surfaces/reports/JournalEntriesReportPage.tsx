@@ -8,16 +8,16 @@ import type { JournalEntry } from "@infinityrx/contract";
 import { MoneyDisplay } from "../../components/MoneyDisplay.js";
 
 export interface JournalEntriesReportPageProps {
-  readonly entries: ReadonlyArray<JournalEntry>;
-  readonly isLoading: boolean;
-  readonly error: string | null;
+  readonly entries?: ReadonlyArray<JournalEntry>;
+  readonly isLoading?: boolean;
+  readonly error?: string | null;
 }
 
 export function JournalEntriesReportPage({
-  entries,
-  isLoading,
-  error,
-}: JournalEntriesReportPageProps): ReactElement {
+  entries = [],
+  isLoading = false,
+  error = null,
+}: JournalEntriesReportPageProps = {}): ReactElement {
   if (isLoading) {
     return (
       <div data-testid="journal-entries-report-page">

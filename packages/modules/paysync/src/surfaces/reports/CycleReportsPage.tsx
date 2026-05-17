@@ -8,9 +8,9 @@ import type { Cycle, CycleStatus } from "@infinityrx/contract";
 import { MoneyDisplay } from "../../components/MoneyDisplay.js";
 
 export interface CycleReportsPageProps {
-  readonly cycles: ReadonlyArray<Cycle>;
-  readonly isLoading: boolean;
-  readonly error: string | null;
+  readonly cycles?: ReadonlyArray<Cycle>;
+  readonly isLoading?: boolean;
+  readonly error?: string | null;
 }
 
 const STATUS_LABELS: Record<CycleStatus, string> = {
@@ -25,10 +25,10 @@ function statusLabel(status: string): string {
 }
 
 export function CycleReportsPage({
-  cycles,
-  isLoading,
-  error,
-}: CycleReportsPageProps): ReactElement {
+  cycles = [],
+  isLoading = false,
+  error = null,
+}: CycleReportsPageProps = {}): ReactElement {
   if (isLoading) {
     return (
       <div data-testid="cycle-reports-page">

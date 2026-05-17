@@ -19,20 +19,20 @@ export interface EmailRecipient {
 }
 
 export interface EmailRecipientsPageProps {
-  readonly recipients: ReadonlyArray<EmailRecipient>;
-  readonly isLoading: boolean;
-  readonly error: string | null;
-  readonly currentRole: RbacRole;
-  readonly onSave: (data: Omit<EmailRecipient, "id" | "tenant_id" | "created_at">) => void;
+  readonly recipients?: ReadonlyArray<EmailRecipient>;
+  readonly isLoading?: boolean;
+  readonly error?: string | null;
+  readonly currentRole?: RbacRole;
+  readonly onSave?: (data: Omit<EmailRecipient, "id" | "tenant_id" | "created_at">) => void;
 }
 
 export function EmailRecipientsPage({
-  recipients,
-  isLoading,
-  error,
-  currentRole,
-  onSave,
-}: EmailRecipientsPageProps): ReactElement {
+  recipients = [],
+  isLoading = false,
+  error = null,
+  currentRole = "auditor",
+  onSave = () => undefined,
+}: EmailRecipientsPageProps = {}): ReactElement {
   if (isLoading) {
     return (
       <div data-testid="email-recipients-page">
