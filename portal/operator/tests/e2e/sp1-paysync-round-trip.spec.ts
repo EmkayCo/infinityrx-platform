@@ -129,7 +129,10 @@ async function cleanupFixtures(operatorToken: string): Promise<void> {
 
 // ── Suite ─────────────────────────────────────────────────────────────────────
 
-test.describe("SP-1 PaySync round trip: Operator -> Approver -> Auditor", () => {
+// Plan E R1 C1 fix: serial ordering required because the 4 test blocks share
+// uploadId and workflow state (operator step seeds, approver step consumes,
+// auditor step verifies). Without .serial, Playwright parallelism could race.
+test.describe.serial("SP-1 PaySync round trip: Operator -> Approver -> Auditor", () => {
   // Shared state across role blocks (all tests run in the same describe block
   // in order; Playwright serial mode enforces sequential execution).
   let operatorToken = "";
