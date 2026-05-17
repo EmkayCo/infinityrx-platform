@@ -132,11 +132,20 @@ export const BatchSchema = z.object({
 });
 export type Batch = z.infer<typeof BatchSchema>;
 
-export const BatchListResponseSchema = z.object({
-  results: z.array(BatchSchema),
-  next_cursor: z.string().optional(),
-  total: z.number().int().nonnegative(),
-});
+// B4: backend /payment-batches returns a bare array; accept either shape and
+// normalise to the envelope so consumers always use .results/.total.
+export const BatchListResponseSchema = z.union([
+  z.array(BatchSchema).transform((items) => ({
+    results: items,
+    next_cursor: null as string | null,
+    total: items.length,
+  })),
+  z.object({
+    results: z.array(BatchSchema),
+    next_cursor: z.string().nullable().optional(),
+    total: z.number().int().nonnegative(),
+  }),
+]);
 export type BatchListResponse = z.infer<typeof BatchListResponseSchema>;
 
 // ── Invoice (paysync client invoice — Plan C adds InvoicesClient) ─────────
@@ -175,11 +184,20 @@ export const InvoiceSchema = z.object({
 });
 export type Invoice = z.infer<typeof InvoiceSchema>;
 
-export const InvoiceListResponseSchema = z.object({
-  results: z.array(InvoiceSchema),
-  next_cursor: z.string().optional(),
-  total: z.number().int().nonnegative(),
-});
+// B4: backend /invoices returns a bare array; accept either shape and
+// normalise to the envelope so consumers always use .results/.total.
+export const InvoiceListResponseSchema = z.union([
+  z.array(InvoiceSchema).transform((items) => ({
+    results: items,
+    next_cursor: null as string | null,
+    total: items.length,
+  })),
+  z.object({
+    results: z.array(InvoiceSchema),
+    next_cursor: z.string().nullable().optional(),
+    total: z.number().int().nonnegative(),
+  }),
+]);
 export type InvoiceListResponse = z.infer<typeof InvoiceListResponseSchema>;
 
 // ── PaymentRun (paysync payment execution — Plan C adds PaymentRunsClient) ──
@@ -214,29 +232,41 @@ export const PaymentRunListResponseSchema = z.object({
 });
 export type PaymentRunListResponse = z.infer<typeof PaymentRunListResponseSchema>;
 
-// ── Carryover (member accumulator carryover — Plan C adds CarryoversClient) ─
+// ── Carryover (AP carryforward — billing.carryovers table, committed 5eb024f1) ─
+// An APRecord that could not be fully paid in the current batch is represented
+// as a Carryover. The Carryover carries the outstanding balance into the next
+// PaymentBatch generation run. This is NOT a member accumulator carryover.
 export const CarryoverSchema = z.object({
   id: z.string().uuid(),
   tenant_id: z.string().uuid(),
-  member_id: z.string().uuid(),
-  // Decimal-string amount carried to the next period.
-  carried_amount: z.string(),
-  // Decimal-string original accumulator amount before carryover.
-  original_amount: z.string(),
+  // FK to billing.ap_records — the AP record being carried forward.
+  ap_record_id: z.string().uuid(),
+  // Decimal-string outstanding AP amount (Numeric 12,2 in the DB).
+  amount: z.string(),
   reason: z.string().min(1).max(255),
-  // Period label e.g. "2026-04" from which the amount is carried.
-  from_period: z.string().min(1).max(64),
-  // Period label e.g. "2026-05" to which the amount is carried.
-  to_period: z.string().min(1).max(64),
+  // Upload provenance; null for legacy carryovers pre-dating SP-1.
+  upload_id: z.string().uuid().nullable(),
+  resolved: z.boolean(),
+  resolved_at: z.string().datetime({ offset: true }).nullable(),
+  resolved_by: z.string().uuid().nullable(),
   created_at: z.string().datetime({ offset: true }),
+  updated_at: z.string().datetime({ offset: true }),
 });
 export type Carryover = z.infer<typeof CarryoverSchema>;
 
-export const CarryoverListResponseSchema = z.object({
-  results: z.array(CarryoverSchema),
-  next_cursor: z.string().optional(),
-  total: z.number().int().nonnegative(),
-});
+// B4 + C4: backend /carryovers returns a bare array; accept either shape.
+export const CarryoverListResponseSchema = z.union([
+  z.array(CarryoverSchema).transform((items) => ({
+    results: items,
+    next_cursor: null as string | null,
+    total: items.length,
+  })),
+  z.object({
+    results: z.array(CarryoverSchema),
+    next_cursor: z.string().nullable().optional(),
+    total: z.number().int().nonnegative(),
+  }),
+]);
 export type CarryoverListResponse = z.infer<typeof CarryoverListResponseSchema>;
 
 // ── BankSettlement (bank reconciliation settlement — Plan C) ──────────────

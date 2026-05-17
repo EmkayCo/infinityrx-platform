@@ -74,27 +74,32 @@ export function CarryoverDetailPage({
 
       <section aria-label="Carryover summary">
         <dl>
-          <dt>Member</dt>
-          <dd>{carryover.member_id}</dd>
+          <dt>AP Record</dt>
+          <dd>{carryover.ap_record_id}</dd>
 
           <dt>Reason</dt>
           <dd>{carryover.reason}</dd>
 
-          <dt>From Period</dt>
-          <dd>{carryover.from_period}</dd>
-
-          <dt>To Period</dt>
-          <dd>{carryover.to_period}</dd>
-
-          <dt>Original Amount</dt>
+          <dt>Amount</dt>
           <dd>
-            <MoneyDisplay value={carryover.original_amount} />
+            <MoneyDisplay value={carryover.amount} />
           </dd>
 
-          <dt>Carried Amount</dt>
-          <dd>
-            <MoneyDisplay value={carryover.carried_amount} />
+          <dt>Status</dt>
+          <dd data-testid="carryover-status">
+            {carryover.resolved ? "resolved" : "open"}
           </dd>
+
+          {carryover.resolved && carryover.resolved_at ? (
+            <>
+              <dt>Resolved</dt>
+              <dd>
+                <time dateTime={carryover.resolved_at}>
+                  {new Date(carryover.resolved_at).toLocaleString()}
+                </time>
+              </dd>
+            </>
+          ) : null}
 
           <dt>Created</dt>
           <dd>

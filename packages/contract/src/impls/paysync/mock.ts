@@ -419,29 +419,34 @@ export function createMockPaymentRunsClient(): PaymentRunsClient {
 }
 
 // ── Carryovers mock ───────────────────────────────────────────────────────
+// Fixtures mirror the AP-carryforward shape (billing.carryovers, commit 5eb024f1).
 
 const FIXTURE_CARRYOVERS: Carryover[] = [
   {
     id: "d0000000-0000-0000-0000-000000000001",
     tenant_id: "a0000000-0000-0000-0000-000000000001",
-    member_id: "e0000000-0000-0000-0000-000000000001",
-    carried_amount: "250.00",
-    original_amount: "500.00",
-    reason: "deductible_carryover",
-    from_period: "2026-04",
-    to_period: "2026-05",
+    ap_record_id: "e0000000-0000-0000-0000-000000000001",
+    amount: "250.00",
+    reason: "vendor_hold",
+    upload_id: "f0000000-0000-0000-0000-000000000001",
+    resolved: false,
+    resolved_at: null,
+    resolved_by: null,
     created_at: "2026-05-01T00:00:00.000+00:00",
+    updated_at: "2026-05-01T00:00:00.000+00:00",
   },
   {
     id: "d0000000-0000-0000-0000-000000000002",
     tenant_id: "a0000000-0000-0000-0000-000000000001",
-    member_id: "e0000000-0000-0000-0000-000000000002",
-    carried_amount: "125.50",
-    original_amount: "125.50",
-    reason: "oop_carryover",
-    from_period: "2026-03",
-    to_period: "2026-04",
+    ap_record_id: "e0000000-0000-0000-0000-000000000002",
+    amount: "125.50",
+    reason: "partial_funding",
+    upload_id: null,
+    resolved: true,
+    resolved_at: "2026-05-10T12:00:00.000+00:00",
+    resolved_by: "00000000-0000-0000-0000-000000000099",
     created_at: "2026-04-01T00:00:00.000+00:00",
+    updated_at: "2026-05-10T12:00:00.000+00:00",
   },
 ];
 
@@ -452,12 +457,14 @@ export function createMockCarryoversClient(): CarryoversClient {
     name: "paysync.carryovers" as const,
     cachePolicies: PAYSYNC_CARRYOVERS_CACHE_POLICIES,
 
+    // NOTE: client.ts list signature still uses member_id/from_period from the
+    // old member-accumulator design; those params are treated as no-ops until
+    // client.ts is updated in the C4 follow-up (Task 7 / sp-1-c-C4-followup).
     async list(req: { member_id?: string; from_period?: string; limit?: number; cursor?: string }): Promise<CarryoverListResponse> {
-      let filtered = carryovers;
-      if (req.member_id !== undefined) filtered = filtered.filter((c) => c.member_id === req.member_id);
-      if (req.from_period !== undefined) filtered = filtered.filter((c) => c.from_period === req.from_period);
+      void req.member_id;
+      void req.from_period;
       const limit = req.limit ?? 50;
-      return { results: filtered.slice(0, limit), total: filtered.length };
+      return { results: carryovers.slice(0, limit), total: carryovers.length };
     },
 
     async get(id: string): Promise<Carryover | null> {

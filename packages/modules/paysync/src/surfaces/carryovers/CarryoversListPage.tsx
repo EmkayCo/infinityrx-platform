@@ -49,12 +49,10 @@ export function CarryoversListPage({
         <table aria-label="Carryovers">
           <thead>
             <tr>
-              <th scope="col">Member</th>
+              <th scope="col">AP Record</th>
               <th scope="col">Reason</th>
-              <th scope="col">From Period</th>
-              <th scope="col">To Period</th>
-              <th scope="col">Original Amount</th>
-              <th scope="col">Carried Amount</th>
+              <th scope="col">Amount</th>
+              <th scope="col">Status</th>
               <th scope="col">Created</th>
             </tr>
           </thead>
@@ -63,19 +61,19 @@ export function CarryoversListPage({
               <tr key={carryover.id} data-testid="carryover-row">
                 <td>
                   <a href={`/admin/paysync/carryovers/${carryover.id}`}>
-                    {carryover.member_id.slice(0, 8)}...
+                    {carryover.ap_record_id.slice(0, 8)}...
                   </a>
                 </td>
                 <td>
                   <span data-testid="carryover-reason">{carryover.reason}</span>
                 </td>
-                <td>{carryover.from_period}</td>
-                <td>{carryover.to_period}</td>
                 <td>
-                  <MoneyDisplay value={carryover.original_amount} />
+                  <MoneyDisplay value={carryover.amount} />
                 </td>
                 <td>
-                  <MoneyDisplay value={carryover.carried_amount} />
+                  <span data-testid="carryover-status">
+                    {carryover.resolved ? "resolved" : "open"}
+                  </span>
                 </td>
                 <td>
                   <time dateTime={carryover.created_at}>

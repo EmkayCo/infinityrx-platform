@@ -24,12 +24,15 @@ import {
   createRealUploadsClient,
   BankSettlementSchema,
   BankSettlementStatusSchema,
+  BatchListResponseSchema,
   BatchSchema,
   BatchStatusSchema,
+  CarryoverListResponseSchema,
   CarryoverSchema,
   CycleSchema,
   CycleStatusSchema,
   InboxItemSchema,
+  InvoiceListResponseSchema,
   InvoiceSchema,
   InvoiceStatusSchema,
   PaymentRunSchema,
@@ -750,7 +753,39 @@ describe("paysync contract — carryovers mock factory", () => {
     expect(typeof page.total).toBe("number");
   });
 
-  it("CarryoverSchema validates a well-formed carryover", () => {
+  it("CarryoverSchema validates a well-formed AP-carryforward carryover (C4)", () => {
+    expect(() => CarryoverSchema.parse({
+      id: "d0000000-0000-0000-0000-000000000001",
+      tenant_id: "a0000000-0000-0000-0000-000000000001",
+      ap_record_id: "e0000000-0000-0000-0000-000000000001",
+      amount: "250.00",
+      reason: "vendor_hold",
+      upload_id: "f0000000-0000-0000-0000-000000000001",
+      resolved: false,
+      resolved_at: null,
+      resolved_by: null,
+      created_at: "2026-05-01T00:00:00.000+00:00",
+      updated_at: "2026-05-01T00:00:00.000+00:00",
+    })).not.toThrow();
+  });
+
+  it("CarryoverSchema validates a resolved carryover with resolved_at + resolved_by (C4)", () => {
+    expect(() => CarryoverSchema.parse({
+      id: "d0000000-0000-0000-0000-000000000002",
+      tenant_id: "a0000000-0000-0000-0000-000000000001",
+      ap_record_id: "e0000000-0000-0000-0000-000000000002",
+      amount: "125.50",
+      reason: "partial_funding",
+      upload_id: null,
+      resolved: true,
+      resolved_at: "2026-05-10T12:00:00.000+00:00",
+      resolved_by: "00000000-0000-0000-0000-000000000099",
+      created_at: "2026-04-01T00:00:00.000+00:00",
+      updated_at: "2026-05-10T12:00:00.000+00:00",
+    })).not.toThrow();
+  });
+
+  it("CarryoverSchema rejects old member-accumulator shape (C4: member_id is gone)", () => {
     expect(() => CarryoverSchema.parse({
       id: "d0000000-0000-0000-0000-000000000001",
       tenant_id: "a0000000-0000-0000-0000-000000000001",
@@ -761,7 +796,7 @@ describe("paysync contract — carryovers mock factory", () => {
       from_period: "2026-04",
       to_period: "2026-05",
       created_at: "2026-05-01T00:00:00.000+00:00",
-    })).not.toThrow();
+    })).toThrow();
   });
 
   it("PAYSYNC_CARRYOVERS_CACHE_POLICIES has list and get operations", () => {
@@ -939,5 +974,127 @@ describe("paysync contract — reconciliations real client (HTTP)", () => {
     expect(captured[0]?.headers.get("authorization")).toBe("Bearer tok-r");
     expect(captured[0]?.headers.get("x-tenant-id")).toBe("ffffffff-ffff-ffff-ffff-ffffffffffff");
     expect(captured[0]?.url).toContain("/api/v1/billing/reconciliations");
+  });
+});
+
+// ── B4: bare-array OR envelope acceptance tests ──────────────────────────────
+// The legacy billing backend returns bare T[] from /payment-batches, /invoices,
+// and /carryovers. The union schemas must accept both shapes and normalise to
+// the envelope so consumers always read .results and .total.
+
+const BARE_BATCH = {
+  id: "b1000000-0000-0000-0000-000000000001",
+  tenant_id: "a0000000-0000-0000-0000-000000000001",
+  batch_number: "BATCH-2026-001",
+  payment_route: "ach",
+  total_amount: "12345.67",
+  payment_count: 10,
+  ap_count: 10,
+  status: "generated" as const,
+  created_at: "2026-05-01T00:00:00.000+00:00",
+  updated_at: "2026-05-01T00:00:00.000+00:00",
+};
+
+const BARE_INVOICE = {
+  id: "11000000-0000-0000-0000-000000000001",
+  tenant_id: "a0000000-0000-0000-0000-000000000001",
+  invoice_number: "INV-2026-001",
+  invoice_type: "client_billing",
+  client_id: "c1000000-0000-0000-0000-000000000001",
+  client_name: "Acme Corp",
+  period_start: "2026-05-01",
+  period_end: "2026-05-31",
+  claims_subtotal: "10000.00",
+  fees_subtotal: "500.00",
+  adjustments: "0.00",
+  late_fees: "0.00",
+  total: "10500.00",
+  paid_amount: "0.00",
+  claim_count: 100,
+  status: "draft" as const,
+  due_date: "2026-06-15",
+  created_at: "2026-05-31T00:00:00.000+00:00",
+};
+
+const BARE_CARRYOVER = {
+  id: "d0000000-0000-0000-0000-000000000001",
+  tenant_id: "a0000000-0000-0000-0000-000000000001",
+  ap_record_id: "e0000000-0000-0000-0000-000000000001",
+  amount: "250.00",
+  reason: "vendor_hold",
+  upload_id: null,
+  resolved: false,
+  resolved_at: null,
+  resolved_by: null,
+  created_at: "2026-05-01T00:00:00.000+00:00",
+  updated_at: "2026-05-01T00:00:00.000+00:00",
+};
+
+describe("paysync contract — B4: BatchListResponseSchema bare-array + envelope", () => {
+  it("parses a bare array and normalises to envelope", () => {
+    const result = BatchListResponseSchema.parse([BARE_BATCH]);
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]?.id).toBe(BARE_BATCH.id);
+    expect(result.total).toBe(1);
+    expect(result.next_cursor).toBeNull();
+  });
+
+  it("parses an envelope response unchanged", () => {
+    const result = BatchListResponseSchema.parse({ results: [BARE_BATCH], next_cursor: null, total: 1 });
+    expect(result.results).toHaveLength(1);
+    expect(result.total).toBe(1);
+  });
+
+  it(".results is accessible in both cases", () => {
+    const fromArray = BatchListResponseSchema.parse([BARE_BATCH]);
+    const fromEnvelope = BatchListResponseSchema.parse({ results: [BARE_BATCH], total: 1, next_cursor: null });
+    expect(fromArray.results[0]?.batch_number).toBe("BATCH-2026-001");
+    expect(fromEnvelope.results[0]?.batch_number).toBe("BATCH-2026-001");
+  });
+});
+
+describe("paysync contract — B4: InvoiceListResponseSchema bare-array + envelope", () => {
+  it("parses a bare array and normalises to envelope", () => {
+    const result = InvoiceListResponseSchema.parse([BARE_INVOICE]);
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]?.id).toBe(BARE_INVOICE.id);
+    expect(result.total).toBe(1);
+    expect(result.next_cursor).toBeNull();
+  });
+
+  it("parses an envelope response unchanged", () => {
+    const result = InvoiceListResponseSchema.parse({ results: [BARE_INVOICE], next_cursor: null, total: 1 });
+    expect(result.results).toHaveLength(1);
+    expect(result.total).toBe(1);
+  });
+
+  it(".results is accessible in both cases", () => {
+    const fromArray = InvoiceListResponseSchema.parse([BARE_INVOICE]);
+    const fromEnvelope = InvoiceListResponseSchema.parse({ results: [BARE_INVOICE], total: 1, next_cursor: null });
+    expect(fromArray.results[0]?.invoice_number).toBe("INV-2026-001");
+    expect(fromEnvelope.results[0]?.invoice_number).toBe("INV-2026-001");
+  });
+});
+
+describe("paysync contract — B4+C4: CarryoverListResponseSchema bare-array + envelope", () => {
+  it("parses a bare array and normalises to envelope", () => {
+    const result = CarryoverListResponseSchema.parse([BARE_CARRYOVER]);
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]?.id).toBe(BARE_CARRYOVER.id);
+    expect(result.total).toBe(1);
+    expect(result.next_cursor).toBeNull();
+  });
+
+  it("parses an envelope response unchanged", () => {
+    const result = CarryoverListResponseSchema.parse({ results: [BARE_CARRYOVER], next_cursor: null, total: 1 });
+    expect(result.results).toHaveLength(1);
+    expect(result.total).toBe(1);
+  });
+
+  it(".results is accessible in both cases", () => {
+    const fromArray = CarryoverListResponseSchema.parse([BARE_CARRYOVER]);
+    const fromEnvelope = CarryoverListResponseSchema.parse({ results: [BARE_CARRYOVER], total: 1, next_cursor: null });
+    expect(fromArray.results[0]?.ap_record_id).toBe("e0000000-0000-0000-0000-000000000001");
+    expect(fromEnvelope.results[0]?.ap_record_id).toBe("e0000000-0000-0000-0000-000000000001");
   });
 });

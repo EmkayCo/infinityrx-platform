@@ -14,16 +14,20 @@ const TENANT = "t0000000-0000-0000-0000-000000000001";
 const NOW = "2026-05-16T22:00:00.000+00:00";
 
 function makeCarryover(overrides: Partial<Carryover> = {}): Carryover {
+  // C4: contract now models AP carryforward (ap_record_id + amount + resolved),
+  // not member accumulator carryover. See packages/contract/src/impls/paysync/types.ts.
   return {
     id: "d0000000-0000-0000-0000-000000000001",
     tenant_id: TENANT,
-    member_id: "e0000000-0000-0000-0000-000000000001",
-    carried_amount: "250.00",
-    original_amount: "500.00",
+    upload_id: null,
+    ap_record_id: "e0000000-0000-0000-0000-000000000001",
+    amount: "250.00",
     reason: "deductible_carryover",
-    from_period: "2026-04",
-    to_period: "2026-05",
+    resolved: false,
+    resolved_at: null,
+    resolved_by: null,
     created_at: NOW,
+    updated_at: NOW,
     ...overrides,
   };
 }
@@ -57,16 +61,23 @@ describe("CarryoversListPage", () => {
     expect(screen.getByText("deductible_carryover")).toBeTruthy();
   });
 
-  it("renders MoneyDisplay for carried_amount", () => {
+  it("renders MoneyDisplay for amount", () => {
     render(<CarryoversListPage carryovers={[makeCarryover()]} isLoading={false} error={null} />);
     const displays = screen.getAllByTestId("money-display");
     expect(displays.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("renders from_period and to_period", () => {
-    render(<CarryoversListPage carryovers={[makeCarryover()]} isLoading={false} error={null} />);
-    expect(screen.getByText("2026-04")).toBeTruthy();
-    expect(screen.getByText("2026-05")).toBeTruthy();
+  it("renders resolved status indicator", () => {
+    render(
+      <CarryoversListPage
+        carryovers={[makeCarryover({ resolved: false }), makeCarryover({ id: "d2", resolved: true })]}
+        isLoading={false}
+        error={null}
+      />,
+    );
+    const statuses = screen.getAllByTestId("carryover-status");
+    expect(statuses.map((s) => s.textContent)).toContain("open");
+    expect(statuses.map((s) => s.textContent)).toContain("resolved");
   });
 
   it("renders loading state when isLoading=true", () => {
@@ -107,7 +118,7 @@ describe("CarryoverDetailPage", () => {
     expect(screen.getByTestId("carryover-detail-page")).toBeTruthy();
   });
 
-  it("renders carried_amount via MoneyDisplay", () => {
+  it("renders amount via MoneyDisplay", () => {
     render(
       <CarryoverDetailPage
         carryover={makeCarryover()}
