@@ -22,11 +22,13 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+from src.api.dependencies import DBSession
 
 logger = logging.getLogger("billing.seed")
 
@@ -72,6 +74,19 @@ _TABLE_MAP: dict[str, str] = {
 
 def _is_production() -> bool:
     return os.getenv("INFINITYRX_ENV", "development").lower() == "production"
+
+
+def _block_in_production() -> None:
+    """Route-level dependency: fail fast with 403 before DBSession resolves.
+
+    Ensures production environments reject the request before the seed
+    handler touches the database.
+    """
+    if _is_production():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Seed endpoint is not available in production environments.",
+        )
 
 
 def _get_session() -> Session:
@@ -139,11 +154,14 @@ def _upsert_rows(
     return inserted
 
 
-@router.post("/seed", status_code=status.HTTP_200_OK)
-async def seed_billing_fixtures(body: SeedRequest, request: Request) -> JSONResponse:
+@router.post("/seed", status_code=status.HTTP_200_OK, dependencies=[Depends(_block_in_production)])
+async def seed_billing_fixtures(
+    body: SeedRequest, request: Request, session: DBSession
+) -> JSONResponse:
     """Seed paysync fixture data into the billing DB.
 
-    Blocked in production. Idempotent — safe to call multiple times.
+    Blocked in production. Idempotent -- safe to call multiple times.
+    Uses the DBSession dependency so test fixtures can override the engine.
     """
     if _is_production():
         raise HTTPException(
@@ -154,24 +172,18 @@ async def seed_billing_fixtures(body: SeedRequest, request: Request) -> JSONResp
     inserted_totals: dict[str, int] = {}
 
     try:
-        session = _get_session()
-        try:
-            for stem in _INSERT_ORDER:
-                table = _TABLE_MAP.get(stem)
-                if table is None:
-                    continue
-                rows = _load_seed_file(stem)
-                count = _upsert_rows(session, table, rows, body.tenant_id)
-                inserted_totals[stem] = count
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
+        for stem in _INSERT_ORDER:
+            table = _TABLE_MAP.get(stem)
+            if table is None:
+                continue
+            rows = _load_seed_file(stem)
+            count = _upsert_rows(session, table, rows, body.tenant_id)
+            inserted_totals[stem] = count
+        session.commit()
     except HTTPException:
         raise
     except Exception as exc:
+        session.rollback()
         logger.exception("billing.seed: seed failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -185,12 +197,15 @@ async def seed_billing_fixtures(body: SeedRequest, request: Request) -> JSONResp
     )
 
 
-@router.delete("/seed", status_code=status.HTTP_200_OK)
-async def cleanup_billing_fixtures(body: SeedRequest, request: Request) -> JSONResponse:
+@router.delete("/seed", status_code=status.HTTP_200_OK, dependencies=[Depends(_block_in_production)])
+async def cleanup_billing_fixtures(
+    body: SeedRequest, request: Request, session: DBSession
+) -> JSONResponse:
     """Truncate paysync fixture data from the billing DB.
 
     Blocked in production. Used by Playwright afterAll hooks.
     Truncates in FK-safe dependency order (children first).
+    Uses the DBSession dependency so test fixtures can override the engine.
     """
     if _is_production():
         raise HTTPException(
@@ -201,30 +216,24 @@ async def cleanup_billing_fixtures(body: SeedRequest, request: Request) -> JSONR
     deleted_totals: dict[str, int] = {}
 
     try:
-        session = _get_session()
-        try:
-            for stem in _TRUNCATE_ORDER:
-                table = _TABLE_MAP.get(stem)
-                if table is None:
-                    continue
-                try:
-                    result = session.execute(
-                        text(f"DELETE FROM {table} WHERE tenant_id = :tid"),
-                        {"tid": body.tenant_id},
-                    )
-                    deleted_totals[stem] = result.rowcount or 0
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("billing.seed cleanup: error on %s — %s", table, exc)
-                    session.rollback()
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
+        for stem in _TRUNCATE_ORDER:
+            table = _TABLE_MAP.get(stem)
+            if table is None:
+                continue
+            try:
+                result = session.execute(
+                    text(f"DELETE FROM {table} WHERE tenant_id = :tid"),
+                    {"tid": body.tenant_id},
+                )
+                deleted_totals[stem] = result.rowcount or 0
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("billing.seed cleanup: error on %s -- %s", table, exc)
+                session.rollback()
+        session.commit()
     except HTTPException:
         raise
     except Exception as exc:
+        session.rollback()
         logger.exception("billing.seed: cleanup failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

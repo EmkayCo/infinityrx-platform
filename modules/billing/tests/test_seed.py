@@ -19,9 +19,41 @@ from src.main import create_app
 
 @pytest.fixture
 def client():
+    """TestClient with an in-memory SQLite engine overriding get_db.
+
+    The seed endpoint uses DBSession (Depends(get_db)); without an override
+    the dep would try to read BILLING_DATABASE_URL and fail. Production-guard
+    tests don't need a real DB but the dependency still resolves first.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session, sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from src.api.dependencies import get_db
+    from src.models.tables import BillingBase
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    for table in BillingBase.metadata.tables.values():
+        table.schema = None
+    BillingBase.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+    def override_db():
+        session = SessionLocal()
+        try:
+            yield session
+        finally:
+            session.close()
+
     app = create_app()
+    app.dependency_overrides[get_db] = override_db
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
+    app.dependency_overrides.clear()
+    engine.dispose()
 
 
 @pytest.fixture
@@ -48,8 +80,10 @@ class TestSeedEndpointDevGuard:
             headers={"X-Tenant-ID": TENANT_ID},
         )
         assert resp.status_code == 403
+        # Canonical envelope per Plan C C1 fix: {"error": {"code", "message", "correlation_id"}}
         body = resp.json()
-        assert "production" in body.get("detail", "").lower()
+        assert "production" in body["error"]["message"].lower()
+        assert body["error"]["code"] == "FORBIDDEN"
 
     def test_returns_200_in_development(self, client, dev_env):
         resp = client.post(
@@ -71,7 +105,9 @@ class TestSeedEndpointDevGuard:
         assert resp.status_code == 200
 
     def test_delete_returns_200_in_development(self, client, dev_env):
-        resp = client.delete(
+        # starlette TestClient.delete signature: content / data, not json kwarg
+        resp = client.request(
+            "DELETE",
             SEED_URL,
             json={"tenant_id": TENANT_ID},
             headers={"X-Tenant-ID": TENANT_ID},
@@ -79,7 +115,8 @@ class TestSeedEndpointDevGuard:
         assert resp.status_code in (200, 404)
 
     def test_delete_returns_403_in_production(self, client, prod_env):
-        resp = client.delete(
+        resp = client.request(
+            "DELETE",
             SEED_URL,
             json={"tenant_id": TENANT_ID},
             headers={"X-Tenant-ID": TENANT_ID},
