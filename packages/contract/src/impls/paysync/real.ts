@@ -46,6 +46,11 @@ function makeAuthedFetch(config: ClientConfig) {
     headers.set("Authorization", `Bearer ${token}`);
     headers.set("Content-Type", "application/json");
     headers.set(correlationHeader, crypto.randomUUID());
+    // B3: send X-Tenant-Id on every request so billing backend authz passes.
+    if (config.getTenantId) {
+      const tenantId = await config.getTenantId();
+      headers.set("x-tenant-id", tenantId);
+    }
     return fetchImpl(`${baseUrl}${path}`, { ...init, headers });
   }
 
@@ -117,6 +122,11 @@ export function createRealUploadsClient(config: ClientConfig): UploadsClient {
       const headers = new Headers();
       headers.set("Authorization", `Bearer ${token}`);
       headers.set(correlationHeader, crypto.randomUUID());
+      // B3: send X-Tenant-Id on multipart path too
+      if (config.getTenantId) {
+        const tenantId = await config.getTenantId();
+        headers.set("x-tenant-id", tenantId);
+      }
       const res = await fetchImpl(`${baseUrl}/api/v1/billing/uploads`, {
         method: "POST",
         headers,

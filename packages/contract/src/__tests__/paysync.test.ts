@@ -117,6 +117,87 @@ describe("paysync contract — real factories (HTTP wired in Plan B)", () => {
     const c = createRealCyclesClient({ baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch });
     expect(await c.get("missing-id")).toBeNull();
   });
+
+  // B3: every paysync real client must send X-Tenant-Id on every request
+  it("createRealUploadsClient sends X-Tenant-Id header on list when getTenantId provided", async () => {
+    const captured: Headers[] = [];
+    const fakeFetch: typeof fetch = async (_input, init) => {
+      captured.push(new Headers(init?.headers));
+      return jsonResponse({ results: [], total: 0 });
+    };
+    const c = createRealUploadsClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok",
+      getTenantId: async () => "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      fetch: fakeFetch,
+    });
+    await c.list({ limit: 10 });
+    expect(captured[0]?.get("x-tenant-id")).toBe("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+  });
+
+  it("createRealUploadsClient sends X-Tenant-Id header on get", async () => {
+    const captured: Headers[] = [];
+    const fakeFetch: typeof fetch = async (_input, init) => {
+      captured.push(new Headers(init?.headers));
+      return jsonResponse({ id: "11111111-1111-1111-1111-111111111111", tenant_id: "22222222-2222-2222-2222-222222222222", filename: "f.csv", content_sha256: "a".repeat(64), status: "validated", total_billed_amount: null, claim_count: 0, row_error_count: 0, uploaded_by_user_id: "33333333-3333-3333-3333-333333333333", uploaded_at: new Date().toISOString() });
+    };
+    const c = createRealUploadsClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok",
+      getTenantId: async () => "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      fetch: fakeFetch,
+    });
+    await c.get("some-id");
+    expect(captured[0]?.get("x-tenant-id")).toBe("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+  });
+
+  it("createRealInboxClient sends X-Tenant-Id header on list", async () => {
+    const captured: Headers[] = [];
+    const fakeFetch: typeof fetch = async (_input, init) => {
+      captured.push(new Headers(init?.headers));
+      return jsonResponse([]);
+    };
+    const c = createRealInboxClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok",
+      getTenantId: async () => "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      fetch: fakeFetch,
+    });
+    await c.list("operator");
+    expect(captured[0]?.get("x-tenant-id")).toBe("cccccccc-cccc-cccc-cccc-cccccccccccc");
+  });
+
+  it("createRealCyclesClient sends X-Tenant-Id header on list", async () => {
+    const captured: Headers[] = [];
+    const fakeFetch: typeof fetch = async (_input, init) => {
+      captured.push(new Headers(init?.headers));
+      return jsonResponse({ results: [], total: 0 });
+    };
+    const c = createRealCyclesClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok",
+      getTenantId: async () => "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      fetch: fakeFetch,
+    });
+    await c.list({});
+    expect(captured[0]?.get("x-tenant-id")).toBe("dddddddd-dddd-dddd-dddd-dddddddddddd");
+  });
+
+  it("createRealCyclesClient sends X-Tenant-Id header on close", async () => {
+    const captured: Headers[] = [];
+    const fakeFetch: typeof fetch = async (_input, init) => {
+      captured.push(new Headers(init?.headers));
+      return jsonResponse({ id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", tenant_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", period_label: "2026-05", status: "closed", window_closed_at: null, origin_upload_id: null, total_billed_amount: null, claim_count: 0, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    };
+    const c = createRealCyclesClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok",
+      getTenantId: async () => "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+      fetch: fakeFetch,
+    });
+    await c.close("id1");
+    expect(captured[0]?.get("x-tenant-id")).toBe("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
+  });
 });
 
 describe("paysync contract — cycles mock factory", () => {
