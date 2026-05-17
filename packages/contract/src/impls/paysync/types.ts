@@ -279,8 +279,9 @@ export const FileArtifactListResponseSchema = z.union([
 export type FileArtifactListResponse = z.infer<typeof FileArtifactListResponseSchema>;
 
 export const FileGenerateRequestSchema = z.object({
-  // "nacha" or "835" — matches the backend GenerateFileRequest.kind field.
-  kind: z.string().min(1),
+  // Plan D R1 B3: narrowed to match FileArtifactKindSchema; backend
+  // GenerateFileRequest.kind accepts the same values.
+  kind: FileArtifactKindSchema,
   source_id: z.string().uuid(),
 });
 export type FileGenerateRequest = z.infer<typeof FileGenerateRequestSchema>;

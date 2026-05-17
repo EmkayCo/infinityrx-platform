@@ -12,18 +12,11 @@ export interface FilesListPageProps {
   readonly error: string | null;
 }
 
+// Per Plan D R1 B3: FileArtifactKindSchema is narrowed to ("nacha", "835").
+// Other X12 variants are tracked as Plan F+ scope.
 const KIND_LABELS: Record<FileArtifactKind, string> = {
   nacha: "NACHA",
-  x12_835: "835",
-  x12_837: "837",
-  x12_270: "270",
-  x12_271: "271",
-  x12_276: "276",
-  x12_277: "277",
-  x12_278: "278",
-  x12_834: "834",
-  x12_999: "999",
-  ncpdp_batch: "NCPDP Batch",
+  "835": "835",
 };
 
 function kindLabel(kind: string): string {

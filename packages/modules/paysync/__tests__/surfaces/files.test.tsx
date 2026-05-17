@@ -51,7 +51,7 @@ describe("FilesListPage", () => {
   it("renders a row for each file", () => {
     const files = [
       makeFile({ id: "fa1", filename: "nacha-001.txt" }),
-      makeFile({ id: "fa2", filename: "835-001.txt", kind: "x12_835" }),
+      makeFile({ id: "fa2", filename: "835-001.txt", kind: "835" }),
     ];
     render(<FilesListPage files={files} isLoading={false} error={null} />);
     expect(screen.getAllByTestId("file-row")).toHaveLength(2);
@@ -64,7 +64,7 @@ describe("FilesListPage", () => {
   });
 
   it("renders kind badge for 835 files", () => {
-    render(<FilesListPage files={[makeFile({ kind: "x12_835", filename: "835.txt" })]} isLoading={false} error={null} />);
+    render(<FilesListPage files={[makeFile({ kind: "835", filename: "835.txt" })]} isLoading={false} error={null} />);
     const badge = screen.getByTestId("file-kind-badge");
     expect(badge.textContent).toBe("835");
   });
