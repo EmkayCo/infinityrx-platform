@@ -299,15 +299,23 @@ class TestScheduledJobs:
 
 class TestAPIDependencies:
     def test_valid_tenant_uuid_header(self) -> None:
-        from src.api.dependencies import get_tenant_id
+        # B2: get_tenant_id was replaced by validate_tenant_id which also checks
+        # that X-Tenant-Id matches current_user.tenant_id. Unit-test the UUID
+        # parse + match path by supplying a matching mock user.
+        from unittest.mock import MagicMock
+        from src.api.dependencies import validate_tenant_id
 
-        result = get_tenant_id(x_tenant_id=str(TENANT))
-        assert result == TENANT
+        tenant = TENANT
+        mock_user = MagicMock(tenant_id=tenant)
+        result = validate_tenant_id(x_tenant_id=str(tenant), current_user=mock_user)
+        assert result == tenant
 
     def test_invalid_tenant_uuid_raises_http_400(self) -> None:
         from fastapi import HTTPException
-        from src.api.dependencies import get_tenant_id
+        from unittest.mock import MagicMock
+        from src.api.dependencies import validate_tenant_id
 
+        mock_user = MagicMock(tenant_id=TENANT)
         with pytest.raises(HTTPException) as exc_info:
-            get_tenant_id(x_tenant_id="not-a-uuid")
+            validate_tenant_id(x_tenant_id="not-a-uuid", current_user=mock_user)
         assert exc_info.value.status_code == 400

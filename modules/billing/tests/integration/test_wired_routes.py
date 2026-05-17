@@ -16,6 +16,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 
 import pytest
+from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
@@ -52,6 +53,22 @@ PROGRAM_A = uuid.UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
 
 HEADERS_A = {"X-Tenant-Id": str(TENANT_A)}
 HEADERS_B = {"X-Tenant-Id": str(TENANT_B)}
+
+# B2 fix: TenantId now validates header against JWT tenant. wired_client sends
+# HEADERS_A by default; tests that use HEADERS_B must override get_current_user
+# themselves. We wire a TENANT_A mock user for the module-scoped client.
+_MOCK_USER_A = MagicMock(
+    id=uuid.UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+    tenant_id=TENANT_A,
+    roles=("operator",),
+    has_role=lambda r: r in ("operator",),
+)
+_MOCK_USER_B = MagicMock(
+    id=uuid.UUID("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+    tenant_id=TENANT_B,
+    roles=("operator",),
+    has_role=lambda r: r in ("operator",),
+)
 
 
 def _now() -> datetime:
@@ -104,7 +121,21 @@ def wired_client(_wired_engine) -> TestClient:
         finally:
             session.close()
 
+    from src.api.dependencies import validate_tenant_id
+    import uuid as _uuid
+
+    # B2 fix: override validate_tenant_id (not get_current_user) so isolation
+    # tests that send HEADERS_B still get data-level 404/empty rather than 403.
+    # These tests verify DB-level tenant isolation; auth isolation is covered by
+    # TestTenantHeaderAuthorizationB2 in test_uploads_router.py.
+    def _bypass_tenant_auth(x_tenant_id: str = __import__("fastapi").Header(...)):
+        try:
+            return _uuid.UUID(x_tenant_id)
+        except ValueError:
+            raise __import__("fastapi").HTTPException(status_code=400, detail="Invalid X-Tenant-Id")
+
     app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[validate_tenant_id] = _bypass_tenant_auth
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
