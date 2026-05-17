@@ -128,6 +128,7 @@ def _upsert_rows(
     for row in rows:
         # Normalise tenant_id to match the request (seed files use demo IDs).
         row = dict(row)
+        row["tenant_id"] = tenant_id  # B4 fix: normalize tenant for cross-tenant safety
 
         # Build INSERT statement appropriate for the dialect.
         cols = list(row.keys())
