@@ -25,6 +25,7 @@ from .api.cycles import router as cycles_router
 from .api.carryovers import router as carryovers_router
 from .api.payment_runs import router as payment_runs_router
 from .api.bank_settlements import router as bank_settlements_router
+from .api.reconciliations import router as reconciliations_router
 
 logger = logging.getLogger("billing.main")
 
@@ -173,6 +174,7 @@ def create_app() -> FastAPI:
     app.include_router(carryovers_router)
     app.include_router(payment_runs_router)
     app.include_router(bank_settlements_router)
+    app.include_router(reconciliations_router)
     app.include_router(
         build_dlq_router(
             get_service=_get_dlq_service,
