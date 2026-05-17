@@ -49,6 +49,14 @@ AUDITOR_USER = MagicMock(
     roles=("auditor",),
     has_role=lambda r: r == "auditor",
 )
+# A user with no PaySync role (e.g. admin from a different system).
+USER_NOROLE = uuid.UUID("44444444-4444-4444-4444-444444444444")
+NO_ROLE_USER = MagicMock(
+    id=USER_NOROLE,
+    tenant_id=uuid.UUID(TENANT_A),
+    roles=(),
+    has_role=lambda r: False,
+)
 
 
 def _csv(claim_id: str = "CLM001") -> bytes:
@@ -203,6 +211,39 @@ class TestRBACUploadPost:
             files=_multipart_file(_csv("CLM-AUD-1")),
         )
         assert resp.status_code == 403
+
+
+class TestRBACWriteRoles:
+    """P1: write endpoints must require operator or approver explicitly.
+
+    Denying only auditor leaves every other non-PaySync role able to write.
+    """
+
+    def test_no_role_user_cannot_create_upload(self, _client):
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+        app.dependency_overrides[get_current_user] = lambda: NO_ROLE_USER
+        resp = _client.post(
+            "/api/v1/billing/uploads",
+            headers={"X-Tenant-Id": TENANT_A},
+            files=_multipart_file(_csv("CLM-NOROLE-1")),
+        )
+        assert resp.status_code == 403, (
+            f"User with no PaySync role must get 403 on create, got {resp.status_code}"
+        )
+
+    def test_no_role_user_cannot_supersede(self, _client):
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+        app.dependency_overrides[get_current_user] = lambda: NO_ROLE_USER
+        resp = _client.post(
+            f"/api/v1/billing/uploads/{uuid.uuid4()}/supersede",
+            headers={"X-Tenant-Id": TENANT_A},
+            files=_multipart_file(_csv("CLM-NOROLE-2")),
+        )
+        assert resp.status_code == 403, (
+            f"User with no PaySync role must get 403 on supersede, got {resp.status_code}"
+        )
 
 
 class TestRBACSupersede:

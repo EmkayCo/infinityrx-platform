@@ -43,6 +43,7 @@ logger = logging.getLogger("billing.api.uploads")
 router = APIRouter(prefix="/api/v1/billing/uploads", tags=["uploads"])
 
 _AUDITOR_ROLE = "auditor"
+_WRITE_ROLES = frozenset({"operator", "approver"})
 _DEFAULT_UPLOAD_DIR = "./data/uploads"
 
 
@@ -170,8 +171,9 @@ async def create_upload(
     tenant_id: TenantId,
     current_user: CurrentUser = Depends(get_current_user),
 ) -> JSONResponse:
-    if current_user.has_role(_AUDITOR_ROLE):
-        raise HTTPException(status_code=403, detail="Auditors cannot upload files")
+    # P1-rbac: require operator or approver explicitly; deny everyone else.
+    if not any(current_user.has_role(r) for r in _WRITE_ROLES):
+        raise HTTPException(status_code=403, detail="Only operators and approvers can upload files")
 
     content = await file.read()
     sha256 = compute_sha256(content)
@@ -356,9 +358,10 @@ async def supersede_upload_endpoint(
     tenant_id: TenantId,
     current_user: CurrentUser = Depends(get_current_user),
 ) -> JSONResponse:
-    if current_user.has_role(_AUDITOR_ROLE):
+    # P1-rbac: require operator or approver explicitly.
+    if not any(current_user.has_role(r) for r in _WRITE_ROLES):
         raise HTTPException(
-            status_code=403, detail="Auditors cannot supersede uploads"
+            status_code=403, detail="Only operators and approvers can supersede uploads"
         )
     stmt = select(Upload).where(
         Upload.id == upload_id, Upload.tenant_id == tenant_id
