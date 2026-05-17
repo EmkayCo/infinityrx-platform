@@ -373,7 +373,42 @@ async def supersede_upload_endpoint(
                 status_code=409,
             )
         raise
-    parse_upload(db, upload=new_upload, file_bytes=content)
+    # B10: parse the replacement file; if it fails validation (all rows invalid
+    # or malformed headers), rollback the entire transaction so old claims are
+    # preserved and return 422. Never commit a supersede where replacement parse fails.
+    try:
+        parse_upload(db, upload=new_upload, file_bytes=content)
+    except ValueError as exc:
+        db.rollback()
+        return _no_store(
+            {
+                "error": {
+                    "code": "PARSE_ERROR",
+                    "message": f"Replacement file is invalid: {exc}",
+                    "correlation_id": str(uuid.uuid4()),
+                }
+            },
+            status_code=422,
+        )
+    if new_upload.status == UploadStatus.validation_failed.value:
+        db.rollback()
+        return _no_store(
+            {
+                "error": {
+                    "code": "VALIDATION_FAILED",
+                    "message": (
+                        "Replacement file failed validation — all rows rejected. "
+                        "Original upload and claims are preserved."
+                    ),
+                    "correlation_id": str(uuid.uuid4()),
+                    "details": {
+                        "row_error_count": new_upload.error_count or 0,
+                        "row_errors": new_upload.row_errors or [],
+                    },
+                }
+            },
+            status_code=422,
+        )
     db.commit()
 
     await _publish_parsed(request, upload=new_upload, correlation_id=uuid.uuid4())

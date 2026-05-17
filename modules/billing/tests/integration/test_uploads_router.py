@@ -599,6 +599,64 @@ class TestContractFieldNames:
 class TestSupersede:
     """Supersede with overlapping claim_ids must not raise IntegrityError."""
 
+    def test_supersede_invalid_replacement_preserves_old_claims(self, _client, _session_factory):
+        """B10: If replacement file is fully invalid, old upload and its claims must be preserved.
+
+        The supersede endpoint deletes old ClaimRecord rows before parsing the
+        replacement. If replacement parse fails (validation_failed), the old claims
+        must NOT be committed as deleted -- the transaction must be rolled back.
+        """
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+        from src.models.tables import ClaimRecord
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+
+        # Upload original with one valid claim
+        original_csv = _csv("CLM-SUP-PRESERVE-1")
+        resp1 = _client.post(
+            "/api/v1/billing/uploads",
+            headers={"X-Tenant-Id": TENANT_A},
+            files=_multipart_file(original_csv, "original.csv"),
+        )
+        assert resp1.status_code == 201, resp1.text
+        upload_id = resp1.json()["id"]
+
+        # Wait for parsing to complete then verify claim exists
+        with _session_factory() as session:
+            claim_count_before = session.query(ClaimRecord).filter(
+                ClaimRecord.upload_id == uuid.UUID(upload_id)
+            ).count()
+        assert claim_count_before > 0, "original upload must have parsed claims"
+
+        # Supersede with a file that has rows but ALL fail validation (bad NPI, bad date)
+        # This triggers parse_upload → validation_failed status.
+        all_invalid_csv = (
+            b"claim_id,member_id,npi,ndc,date_of_service,quantity,days_supply,amount_billed\n"
+            b"BAD-1,M001,NOT_AN_NPI,12345678901,NOT_A_DATE,1,30,10.00\n"
+        )
+        resp2 = _client.post(
+            f"/api/v1/billing/uploads/{upload_id}/supersede",
+            headers={"X-Tenant-Id": TENANT_A},
+            files=[("file", ("invalid.csv", all_invalid_csv, "text/csv"))],
+        )
+        # An all-invalid replacement → parse_upload sets validation_failed.
+        # The router must rollback the entire txn and return 422.
+        # B10 bug: supersede committed with old claims deleted even when parse fails.
+        assert resp2.status_code == 422, (
+            f"B10: all-invalid replacement must be rejected with 422 (validation_failed), "
+            f"got {resp2.status_code}: {resp2.text}"
+        )
+        # Old claims must be preserved after the failed supersede
+        with _session_factory() as session:
+            claim_count_after = session.query(ClaimRecord).filter(
+                ClaimRecord.upload_id == uuid.UUID(upload_id)
+            ).count()
+        assert claim_count_after == claim_count_before, (
+            f"B10: invalid replacement must not delete old claims. "
+            f"Before: {claim_count_before}, after: {claim_count_after}"
+        )
+
     def test_supersede_with_same_claim_ids_succeeds(self, _client):
         from shared.auth.dependencies import get_current_user
         from src.main import app
