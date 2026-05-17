@@ -1,17 +1,27 @@
 // packages/modules/paysync/src/bff/inbox.ts
-// BFF stub — STUB ONLY (not a complete Inbox implementation).
-// Plan B replaces this with a real backend call to GET /api/v1/billing/inbox?role=<role>.
-// The Plan A gate explicitly accepts this as stub-scope.
+// BFF function for GET /api/paysync/inbox?role=<role>.
+// Plan B replaces the stub (always returned []) with a real call to InboxClient.
+// The caller injects the InboxClient so this function is testable without HTTP.
 
 import type { InboxItem, RbacRole } from "../inbox/types.js";
 
+// Minimal interface for the InboxClient dependency — matches InboxClient from
+// @infinityrx/contract without importing the full package here (avoids circular
+// dep; the portal's route handler wires the concrete client).
+export interface InboxClientLike {
+  list(role: RbacRole): Promise<InboxItem[]>;
+}
+
 /**
- * GET /api/paysync/inbox?role=<role>
+ * Fetches inbox items for the given role from the billing backend via InboxClient.
  *
- * Plan A: returns an empty array regardless of role.
- * Plan B: proxies to billing module's real inbox endpoint and applies tenant
- *         + RBAC filtering before returning.
+ * @param role    - The RBAC role to filter items by (Operator/Approver/Auditor).
+ * @param client  - InboxClient instance (real or mock). Injected by the caller.
+ * @returns       - Array of InboxItem for this role.
  */
-export async function listInboxItems(_role: RbacRole): Promise<InboxItem[]> {
-  return [];
+export async function listInboxItems(
+  role: RbacRole,
+  client: InboxClientLike,
+): Promise<InboxItem[]> {
+  return client.list(role);
 }
