@@ -2,12 +2,22 @@
 
 **Date:** 2026-05-16
 **Sub-project:** SP-1 PaySync Operator Portal
-**Status:** Ready for execution (R2 — addresses pre-execute codex NO-GO of 2026-05-16; 10 items resolved)
+**Status:** Ready for execution (R3 — addresses 2nd pre-execute codex NO-GO of 2026-05-16; 3 design-decision items resolved on top of R2's 10)
 **Depends on:** SP-1 Plan A complete on `wave/B10-w5-sp1-paysync` (HEAD `e97a1bb0`)
 
 ---
 
-## R2 Revision Summary (pre-execute codex NO-GO fixes)
+## R3 Revision Summary (2nd pre-execute codex NO-GO fixes)
+
+After R2, codex re-review returned NO-GO with 3 remaining items requiring design decisions. R3 resolves each in the cleanest-against-HEAD direction:
+
+| # | Issue | R3 decision |
+|---|---|---|
+| R3.1 | MFA gate as specified was non-sensical against HEAD. `modules/core-platform/src/auth/api/auth_router.py` issues the JWT ONLY at `/mfa/verify` success (line 152-216). HEAD's `CurrentUser` has no `mfa_verified` attribute, JWT claims have no MFA claim, sessions table has no `mfa_verified` column. The proposed `require_mfa_for_phi` would have nothing to read. | **DROP the per-route MFA gate.** MFA is enforced at the AUTH GATE: a user who hasn't completed MFA cannot obtain a JWT and therefore cannot reach any authenticated PaySync route. Adding `require_mfa_for_phi` would duplicate this enforcement against an attribute that doesn't exist. Plan B's MFA "gate tests" are replaced with a SINGLE assertion per new route that the route is protected by `get_current_user` (which itself rejects unauthenticated requests). Session-level MFA-reverification-on-PHI-access is a core-platform-level concern — not paysync-specific — and is documented as out-of-scope for SP-1 here. Drops Task 3.1 entirely; drops MFA gate test from every other route test. |
+| R3.2 | Event publisher sketch was sync — `bus.publish(envelope)` without `await`. HEAD's `EventBus.publish()` is async; all existing billing publishers use `async def` + `await bus.publish(...)`. R2 sketch would produce unawaited coroutines (silent no-op). | **Make `publish_upload_parsed` async** + `await bus.publish(envelope)`. The calling site in upload service is also async (`async def parse_upload(...)`) — propagates naturally. Mechanical fix; see Task 3b sample updated below. |
+| R3.3 | Financial schema claim false: said `claim_records.amount_billed Numeric(18, 4)` and `quantity Numeric(18, 4)`. HEAD: NO `amount_billed` column at all; `quantity` is `Numeric(10, 3)`; money columns are `Numeric(12, 2)` (`net_amount`, `ingredient_cost`, etc.). Plan B's parser would have failed at INSERT. | **Two concrete fixes:** (a) Migration `0011` ALSO adds `amount_billed Numeric(14, 4)` to `billing.claim_records` — this is a semantically distinct first-class field (pharmacy-claimed amount, pre-adjudication; different from `net_amount` which is post-adjudication paid amount). 14-digit precision with 4dp preserves source-of-truth precision from the CSV upload for audit/dispute resolution. (b) CSV spec §10.3 `quantity` constraint tightened from "max 4dp" to "max 3dp" — matches HEAD's `Numeric(10, 3)` exactly; no quantity migration needed. |
+
+## R2 Revision Summary (1st pre-execute codex NO-GO fixes)
 
 Pre-execute codex returned NO-GO with 10 items. R2 addresses each against HEAD:
 
@@ -31,7 +41,7 @@ Pre-execute codex returned NO-GO with 10 items. R2 addresses each against HEAD:
 | # | Decision | Resolution |
 |---|---|---|
 | §10.2 | Upload file storage strategy | Local disk under `{PAYSYNC_UPLOAD_DIR}/{tenant_id}/{upload_id}/{original_filename}`; `PAYSYNC_UPLOAD_DIR` defaults to `./data/uploads` relative to the billing module working dir; 90-day retention enforced by a nightly job `paysync.cleanup_old_uploads` registered in `operator-dev.yml` `required_jobs`; files are never deleted before 90 days even if upload is superseded (provenance immutability, spec §5.2) |
-| §10.3 | CSV/Excel minimum schema | 8 mandatory columns: `ndc` (11 digits), `npi` (10 digits, Luhn-checked via 80840-prefix), `claim_id` (string, unique within upload), `date_of_service` (YYYY-MM-DD), `quantity` (positive Decimal, max 4dp), `days_supply` (positive integer), `amount_billed` (Decimal ≥ 0, max 4dp), `member_id` (string, non-empty); `source_platform` optional header comment (free-text, stored on Upload row); row errors are collected per-row and never abort the parse of other rows |
+| §10.3 | CSV/Excel minimum schema | 8 mandatory columns: `ndc` (11 digits), `npi` (10 digits, Luhn-checked via 80840-prefix), `claim_id` (string, unique within upload), `date_of_service` (YYYY-MM-DD), `quantity` (positive Decimal, **max 3dp** to match HEAD's `claim_records.quantity Numeric(10, 3)` — R3 fix), `days_supply` (positive integer), `amount_billed` (Decimal ≥ 0, max 4dp; stored as new `claim_records.amount_billed Numeric(14, 4)` column added by migration 0011 — R3 fix), `member_id` (string, non-empty); `source_platform` optional header comment (free-text, stored on Upload row); row errors are collected per-row and never abort the parse of other rows |
 
 ---
 
@@ -56,10 +66,10 @@ This plan proves the upload-driven data flow end-to-end: CSV in → Upload row �
 - `modules/billing/src/models/upload.py` — `Upload` ORM model + `UploadStatus` enum
 - `modules/billing/src/services/upload.py` — parser dispatcher, sha256 dedup, row-error capture, file writer, supersede semantics
 - `modules/billing/alembic/versions/0011_add_upload_resource.py` — migration adding `billing.uploads` table + nullable `upload_id` FK on `billing.claim_records` + `idx_claims_upload` index
-- `modules/billing/src/api/uploads.py` — FastAPI router (5 endpoints, RBAC-gated, MFA-gated, PHI-audited)
+- `modules/billing/src/api/uploads.py` — FastAPI router (5 endpoints, RBAC-gated via standard get_current_user, PHI-audited; MFA enforced upstream at auth gate per R3.1)
 - `modules/billing/src/api/inbox.py` — FastAPI router returning `InboxItem[]` from current DB state
 - `modules/billing/src/events/upload_events.py` — `paysync.upload.parsed` `EventEnvelope` publication + `@idempotent_handler` consumer that invalidates inbox cache
-- `modules/billing/src/auth/mfa_dependency.py` — `require_mfa_for_phi` FastAPI dependency (or import from core-platform if HEAD provides one)
+<!-- R3 fix: removed modules/billing/src/auth/mfa_dependency.py from scope. MFA is enforced at JWT issuance (auth gate) per modules/core-platform/src/auth/api/auth_router.py:152-216; no per-route MFA dependency is needed or implementable against HEAD. -->
 - `modules/billing/tests/unit/test_upload_model.py`
 - `modules/billing/tests/unit/test_upload_service.py` — parser, dedup, row-error, supersede semantics, upload_id propagation, financial Decimal precision
 - `modules/billing/tests/unit/test_upload_events.py` — EventEnvelope shape (correlation_id, source_module, idempotency_key, schema_version), consumer idempotency, forward-compat
@@ -126,10 +136,13 @@ This plan proves the upload-driven data flow end-to-end: CSV in → Upload row �
 
 **Migration rules:**
 - `upload_id` FK on `claim_records` is NULLABLE initially (existing claims have no upload; new claims require it at service layer, not DB layer)
+- **R3 fix: same migration ALSO adds `amount_billed Numeric(14, 4) NULL` to `claim_records`** — pharmacy-claimed amount, pre-adjudication. Semantically distinct from existing `net_amount` (post-adjudication paid amount). 14-digit precision with 4dp preserves source-of-truth Decimal precision from CSV uploads for audit/dispute resolution. Nullable for backwards compat with existing rows; service layer requires it for new upload-created claims.
 - Index: `idx_claims_upload` on `claim_records(upload_id)` for `GET /uploads/{id}/claims` query performance
 - Migration uses `op.create_table('uploads', schema='billing', ...)` matching the existing `billing` schema namespace
-- `op.add_column('claim_records', sa.Column('upload_id', UUID, nullable=True), schema='billing')` + `op.create_foreign_key('fk_claims_upload', 'claim_records', 'uploads', ['upload_id'], ['id'], source_schema='billing', referent_schema='billing')`
-- `op.downgrade()` drops in reverse order
+- `op.add_column('claim_records', sa.Column('upload_id', UUID, nullable=True), schema='billing')`
+- `op.add_column('claim_records', sa.Column('amount_billed', sa.Numeric(14, 4), nullable=True), schema='billing')` (R3 fix)
+- `op.create_foreign_key('fk_claims_upload', 'claim_records', 'uploads', ['upload_id'], ['id'], source_schema='billing', referent_schema='billing')`
+- `op.downgrade()` drops in reverse order: FK, both columns, then uploads table
 
 - [ ] Step 1.1: Write `modules/billing/src/models/upload.py` with `Upload` model + `UploadStatus` enum; inherit `TenantScopedMixin` from `shared.db.tenant_context` + `AuditMixin`
 - [ ] Step 1.2: Add `upload_id` nullable FK column to `ClaimRecord` in `modules/billing/src/models/tables.py` (line 39, after `__table_args__`)
@@ -163,7 +176,8 @@ Per-row validation (using `\A...\Z` regex anchors per LESSON-004):
 - `ndc`: `re.fullmatch(r"\A\d{11}\Z", value)`
 - `npi`: exactly 10 digits + Luhn check with 80840 prefix (use existing `shared.validation.npi.is_valid_npi` if present; otherwise inline)
 - `date_of_service`: `datetime.date.fromisoformat(value)` — no try/except swallowing (use a guarded helper that returns row error on `ValueError`)
-- `quantity`, `amount_billed`: `Decimal(str(value))` — must be `>= 0`, `<= 4 decimal places` via `value.as_tuple().exponent >= -4`; ROUND_HALF_UP for any computed sums
+- `quantity`: `Decimal(str(value))` — must be `>= 0`, **`<= 3 decimal places`** via `value.as_tuple().exponent >= -3` (R3 fix: matches HEAD `claim_records.quantity Numeric(10, 3)`); ROUND_HALF_UP for any computed sums
+- `amount_billed`: `Decimal(str(value))` — must be `>= 0`, `<= 4 decimal places` via `value.as_tuple().exponent >= -4`; stored as new `claim_records.amount_billed Numeric(14, 4)` column added by migration 0011; ROUND_HALF_UP for any computed sums
 - `days_supply`: `int(value)`, `>= 1`
 - `member_id`: non-empty string, length `<= 64`
 
@@ -175,7 +189,7 @@ Row errors stored as `list[dict[str, str]]` on `Upload.row_errors` JSONB. **Neve
 ```
 `PAYSYNC_UPLOAD_DIR` defaults to `./data/uploads`. Directory created on first write. Atomic write: write to `.tmp` suffix, `os.replace()` on success. Mid-write crash → orphaned `.tmp` cleaned by the nightly `paysync.cleanup_old_uploads` job.
 
-**Financial precision:** `amount_billed` and `quantity` stored as `Numeric(18, 4)` in `claim_records` (matches existing schema). All Decimal math uses `Decimal(str(raw_value))` — never `Decimal(float)`. ROUND_HALF_UP on every `.quantize()`. Per `.claude/rules/financial-precision.md`.
+**Financial precision (R3 fix to GC.3):** `amount_billed` stored as new `claim_records.amount_billed Numeric(14, 4)` column added by migration 0011; `quantity` stored as existing `claim_records.quantity Numeric(10, 3)`. All Decimal math uses `Decimal(str(raw_value))` — never `Decimal(float)`. ROUND_HALF_UP on every `.quantize()`. Per `.claude/rules/financial-precision.md`. The earlier R2 claim of `Numeric(18, 4)` for both was wrong against HEAD — `amount_billed` didn't exist, `quantity` was `(10, 3)`.
 
 - [ ] Step 2.1: Write `modules/billing/src/services/upload.py` with all 5 service functions
 - [ ] Step 2.2: Write `modules/billing/tests/unit/test_upload_service.py` covering all unit cases in table above; use SAVEPOINT-based fixture per LESSON-001
@@ -184,34 +198,20 @@ Row errors stored as `list[dict[str, str]]` on `Upload.row_errors` JSONB. **Neve
 
 ---
 
-### Task 3 — Backend: Upload + Inbox API routers (RBAC + tenant + MFA + PHI audit)
+### Task 3 — Backend: Upload + Inbox API routers (RBAC + tenant + PHI audit)
 
 | # | Subject | Files touched | Test added | Deliverable |
 |---|---|---|---|---|
-| 3.1 | MFA dependency | `modules/billing/src/auth/mfa_dependency.py` (new file; OR import existing `core-platform` dep if grep finds one) | unit: 403 when mfa_required=True and mfa_verified=False; passes otherwise | `require_mfa_for_phi` ready |
-| 3.2 | Upload router (5 endpoints) | `modules/billing/src/api/uploads.py` (new file) | integration: 5 routes × 3 roles + cross-tenant + MFA gate + PHI audit | Routes live |
-| 3.3 | Inbox router | `modules/billing/src/api/inbox.py` (new file) | integration: each Inbox kind for correct state + cross-tenant + MFA gate | Inbox derives from DB |
-| 3.4 | Mount routers on billing app | `modules/billing/src/main.py` | integration: health check + auth-gated route responds | Routers in production app |
+| 3.1 | Upload router (5 endpoints) | `modules/billing/src/api/uploads.py` (new file) | integration: 5 routes × 3 roles + cross-tenant per endpoint + PHI audit per read endpoint | Routes live |
+| 3.2 | Inbox router | `modules/billing/src/api/inbox.py` (new file) | integration: each Inbox kind for correct state + cross-tenant | Inbox derives from DB |
+| 3.3 | Mount routers on billing app | `modules/billing/src/main.py` | integration: health check + auth-gated route responds | Routers in production app |
 
-**MFA dependency** (R2 fix to GC.6):
-First step: `grep -rn "mfa_verified\|require_mfa" modules/core-platform/src/auth/` to confirm whether HEAD already exposes a route-level MFA dependency. If yes, import from there. If no, create `modules/billing/src/auth/mfa_dependency.py`:
+**MFA enforcement** (R3 fix to GC.6 + R3.1):
+**Per-route MFA reverification is OUT OF SCOPE for SP-1.** HEAD's `modules/core-platform/src/auth/api/auth_router.py:152-216` issues the JWT ONLY at `/auth/mfa/verify` success — a user who hasn't completed MFA cannot obtain a JWT and therefore cannot reach any authenticated PaySync route. Adding a per-route `require_mfa_for_phi` dependency would duplicate enforcement against an attribute (`mfa_verified` on CurrentUser / JWT claims / sessions) that does not exist in HEAD.
 
-```python
-from fastapi import Depends, HTTPException, status
-from shared.auth.dependencies import get_current_user, CurrentUser
-from shared.db.tenant_context import current_tenant
+Plan B's new routes use the standard `Depends(get_current_user)` dependency. Test assertion per route: "returns 401 without bearer token" — this proves auth-gate protection (which implicitly proves MFA protection because JWT issuance requires MFA). No `mfa_verified=False` JWT can exist in HEAD, so a "403 on mfa_verified=False" test cannot be written.
 
-def require_mfa_for_phi(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-    tenant = current_tenant()  # raises if no tenant context
-    if tenant.mfa_required and not user.mfa_verified:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required for PHI-adjacent route"}},
-        )
-    return user
-```
-
-Every new upload/inbox route uses `Depends(require_mfa_for_phi)` instead of (or alongside) `Depends(get_current_user)`.
+If future requirements call for session-level MFA-reverification-on-PHI-access (e.g., "force fresh MFA within 15 min of PHI route access"), it lands as a core-platform `auth/mfa_session.py` feature with a corresponding `CurrentUser.mfa_verified_at` attribute. That is a separate sprint and not a paysync-module-specific concern.
 
 **RBAC enforcement on upload router** (spec §5.4):
 - `POST /api/v1/billing/uploads` — Operator + Approver; Auditor → 403
@@ -250,28 +250,27 @@ emit_audit(
 
 Test asserts the audit row is written for each call.
 
-**MFA gate test** per new route: valid JWT with `mfa_verified=False` and `tenant.mfa_required=True` → 403.
+**Auth-gate test** per new route (replaces R2's MFA gate test): `GET/POST <new route>` without Authorization header → 401. This proves auth-gate protection; MFA is enforced upstream at JWT issuance, so any valid JWT is implicitly MFA-verified.
 
-- [ ] Step 3.1: Grep for existing MFA dependency; either import or write `modules/billing/src/auth/mfa_dependency.py`
-- [ ] Step 3.2: Write `modules/billing/src/api/uploads.py` with 5 endpoints + RBAC + MFA + PHI audit + Cache-Control on row_errors responses
-- [ ] Step 3.3: Write `modules/billing/src/api/inbox.py` with DB-query-derived items
-- [ ] Step 3.4: Mount routers in `modules/billing/src/main.py`
-- [ ] Step 3.5: Write `modules/billing/tests/integration/test_uploads_router.py` — RBAC (3 roles × 5 endpoints) + cross-tenant per endpoint + PHI audit per read endpoint + MFA gate per endpoint + Cache-Control header assertion
-- [ ] Step 3.6: Write `modules/billing/tests/integration/test_inbox_router.py` — items per kind + cross-tenant + MFA gate
-- [ ] Step 3.7: Run `pytest modules/billing/tests/` — 100% on auth/RBAC/PHI paths, ≥99% branch elsewhere
-- [ ] Step 3.8: Commit — `feat(sp-1-b): billing Upload + Inbox routers, RBAC/MFA-gated, tenant-isolated, PHI-audited`
+- [ ] Step 3.1: Write `modules/billing/src/api/uploads.py` with 5 endpoints + RBAC + PHI audit + Cache-Control on row_errors responses
+- [ ] Step 3.2: Write `modules/billing/src/api/inbox.py` with DB-query-derived items
+- [ ] Step 3.3: Mount routers in `modules/billing/src/main.py`
+- [ ] Step 3.4: Write `modules/billing/tests/integration/test_uploads_router.py` — RBAC (3 roles × 5 endpoints) + cross-tenant per endpoint + PHI audit per read endpoint + auth-gate (no-token = 401) per endpoint + Cache-Control header assertion on row_errors responses
+- [ ] Step 3.5: Write `modules/billing/tests/integration/test_inbox_router.py` — items per kind + cross-tenant + auth-gate per endpoint
+- [ ] Step 3.6: Run `pytest modules/billing/tests/` — 100% on auth/RBAC/PHI paths, ≥99% branch elsewhere
+- [ ] Step 3.7: Commit — `feat(sp-1-b): billing Upload + Inbox routers, RBAC-gated, tenant-isolated, PHI-audited`
 
 ---
 
 ### Task 3b — Backend: `paysync.upload.parsed` event (EventEnvelope + idempotent consumer)
 
-**Event publication** (in `modules/billing/src/events/upload_events.py`, called from `upload.py` service end-of-parse):
+**Event publication** (in `modules/billing/src/events/upload_events.py`, called from `upload.py` service end-of-parse). **R3 fix: async** — HEAD's `EventBus.publish()` is async; existing billing publishers use `async def` + `await`. Calling site is already `async def parse_upload(...)`.
 
 ```python
 import uuid
 from shared.events import EventEnvelope, EventBus
 
-def publish_upload_parsed(bus: EventBus, *, upload, correlation_id: uuid.UUID) -> None:
+async def publish_upload_parsed(bus: EventBus, *, upload, correlation_id: uuid.UUID) -> None:
     envelope = EventEnvelope(
         event_type="paysync.upload.parsed",
         tenant_id=upload.tenant_id,
@@ -288,7 +287,7 @@ def publish_upload_parsed(bus: EventBus, *, upload, correlation_id: uuid.UUID) -
         idempotency_key=f"paysync:upload:{upload.id}:parsed",
         schema_version="1.0",
     )
-    bus.publish(envelope)
+    await bus.publish(envelope)
 ```
 
 **Required EventEnvelope fields confirmed against HEAD** (`shared/events/types.py:20`): `event_type`, `tenant_id`, `correlation_id`, `source_module`, `payload`, `timestamp` (auto), `idempotency_key`, `ordering_key`, `schema_version`. The R1 plan omitted `correlation_id` and `source_module` — R2 includes them.
@@ -457,13 +456,13 @@ export interface CyclesClient extends BaseClient {
 Plan B is complete when ALL of the following are true:
 
 - [ ] `pytest modules/billing/tests/` passes; 100% coverage on upload service (financial: Decimal parsing; security: auth/RBAC; PHI: tenant isolation, phi_access audit, member_id non-echo in row_errors); ≥99% branch coverage on all other active billing code added in this plan
-- [ ] Migration `0011` runs `upgrade` and `downgrade` cleanly on a fresh schema (targets `billing` namespace; alters `billing.claim_records`)
+- [ ] Migration `0011` runs `upgrade` and `downgrade` cleanly on a fresh schema (targets `billing` namespace; alters `billing.claim_records` to add `upload_id UUID NULL` + `amount_billed Numeric(14, 4) NULL` per R3.3; creates `billing.uploads` table; creates `idx_claims_upload`; downgrade drops in reverse order)
 - [ ] `GET /api/v1/billing/inbox?role=operator` returns ≥1 item given a seeded database with an upload in `validation_failed` state
 - [ ] `POST /api/v1/billing/uploads` with a duplicate file returns 409 with existing upload reference
 - [ ] Cross-tenant isolation test passes for EVERY new endpoint (6 endpoints): Tenant A cannot see Tenant B data
 - [ ] PHI access audit entry written when `GET /api/v1/billing/uploads/{id}` or `GET /api/v1/billing/uploads/{id}/claims` is called (verified by test inspecting the audit log)
-- [ ] MFA gate test: request with `mfa_verified=False` JWT + `tenant.mfa_required=True` returns 403 on every new route
-- [ ] `paysync.upload.parsed` event published with `EventEnvelope` carrying `correlation_id`, `source_module="billing"`, `ordering_key=str(upload.id)`, `idempotency_key="paysync:upload:{id}:parsed"`, `schema_version="1.0"`, `tenant_id` (verified by unit test)
+- [ ] Auth-gate test per new route: request without Authorization header returns 401 (R3.1: replaces the MFA-gate test; MFA is enforced upstream at JWT issuance per modules/core-platform/src/auth/api/auth_router.py:152-216 — any valid JWT is implicitly MFA-verified; no `mfa_verified=False` JWT can exist in HEAD)
+- [ ] `paysync.upload.parsed` event published with `EventEnvelope` carrying `correlation_id`, `source_module="billing"`, `ordering_key=str(upload.id)`, `idempotency_key="paysync:upload:{id}:parsed"`, `schema_version="1.0"`, `tenant_id` (verified by unit test); publisher is `async def` with `await bus.publish(envelope)` per R3.2
 - [ ] Consumer handler decorated with `@idempotent_handler`; duplicate event is no-op (verified by unit test)
 - [ ] `docs/api-contracts/events/paysync.upload.parsed.md` exists and documents event contract
 - [ ] `npm --workspace=@infinityrx/module-paysync test` passes; 100% coverage on `MoneyDisplay`/`MoneyInput`/`RbacGate` retained; ≥99% branch coverage on uploads + cycles surface components
@@ -498,7 +497,7 @@ Plan B is complete when ALL of the following are true:
 - SP-1 Plan A complete on `wave/B10-w5-sp1-paysync` (HEAD `e97a1bb0`)
 - `modules/billing` existing models: `ClaimRecord` (`tables.py:39`, table `claim_records`), `PaymentBatch` (`tables.py:214`), `Invoice` (`tables.py:333`), `InvoiceLineItem` (`tables.py:391`)
 - `modules/billing` existing services: `ar.py`, `ap.py`, `nacha.py`, `journal.py`, `claims.py`, `routing.py`, `budget.py`, `remittance_835.py` — `upload.py` is a NEW sibling
-- SP-0 auth/JWT infrastructure: `shared.auth.dependencies.get_current_user` for current user; `tenant.mfa_required` on tenant model at `modules/core-platform/src/auth/_models.py:78`
+- SP-0 auth/JWT infrastructure: `shared.auth.dependencies.get_current_user` for current user. MFA is enforced upstream at JWT issuance (modules/core-platform/src/auth/api/auth_router.py:152-216 issues JWT only on `/mfa/verify` success); no per-route MFA dependency is used or needed (R3.1)
 - `shared/db/tenant_context.py:90` `TenantScopedMixin` + `install_tenant_loader` (R2: correct path)
 - `shared/events/types.py:20` `EventEnvelope` (re-exported from `shared/events/__init__.py`) — required fields include `correlation_id` and `source_module`
 - `modules/core-platform/src/audit/middleware.py:200` `action="phi_access"` pattern for PHI access audit emission
