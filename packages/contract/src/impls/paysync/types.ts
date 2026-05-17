@@ -225,11 +225,19 @@ export const PaymentRunSchema = z.object({
 });
 export type PaymentRun = z.infer<typeof PaymentRunSchema>;
 
-export const PaymentRunListResponseSchema = z.object({
-  results: z.array(PaymentRunSchema),
-  next_cursor: z.string().optional(),
-  total: z.number().int().nonnegative(),
-});
+// B4 R2: backend /payment-runs returns a bare array; accept either shape.
+export const PaymentRunListResponseSchema = z.union([
+  z.array(PaymentRunSchema).transform((items) => ({
+    results: items,
+    next_cursor: null as string | null,
+    total: items.length,
+  })),
+  z.object({
+    results: z.array(PaymentRunSchema),
+    next_cursor: z.string().nullable().optional(),
+    total: z.number().int().nonnegative(),
+  }),
+]);
 export type PaymentRunListResponse = z.infer<typeof PaymentRunListResponseSchema>;
 
 // ── Carryover (AP carryforward — billing.carryovers table, committed 5eb024f1) ─
@@ -297,11 +305,19 @@ export const BankSettlementSchema = z.object({
 });
 export type BankSettlement = z.infer<typeof BankSettlementSchema>;
 
-export const BankSettlementListResponseSchema = z.object({
-  results: z.array(BankSettlementSchema),
-  next_cursor: z.string().optional(),
-  total: z.number().int().nonnegative(),
-});
+// B4 R2: backend /bank-settlements returns a bare array; accept either shape.
+export const BankSettlementListResponseSchema = z.union([
+  z.array(BankSettlementSchema).transform((items) => ({
+    results: items,
+    next_cursor: null as string | null,
+    total: items.length,
+  })),
+  z.object({
+    results: z.array(BankSettlementSchema),
+    next_cursor: z.string().nullable().optional(),
+    total: z.number().int().nonnegative(),
+  }),
+]);
 export type BankSettlementListResponse = z.infer<typeof BankSettlementListResponseSchema>;
 
 // ── Reconciliation (period-level reconciliation — Plan C) ──────────────────
@@ -331,9 +347,17 @@ export const ReconciliationSchema = z.object({
 });
 export type Reconciliation = z.infer<typeof ReconciliationSchema>;
 
-export const ReconciliationListResponseSchema = z.object({
-  results: z.array(ReconciliationSchema),
-  next_cursor: z.string().optional(),
-  total: z.number().int().nonnegative(),
-});
+// B4 R2: backend /reconciliations returns a bare array; accept either shape.
+export const ReconciliationListResponseSchema = z.union([
+  z.array(ReconciliationSchema).transform((items) => ({
+    results: items,
+    next_cursor: null as string | null,
+    total: items.length,
+  })),
+  z.object({
+    results: z.array(ReconciliationSchema),
+    next_cursor: z.string().nullable().optional(),
+    total: z.number().int().nonnegative(),
+  }),
+]);
 export type ReconciliationListResponse = z.infer<typeof ReconciliationListResponseSchema>;

@@ -147,10 +147,15 @@ def create_app() -> FastAPI:
         # "error" is itself a dict with code+message+correlation_id), passthrough
         # unchanged. Detail shapes that merely contain a string-valued "error"
         # key fall through to the canonical wrapper below.
+        # Require a FULL canonical envelope (code + message + correlation_id)
+        # to passthrough. Anything less goes through the wrapper so the rule
+        # in .claude/rules/error-handling.md is enforced consistently.
+        _err = exc.detail.get("error") if isinstance(exc.detail, dict) else None
         if (
-            isinstance(exc.detail, dict)
-            and isinstance(exc.detail.get("error"), dict)
-            and "code" in exc.detail["error"]
+            isinstance(_err, dict)
+            and "code" in _err
+            and "message" in _err
+            and "correlation_id" in _err
         ):
             return JSONResponse(status_code=exc.status_code, content=exc.detail)
         code = _STATUS_CODE_MAP.get(exc.status_code, "ERROR")
