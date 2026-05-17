@@ -11,8 +11,11 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
+import enum
+
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -54,6 +57,19 @@ class ClaimRecord(BillingBase):
     source_type: Mapped[str] = mapped_column(String(50), nullable=False)
     source_file_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     source_claim_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+
+    # SP-1 Plan B Task 1 (migration 0003): provenance link to the Upload that
+    # produced this claim. Nullable for backwards compat with rows ingested
+    # before the Upload resource existed; the upload service requires it for
+    # all new upload-created claims.
+    upload_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("billing.uploads.id"), nullable=True
+    )
+    # Pharmacy-claimed amount, pre-adjudication (semantically distinct from
+    # net_amount which is the post-adjudication paid amount). 14-digit
+    # precision with 4dp preserves source-of-truth precision from CSV
+    # uploads for audit/dispute resolution.
+    amount_billed: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
 
     # Claim identifiers
     auth_number: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -824,3 +840,51 @@ class BillingSequence(BillingBase):
     sequence_type: Mapped[str] = mapped_column(String(50), nullable=False)
     prefix: Mapped[str | None] = mapped_column(String(20), nullable=True)
     current_value: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+# ---------------------------------------------------------------------------
+# UPLOADS (SP-1 Plan B Task 1, migration 0003)
+# ---------------------------------------------------------------------------
+
+
+class UploadStatus(str, enum.Enum):
+    parsing = "parsing"
+    validation_failed = "validation_failed"
+    validated = "validated"
+    superseded = "superseded"
+
+
+class Upload(BillingBase):
+    __tablename__ = "uploads"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "sha256", name="uq_upload_tenant_sha256"),
+        Index("idx_uploads_tenant_uploaded_at", "tenant_id", "uploaded_at"),
+        {"schema": "billing"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+
+    filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(128), nullable=False)
+
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    uploaded_by: Mapped[uuid.UUID] = mapped_column(nullable=False)
+
+    source_platform: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    supersedes_upload_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("billing.uploads.id"), nullable=True
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=UploadStatus.parsing.value
+    )
+    row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # row_errors must NEVER contain raw member_id values; only the failure
+    # category. Reading via the router emits a phi_access audit entry.
+    row_errors: Mapped[Any | None] = mapped_column(JSON, nullable=True)
+
