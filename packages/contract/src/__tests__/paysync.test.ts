@@ -112,6 +112,39 @@ describe("paysync contract — real factories (HTTP wired in Plan B)", () => {
     expect(captured[0]?.url).toContain("/api/v1/billing/cycles");
   });
 
+  it("createRealUploadsClient.create throws with details.existing_upload_id on 409 DUPLICATE_UPLOAD", async () => {
+    // B9: PaysyncClientError must carry error.details so the BFF can recover existing_upload_id
+    const existingId = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+    const fakeFetch: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "DUPLICATE_UPLOAD",
+            message: "File already uploaded",
+            correlation_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+            details: { existing_upload_id: existingId },
+          },
+        }),
+        { status: 409, headers: { "content-type": "application/json" } },
+      );
+    const c = createRealUploadsClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "t",
+      getTenantId: async () => "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      fetch: fakeFetch,
+    });
+    let caught: unknown;
+    try {
+      await c.create({ filename: "dup.csv", content: new Blob(["a"]) });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeDefined();
+    expect((caught as { code?: string }).code).toBe("DUPLICATE_UPLOAD");
+    // details must be present so BFF can recover existing_upload_id
+    expect((caught as { details?: { existing_upload_id?: string } }).details?.existing_upload_id).toBe(existingId);
+  });
+
   it("createRealCyclesClient.get returns null on HTTP 404", async () => {
     const fakeFetch: typeof fetch = async () => new Response(null, { status: 404 });
     const c = createRealCyclesClient({ baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch });

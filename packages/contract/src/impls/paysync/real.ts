@@ -29,7 +29,12 @@ import {
 } from "./types.js";
 
 class PaysyncClientError extends Error {
-  constructor(public readonly code: string, message: string, public readonly correlationId?: string) {
+  constructor(
+    public readonly code: string,
+    message: string,
+    public readonly correlationId?: string,
+    public readonly details?: Record<string, unknown>,
+  ) {
     super(message);
     this.name = "PaysyncClientError";
   }
@@ -58,7 +63,7 @@ function makeAuthedFetch(config: ClientConfig) {
     const body = await res.json() as unknown;
     if (!res.ok) {
       if (isErrorEnvelope(body)) {
-        throw new PaysyncClientError(body.error.code, body.error.message, body.error.correlation_id);
+        throw new PaysyncClientError(body.error.code, body.error.message, body.error.correlation_id, body.error.details as Record<string, unknown> | undefined);
       }
       throw new Error(`Unexpected error shape: HTTP ${res.status}`);
     }
@@ -135,7 +140,7 @@ export function createRealUploadsClient(config: ClientConfig): UploadsClient {
       if (!res.ok) {
         const errBody = await res.json() as unknown;
         if (isErrorEnvelope(errBody)) {
-          throw new PaysyncClientError(errBody.error.code, errBody.error.message, errBody.error.correlation_id);
+          throw new PaysyncClientError(errBody.error.code, errBody.error.message, errBody.error.correlation_id, errBody.error.details as Record<string, unknown> | undefined);
         }
         throw new Error(`Upload create failed: HTTP ${res.status}`);
       }

@@ -93,7 +93,7 @@ export async function handleCreateUpload(
     // 409 from backend signals sha256 dedup — surface the existing upload id.
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes("DUPLICATE_UPLOAD") || (err as { code?: string }).code === "DUPLICATE_UPLOAD") {
-      const existingId = (err as { detail?: string }).detail ?? "";
+      const existingId = (err as { details?: { existing_upload_id?: string } }).details?.existing_upload_id ?? "";
       return {
         data: { conflict: true, existing_upload_id: existingId },
         status: 409,
