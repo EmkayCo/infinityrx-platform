@@ -174,3 +174,4 @@ class TestPaymentRunsGetById:
         )
         # 404 is served via HTTPException -> canonical handler sets Cache-Control: no-store
         assert resp.status_code == 404
+        assert resp.headers.get("cache-control") == "no-store"

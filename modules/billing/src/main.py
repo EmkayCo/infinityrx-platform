@@ -147,6 +147,11 @@ def create_app() -> FastAPI:
         # "error" is itself a dict with code+message+correlation_id), passthrough
         # unchanged. Detail shapes that merely contain a string-valued "error"
         # key fall through to the canonical wrapper below.
+        # Every HTTPException response gets Cache-Control: no-store.
+        # Errors often surface PHI surrogates (filenames, ids) and authn/authz
+        # state; caching them violates phi-compliance + security rules.
+        _no_store_headers = {"Cache-Control": "no-store"}
+
         # Require a FULL canonical envelope (code + message + correlation_id)
         # to passthrough. Anything less goes through the wrapper so the rule
         # in .claude/rules/error-handling.md is enforced consistently.
@@ -157,7 +162,11 @@ def create_app() -> FastAPI:
             and "message" in _err
             and "correlation_id" in _err
         ):
-            return JSONResponse(status_code=exc.status_code, content=exc.detail)
+            return JSONResponse(
+                status_code=exc.status_code,
+                content=exc.detail,
+                headers=_no_store_headers,
+            )
         code = _STATUS_CODE_MAP.get(exc.status_code, "ERROR")
         message = exc.detail if isinstance(exc.detail, str) else "Request failed"
         body = {
@@ -167,10 +176,11 @@ def create_app() -> FastAPI:
                 "correlation_id": str(_uuid.uuid4()),
             }
         }
-        headers: dict[str, str] | None = None
-        if exc.status_code in (401, 403):
-            headers = {"Cache-Control": "no-store"}
-        return JSONResponse(status_code=exc.status_code, content=body, headers=headers)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=body,
+            headers=_no_store_headers,
+        )
 
     app.include_router(router)
     app.include_router(uploads_router)
