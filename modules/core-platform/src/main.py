@@ -41,7 +41,7 @@ from shared.observability.slow_query import install_slow_query_logger
 
 from ._shim import db as db_shim
 from .api import router as api_router
-from .api.test_auth import router as test_auth_router
+from .api.e2e_auth import router as test_auth_router
 from .jobs.seed import ensure_audit_chain_job
 from .audit.middleware import AuditContext, AuditMiddleware
 from .auth import auth_api_router, configure_core_auth
@@ -316,17 +316,20 @@ def create_app() -> FastAPI:
     # (that's the whole point); health probes come from Kubernetes which
     # never carries an auth header. Everything else still requires a valid
     # JWT. Paths must match `scope["path"]` exactly.
-    _UNAUTH_PATHS: frozenset[str] = frozenset(
-        {
-            "/api/v1/auth/login",
-            "/api/v1/auth/token/refresh",
-            "/api/v1/auth/mfa/verify",
-            "/health",
-            # E2E-only shortcut: issues JWTs for fixture users without an
-            # existing token. Blocked in production by the endpoint itself.
-            "/api/v1/core/test-auth/token",
-        }
-    )
+    import os as _os  # noqa: PLC0415
+    _base_unauth_paths = {
+        "/api/v1/auth/login",
+        "/api/v1/auth/token/refresh",
+        "/api/v1/auth/mfa/verify",
+        "/health",
+    }
+    # B6: test-auth bypass must NOT exist in production — middleware would let
+    # unauthenticated requests through to the endpoint's own guard, but that
+    # endpoint guard is the only thing standing between an unauthenticated
+    # caller and a signed JWT.  Gate the allowlist entry on non-production env.
+    if _os.getenv("INFINITYRX_ENV", "development").lower() != "production":
+        _base_unauth_paths.add("/api/v1/core/test-auth/token")
+    _UNAUTH_PATHS: frozenset[str] = frozenset(_base_unauth_paths)
     app.add_middleware(
         TenantIsolationMiddleware,
         resolver=_TenantResolver(),
