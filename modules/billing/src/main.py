@@ -81,6 +81,16 @@ def create_app() -> FastAPI:
     """Application factory. Tests use this to build a fresh app per case."""
     from shared.config import get_settings  # noqa: PLC0415 - deferred to allow test override
 
+    # P1-auth: billing now uses get_current_user on all SP-1 Plan B endpoints.
+    # configure_auth_trust_jwt() must be called before the app handles requests
+    # so shared.auth.dependencies.get_current_user has a loader registered.
+    # Mirrors the pattern in drug-database and prescriber-directory main.py.
+    try:
+        from shared.auth.dev_trust_jwt import configure_auth_trust_jwt  # noqa: PLC0415
+        configure_auth_trust_jwt()
+    except Exception:  # pragma: no cover - best-effort; test overrides bypass this
+        pass
+
     settings = get_settings()
     environment = getattr(settings, "ENVIRONMENT", "development")
     cors_origins = getattr(settings, "CORS_ALLOW_ORIGINS", [])
