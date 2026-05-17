@@ -19,6 +19,8 @@ from shared.events.dlq import DLQService, build_dlq_router
 from shared.middleware import RateLimitConfig, RateLimitMiddleware, SecurityHeadersMiddleware
 
 from .api.router import router
+from .api.uploads import router as uploads_router
+from .api.inbox import router as inbox_router
 
 logger = logging.getLogger("billing.main")
 
@@ -50,7 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         from shared.observability.slow_query import install_slow_query_logger  # noqa: PLC0415
         threshold = int(os.getenv("SLOW_QUERY_THRESHOLD_MS", "1000"))
         install_slow_query_logger(_get_engine(), threshold_ms=threshold)
-    except Exception:  # pragma: no cover — best-effort; missing DB is fine in tests
+    except Exception:  # pragma: no cover - best-effort; missing DB is fine in tests
         pass
 
     # CR-01/CR-11: subscribe consumers to the event bus with idempotency wrappers.
@@ -61,7 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await bus.start()
         await wire_consumers(bus)
         app.state.event_bus = bus
-    except Exception:  # pragma: no cover — best-effort; missing broker is fine in tests
+    except Exception:  # pragma: no cover - best-effort; missing broker is fine in tests
         logger.exception("billing.consumer_wiring_failed")
 
     yield
@@ -76,7 +78,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     """Application factory. Tests use this to build a fresh app per case."""
-    from shared.config import get_settings  # noqa: PLC0415 — deferred to allow test override
+    from shared.config import get_settings  # noqa: PLC0415 - deferred to allow test override
 
     settings = get_settings()
     environment = getattr(settings, "ENVIRONMENT", "development")
@@ -86,7 +88,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
         title="InfinityRx Billing",
         version="1.0.0",
-        description="Billing module — claims, AP, AR, invoicing, journal, program monitoring",
+        description="Billing module - claims, AP, AR, invoicing, journal, program monitoring",
         openapi_url="/openapi.json" if environment != "production" else None,
         docs_url="/docs" if environment != "production" else None,
         redoc_url="/redoc" if environment != "production" else None,
@@ -107,6 +109,8 @@ def create_app() -> FastAPI:
     app.add_middleware(SecurityHeadersMiddleware)
 
     app.include_router(router)
+    app.include_router(uploads_router)
+    app.include_router(inbox_router)
     app.include_router(
         build_dlq_router(
             get_service=_get_dlq_service,
@@ -153,3 +157,4 @@ def create_app() -> FastAPI:
 app = create_app()
 
 __all__ = ["app", "create_app"]
+
