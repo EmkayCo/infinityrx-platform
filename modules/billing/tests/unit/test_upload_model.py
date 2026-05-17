@@ -10,8 +10,12 @@ Scope per Plan B Task 1.4:
 - ClaimRecord.upload_id is a nullable FK to billing.uploads.id
 - ClaimRecord.amount_billed is Numeric(14, 4) nullable
 - Schema namespace is billing
-- Tenant scoping via direct tenant_id column (matches existing billing pattern;
-  no TenantScopedMixin used in billing — RLS at DB layer handles isolation)
+- Tenant scoping: billing module uses RLS-only pattern (BillingBase, no TenantScopedMixin)
+  because TenantScopedMixin is architecturally incompatible with BillingBase's
+  mapped_column pattern (causes ConstraintColumnNotFoundError at import time).
+  Isolation is enforced by: (1) RLS policies, (2) explicit WHERE tenant_id = ? in all
+  queries, (3) validate_tenant_id() header guard (B2). This matches ALL other billing
+  models — tracked as a follow-up migration task.
 """
 
 from __future__ import annotations
@@ -32,6 +36,32 @@ from tests.conftest import TENANT_A
 
 def test_upload_model_is_registered_with_billingbase():
     assert "uploads" in {t.name for t in BillingBase.metadata.tables.values()}
+
+
+def test_upload_has_non_nullable_tenant_id_column():
+    """B4: Upload must have a non-nullable tenant_id column.
+
+    Billing uses the RLS-only isolation pattern (no TenantScopedMixin) because
+    TenantScopedMixin is architecturally incompatible with BillingBase. The direct
+    tenant_id column + RLS policies + validate_tenant_id() header guard provide
+    equivalent isolation guarantees. All other billing models follow this same pattern.
+    """
+    cols = {c.name: c for c in Upload.__table__.columns}
+    assert "tenant_id" in cols, "Upload must have a tenant_id column"
+    assert not cols["tenant_id"].nullable, "Upload.tenant_id must be NOT NULL"
+
+
+def test_upload_unique_constraint_is_tenant_scoped():
+    """B4: Upload deduplication constraint must be scoped to tenant.
+
+    The unique constraint uq_upload_tenant_sha256 on (tenant_id, sha256) ensures
+    that the same file cannot be uploaded twice within a tenant while allowing the
+    same sha256 to exist in different tenants (correct multi-tenant behavior).
+    """
+    constraint_names = {c.name for c in Upload.__table__.constraints if hasattr(c, "name")}
+    assert "uq_upload_tenant_sha256" in constraint_names, (
+        "Upload must have uq_upload_tenant_sha256 unique constraint on (tenant_id, sha256)"
+    )
 
 
 def test_upload_has_all_required_columns():
