@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from src.api.dependencies import DBSession
+from src.api.dependencies import DBSession, TenantId
 
 logger = logging.getLogger("billing.seed")
 
@@ -157,17 +157,32 @@ def _upsert_rows(
 
 @router.post("/seed", status_code=status.HTTP_200_OK, dependencies=[Depends(_block_in_production)])
 async def seed_billing_fixtures(
-    body: SeedRequest, request: Request, session: DBSession
+    body: SeedRequest, request: Request, session: DBSession, tenant_id: TenantId
 ) -> JSONResponse:
     """Seed paysync fixture data into the billing DB.
 
     Blocked in production. Idempotent -- safe to call multiple times.
     Uses the DBSession dependency so test fixtures can override the engine.
+    Requires auth (JWT) and X-Tenant-Id header matching body.tenant_id (B5).
     """
     if _is_production():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Seed endpoint is not available in production environments.",
+        )
+
+    # B5: reject if body.tenant_id does not match the header-validated tenant.
+    try:
+        body_tenant = uuid.UUID(body.tenant_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid tenant_id in request body.",
+        ) from exc
+    if body_tenant != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="body.tenant_id does not match X-Tenant-Id header.",
         )
 
     inserted_totals: dict[str, int] = {}
@@ -200,18 +215,33 @@ async def seed_billing_fixtures(
 
 @router.delete("/seed", status_code=status.HTTP_200_OK, dependencies=[Depends(_block_in_production)])
 async def cleanup_billing_fixtures(
-    body: SeedRequest, request: Request, session: DBSession
+    body: SeedRequest, request: Request, session: DBSession, tenant_id: TenantId
 ) -> JSONResponse:
     """Truncate paysync fixture data from the billing DB.
 
     Blocked in production. Used by Playwright afterAll hooks.
     Truncates in FK-safe dependency order (children first).
     Uses the DBSession dependency so test fixtures can override the engine.
+    Requires auth (JWT) and X-Tenant-Id header matching body.tenant_id (B5).
     """
     if _is_production():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Seed endpoint is not available in production environments.",
+        )
+
+    # B5: reject if body.tenant_id does not match the header-validated tenant.
+    try:
+        body_tenant = uuid.UUID(body.tenant_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid tenant_id in request body.",
+        ) from exc
+    if body_tenant != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="body.tenant_id does not match X-Tenant-Id header.",
         )
 
     deleted_totals: dict[str, int] = {}

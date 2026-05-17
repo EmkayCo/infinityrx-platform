@@ -5,10 +5,13 @@ Verifies:
 - 403 returned when INFINITYRX_ENV=production
 - DELETE /api/v1/billing/seed returns 200 (cleanup path)
 - Idempotency: second POST returns same counts without error
+- B5: endpoints require auth (JWT) with body.tenant_id == X-Tenant-Id header
 """
 from __future__ import annotations
 
 import os
+import types
+import uuid
 from unittest.mock import patch
 
 import pytest
@@ -16,18 +19,32 @@ from fastapi.testclient import TestClient
 
 from src.main import create_app
 
+TENANT_UUID = uuid.UUID("t0000000-0000-0000-0000-000000000001".replace("t", "0", 1))
+
+
+def _make_mock_user(tenant_id: uuid.UUID = TENANT_UUID):
+    """Return a minimal CurrentUser-compatible object for dependency override."""
+    user = types.SimpleNamespace(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000002"),
+        tenant_id=tenant_id,
+        roles=["approver"],
+        is_active=True,
+    )
+    return user
+
 
 @pytest.fixture
 def client():
-    """TestClient with an in-memory SQLite engine overriding get_db.
+    """TestClient with an in-memory SQLite engine overriding get_db and get_current_user.
 
-    The seed endpoint uses DBSession (Depends(get_db)); without an override
-    the dep would try to read BILLING_DATABASE_URL and fail. Production-guard
-    tests don't need a real DB but the dependency still resolves first.
+    The seed endpoint uses DBSession (Depends(get_db)) and TenantId
+    (Depends(validate_tenant_id) which itself depends on get_current_user).
+    Both are overridden so tests run without a live DB or JWT secret.
     """
     from sqlalchemy import create_engine
-    from sqlalchemy.orm import Session, sessionmaker
+    from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
+    from shared.auth.dependencies import get_current_user
     from src.api.dependencies import get_db
     from src.models.tables import BillingBase
 
@@ -48,8 +65,12 @@ def client():
         finally:
             session.close()
 
+    def override_current_user():
+        return _make_mock_user()
+
     app = create_app()
     app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_current_user
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
     app.dependency_overrides.clear()
@@ -166,3 +187,101 @@ class TestSeedEndpointDevGuard:
             headers={"X-Tenant-ID": TENANT_ID},
         )
         assert resp.status_code == 200
+
+
+class TestSeedEndpointAuthB5:
+    """B5: seed endpoints require auth and body.tenant_id == X-Tenant-Id header."""
+
+    def test_post_rejected_when_body_tenant_mismatches_header(self, dev_env):
+        """POST with body.tenant_id != X-Tenant-Id must return 403."""
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.pool import StaticPool
+        from shared.auth.dependencies import get_current_user
+        from src.api.dependencies import get_db
+        from src.models.tables import BillingBase
+
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        for table in BillingBase.metadata.tables.values():
+            table.schema = None
+        BillingBase.metadata.create_all(engine)
+        SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+        def override_db():
+            s = SessionLocal()
+            try:
+                yield s
+            finally:
+                s.close()
+
+        other_tenant = "00000000-0000-0000-0000-000000000099"
+
+        def override_current_user():
+            return _make_mock_user(uuid.UUID(other_tenant))
+
+        app = create_app()
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[get_current_user] = override_current_user
+
+        with TestClient(app, raise_server_exceptions=False) as c:
+            # Header tenant matches JWT user, but body.tenant_id is different.
+            resp = c.post(
+                SEED_URL,
+                json={"tenant_id": TENANT_ID},  # body uses demo tenant
+                headers={"X-Tenant-ID": other_tenant},  # header uses other tenant
+            )
+        assert resp.status_code == 403
+
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+    def test_delete_rejected_when_body_tenant_mismatches_header(self, dev_env):
+        """DELETE with body.tenant_id != X-Tenant-Id must return 403."""
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.pool import StaticPool
+        from shared.auth.dependencies import get_current_user
+        from src.api.dependencies import get_db
+        from src.models.tables import BillingBase
+
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        for table in BillingBase.metadata.tables.values():
+            table.schema = None
+        BillingBase.metadata.create_all(engine)
+        SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+        def override_db():
+            s = SessionLocal()
+            try:
+                yield s
+            finally:
+                s.close()
+
+        other_tenant = "00000000-0000-0000-0000-000000000099"
+
+        def override_current_user():
+            return _make_mock_user(uuid.UUID(other_tenant))
+
+        app = create_app()
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[get_current_user] = override_current_user
+
+        with TestClient(app, raise_server_exceptions=False) as c:
+            resp = c.request(
+                "DELETE",
+                SEED_URL,
+                json={"tenant_id": TENANT_ID},
+                headers={"X-Tenant-ID": other_tenant},
+            )
+        assert resp.status_code == 403
+
+        app.dependency_overrides.clear()
+        engine.dispose()
