@@ -558,7 +558,8 @@ describe("paysync contract — batches real client (HTTP)", () => {
     await c.list({});
     expect(captured[0]?.headers.get("authorization")).toBe("Bearer tok-b");
     expect(captured[0]?.headers.get("x-tenant-id")).toBe("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-    expect(captured[0]?.url).toContain("/api/v1/billing/batches");
+    // B1: backend route is /payment-batches (router.py:504), not /batches
+    expect(captured[0]?.url).toContain("/api/v1/billing/payment-batches");
   });
 
   it("createRealBatchesClient.get returns null on HTTP 404", async () => {

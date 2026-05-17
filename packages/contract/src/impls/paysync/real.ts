@@ -289,12 +289,12 @@ export function createRealBatchesClient(config: ClientConfig): BatchesClient {
       if (req.status) qs.set("status", req.status);
       qs.set("limit", String(req.limit ?? 50));
       if (req.cursor) qs.set("cursor", req.cursor);
-      const res = await authedFetch(`/api/v1/billing/batches?${qs.toString()}`);
+      const res = await authedFetch(`/api/v1/billing/payment-batches?${qs.toString()}`);
       return unwrap(res, BatchListResponseSchema);
     },
 
     async get(id: string): Promise<Batch | null> {
-      const res = await authedFetch(`/api/v1/billing/batches/${encodeURIComponent(id)}`);
+      const res = await authedFetch(`/api/v1/billing/payment-batches/${encodeURIComponent(id)}`);
       if (res.status === 404) return null;
       return unwrap(res, BatchSchema);
     },
