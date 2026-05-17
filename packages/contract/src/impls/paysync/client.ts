@@ -23,10 +23,16 @@ import type {
   Cycle,
   CycleListResponse,
   CycleStatus,
+  FileArtifact,
+  FileArtifactListResponse,
+  FileGenerateRequest,
+  HashChainVerifyResponse,
   InboxItem,
   Invoice,
   InvoiceListResponse,
   InvoiceStatus,
+  JournalEntry,
+  JournalEntryListResponse,
   PaymentRun,
   PaymentRunListResponse,
   PaymentRunStatus,
@@ -294,5 +300,87 @@ export const PAYSYNC_RECONCILIATIONS_CACHE_POLICIES: Record<string, CachePolicy>
     key: ["paysync", "reconciliations", "by-id", "{tenant_id}", "{id}"],
     invalidation_tags: ["paysync:reconciliations"],
     backend_down: "stale-ok",
+  },
+};
+
+// ── FilesClient ───────────────────────────────────────────────────────────
+export interface FilesClient extends BaseClient {
+  readonly name: "paysync.files";
+
+  /** List file artifacts for the active tenant. Filters by kind; paginates via limit. */
+  list(req: { type?: string; limit?: number; cursor?: string }): Promise<FileArtifactListResponse>;
+
+  /** Fetch one file artifact by id. Returns null if not found / not visible to tenant. */
+  get(id: string): Promise<FileArtifact | null>;
+
+  /** Generate a NACHA or 835 file from a source batch / payment run. Approver-only. */
+  generate(input: FileGenerateRequest): Promise<FileArtifact>;
+
+  /** Download the raw file bytes as a Blob. PHI audit emitted server-side. */
+  download(id: string): Promise<Blob>;
+}
+
+export const PAYSYNC_FILES_CACHE_POLICIES: Record<string, CachePolicy> = {
+  list: {
+    ttl_seconds: 30,
+    key: ["paysync", "files", "list", "{tenant_id}", "{type}", "{cursor}", "{limit}"],
+    invalidation_tags: ["paysync:files"],
+    backend_down: "stale-ok",
+  },
+  get: {
+    ttl_seconds: 60,
+    key: ["paysync", "files", "by-id", "{tenant_id}", "{id}"],
+    invalidation_tags: ["paysync:files"],
+    backend_down: "stale-ok",
+  },
+  generate: {
+    // Mutation -- no-cache, fail-fast.
+    ttl_seconds: 0,
+    key: ["paysync", "files", "generate", "{tenant_id}"],
+    invalidation_tags: ["paysync:files"],
+    backend_down: "fail-fast",
+  },
+  download: {
+    // Binary stream -- never cache.
+    ttl_seconds: 0,
+    key: ["paysync", "files", "download", "{tenant_id}", "{id}"],
+    invalidation_tags: ["paysync:files"],
+    backend_down: "fail-fast",
+  },
+};
+
+// ── JournalClient ─────────────────────────────────────────────────────────
+export interface JournalClient extends BaseClient {
+  readonly name: "paysync.journal";
+
+  /** List journal entries for the active tenant, newest first. */
+  list(req: { limit?: number; cursor?: string }): Promise<JournalEntryListResponse>;
+
+  /** Fetch one journal entry by id. Returns null if not found / not visible to tenant. */
+  get(id: string): Promise<JournalEntry | null>;
+
+  /** Synchronously verify the hash chain. Returns too_large=true when entry count exceeds threshold. */
+  verifyChain(): Promise<HashChainVerifyResponse>;
+}
+
+export const PAYSYNC_JOURNAL_CACHE_POLICIES: Record<string, CachePolicy> = {
+  list: {
+    ttl_seconds: 30,
+    key: ["paysync", "journal", "list", "{tenant_id}", "{cursor}", "{limit}"],
+    invalidation_tags: ["paysync:journal"],
+    backend_down: "stale-ok",
+  },
+  get: {
+    ttl_seconds: 60,
+    key: ["paysync", "journal", "by-id", "{tenant_id}", "{id}"],
+    invalidation_tags: ["paysync:journal"],
+    backend_down: "stale-ok",
+  },
+  verifyChain: {
+    // Chain verification is stateful -- never serve stale.
+    ttl_seconds: 0,
+    key: ["paysync", "journal", "verify-chain", "{tenant_id}"],
+    invalidation_tags: ["paysync:journal"],
+    backend_down: "fail-fast",
   },
 };

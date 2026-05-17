@@ -10,8 +10,10 @@ import {
   PAYSYNC_BATCHES_CACHE_POLICIES,
   PAYSYNC_CARRYOVERS_CACHE_POLICIES,
   PAYSYNC_CYCLES_CACHE_POLICIES,
+  PAYSYNC_FILES_CACHE_POLICIES,
   PAYSYNC_INBOX_CACHE_POLICIES,
   PAYSYNC_INVOICES_CACHE_POLICIES,
+  PAYSYNC_JOURNAL_CACHE_POLICIES,
   PAYSYNC_PAYMENT_RUNS_CACHE_POLICIES,
   PAYSYNC_RECONCILIATIONS_CACHE_POLICIES,
   PAYSYNC_UPLOADS_CACHE_POLICIES,
@@ -19,8 +21,10 @@ import {
   type BatchesClient,
   type CarryoversClient,
   type CyclesClient,
+  type FilesClient,
   type InboxClient,
   type InvoicesClient,
+  type JournalClient,
   type PaymentRunsClient,
   type ReconciliationsClient,
   type UploadsClient,
@@ -34,8 +38,13 @@ import {
   CarryoverSchema,
   CycleListResponseSchema,
   CycleSchema,
+  FileArtifactListResponseSchema,
+  FileArtifactSchema,
+  HashChainVerifyResponseSchema,
   InvoiceListResponseSchema,
   InvoiceSchema,
+  JournalEntryListResponseSchema,
+  JournalEntrySchema,
   PaymentRunListResponseSchema,
   PaymentRunSchema,
   ReconciliationListResponseSchema,
@@ -53,10 +62,16 @@ import {
   type Cycle,
   type CycleListResponse,
   type CycleStatus,
+  type FileArtifact,
+  type FileArtifactListResponse,
+  type FileGenerateRequest,
+  type HashChainVerifyResponse,
   type InboxItem,
   type Invoice,
   type InvoiceListResponse,
   type InvoiceStatus,
+  type JournalEntry,
+  type JournalEntryListResponse,
   type PaymentRun,
   type PaymentRunListResponse,
   type PaymentRunStatus,
@@ -446,6 +461,104 @@ export function createRealReconciliationsClient(config: ClientConfig): Reconcili
       const res = await authedFetch(`/api/v1/billing/reconciliations/${encodeURIComponent(id)}`);
       if (res.status === 404) return null;
       return unwrap(res, ReconciliationSchema);
+    },
+
+    probeHealth,
+  };
+}
+
+export function createRealFilesClient(config: ClientConfig): FilesClient {
+  if (!config.baseUrl) {
+    throw new Error("createRealFilesClient: baseUrl is required");
+  }
+  const { authedFetch, unwrap, probeHealth } = makeAuthedFetch(config);
+  const baseUrl = (config.baseUrl).replace(/\/$/, "");
+
+  return {
+    name: "paysync.files" as const,
+    cachePolicies: PAYSYNC_FILES_CACHE_POLICIES,
+
+    async list(req: { type?: string; limit?: number; cursor?: string }): Promise<FileArtifactListResponse> {
+      const qs = new URLSearchParams();
+      if (req.type) qs.set("kind", req.type);
+      qs.set("limit", String(req.limit ?? 50));
+      if (req.cursor) qs.set("cursor", req.cursor);
+      const res = await authedFetch(`/api/v1/billing/files?${qs.toString()}`);
+      return unwrap(res, FileArtifactListResponseSchema);
+    },
+
+    async get(id: string): Promise<FileArtifact | null> {
+      const res = await authedFetch(`/api/v1/billing/files/${encodeURIComponent(id)}`);
+      if (res.status === 404) return null;
+      return unwrap(res, FileArtifactSchema);
+    },
+
+    async generate(input: FileGenerateRequest): Promise<FileArtifact> {
+      const res = await authedFetch(`/api/v1/billing/files/generate`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+      return unwrap(res, FileArtifactSchema);
+    },
+
+    async download(id: string): Promise<Blob> {
+      const token = await config.getAuthToken();
+      const fetchImpl = config.fetch ?? globalThis.fetch;
+      const correlationHeader = config.correlationHeader ?? "x-correlation-id";
+      const headers = new Headers();
+      headers.set("Authorization", `Bearer ${token}`);
+      headers.set(correlationHeader, crypto.randomUUID());
+      if (config.getTenantId) {
+        const tenantId = await config.getTenantId();
+        headers.set("x-tenant-id", tenantId);
+      }
+      const res = await fetchImpl(
+        `${baseUrl}/api/v1/billing/files/${encodeURIComponent(id)}/download`,
+        { headers },
+      );
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => null) as unknown;
+        if (isErrorEnvelope(errBody)) {
+          throw new PaysyncClientError(errBody.error.code, errBody.error.message, errBody.error.correlation_id, errBody.error.details as Record<string, unknown> | undefined);
+        }
+        throw new Error(`File download failed: HTTP ${res.status}`);
+      }
+      return res.blob();
+    },
+
+    probeHealth,
+  };
+}
+
+export function createRealJournalClient(config: ClientConfig): JournalClient {
+  if (!config.baseUrl) {
+    throw new Error("createRealJournalClient: baseUrl is required");
+  }
+  const { authedFetch, unwrap, probeHealth } = makeAuthedFetch(config);
+
+  return {
+    name: "paysync.journal" as const,
+    cachePolicies: PAYSYNC_JOURNAL_CACHE_POLICIES,
+
+    async list(req: { limit?: number; cursor?: string }): Promise<JournalEntryListResponse> {
+      const qs = new URLSearchParams();
+      qs.set("limit", String(req.limit ?? 100));
+      if (req.cursor) qs.set("cursor", req.cursor);
+      const res = await authedFetch(`/api/v1/billing/journal?${qs.toString()}`);
+      return unwrap(res, JournalEntryListResponseSchema);
+    },
+
+    async get(id: string): Promise<JournalEntry | null> {
+      const res = await authedFetch(`/api/v1/billing/journal/${encodeURIComponent(id)}`);
+      if (res.status === 404) return null;
+      return unwrap(res, JournalEntrySchema);
+    },
+
+    async verifyChain(): Promise<HashChainVerifyResponse> {
+      const res = await authedFetch(`/api/v1/billing/journal/verify-chain`, {
+        method: "POST",
+      });
+      return unwrap(res, HashChainVerifyResponseSchema);
     },
 
     probeHealth,

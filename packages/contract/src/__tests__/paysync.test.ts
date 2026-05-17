@@ -8,8 +8,10 @@ import {
   createMockBatchesClient,
   createMockCarryoversClient,
   createMockCyclesClient,
+  createMockFilesClient,
   createMockInboxClient,
   createMockInvoicesClient,
+  createMockJournalClient,
   createMockPaymentRunsClient,
   createMockReconciliationsClient,
   createMockUploadsClient,
@@ -17,8 +19,10 @@ import {
   createRealBatchesClient,
   createRealCarryoversClient,
   createRealCyclesClient,
+  createRealFilesClient,
   createRealInboxClient,
   createRealInvoicesClient,
+  createRealJournalClient,
   createRealPaymentRunsClient,
   createRealReconciliationsClient,
   createRealUploadsClient,
@@ -31,10 +35,17 @@ import {
   CarryoverSchema,
   CycleSchema,
   CycleStatusSchema,
+  FileArtifactKindSchema,
+  FileArtifactListResponseSchema,
+  FileArtifactSchema,
+  FileGenerateRequestSchema,
+  HashChainVerifyResponseSchema,
   InboxItemSchema,
   InvoiceListResponseSchema,
   InvoiceSchema,
   InvoiceStatusSchema,
+  JournalEntryListResponseSchema,
+  JournalEntrySchema,
   PaymentRunSchema,
   PaymentRunStatusSchema,
   ReconciliationSchema,
@@ -43,8 +54,10 @@ import {
   PAYSYNC_BATCHES_CACHE_POLICIES,
   PAYSYNC_CARRYOVERS_CACHE_POLICIES,
   PAYSYNC_CYCLES_CACHE_POLICIES,
+  PAYSYNC_FILES_CACHE_POLICIES,
   PAYSYNC_INBOX_CACHE_POLICIES,
   PAYSYNC_INVOICES_CACHE_POLICIES,
+  PAYSYNC_JOURNAL_CACHE_POLICIES,
   PAYSYNC_PAYMENT_RUNS_CACHE_POLICIES,
   PAYSYNC_RECONCILIATIONS_CACHE_POLICIES,
   PAYSYNC_UPLOADS_CACHE_POLICIES,
@@ -1096,5 +1109,513 @@ describe("paysync contract — B4+C4: CarryoverListResponseSchema bare-array + e
     const fromEnvelope = CarryoverListResponseSchema.parse({ results: [BARE_CARRYOVER], total: 1, next_cursor: null });
     expect(fromArray.results[0]?.ap_record_id).toBe("e0000000-0000-0000-0000-000000000001");
     expect(fromEnvelope.results[0]?.ap_record_id).toBe("e0000000-0000-0000-0000-000000000001");
+  });
+});
+
+// ── Plan D additions: FilesClient + JournalClient ────────────────────────────
+
+describe("paysync contract — files mock factory", () => {
+  it("createMockFilesClient instantiates with expected shape", async () => {
+    const c = createMockFilesClient();
+    expect(c.name).toBe("paysync.files");
+    expect(c.cachePolicies).toBe(PAYSYNC_FILES_CACHE_POLICIES);
+    const health = await c.probeHealth();
+    expect(health.ok).toBe(true);
+  });
+
+  it("createMockFilesClient.list returns empty page", async () => {
+    const c = createMockFilesClient();
+    const page = await c.list({});
+    expect(page.results).toEqual([]);
+    expect(page.total).toBe(0);
+  });
+
+  it("createMockFilesClient.get returns null for any id", async () => {
+    const c = createMockFilesClient();
+    expect(await c.get("00000000-0000-0000-0000-000000000000")).toBeNull();
+  });
+
+  it("createMockFilesClient.generate returns a synthetic FileArtifact", async () => {
+    const c = createMockFilesClient();
+    const artifact = await c.generate({ kind: "nacha", source_id: "11111111-1111-1111-1111-111111111111" });
+    expect(artifact.kind).toBe("nacha");
+    expect(artifact.source_batch_id).toBe("11111111-1111-1111-1111-111111111111");
+    expect(() => FileArtifactSchema.parse(artifact)).not.toThrow();
+  });
+
+  it("createMockFilesClient.generate returns x12_835 for kind='835'", async () => {
+    const c = createMockFilesClient();
+    const artifact = await c.generate({ kind: "835", source_id: "22222222-2222-2222-2222-222222222222" });
+    expect(artifact.kind).toBe("x12_835");
+  });
+
+  it("createMockFilesClient.download returns an empty Blob", async () => {
+    const c = createMockFilesClient();
+    const blob = await c.download("any-id");
+    expect(blob).toBeInstanceOf(Blob);
+    expect(blob.size).toBe(0);
+  });
+
+  it("PAYSYNC_FILES_CACHE_POLICIES has list, get, generate, download operations", () => {
+    expect(PAYSYNC_FILES_CACHE_POLICIES).toHaveProperty("list");
+    expect(PAYSYNC_FILES_CACHE_POLICIES).toHaveProperty("get");
+    expect(PAYSYNC_FILES_CACHE_POLICIES).toHaveProperty("generate");
+    expect(PAYSYNC_FILES_CACHE_POLICIES).toHaveProperty("download");
+  });
+
+  it("PAYSYNC_FILES_CACHE_POLICIES.generate has ttl_seconds=0 (no-cache mutation)", () => {
+    expect(PAYSYNC_FILES_CACHE_POLICIES.generate?.ttl_seconds).toBe(0);
+  });
+
+  it("PAYSYNC_FILES_CACHE_POLICIES.download has ttl_seconds=0 (never cache binary)", () => {
+    expect(PAYSYNC_FILES_CACHE_POLICIES.download?.ttl_seconds).toBe(0);
+  });
+});
+
+describe("paysync contract — files real client (HTTP)", () => {
+  function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
+    return new Response(JSON.stringify(body), {
+      ...init,
+      headers: { "content-type": "application/json", ...(init.headers ?? {}) },
+    });
+  }
+
+  function makeArtifact(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      id: "a0000000-0000-0000-0000-000000000001",
+      tenant_id: "b0000000-0000-0000-0000-000000000001",
+      kind: "nacha",
+      source_batch_id: "c0000000-0000-0000-0000-000000000001",
+      source_payment_run_id: null,
+      sha256: "a".repeat(64),
+      file_size: 1024,
+      generated_at: "2026-05-17T10:00:00.000+00:00",
+      generated_by: "d0000000-0000-0000-0000-000000000001",
+      upload_id: null,
+      filename: "payment.nacha",
+      status: "ready",
+      ...overrides,
+    };
+  }
+
+  it("createRealFilesClient sends Bearer + X-Tenant-Id on list", async () => {
+    const captured: { headers: Headers; url: string }[] = [];
+    const fakeFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      captured.push({ headers: new Headers(init?.headers), url });
+      return jsonResponse([]);
+    };
+    const c = createRealFilesClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok-f",
+      getTenantId: async () => "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      fetch: fakeFetch,
+    });
+    await c.list({});
+    expect(captured[0]?.headers.get("authorization")).toBe("Bearer tok-f");
+    expect(captured[0]?.headers.get("x-tenant-id")).toBe("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    expect(captured[0]?.url).toContain("/api/v1/billing/files");
+  });
+
+  it("createRealFilesClient.get returns null on HTTP 404", async () => {
+    const fakeFetch: typeof fetch = async () => new Response(null, { status: 404 });
+    const c = createRealFilesClient({ baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch });
+    expect(await c.get("missing-id")).toBeNull();
+  });
+
+  it("createRealFilesClient.generate POSTs to /files/generate with Bearer + X-Tenant-Id", async () => {
+    const captured: { headers: Headers; url: string; method: string }[] = [];
+    const fakeFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      captured.push({ headers: new Headers(init?.headers), url, method: init?.method ?? "GET" });
+      return jsonResponse(makeArtifact());
+    };
+    const c = createRealFilesClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok-gen",
+      getTenantId: async () => "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      fetch: fakeFetch,
+    });
+    await c.generate({ kind: "nacha", source_id: "c0000000-0000-0000-0000-000000000001" });
+    expect(captured[0]?.method).toBe("POST");
+    expect(captured[0]?.url).toContain("/api/v1/billing/files/generate");
+    expect(captured[0]?.headers.get("authorization")).toBe("Bearer tok-gen");
+    expect(captured[0]?.headers.get("x-tenant-id")).toBe("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+  });
+
+  it("createRealFilesClient.download GETs /files/{id}/download with Bearer + X-Tenant-Id", async () => {
+    const captured: { headers: Headers; url: string }[] = [];
+    const fakeFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      captured.push({ headers: new Headers(init?.headers), url });
+      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    };
+    const c = createRealFilesClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok-dl",
+      getTenantId: async () => "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      fetch: fakeFetch,
+    });
+    const blob = await c.download("file-id-123");
+    expect(blob).toBeInstanceOf(Blob);
+    expect(captured[0]?.url).toContain("/api/v1/billing/files/file-id-123/download");
+    expect(captured[0]?.headers.get("authorization")).toBe("Bearer tok-dl");
+    expect(captured[0]?.headers.get("x-tenant-id")).toBe("cccccccc-cccc-cccc-cccc-cccccccccccc");
+  });
+
+  it("createRealFilesClient 403 response surfaces PaysyncClientError with .details", async () => {
+    const fakeFetch: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "FORBIDDEN",
+            message: "Only approvers can generate payment files",
+            correlation_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+            details: { required_role: "approver" },
+          },
+        }),
+        { status: 403, headers: { "content-type": "application/json" } },
+      );
+    const c = createRealFilesClient({ baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch });
+    let caught: unknown;
+    try {
+      await c.generate({ kind: "nacha", source_id: "c0000000-0000-0000-0000-000000000001" });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeDefined();
+    expect((caught as { code?: string }).code).toBe("FORBIDDEN");
+    expect((caught as { details?: { required_role?: string } }).details?.required_role).toBe("approver");
+  });
+});
+
+describe("paysync contract — journal mock factory", () => {
+  it("createMockJournalClient instantiates with expected shape", async () => {
+    const c = createMockJournalClient();
+    expect(c.name).toBe("paysync.journal");
+    expect(c.cachePolicies).toBe(PAYSYNC_JOURNAL_CACHE_POLICIES);
+    const health = await c.probeHealth();
+    expect(health.ok).toBe(true);
+  });
+
+  it("createMockJournalClient.list returns empty page", async () => {
+    const c = createMockJournalClient();
+    const page = await c.list({});
+    expect(page.results).toEqual([]);
+    expect(page.total).toBe(0);
+  });
+
+  it("createMockJournalClient.get returns null for any id", async () => {
+    const c = createMockJournalClient();
+    expect(await c.get("00000000-0000-0000-0000-000000000000")).toBeNull();
+  });
+
+  it("createMockJournalClient.verifyChain returns the schema-shaped response", async () => {
+    const c = createMockJournalClient();
+    const result = await c.verifyChain();
+    expect(result.verified).toBe(true);
+    expect(result.too_large).toBe(false);
+    expect(result.job_id).toBeNull();
+    expect(result.total_entries).toBe(0);
+    expect(result.broken_at).toBeNull();
+    expect(() => HashChainVerifyResponseSchema.parse(result)).not.toThrow();
+  });
+
+  it("PAYSYNC_JOURNAL_CACHE_POLICIES has list, get, verifyChain operations", () => {
+    expect(PAYSYNC_JOURNAL_CACHE_POLICIES).toHaveProperty("list");
+    expect(PAYSYNC_JOURNAL_CACHE_POLICIES).toHaveProperty("get");
+    expect(PAYSYNC_JOURNAL_CACHE_POLICIES).toHaveProperty("verifyChain");
+  });
+
+  it("PAYSYNC_JOURNAL_CACHE_POLICIES.verifyChain has ttl_seconds=0 (never serve stale)", () => {
+    expect(PAYSYNC_JOURNAL_CACHE_POLICIES.verifyChain?.ttl_seconds).toBe(0);
+  });
+});
+
+describe("paysync contract — journal real client (HTTP)", () => {
+  function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
+    return new Response(JSON.stringify(body), {
+      ...init,
+      headers: { "content-type": "application/json", ...(init.headers ?? {}) },
+    });
+  }
+
+  function makeEntry(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      id: "e0000000-0000-0000-0000-000000000001",
+      tenant_id: "f0000000-0000-0000-0000-000000000001",
+      entry_date: "2026-05-17",
+      entry_timestamp: "2026-05-17T10:00:00",
+      entry_type: "payment",
+      client_id: null,
+      client_name: null,
+      program_id: null,
+      program_name: null,
+      pay_to_entity_id: null,
+      pay_to_entity_name: null,
+      amount: "1234.56",
+      category: "ap",
+      gl_account_code: "2000",
+      gl_class: null,
+      reference_type: "payment_batch",
+      reference_id: "b0000000-0000-0000-0000-000000000001",
+      description: null,
+      exported_to_accounting: false,
+      exported_at: null,
+      export_reference: null,
+      created_at: "2026-05-17T10:00:00",
+      entry_hash: "a".repeat(64),
+      prev_hash: null,
+      ...overrides,
+    };
+  }
+
+  it("createRealJournalClient sends Bearer + X-Tenant-Id on list", async () => {
+    const captured: { headers: Headers; url: string }[] = [];
+    const fakeFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      captured.push({ headers: new Headers(init?.headers), url });
+      return jsonResponse([]);
+    };
+    const c = createRealJournalClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok-j",
+      getTenantId: async () => "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      fetch: fakeFetch,
+    });
+    await c.list({});
+    expect(captured[0]?.headers.get("authorization")).toBe("Bearer tok-j");
+    expect(captured[0]?.headers.get("x-tenant-id")).toBe("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    expect(captured[0]?.url).toContain("/api/v1/billing/journal");
+  });
+
+  it("createRealJournalClient.get returns null on HTTP 404", async () => {
+    const fakeFetch: typeof fetch = async () => new Response(null, { status: 404 });
+    const c = createRealJournalClient({ baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch });
+    expect(await c.get("missing-id")).toBeNull();
+  });
+
+  it("createRealJournalClient.verifyChain POSTs to /journal/verify-chain with Bearer + X-Tenant-Id", async () => {
+    const captured: { headers: Headers; url: string; method: string }[] = [];
+    const fakeFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      captured.push({ headers: new Headers(init?.headers), url, method: init?.method ?? "GET" });
+      return jsonResponse({ verified: true, too_large: false, job_id: null, total_entries: 5, broken_at: null });
+    };
+    const c = createRealJournalClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok-vc",
+      getTenantId: async () => "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      fetch: fakeFetch,
+    });
+    const result = await c.verifyChain();
+    expect(captured[0]?.method).toBe("POST");
+    expect(captured[0]?.url).toContain("/api/v1/billing/journal/verify-chain");
+    expect(captured[0]?.headers.get("authorization")).toBe("Bearer tok-vc");
+    expect(captured[0]?.headers.get("x-tenant-id")).toBe("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    expect(result.verified).toBe(true);
+    expect(result.total_entries).toBe(5);
+  });
+
+  it("createRealJournalClient.verifyChain returns too_large=true when chain is oversized", async () => {
+    const fakeFetch: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({ verified: null, too_large: true, job_id: null, total_entries: 50000, broken_at: null }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    const c = createRealJournalClient({ baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch });
+    const result = await c.verifyChain();
+    expect(result.verified).toBeNull();
+    expect(result.too_large).toBe(true);
+    expect(result.total_entries).toBe(50000);
+    expect(() => HashChainVerifyResponseSchema.parse(result)).not.toThrow();
+  });
+
+  it("createRealJournalClient 409 response surfaces PaysyncClientError with .details", async () => {
+    const fakeFetch: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "CONFLICT",
+            message: "Concurrent verification already running",
+            correlation_id: "dddddddd-dddd-dddd-dddd-dddddddddddd",
+            details: { running_job_id: "jjjjjjjj-jjjj-jjjj-jjjj-jjjjjjjjjjjj" },
+          },
+        }),
+        { status: 409, headers: { "content-type": "application/json" } },
+      );
+    const c = createRealJournalClient({ baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch });
+    let caught: unknown;
+    try {
+      await c.verifyChain();
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeDefined();
+    expect((caught as { code?: string }).code).toBe("CONFLICT");
+    expect((caught as { details?: { running_job_id?: string } }).details?.running_job_id).toBeDefined();
+  });
+});
+
+describe("paysync contract — schemas: FileArtifact + JournalEntry + HashChainVerifyResponse", () => {
+  it("FileArtifactSchema validates a well-formed artifact", () => {
+    expect(() => FileArtifactSchema.parse({
+      id: "a0000000-0000-0000-0000-000000000001",
+      tenant_id: "b0000000-0000-0000-0000-000000000001",
+      kind: "nacha",
+      source_batch_id: "c0000000-0000-0000-0000-000000000001",
+      source_payment_run_id: null,
+      sha256: "a".repeat(64),
+      file_size: 2048,
+      generated_at: "2026-05-17T10:00:00.000+00:00",
+      generated_by: "d0000000-0000-0000-0000-000000000001",
+      upload_id: null,
+      filename: "payment.nacha",
+      status: "ready",
+    })).not.toThrow();
+  });
+
+  it("FileArtifactSchema rejects invalid sha256 (not hex)", () => {
+    expect(() => FileArtifactSchema.parse({
+      id: "a0000000-0000-0000-0000-000000000001",
+      tenant_id: "b0000000-0000-0000-0000-000000000001",
+      kind: "nacha",
+      source_batch_id: null,
+      source_payment_run_id: null,
+      sha256: "not-a-sha256",
+      file_size: 0,
+      generated_at: null,
+      generated_by: "d0000000-0000-0000-0000-000000000001",
+      upload_id: null,
+      filename: "x.nacha",
+      status: "ready",
+    })).toThrow();
+  });
+
+  it("FileArtifactKindSchema accepts all valid kinds", () => {
+    for (const k of ["nacha", "x12_835", "x12_837", "x12_270", "x12_271", "x12_276", "x12_277", "x12_278", "x12_834", "x12_999", "ncpdp_batch"] as const) {
+      expect(FileArtifactKindSchema.parse(k)).toBe(k);
+    }
+    expect(() => FileArtifactKindSchema.parse("unknown")).toThrow();
+  });
+
+  it("FileGenerateRequestSchema validates a well-formed generate request", () => {
+    expect(() => FileGenerateRequestSchema.parse({ kind: "nacha", source_id: "a0000000-0000-0000-0000-000000000001" })).not.toThrow();
+    expect(() => FileGenerateRequestSchema.parse({ kind: "835", source_id: "b0000000-0000-0000-0000-000000000001" })).not.toThrow();
+  });
+
+  it("FileArtifactListResponseSchema parses a bare array and normalises to envelope", () => {
+    const artifact = {
+      id: "a0000000-0000-0000-0000-000000000001",
+      tenant_id: "b0000000-0000-0000-0000-000000000001",
+      kind: "nacha",
+      source_batch_id: null,
+      source_payment_run_id: null,
+      sha256: "b".repeat(64),
+      file_size: 512,
+      generated_at: "2026-05-17T10:00:00.000+00:00",
+      generated_by: "d0000000-0000-0000-0000-000000000001",
+      upload_id: null,
+      filename: "out.nacha",
+      status: "ready",
+    };
+    const result = FileArtifactListResponseSchema.parse([artifact]);
+    expect(result.results).toHaveLength(1);
+    expect(result.total).toBe(1);
+    expect(result.next_cursor).toBeNull();
+  });
+
+  it("JournalEntrySchema validates a well-formed journal entry", () => {
+    expect(() => JournalEntrySchema.parse({
+      id: "e0000000-0000-0000-0000-000000000001",
+      tenant_id: "f0000000-0000-0000-0000-000000000001",
+      entry_date: "2026-05-17",
+      entry_timestamp: "2026-05-17T10:00:00",
+      entry_type: "payment",
+      client_id: null,
+      client_name: null,
+      program_id: null,
+      program_name: null,
+      pay_to_entity_id: null,
+      pay_to_entity_name: null,
+      amount: "1234.56",
+      category: "ap",
+      gl_account_code: "2000",
+      gl_class: null,
+      reference_type: "payment_batch",
+      reference_id: "b0000000-0000-0000-0000-000000000001",
+      description: null,
+      exported_to_accounting: false,
+      exported_at: null,
+      export_reference: null,
+      created_at: "2026-05-17T10:00:00",
+      entry_hash: "a".repeat(64),
+      prev_hash: null,
+    })).not.toThrow();
+  });
+
+  it("JournalEntryListResponseSchema parses a bare array and normalises to envelope", () => {
+    const entry = {
+      id: "e0000000-0000-0000-0000-000000000001",
+      tenant_id: "f0000000-0000-0000-0000-000000000001",
+      entry_date: null,
+      entry_timestamp: null,
+      entry_type: "fee",
+      client_id: null,
+      client_name: null,
+      program_id: null,
+      program_name: null,
+      pay_to_entity_id: null,
+      pay_to_entity_name: null,
+      amount: "50.00",
+      category: null,
+      gl_account_code: null,
+      gl_class: null,
+      reference_type: null,
+      reference_id: null,
+      description: null,
+      exported_to_accounting: null,
+      exported_at: null,
+      export_reference: null,
+      created_at: null,
+      entry_hash: null,
+      prev_hash: null,
+    };
+    const result = JournalEntryListResponseSchema.parse([entry]);
+    expect(result.results).toHaveLength(1);
+    expect(result.total).toBe(1);
+    expect(result.next_cursor).toBeNull();
+  });
+
+  it("HashChainVerifyResponseSchema validates verified=true response", () => {
+    expect(() => HashChainVerifyResponseSchema.parse({
+      verified: true,
+      too_large: false,
+      job_id: null,
+      total_entries: 42,
+      broken_at: null,
+    })).not.toThrow();
+  });
+
+  it("HashChainVerifyResponseSchema validates too_large=true response with verified=null", () => {
+    expect(() => HashChainVerifyResponseSchema.parse({
+      verified: null,
+      too_large: true,
+      job_id: null,
+      total_entries: 99999,
+      broken_at: null,
+    })).not.toThrow();
+  });
+
+  it("HashChainVerifyResponseSchema validates broken chain response", () => {
+    const result = HashChainVerifyResponseSchema.parse({
+      verified: false,
+      too_large: false,
+      job_id: null,
+      total_entries: 100,
+      broken_at: "e0000000-0000-0000-0000-000000000042",
+    });
+    expect(result.verified).toBe(false);
+    expect(result.broken_at).toBe("e0000000-0000-0000-0000-000000000042");
   });
 });

@@ -240,6 +240,122 @@ export const PaymentRunListResponseSchema = z.union([
 ]);
 export type PaymentRunListResponse = z.infer<typeof PaymentRunListResponseSchema>;
 
+// ── FileArtifact (paysync generated files — Plan D adds FilesClient) ──────────
+export const FileArtifactKindSchema = z.enum([
+  "nacha",
+  "x12_835",
+  "x12_837",
+  "x12_270",
+  "x12_271",
+  "x12_276",
+  "x12_277",
+  "x12_278",
+  "x12_834",
+  "x12_999",
+  "ncpdp_batch",
+]);
+export type FileArtifactKind = z.infer<typeof FileArtifactKindSchema>;
+
+export const FileArtifactSchema = z.object({
+  id: z.string().uuid(),
+  tenant_id: z.string().uuid(),
+  // "kind" matches the backend column name (files.py uses "kind" in _artifact_to_dict).
+  kind: FileArtifactKindSchema,
+  source_batch_id: z.string().uuid().nullable(),
+  source_payment_run_id: z.string().uuid().nullable(),
+  // SHA-256 hex content hash.
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  file_size: z.number().int().nonnegative(),
+  generated_at: z.string().datetime({ offset: true }).nullable(),
+  // user_id of the approver who triggered generation.
+  generated_by: z.string().uuid(),
+  upload_id: z.string().uuid().nullable(),
+  filename: z.string().min(1).max(255),
+  status: z.string(),
+});
+export type FileArtifact = z.infer<typeof FileArtifactSchema>;
+
+// Backend /files returns a JSON array; accept either shape and normalise.
+export const FileArtifactListResponseSchema = z.union([
+  z.array(FileArtifactSchema).transform((items) => ({
+    results: items,
+    next_cursor: null as string | null,
+    total: items.length,
+  })),
+  z.object({
+    results: z.array(FileArtifactSchema),
+    next_cursor: z.string().nullable().optional(),
+    total: z.number().int().nonnegative(),
+  }),
+]);
+export type FileArtifactListResponse = z.infer<typeof FileArtifactListResponseSchema>;
+
+export const FileGenerateRequestSchema = z.object({
+  // "nacha" or "835" — matches the backend GenerateFileRequest.kind field.
+  kind: z.string().min(1),
+  source_id: z.string().uuid(),
+});
+export type FileGenerateRequest = z.infer<typeof FileGenerateRequestSchema>;
+
+// ── JournalEntry (billing hash-chained ledger — Plan D adds JournalClient) ──
+export const JournalEntrySchema = z.object({
+  id: z.string().uuid(),
+  tenant_id: z.string().uuid(),
+  entry_date: z.string().nullable(),
+  entry_timestamp: z.string().nullable(),
+  entry_type: z.string(),
+  client_id: z.string().uuid().nullable(),
+  client_name: z.string().nullable(),
+  program_id: z.string().uuid().nullable(),
+  program_name: z.string().nullable(),
+  pay_to_entity_id: z.string().uuid().nullable(),
+  pay_to_entity_name: z.string().nullable(),
+  // Decimal-as-string per financial-precision rules.
+  amount: z.string(),
+  category: z.string().nullable(),
+  gl_account_code: z.string().nullable(),
+  gl_class: z.string().nullable(),
+  reference_type: z.string().nullable(),
+  reference_id: z.string().uuid().nullable(),
+  description: z.string().nullable(),
+  exported_to_accounting: z.boolean().nullable(),
+  exported_at: z.string().nullable(),
+  export_reference: z.string().nullable(),
+  created_at: z.string().nullable(),
+  // Hash-chain fields.
+  entry_hash: z.string().nullable(),
+  prev_hash: z.string().nullable(),
+});
+export type JournalEntry = z.infer<typeof JournalEntrySchema>;
+
+// Backend /journal returns a bare array; accept either shape.
+export const JournalEntryListResponseSchema = z.union([
+  z.array(JournalEntrySchema).transform((items) => ({
+    results: items,
+    next_cursor: null as string | null,
+    total: items.length,
+  })),
+  z.object({
+    results: z.array(JournalEntrySchema),
+    next_cursor: z.string().nullable().optional(),
+    total: z.number().int().nonnegative(),
+  }),
+]);
+export type JournalEntryListResponse = z.infer<typeof JournalEntryListResponseSchema>;
+
+// Hash chain verify response -- mirrors journal.py verify_chain endpoint exactly.
+export const HashChainVerifyResponseSchema = z.object({
+  // null when too_large is true (chain not evaluated).
+  verified: z.boolean().nullable(),
+  too_large: z.boolean(),
+  // Reserved for future async job path.
+  job_id: z.string().nullable(),
+  total_entries: z.number().int().nonnegative(),
+  // entry id of the first broken link; null when verified or not checked.
+  broken_at: z.string().nullable(),
+});
+export type HashChainVerifyResponse = z.infer<typeof HashChainVerifyResponseSchema>;
+
 // ── Carryover (AP carryforward — billing.carryovers table, committed 5eb024f1) ─
 // An APRecord that could not be fully paid in the current batch is represented
 // as a Carryover. The Carryover carries the outstanding balance into the next

@@ -9,8 +9,10 @@ import {
   PAYSYNC_BATCHES_CACHE_POLICIES,
   PAYSYNC_CARRYOVERS_CACHE_POLICIES,
   PAYSYNC_CYCLES_CACHE_POLICIES,
+  PAYSYNC_FILES_CACHE_POLICIES,
   PAYSYNC_INBOX_CACHE_POLICIES,
   PAYSYNC_INVOICES_CACHE_POLICIES,
+  PAYSYNC_JOURNAL_CACHE_POLICIES,
   PAYSYNC_PAYMENT_RUNS_CACHE_POLICIES,
   PAYSYNC_RECONCILIATIONS_CACHE_POLICIES,
   PAYSYNC_UPLOADS_CACHE_POLICIES,
@@ -18,8 +20,10 @@ import {
   type BatchesClient,
   type CarryoversClient,
   type CyclesClient,
+  type FilesClient,
   type InboxClient,
   type InvoicesClient,
+  type JournalClient,
   type PaymentRunsClient,
   type ReconciliationsClient,
   type UploadsClient,
@@ -36,10 +40,16 @@ import type {
   Cycle,
   CycleListResponse,
   CycleStatus,
+  FileArtifact,
+  FileArtifactListResponse,
+  FileGenerateRequest,
+  HashChainVerifyResponse,
   InboxItem,
   Invoice,
   InvoiceListResponse,
   InvoiceStatus,
+  JournalEntry,
+  JournalEntryListResponse,
   PaymentRun,
   PaymentRunListResponse,
   PaymentRunStatus,
@@ -577,6 +587,80 @@ export function createMockReconciliationsClient(): ReconciliationsClient {
 
     async get(id: string): Promise<Reconciliation | null> {
       return recs.find((r) => r.id === id) ?? null;
+    },
+
+    async probeHealth() {
+      return { ok: true, latency_ms: 0 };
+    },
+  };
+}
+
+// ── Files mock ────────────────────────────────────────────────────────────
+
+export function createMockFilesClient(): FilesClient {
+  return {
+    name: "paysync.files" as const,
+    cachePolicies: PAYSYNC_FILES_CACHE_POLICIES,
+
+    async list(_req: { type?: string; limit?: number; cursor?: string }): Promise<FileArtifactListResponse> {
+      return { results: [], next_cursor: null, total: 0 };
+    },
+
+    async get(_id: string): Promise<FileArtifact | null> {
+      return null;
+    },
+
+    async generate(input: FileGenerateRequest): Promise<FileArtifact> {
+      const now = new Date().toISOString();
+      return {
+        id: "00000000-0000-0000-0000-000000000000",
+        tenant_id: "00000000-0000-0000-0000-000000000000",
+        kind: input.kind === "835" ? "x12_835" : "nacha",
+        source_batch_id: input.source_id,
+        source_payment_run_id: null,
+        sha256: "0".repeat(64),
+        file_size: 0,
+        generated_at: now,
+        generated_by: "00000000-0000-0000-0000-000000000000",
+        upload_id: null,
+        filename: `${input.kind}-${input.source_id}.txt`,
+        status: "ready",
+      };
+    },
+
+    async download(_id: string): Promise<Blob> {
+      return new Blob([]);
+    },
+
+    async probeHealth() {
+      return { ok: true, latency_ms: 0 };
+    },
+  };
+}
+
+// ── Journal mock ──────────────────────────────────────────────────────────
+
+export function createMockJournalClient(): JournalClient {
+  return {
+    name: "paysync.journal" as const,
+    cachePolicies: PAYSYNC_JOURNAL_CACHE_POLICIES,
+
+    async list(_req: { limit?: number; cursor?: string }): Promise<JournalEntryListResponse> {
+      return { results: [], next_cursor: null, total: 0 };
+    },
+
+    async get(_id: string): Promise<JournalEntry | null> {
+      return null;
+    },
+
+    async verifyChain(): Promise<HashChainVerifyResponse> {
+      return {
+        verified: true,
+        too_large: false,
+        job_id: null,
+        total_entries: 0,
+        broken_at: null,
+      };
     },
 
     async probeHealth() {
