@@ -60,3 +60,50 @@ export { JournalSurface } from "./surfaces/journal/index.js";
 export { ReportsSurface } from "./surfaces/reports/index.js";
 export { SetupSurface } from "./surfaces/setup/index.js";
 export { EchoSurface } from "./surfaces/echo/index.js";
+
+// Reports surface page components (mounted by portal/operator App Router)
+export { ReportsListPage } from "./surfaces/reports/ReportsListPage.js";
+export { CycleReportsPage, type CycleReportsPageProps } from "./surfaces/reports/CycleReportsPage.js";
+export {
+  JournalEntriesReportPage,
+  type JournalEntriesReportPageProps,
+} from "./surfaces/reports/JournalEntriesReportPage.js";
+export {
+  PeriodSummaryPage,
+  type PeriodSummaryPageProps,
+} from "./surfaces/reports/PeriodSummaryPage.js";
+
+// Setup surface page components (mounted by portal/operator App Router)
+export { SetupHomePage } from "./surfaces/setup/SetupHomePage.js";
+export {
+  EmailRecipientsPage,
+  type EmailRecipientsPageProps,
+  type EmailRecipient,
+} from "./surfaces/setup/EmailRecipientsPage.js";
+export {
+  EmailTemplatesPage,
+  type EmailTemplatesPageProps,
+  type EmailTemplate,
+} from "./surfaces/setup/EmailTemplatesPage.js";
+export {
+  ExportTemplatesPage,
+  type ExportTemplatesPageProps,
+  type ExportTemplate,
+  type ExportFormat,
+} from "./surfaces/setup/ExportTemplatesPage.js";
+export {
+  GlAccountMappingsPage,
+  type GlAccountMappingsPageProps,
+  type GlAccountMapping,
+} from "./surfaces/setup/GlAccountMappingsPage.js";
+export {
+  InvoiceSequencesPage,
+  type InvoiceSequencesPageProps,
+  type InvoiceSequence,
+} from "./surfaces/setup/InvoiceSequencesPage.js";
+export {
+  CycleSchedulesPage,
+  type CycleSchedulesPageProps,
+  type CycleSchedule,
+  type CycleFrequency,
+} from "./surfaces/setup/CycleSchedulesPage.js";
