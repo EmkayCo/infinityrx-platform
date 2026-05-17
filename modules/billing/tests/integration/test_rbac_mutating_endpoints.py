@@ -674,3 +674,88 @@ class TestPostInvoiceVoid:
         invoice_id = str(uuid.uuid4())
         resp = _client.post(f"/api/v1/billing/invoices/{invoice_id}/void", headers=_h(), json={"reason": "test"})
         assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# C1 -- Canonical error envelope on 403 responses
+# ---------------------------------------------------------------------------
+
+
+class TestCanonicalErrorEnvelope:
+    """C1: HTTPException 403/401/404 responses must use the canonical envelope.
+
+    Canonical shape (from .claude/rules/error-handling.md):
+      {"error": {"code": "<CODE>", "message": "<str>", "correlation_id": "<uuid>"}}
+
+    Previously, raise HTTPException(status_code=403, detail="...") returned
+    FastAPI's default {"detail": "..."} which the UI cannot parse.
+    """
+
+    def test_403_response_has_canonical_envelope(self, _client):
+        """Auditor hitting an Approver-only gate must get the canonical envelope."""
+        from src.main import app
+        _as(app, AUDITOR_USER)
+        resp = _client.post("/api/v1/billing/routing-rules", headers=_h(), json=_ROUTING_RULE_BODY)
+        assert resp.status_code == 403
+        body = resp.json()
+        assert "error" in body, f"missing 'error' key; got: {body}"
+        err = body["error"]
+        assert "code" in err, f"missing error.code; got: {err}"
+        assert "message" in err, f"missing error.message; got: {err}"
+        assert "correlation_id" in err, f"missing error.correlation_id; got: {err}"
+
+    def test_403_error_code_is_forbidden(self, _client):
+        """error.code for a 403 must be FORBIDDEN."""
+        from src.main import app
+        _as(app, AUDITOR_USER)
+        resp = _client.post("/api/v1/billing/routing-rules", headers=_h(), json=_ROUTING_RULE_BODY)
+        assert resp.status_code == 403
+        assert resp.json()["error"]["code"] == "FORBIDDEN"
+
+    def test_403_error_message_is_string(self, _client):
+        """error.message must be a non-empty string."""
+        from src.main import app
+        _as(app, AUDITOR_USER)
+        resp = _client.post("/api/v1/billing/routing-rules", headers=_h(), json=_ROUTING_RULE_BODY)
+        assert resp.status_code == 403
+        msg = resp.json()["error"]["message"]
+        assert isinstance(msg, str) and len(msg) > 0
+
+    def test_403_correlation_id_is_uuid(self, _client):
+        """error.correlation_id must be a valid UUID string."""
+        import uuid as _uuid
+        from src.main import app
+        _as(app, AUDITOR_USER)
+        resp = _client.post("/api/v1/billing/routing-rules", headers=_h(), json=_ROUTING_RULE_BODY)
+        assert resp.status_code == 403
+        cid = resp.json()["error"]["correlation_id"]
+        # Must parse as UUID without raising
+        _uuid.UUID(cid)
+
+    def test_403_has_cache_control_no_store(self, _client):
+        """403 responses must carry Cache-Control: no-store (prevents auth caching)."""
+        from src.main import app
+        _as(app, AUDITOR_USER)
+        resp = _client.post("/api/v1/billing/routing-rules", headers=_h(), json=_ROUTING_RULE_BODY)
+        assert resp.status_code == 403
+        assert resp.headers.get("cache-control") == "no-store"
+
+    def test_403_does_not_use_legacy_detail_key(self, _client):
+        """FastAPI's default {'detail': '...'} shape must NOT appear on 403."""
+        from src.main import app
+        _as(app, AUDITOR_USER)
+        resp = _client.post("/api/v1/billing/routing-rules", headers=_h(), json=_ROUTING_RULE_BODY)
+        assert resp.status_code == 403
+        assert "detail" not in resp.json(), "legacy FastAPI detail key must not appear"
+
+    def test_401_response_has_canonical_envelope(self, _client):
+        """Unauthenticated request must also get the canonical envelope."""
+        # Clear overrides so no user is injected
+        from src.main import app
+        app.dependency_overrides.clear()
+        resp = _client.post("/api/v1/billing/routing-rules", headers=_h(), json=_ROUTING_RULE_BODY)
+        assert resp.status_code == 401
+        body = resp.json()
+        assert "error" in body, f"missing 'error' key on 401; got: {body}"
+        assert body["error"]["code"] == "UNAUTHORIZED"
+        assert "correlation_id" in body["error"]

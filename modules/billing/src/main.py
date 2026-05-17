@@ -119,6 +119,50 @@ def create_app() -> FastAPI:
     app.add_middleware(RateLimitMiddleware, config=RateLimitConfig())
     app.add_middleware(SecurityHeadersMiddleware)
 
+    # C1: canonical error envelope per .claude/rules/error-handling.md.
+    # FastAPI's default HTTPException response is {"detail": "..."} which the
+    # paysync clients cannot parse. Map every HTTPException to the canonical
+    # {"error": {"code", "message", "correlation_id"}} envelope.
+    from fastapi import HTTPException, Request  # noqa: PLC0415
+    from fastapi.responses import JSONResponse  # noqa: PLC0415
+    import uuid as _uuid  # noqa: PLC0415
+
+    _STATUS_CODE_MAP = {
+        400: "BAD_REQUEST",
+        401: "UNAUTHORIZED",
+        403: "FORBIDDEN",
+        404: "NOT_FOUND",
+        409: "CONFLICT",
+        422: "VALIDATION_ERROR",
+        429: "RATE_LIMITED",
+    }
+
+    @app.exception_handler(HTTPException)
+    async def _canonical_http_exception_handler(request: Request, exc: HTTPException):
+        # If the route already returned a fully-canonical envelope (dict where
+        # "error" is itself a dict with code+message+correlation_id), passthrough
+        # unchanged. Detail shapes that merely contain a string-valued "error"
+        # key fall through to the canonical wrapper below.
+        if (
+            isinstance(exc.detail, dict)
+            and isinstance(exc.detail.get("error"), dict)
+            and "code" in exc.detail["error"]
+        ):
+            return JSONResponse(status_code=exc.status_code, content=exc.detail)
+        code = _STATUS_CODE_MAP.get(exc.status_code, "ERROR")
+        message = exc.detail if isinstance(exc.detail, str) else "Request failed"
+        body = {
+            "error": {
+                "code": code,
+                "message": message,
+                "correlation_id": str(_uuid.uuid4()),
+            }
+        }
+        headers: dict[str, str] | None = None
+        if exc.status_code in (401, 403):
+            headers = {"Cache-Control": "no-store"}
+        return JSONResponse(status_code=exc.status_code, content=body, headers=headers)
+
     app.include_router(router)
     app.include_router(uploads_router)
     app.include_router(inbox_router)
