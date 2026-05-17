@@ -231,6 +231,46 @@ describe("paysync contract — real factories (HTTP wired in Plan B)", () => {
     await c.close("id1");
     expect(captured[0]?.get("x-tenant-id")).toBe("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
   });
+
+  it("createRealUploadsClient.create sends full stream content when ReadableStream passed", async () => {
+    // P2: ReadableStream must be consumed into Blob — not replaced with new Blob([]).
+    const captured: { body: FormData | null }[] = [];
+    const csvContent = "ndc,npi,claim_id\n12345678901,1234567890,CLM-1";
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(csvContent));
+        controller.close();
+      },
+    });
+    const fakeFetch: typeof fetch = async (_input, init) => {
+      const body = init?.body instanceof FormData ? init.body : null;
+      captured.push({ body });
+      return new Response(JSON.stringify({
+        id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        tenant_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        filename: "test.csv",
+        content_sha256: "a".repeat(64),
+        status: "parsing",
+        claim_count: 0,
+        row_error_count: 0,
+        total_billed_amount: null,
+        uploaded_by_user_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+        uploaded_at: new Date().toISOString(),
+      }), { status: 201, headers: { "Content-Type": "application/json" } });
+    };
+    const c = createRealUploadsClient({
+      baseUrl: "http://x.test",
+      getAuthToken: async () => "tok",
+      fetch: fakeFetch,
+    });
+    await c.create({ filename: "test.csv", content: stream });
+    expect(captured.length).toBe(1);
+    const sentBlob = captured[0]?.body?.get("file") as File | Blob | null;
+    expect(sentBlob).not.toBeNull();
+    // The blob must contain the actual content, not be empty
+    const text = await (sentBlob as Blob).text();
+    expect(text).toBe(csvContent);
+  });
 });
 
 describe("paysync contract — cycles mock factory", () => {

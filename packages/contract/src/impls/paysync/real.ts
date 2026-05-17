@@ -117,7 +117,21 @@ export function createRealUploadsClient(config: ClientConfig): UploadsClient {
 
     async create(args: { readonly filename: string; readonly content: Blob | ReadableStream<Uint8Array> }): Promise<Upload> {
       const body = new FormData();
-      const blob = args.content instanceof Blob ? args.content : new Blob([]);
+      // P2-stream: ReadableStream must be consumed into a Blob before FormData.
+      // Passing a stream directly to new Blob([]) produces an empty Blob.
+      let blob: Blob;
+      if (args.content instanceof Blob) {
+        blob = args.content;
+      } else {
+        const reader = args.content.getReader();
+        const chunks: Uint8Array[] = [];
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) chunks.push(value);
+        }
+        blob = new Blob(chunks);
+      }
       body.append("file", blob, args.filename);
       // multipart — do NOT set Content-Type (browser/fetch sets it with boundary)
       const token = await config.getAuthToken();

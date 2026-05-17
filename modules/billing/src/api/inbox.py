@@ -105,7 +105,7 @@ async def get_inbox(
                 "kind": "cycle_pending_close",
                 "tenant_id": str(tenant_id),
                 "upload_id": None,
-                "rbac_required": "approver",
+                "rbac_required": "operator",
                 "created_at": now_iso,
                 "priority": "normal",
                 "payload": {"cycle_id": str(b.id), "status": b.status},
