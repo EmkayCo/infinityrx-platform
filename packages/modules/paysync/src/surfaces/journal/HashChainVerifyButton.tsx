@@ -60,7 +60,7 @@ export function HashChainVerifyButton({
 
   return (
     <div data-testid="hash-chain-verify-panel">
-      <RbacGate role={["operator", "approver", "auditor"]} currentRole={currentRole}>
+      <RbacGate role="auditor" currentRole={currentRole}>
         {button}
       </RbacGate>
 

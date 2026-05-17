@@ -193,6 +193,9 @@ async def list_journal_entries(
     return _no_store([_entry_to_dict(e) for e in entries])
 
 
+_AUDITOR_ROLE = "auditor"
+
+
 @router.post("/verify-chain")
 async def verify_chain(
     db: DBSession,
@@ -200,6 +203,8 @@ async def verify_chain(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> JSONResponse:
     """Synchronously verify the hash chain for the current tenant.
+
+    RBAC: Auditor only.  Operators and approvers receive 403.
 
     Returns:
       {
@@ -213,6 +218,12 @@ async def verify_chain(
     If total_entries > PAYSYNC_HASH_CHAIN_SYNC_LIMIT, returns verified=null,
     too_large=true without iterating.
     """
+    if not current_user.has_role(_AUDITOR_ROLE):
+        raise HTTPException(
+            status_code=403,
+            detail="Only auditors can run hash-chain verification",
+        )
+
     limit = _sync_limit()
 
     count_result = db.execute(

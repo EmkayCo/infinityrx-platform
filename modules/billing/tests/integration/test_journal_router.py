@@ -423,8 +423,8 @@ class TestVerifyChain:
         chain_user = MagicMock(
             id=uuid.uuid4(),
             tenant_id=uuid.UUID(chain_tenant),
-            roles=("approver",),
-            has_role=lambda r: r == "approver",
+            roles=("auditor",),
+            has_role=lambda r: r == "auditor",
         )
 
         session = _session_factory()
@@ -455,8 +455,8 @@ class TestVerifyChain:
         chain_user = MagicMock(
             id=uuid.uuid4(),
             tenant_id=uuid.UUID(chain_tenant),
-            roles=("approver",),
-            has_role=lambda r: r == "approver",
+            roles=("auditor",),
+            has_role=lambda r: r == "auditor",
         )
 
         session = _session_factory()
@@ -489,8 +489,8 @@ class TestVerifyChain:
         chain_user = MagicMock(
             id=uuid.uuid4(),
             tenant_id=uuid.UUID(chain_tenant),
-            roles=("approver",),
-            has_role=lambda r: r == "approver",
+            roles=("auditor",),
+            has_role=lambda r: r == "auditor",
         )
 
         session = _session_factory()
@@ -520,8 +520,8 @@ class TestVerifyChain:
         empty_user = MagicMock(
             id=uuid.uuid4(),
             tenant_id=uuid.UUID(empty_tenant),
-            roles=("approver",),
-            has_role=lambda r: r == "approver",
+            roles=("auditor",),
+            has_role=lambda r: r == "auditor",
         )
 
         app.dependency_overrides[get_current_user] = lambda: empty_user
@@ -534,3 +534,57 @@ class TestVerifyChain:
         assert body["verified"] is True
         assert body["total_entries"] == 0
         assert body["broken_at"] is None
+
+
+# ---------------------------------------------------------------------------
+# B2: verify-chain RBAC -- auditor only
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyChainRbac:
+    def _make_user(self, role: str, tenant_id: str) -> MagicMock:
+        return MagicMock(
+            id=uuid.uuid4(),
+            tenant_id=uuid.UUID(tenant_id),
+            roles=(role,),
+            has_role=lambda r, _role=role: r == _role,
+        )
+
+    def test_operator_receives_403(self, _client):
+        """operator role must not run verify-chain."""
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        t = str(uuid.uuid4())
+        app.dependency_overrides[get_current_user] = lambda: self._make_user("operator", t)
+        resp = _client.post(
+            "/api/v1/billing/journal/verify-chain",
+            headers={"X-Tenant-Id": t},
+        )
+        assert resp.status_code == 403
+
+    def test_approver_receives_403(self, _client):
+        """approver role must not run verify-chain."""
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        t = str(uuid.uuid4())
+        app.dependency_overrides[get_current_user] = lambda: self._make_user("approver", t)
+        resp = _client.post(
+            "/api/v1/billing/journal/verify-chain",
+            headers={"X-Tenant-Id": t},
+        )
+        assert resp.status_code == 403
+
+    def test_auditor_receives_2xx(self, _client):
+        """auditor role must be allowed through."""
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        t = str(uuid.uuid4())
+        app.dependency_overrides[get_current_user] = lambda: self._make_user("auditor", t)
+        resp = _client.post(
+            "/api/v1/billing/journal/verify-chain",
+            headers={"X-Tenant-Id": t},
+        )
+        assert resp.status_code == 200
