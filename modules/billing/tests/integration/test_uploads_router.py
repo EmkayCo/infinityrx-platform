@@ -606,3 +606,72 @@ class TestSupersede:
         )
         # 201 = success; 409 = dedup (same SHA if content identical); anything else is a bug
         assert resp2.status_code in (201, 409), f"unexpected: {resp2.status_code} {resp2.text}"
+
+
+# -- B2: Header tenant vs JWT tenant mismatch -> 403 -----------------------
+
+
+class TestTenantHeaderAuthorizationB2:
+    """B2 fix: X-Tenant-Id header must be checked against JWT tenant_id.
+
+    A Tenant-A JWT presenting X-Tenant-Id: <Tenant-B> must receive 403
+    on every endpoint, not silently query Tenant-B data.
+    """
+
+    def test_post_upload_wrong_tenant_header_returns_403(self, _client):
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        # JWT is for TENANT_A but header claims TENANT_B
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        resp = _client.post(
+            "/api/v1/billing/uploads",
+            headers={"X-Tenant-Id": TENANT_B},
+            files=_multipart_file(_csv("CLM-B2-POST-1")),
+        )
+        assert resp.status_code == 403
+
+    def test_get_uploads_wrong_tenant_header_returns_403(self, _client):
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        resp = _client.get(
+            "/api/v1/billing/uploads",
+            headers={"X-Tenant-Id": TENANT_B},
+        )
+        assert resp.status_code == 403
+
+    def test_get_upload_by_id_wrong_tenant_header_returns_403(self, _client):
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        resp = _client.get(
+            f"/api/v1/billing/uploads/{uuid.uuid4()}",
+            headers={"X-Tenant-Id": TENANT_B},
+        )
+        assert resp.status_code == 403
+
+    def test_get_upload_claims_wrong_tenant_header_returns_403(self, _client):
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        resp = _client.get(
+            f"/api/v1/billing/uploads/{uuid.uuid4()}/claims",
+            headers={"X-Tenant-Id": TENANT_B},
+        )
+        assert resp.status_code == 403
+
+    def test_supersede_wrong_tenant_header_returns_403(self, _client):
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+        resp = _client.post(
+            f"/api/v1/billing/uploads/{uuid.uuid4()}/supersede",
+            headers={"X-Tenant-Id": TENANT_B},
+            files=_multipart_file(_csv("CLM-B2-SUP-1")),
+        )
+        assert resp.status_code == 403
