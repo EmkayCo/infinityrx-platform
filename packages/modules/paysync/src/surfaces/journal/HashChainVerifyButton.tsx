@@ -10,7 +10,9 @@
 //   too-large  -- amber badge (verified=null, too_large=true) + link to job runner
 //
 // Per spec §8: does NOT auto-repair on break. No repair button is ever rendered.
-// All roles can view the result; the button is accessible to any-role per plan.
+// Per Plan D R1 B2 fix: verify-chain is auditor-only (matches backend RBAC at
+// modules/billing/src/api/journal.py). Non-auditor roles see the RbacGate
+// denied state and cannot trigger verification.
 
 import { useState, type ReactElement } from "react";
 import type { HashChainVerifyResponse } from "@infinityrx/contract";

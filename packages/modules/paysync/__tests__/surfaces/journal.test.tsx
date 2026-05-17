@@ -213,16 +213,16 @@ describe("HashChainVerifyButton", () => {
     expect(screen.getByTestId("rbac-gate-allowed")).toBeTruthy();
   });
 
-  it("renders RbacGate allowed for Approver", () => {
+  it("renders RbacGate denied for Approver (verify-chain is auditor-only per B2)", () => {
     const onVerify = vi.fn().mockResolvedValue(makeVerifyResponse());
     render(<HashChainVerifyButton currentRole="approver" onVerify={onVerify} />);
-    expect(screen.getByTestId("rbac-gate-allowed")).toBeTruthy();
+    expect(screen.getByTestId("rbac-gate-denied")).toBeTruthy();
   });
 
-  it("renders RbacGate allowed for Operator", () => {
+  it("renders RbacGate denied for Operator (verify-chain is auditor-only per B2)", () => {
     const onVerify = vi.fn().mockResolvedValue(makeVerifyResponse());
     render(<HashChainVerifyButton currentRole="operator" onVerify={onVerify} />);
-    expect(screen.getByTestId("rbac-gate-allowed")).toBeTruthy();
+    expect(screen.getByTestId("rbac-gate-denied")).toBeTruthy();
   });
 
   it("shows verifying spinner while in flight", async () => {

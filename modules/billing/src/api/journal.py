@@ -7,7 +7,8 @@ Endpoints:
 
 Security:
   - All endpoints require a valid JWT (401 without token).
-  - All roles (auditor, operator, approver) may read and verify.
+  - GET list/detail: all roles (auditor, operator, approver) may read.
+  - POST verify-chain: auditor-only (per Plan D R1 B2 fix and spec §238).
   - Cache-Control: no-store on every response (journal entries are financial data).
   - PHI audit emitted on every list/detail response.
 """
