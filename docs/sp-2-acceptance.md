@@ -4,7 +4,7 @@
 **Sprint:** SP-2  
 **Prepared by:** SP-2 Plan E execution agent (a7d01b650013cd863)  
 **Date:** 2026-05-18  
-**Verdict:** READY FOR CODEX GATE-CLOSE REVIEW (R2 — after addressing codex R1 NO-GO)  
+**Verdict:** READY FOR CODEX GATE-CLOSE REVIEW (R3 — after addressing codex R2 NO-GO)  
 
 ---
 
@@ -19,14 +19,22 @@ integrated into the `packages/modules/directories` TypeScript package and mounte
 failures, zero skips. All five plans (A–E) complete and gate-reviewed.
 
 **Codex R1 NO-GO addressed** (commit 85b94c23):
-- BLOCK 1: E2E prescriber/drug search tests strengthened — now assert BFF response shape
-  (NPI, NDC, dataset key, display name), not just input value or body visibility. Quality
-  dashboard UI test now asserts `data-testid="quality-dashboard-panel"` and
-  `data-source="nppes"` row. Audit log UI test now asserts `data-testid="audit-log-table"`.
+- BLOCK 1 (partial): E2E prescriber/drug search tests strengthened — now assert BFF response
+  shape (NPI, NDC, dataset key, display name), not just input value or body visibility.
 - BLOCK 2: Added 6 missing fixture files (`pricing-medicaid-bins.json`, `pricing-bpg.json`,
   `exclusions-oig.json`, `exclusions-state.json`, `cross-links.json`, `datasets-meta.json`)
   to bring fixture count to 18 per DatasetKeySchema. Added 16 fixture validation tests.
 - BLOCK 3: Acceptance document updated to match actual implementation.
+
+**Codex R2 NO-GO addressed** (this commit):
+- BLOCK 1 resolved: Quality dashboard UI test was navigating to `/analytics/data-quality`
+  (DataIQ analytics page — does NOT mount `QualityDashboardPanel`) and asserting a
+  `data-testid` that cannot exist there. Audit log UI test was navigating to
+  `/admin/audit-log` (core-platform audit page with only `aria-label`, not
+  `data-testid="audit-log-table"`). Both tests replaced with honest BFF auth-guard
+  contract tests (`page.request.get` → 401 → structured error shape). Component-level
+  rendering is tested exhaustively by RTL unit tests:
+  `QualityDashboardPanel.test.tsx` (9 tests) and `AuditLogPage.test.tsx` (8 tests).
 
 ---
 
@@ -194,18 +202,27 @@ No real PHI. All data is synthetic.
 All tests use `page.route("**/api/directories/**", route => route.fulfill({...}))` — no live backend required.
 
 Coverage:
-- Prescriber search → result list render
-- Drug NDC result display
-- Cross-dataset results (prescriber + drug in same response)
-- `is_partial=true` banner display
-- 401 auth rejection → redirect
-- Short-query → empty state
-- Quality dashboard BFF endpoint response shape
-- Ingestion status display + trigger button + SSRF guard at API layer
-- Audit log pagination (page 1 → page 2)
-- SAM exclusion cross-link: NPI 8084009009 → SAM-GUID-00001
-- Cross-tenant reference data isolation
-- 3 page render smoke tests (prescribers page, drugs page, ingestion console)
+- Prescriber BFF contract: `?q=Jane` → NPI 8084000008, dataset=nppes, display contains "Jane Smith"
+- Drug BFF contract: `?q=lipitor` → NDC 00071015523, dataset=fda_ndc, display contains "Atorvastatin"
+- Cross-dataset results: 3 results (nppes + fda_ndc + ncpdp) in single response
+- `is_partial=true` shape: timed_out_datasets contains "nppes" when prescriber backend down
+- Search 401: unauthenticated request → structured error `{error.code: "UNAUTHORIZED"}`
+- Short-query guard: 1-char query → empty results, `is_partial=false`
+- Quality BFF contract: datasets array, nppes healthy + 9.4M records, fda_ndc error + alert
+- Quality 401: unauthenticated request → structured error `{error.code: "UNAUTHORIZED"}`
+- Ingestion status contract: completed/failed/running per source, records_inserted, next_run_at
+- Ingestion trigger 202: `run_id` + `status: "queued"` in response
+- Ingestion SSRF guard: bpg trigger → 404, `SOURCE_NOT_FOUND` error code
+- Audit BFF contract: paginated items with action, actor_email, source fields
+- Audit 401: unauthenticated request → structured error `{error.code: "UNAUTHORIZED"}`
+- SAM cross-link: NPI 8084009009 → dataset=nppes; exclusion-check → is_excluded=true, SAM-GUID-00001
+- Cross-tenant reference data parity: identical drug results for tenant A and tenant B tokens
+- 3 page render smoke tests: prescribers page `data-testid="prescribers-list-page"` visible, drugs page body visible, pharmacies page body visible
+
+Note: `QualityDashboardPanel` and `AuditLogPage` component rendering is verified by RTL unit
+tests (9 + 8 tests respectively), not by Playwright navigation. The components are not
+currently mounted on portal routes that the E2E layer can navigate to independently; their
+BFF wiring is confirmed via API-layer assertions.
 
 **E-6: QA harness additions**
 
