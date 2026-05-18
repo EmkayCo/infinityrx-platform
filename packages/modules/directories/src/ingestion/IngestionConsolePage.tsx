@@ -13,7 +13,6 @@ import { TriggerRefreshButton } from "./TriggerRefreshButton.js";
 import { RunHistoryDrawer } from "./RunHistoryDrawer.js";
 import { RunProgressBar } from "./RunProgressBar.js";
 import { formatScheduleLabel, SOURCE_CLUSTER } from "./scheduleLabels.js";
-import { TRIGGERABLE_SOURCES } from "../bff/ingest.js";
 
 // ---------------------------------------------------------------------------
 // All source rows shown in the console table (in display order).

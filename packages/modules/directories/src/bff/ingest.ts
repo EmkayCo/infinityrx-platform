@@ -189,9 +189,11 @@ export async function getHistory(
   const sourceGuard = _guardSource(source, correlationId);
   if (sourceGuard) return sourceGuard;
 
-  const limit = req.nextUrl.searchParams.get("limit") ?? "50";
+  const rawLimit = req.nextUrl.searchParams.get("limit") ?? "50";
+  // Validate limit is a positive integer to prevent query injection.
+  const limit = /^\d{1,6}$/.test(rawLimit) ? rawLimit : "50";
   const backendResp = await fetch(
-    `${INGESTION_BASE}/api/v1/data-ingestion/${source}/history?limit=${limit}`,
+    `${INGESTION_BASE}/api/v1/data-ingestion/${source}/history?limit=${encodeURIComponent(limit)}`,
     {
       headers: { "x-correlation-id": correlationId },
     },
@@ -220,7 +222,7 @@ export async function getRunDetail(
   if (authResult instanceof NextResponse) return authResult;
 
   const backendResp = await fetch(
-    `${INGESTION_BASE}/api/v1/data-ingestion/runs/${runId}`,
+    `${INGESTION_BASE}/api/v1/data-ingestion/runs/${encodeURIComponent(runId)}`,
     {
       headers: { "x-correlation-id": correlationId },
     },
