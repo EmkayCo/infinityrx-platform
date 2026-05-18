@@ -15,3 +15,6 @@ export {
   DISMISSIBLE_SOURCES,
 } from "./quality.js";
 export { getAuditLog } from "./audit.js";
+// pharmacies GET aliased to avoid name collision with search GET in barrel.
+export { GET as getPharmacies } from "./pharmacies.js";
+export { getExclusionCheck } from "./prescribers.js";
