@@ -80,10 +80,39 @@ for ingestion requests. Adjust the BFF filter accordingly.
 
 ### D-D1 — `DatasetQuality` TypeScript type (add to `src/search/schemas.ts`)
 
+/**
+ * IngestionSourceKeySchema — superset of DatasetKeySchema.
+ *
+ * The quality dashboard covers ALL ingestion schedule rows, which includes
+ * nppes_monthly and nppes_deactivation (scheduler sub-modes not in the 18-key
+ * browse enum) and fdb (B9-blocked, no browse surface yet). These keys are valid
+ * SourceStatus.source values returned by GET /api/v1/data-ingestion/status but
+ * are NOT in DatasetKeySchema (which only covers browse-cluster source keys).
+ *
+ * DatasetKeySchema (18 keys) is used for: search results, browse cluster items.
+ * IngestionSourceKeySchema (21 keys) is used for: quality dashboard, ingestion console.
+ *
+ * CORRECTION (codex r2 finding): DatasetQualitySchema.source originally used
+ * DatasetKeySchema. This would cause Zod parse failures when the BFF returns
+ * quality rows for nppes_monthly, nppes_deactivation, or fdb. Fixed here.
+ */
+export const IngestionSourceKeySchema = z.enum([
+  // All 18 browse-cluster keys:
+  "nppes", "ncpdp", "fda_ndc", "fda_orange_book", "fda_purple_book",
+  "fda_drug_shortages", "fda_rems", "rxnorm", "hcpcs", "icd10_cm",
+  "cms_asp", "cms_nadac", "state_medicaid_bins",
+  "cms_opt_out", "ofac_sdn", "sam_exclusions", "oig_leie", "dea_registrations",
+  // Ingestion-only keys (scheduler sub-modes / B9-blocked — not browse surfaces):
+  "nppes_monthly",      // scheduler sub-mode of nppes
+  "nppes_deactivation", // scheduler sub-mode of nppes
+  "fdb",                // B9-blocked; shown in quality dashboard with b9_blocked=true
+]);
+export type IngestionSourceKey = z.infer<typeof IngestionSourceKeySchema>;
+
 ```typescript
-// Add to src/search/schemas.ts
+// Add to src/search/schemas.ts (after IngestionSourceKeySchema definition above)
 export const DatasetQualitySchema = z.object({
-  source: DatasetKeySchema,
+  source: IngestionSourceKeySchema,             // 21-key superset, not 18-key DatasetKeySchema
   last_run_at: z.string().nullable(),           // ISO datetime (RunSummary.started_at)
   last_success_at: z.string().nullable(),        // SourceStatus.last_success_at
   last_run_status: z.enum([
@@ -91,7 +120,7 @@ export const DatasetQualitySchema = z.object({
   ]).nullable(),
   records_inserted: z.number().nullable(),
   records_errored: z.number().int().nullable(),
-  cron_expression: z.string().nullable(),        // null = manual-only
+  cron_expression: z.string().nullable(),        // null = manual-only (ncpdp)
   next_run_at: z.string().nullable(),
   cluster: z.enum(["prescribers","pharmacies","drugs","codes","pricing","exclusions"]),
   is_dismissed: z.boolean().default(false),      // from Redis alert-dismiss key
