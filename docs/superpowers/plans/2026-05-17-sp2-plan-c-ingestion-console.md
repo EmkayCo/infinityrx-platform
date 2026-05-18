@@ -432,30 +432,37 @@ that proxies directly to `GET /api/v1/data-ingestion/status` (routes.py:260).
 The `SourceStatus` schema from `shared/data_ingestion/api/schemas.py`:
 
 ```typescript
-// Mirrored from shared/data_ingestion/api/schemas.py (execution-time: verify field names)
+// Mirrored from shared/data_ingestion/api/schemas.py (verified against HEAD)
+// RunSummary fields confirmed at schemas.py:47-62; SourceStatus at schemas.py:81-89.
 interface SourceStatus {
   source: string;
-  schedule: {
-    cron_expression: string | null;
-    enabled: boolean;
-    next_run_at: string | null;
-  } | null;
+  cron_expression: string | null;  // top-level on SourceStatus, NOT nested in schedule
+  enabled: boolean;
+  last_success_at: string | null;
+  next_run_at: string | null;
   last_run: {
     id: string;
+    source: string;
+    run_type: string;
     status: "running" | "completed" | "completed_core" | "failed" | "skipped_unchanged";
-    started_at: string;
-    finished_at: string | null;
+    records_processed: number;
     records_inserted: number;
     records_updated: number;
+    records_skipped: number;
     records_errored: number;
-    records_in_source: number | null;
+    started_at: string;
+    completed_at: string | null;   // NOT "finished_at" — verified: schemas.py:60
+    duration_seconds: number | null;
     error_message: string | null;
   } | null;
 }
 ```
 
-**Execution-time verification:** `grep -n "class SourceStatus\|class RunDetail" shared/data_ingestion/api/schemas.py`
-to confirm field names before implementing frontend TypeScript types.
+**CORRECTION (codex r1 BLOCK):** The original interface had `finished_at` — this field does NOT
+exist. The actual field is `completed_at` (confirmed at `shared/data_ingestion/api/schemas.py:60`).
+The SourceStatus structure was also corrected: `cron_expression`, `enabled`, `last_success_at`,
+and `next_run_at` are top-level fields on SourceStatus, not nested in a `schedule` sub-object.
+Implementing agents MUST use `completed_at`.
 
 ---
 
