@@ -1,0 +1,92 @@
+[
+  {
+    "fdb_drug_id": "FDB-MOCK-0001",
+    "generic_name": "atorvastatin calcium",
+    "brand_name": "Lipitor",
+    "interaction_count": 42,
+    "contraindication_count": 3,
+    "_mock": true,
+    "b9_blocked": true
+  },
+  {
+    "fdb_drug_id": "FDB-MOCK-0002",
+    "generic_name": "metformin hydrochloride",
+    "brand_name": "Glucophage",
+    "interaction_count": 18,
+    "contraindication_count": 2,
+    "_mock": true,
+    "b9_blocked": true
+  },
+  {
+    "fdb_drug_id": "FDB-MOCK-0003",
+    "generic_name": "levothyroxine sodium",
+    "brand_name": "Synthroid",
+    "interaction_count": 31,
+    "contraindication_count": 1,
+    "_mock": true,
+    "b9_blocked": true
+  },
+  {
+    "fdb_drug_id": "FDB-MOCK-0004",
+    "generic_name": "albuterol sulfate",
+    "brand_name": "Ventolin HFA",
+    "interaction_count": 9,
+    "contraindication_count": 0,
+    "_mock": true,
+    "b9_blocked": true
+  },
+  {
+    "fdb_drug_id": "FDB-MOCK-0005",
+    "generic_name": "rosuvastatin calcium",
+    "brand_name": "Crestor",
+    "interaction_count": 38,
+    "contraindication_count": 2,
+    "_mock": true,
+    "b9_blocked": true
+  },
+  {
+    "fdb_drug_id": "FDB-MOCK-0006",
+    "generic_name": "sacubitril/valsartan",
+    "brand_name": "Entresto",
+    "interaction_count": 24,
+    "contraindication_count": 4,
+    "_mock": true,
+    "b9_blocked": true
+  },
+  {
+    "fdb_drug_id": "FDB-MOCK-0007",
+    "generic_name": "insulin lispro",
+    "brand_name": "Humalog",
+    "interaction_count": 12,
+    "contraindication_count": 1,
+    "_mock": true,
+    "b9_blocked": true
+  },
+  {
+    "fdb_drug_id": "FDB-MOCK-0008",
+    "generic_name": "rivaroxaban",
+    "brand_name": "Xarelto",
+    "interaction_count": 47,
+    "contraindication_count": 6,
+    "_mock": true,
+    "b9_blocked": true
+  },
+  {
+    "fdb_drug_id": "FDB-MOCK-0009",
+    "generic_name": "lisinopril",
+    "brand_name": "Prinivil",
+    "interaction_count": 22,
+    "contraindication_count": 2,
+    "_mock": true,
+    "b9_blocked": true
+  },
+  {
+    "fdb_drug_id": "FDB-MOCK-0010",
+    "generic_name": "amlodipine besylate",
+    "brand_name": "Norvasc",
+    "interaction_count": 15,
+    "contraindication_count": 1,
+    "_mock": true,
+    "b9_blocked": true
+  }
+]

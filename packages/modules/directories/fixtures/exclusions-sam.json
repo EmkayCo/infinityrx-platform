@@ -1,0 +1,58 @@
+[
+  {
+    "exclusion_type": "INELIGIBLE",
+    "entity_name": "ABC MEDICAL SUPPLY CO",
+    "entity_npi": "8084009009",
+    "exclusion_date": "2023-06-01",
+    "reinstatement_date": null,
+    "ctcode": "Z4",
+    "agency": "HHS-OIG",
+    "sam_guid": "SAM-GUID-00001",
+    "_note": "entity_npi matches fixture prescriber NPI 8084009009 (Thomas Anderson) for cross-link E2E test",
+    "_fixture": true
+  },
+  {
+    "exclusion_type": "INELIGIBLE",
+    "entity_name": "GLOBAL PHARMA DISTRIBUTORS INC",
+    "entity_npi": null,
+    "exclusion_date": "2022-09-15",
+    "reinstatement_date": null,
+    "ctcode": "Z5",
+    "agency": "HHS-OIG",
+    "sam_guid": "SAM-GUID-00002",
+    "_fixture": true
+  },
+  {
+    "exclusion_type": "CONVICTION",
+    "entity_name": "ALLIED HEALTHCARE NETWORK",
+    "entity_npi": null,
+    "exclusion_date": "2021-03-20",
+    "reinstatement_date": null,
+    "ctcode": "1128A",
+    "agency": "USDA",
+    "sam_guid": "SAM-GUID-00003",
+    "_fixture": true
+  },
+  {
+    "exclusion_type": "INELIGIBLE",
+    "entity_name": "PRECISION BILLING CONSULTANTS",
+    "entity_npi": null,
+    "exclusion_date": "2023-11-10",
+    "reinstatement_date": null,
+    "ctcode": "Z4",
+    "agency": "HHS-OIG",
+    "sam_guid": "SAM-GUID-00004",
+    "_fixture": true
+  },
+  {
+    "exclusion_type": "CONVICTION",
+    "entity_name": "MIDWEST PHARMACY ASSOCIATES LLC",
+    "entity_npi": null,
+    "exclusion_date": "2020-07-01",
+    "reinstatement_date": "2025-07-01",
+    "ctcode": "1128B",
+    "agency": "DOJ",
+    "sam_guid": "SAM-GUID-00005",
+    "_fixture": true
+  }
+]

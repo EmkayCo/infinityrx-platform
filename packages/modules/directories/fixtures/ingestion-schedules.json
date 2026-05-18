@@ -1,0 +1,23 @@
+[
+  { "source": "nppes",               "cron_expression": "0 3 * * SUN",    "enabled": true,  "run_type": "full"        },
+  { "source": "nppes_monthly",        "cron_expression": "0 3 1 * *",      "enabled": true,  "run_type": "incremental" },
+  { "source": "nppes_deactivation",   "cron_expression": "0 4 * * MON",    "enabled": true,  "run_type": "full"        },
+  { "source": "ncpdp",                "cron_expression": null,             "enabled": false, "run_type": "manual_only"  },
+  { "source": "fda_ndc",              "cron_expression": "0 2 * * WED",    "enabled": true,  "run_type": "full"        },
+  { "source": "fda_orange_book",      "cron_expression": "0 2 1 * *",      "enabled": true,  "run_type": "full"        },
+  { "source": "fda_purple_book",      "cron_expression": "0 2 15 * *",     "enabled": true,  "run_type": "full"        },
+  { "source": "fda_drug_shortages",   "cron_expression": "0 6 * * *",      "enabled": true,  "run_type": "full"        },
+  { "source": "fda_rems",             "cron_expression": "0 5 * * MON",    "enabled": true,  "run_type": "full"        },
+  { "source": "rxnorm",               "cron_expression": "0 3 1 * *",      "enabled": true,  "run_type": "full"        },
+  { "source": "fdb",                  "cron_expression": null,             "enabled": false, "run_type": "b9_pending"   },
+  { "source": "hcpcs",                "cron_expression": "0 1 * * MON",    "enabled": true,  "run_type": "full"        },
+  { "source": "icd10_cm",             "cron_expression": "0 1 1 10 *",     "enabled": true,  "run_type": "full"        },
+  { "source": "cms_asp",              "cron_expression": "0 2 1 1,4,7,10 *", "enabled": true, "run_type": "full"       },
+  { "source": "cms_nadac",            "cron_expression": "0 2 * * WED",    "enabled": true,  "run_type": "full"        },
+  { "source": "state_medicaid_bins",  "cron_expression": "0 3 1 * *",      "enabled": true,  "run_type": "full"        },
+  { "source": "cms_opt_out",          "cron_expression": "0 4 * * MON",    "enabled": true,  "run_type": "full"        },
+  { "source": "ofac_sdn",             "cron_expression": "0 0 * * *",      "enabled": true,  "run_type": "full"        },
+  { "source": "sam_exclusions",       "cron_expression": "0 0 * * *",      "enabled": true,  "run_type": "full"        },
+  { "source": "oig_leie",             "cron_expression": "0 0 * * MON",    "enabled": true,  "run_type": "full"        },
+  { "source": "dea_registrations",    "cron_expression": "0 3 1 * *",      "enabled": true,  "run_type": "full"        }
+]

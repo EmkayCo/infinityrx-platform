@@ -11,7 +11,7 @@ export interface ProvenanceBadgeProps {
 
 export function ProvenanceBadge({ sourceKey, runId, sourceDate, recordCount }: ProvenanceBadgeProps) {
   return (
-    <span className="provenance-badge">
+    <span className="provenance-badge" data-testid="provenance-badge">
       <span className="provenance-badge__source">{"Source: "}{sourceKey}</span>
       {sourceDate && (
         <span className="provenance-badge__date">{" | Loaded: "}{sourceDate}</span>

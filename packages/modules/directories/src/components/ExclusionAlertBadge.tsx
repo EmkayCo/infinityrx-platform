@@ -26,6 +26,7 @@ export function ExclusionAlertBadge({ npi, entityName, exclusionSources }: Exclu
   return (
     <a
       className="exclusion-alert-badge"
+      data-testid="exclusion-alert-badge"
       href={href}
       title={`Found in: ${exclusionSources.join(", ")}`}
       aria-label={`Exclusion alert: ${label} — ${exclusionSources.join(", ")}`}

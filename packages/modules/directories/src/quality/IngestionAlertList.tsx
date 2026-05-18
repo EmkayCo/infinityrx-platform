@@ -91,6 +91,7 @@ export function IngestionAlertList({
           <li
             key={alert.source}
             className={`ingestion-alert-list__item${alert.is_dismissed ? " ingestion-alert-list__item--dismissed" : ""}`}
+            data-testid={`ingestion-alert-${alert.source}`}
             data-source={alert.source}
           >
             <div className="ingestion-alert-list__source">

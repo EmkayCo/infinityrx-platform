@@ -34,7 +34,7 @@ export function FreshnessChip({ sourceKey, lastRunAt, className }: FreshnessChip
   const chipClass = [COLOR_CLASSES[color], className].filter(Boolean).join(" ");
 
   return (
-    <span className={chipClass} title={`${sourceKey}: last loaded ${ageLabel}`}>
+    <span className={chipClass} data-testid="freshness-chip" title={`${sourceKey}: last loaded ${ageLabel}`}>
       <span className="freshness-chip__dot" aria-hidden="true" />
       <span className="freshness-chip__source">{sourceKey}</span>
       {lastRunAt && (

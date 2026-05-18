@@ -68,7 +68,7 @@ export function QualityDashboardPanel({
   const sorted = sortByStaleness(data.datasets);
 
   return (
-    <div className="quality-dashboard-panel">
+    <div className="quality-dashboard-panel" data-testid="quality-dashboard-panel">
       {data.is_partial && (
         <p className="quality-dashboard-panel__partial-banner">
           Some backend services were unreachable — data may be incomplete.

@@ -1,0 +1,47 @@
+[
+  {
+    "sdn_type": "SDN",
+    "entity_name": "GLOBAL TRADING SOLUTIONS LLC",
+    "program": "IRAN",
+    "list_date": "2022-03-15",
+    "entry_id": "OFAC-SDN-00001",
+    "remarks": "Sanctioned for activities related to IRAN program",
+    "_fixture": true
+  },
+  {
+    "sdn_type": "SDN",
+    "entity_name": "NORTHWEST SUPPLY CORP",
+    "program": "DPRK",
+    "list_date": "2021-07-20",
+    "entry_id": "OFAC-SDN-00002",
+    "remarks": "Sanctioned for activities related to DPRK program",
+    "_fixture": true
+  },
+  {
+    "sdn_type": "SDN",
+    "entity_name": "EASTERN DISTRIBUTION GROUP",
+    "program": "RUSSIA-EO14024",
+    "list_date": "2022-08-10",
+    "entry_id": "OFAC-SDN-00003",
+    "remarks": "Sanctioned under Executive Order 14024",
+    "_fixture": true
+  },
+  {
+    "sdn_type": "SDN",
+    "entity_name": "PINNACLE MEDICAL SUPPLIES LLC",
+    "program": "SDGT",
+    "list_date": "2023-01-05",
+    "entry_id": "OFAC-SDN-00004",
+    "remarks": "Sanctioned for global terrorism activities",
+    "_fixture": true
+  },
+  {
+    "sdn_type": "SDN",
+    "entity_name": "MERIDIAN HEALTHCARE VENTURES",
+    "program": "VENEZUELA-EO13850",
+    "list_date": "2021-11-30",
+    "entry_id": "OFAC-SDN-00005",
+    "remarks": "Sanctioned under Executive Order 13850",
+    "_fixture": true
+  }
+]

@@ -64,6 +64,7 @@ export function DismissAlertAction({
     <button
       type="button"
       className="dismiss-alert-action__button"
+      data-testid="dismiss-alert-btn"
       onClick={handleDismiss}
       disabled={state === "loading"}
       aria-label={`Dismiss alert for ${source}`}

@@ -113,7 +113,7 @@ export function AuditLogPage({
 
   return (
     <div className="audit-log-page">
-      <table className="audit-log-page__table" aria-label="Ingestion audit log">
+      <table className="audit-log-page__table" data-testid="audit-log-table" aria-label="Ingestion audit log">
         <thead>
           <tr>
             <th scope="col">Timestamp</th>

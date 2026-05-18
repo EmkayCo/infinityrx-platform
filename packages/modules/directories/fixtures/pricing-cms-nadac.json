@@ -1,0 +1,42 @@
+[
+  {
+    "ndc11": "00093314956",
+    "drug_name": "metformin HCl 500 mg tablet",
+    "nadac_per_unit": "0.01785",
+    "effective_date": "2026-01-08",
+    "classification": "Generic",
+    "_fixture": true
+  },
+  {
+    "ndc11": "00378180010",
+    "drug_name": "amlodipine besylate 5 mg tablet",
+    "nadac_per_unit": "0.02314",
+    "effective_date": "2026-01-08",
+    "classification": "Generic",
+    "_fixture": true
+  },
+  {
+    "ndc11": "00904584560",
+    "drug_name": "lisinopril 10 mg tablet",
+    "nadac_per_unit": "0.01622",
+    "effective_date": "2026-01-08",
+    "classification": "Generic",
+    "_fixture": true
+  },
+  {
+    "ndc11": "00310012330",
+    "drug_name": "levothyroxine sodium 50 mcg tablet",
+    "nadac_per_unit": "0.21440",
+    "effective_date": "2026-01-08",
+    "classification": "Brand",
+    "_fixture": true
+  },
+  {
+    "ndc11": "00071015523",
+    "drug_name": "atorvastatin calcium 20 mg tablet",
+    "nadac_per_unit": "0.03918",
+    "effective_date": "2026-01-08",
+    "classification": "Generic",
+    "_fixture": true
+  }
+]

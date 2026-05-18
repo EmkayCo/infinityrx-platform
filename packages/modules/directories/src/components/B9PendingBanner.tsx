@@ -18,6 +18,7 @@ export function B9PendingBanner({ dataType }: B9PendingBannerProps) {
   return (
     <div
       className="b9-pending-banner"
+      data-testid="b9-pending-banner"
       role="status"
       aria-live="polite"
     >

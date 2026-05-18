@@ -1,0 +1,82 @@
+[
+  {
+    "code": "J0135",
+    "description": "Adalimumab injection",
+    "category": "Drugs Administered Other Than Oral Method",
+    "status": "active",
+    "effective_date": "2003-01-01",
+    "_fixture": true
+  },
+  {
+    "code": "J3490",
+    "description": "Unclassified drugs",
+    "category": "Drugs Administered Other Than Oral Method",
+    "status": "active",
+    "effective_date": "1990-01-01",
+    "_fixture": true
+  },
+  {
+    "code": "J0696",
+    "description": "Ceftriaxone sodium injection",
+    "category": "Drugs Administered Other Than Oral Method",
+    "status": "active",
+    "effective_date": "1990-01-01",
+    "_fixture": true
+  },
+  {
+    "code": "A6216",
+    "description": "Gauze, non-impregnated, non-sterile",
+    "category": "Medical Supplies",
+    "status": "active",
+    "effective_date": "2002-01-01",
+    "_fixture": true
+  },
+  {
+    "code": "E0601",
+    "description": "Continuous positive airway pressure (CPAP) device",
+    "category": "Durable Medical Equipment",
+    "status": "active",
+    "effective_date": "1990-01-01",
+    "_fixture": true
+  },
+  {
+    "code": "G0008",
+    "description": "Administration of influenza virus vaccine",
+    "category": "Procedures/Professional Services",
+    "status": "active",
+    "effective_date": "1990-01-01",
+    "_fixture": true
+  },
+  {
+    "code": "L3000",
+    "description": "Foot insert, removable, molded to patient model",
+    "category": "Orthotic Procedures",
+    "status": "active",
+    "effective_date": "1990-01-01",
+    "_fixture": true
+  },
+  {
+    "code": "Q9956",
+    "description": "Injection, octafluoropropane microspheres, per mL",
+    "category": "Temporary Codes",
+    "status": "active",
+    "effective_date": "2009-01-01",
+    "_fixture": true
+  },
+  {
+    "code": "S0195",
+    "description": "Pneumococcal vaccine, 23-valent",
+    "category": "Temporary National Codes",
+    "status": "active",
+    "effective_date": "2000-01-01",
+    "_fixture": true
+  },
+  {
+    "code": "V2020",
+    "description": "Frames, purchases",
+    "category": "Vision Services",
+    "status": "active",
+    "effective_date": "1990-01-01",
+    "_fixture": true
+  }
+]

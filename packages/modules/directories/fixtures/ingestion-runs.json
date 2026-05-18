@@ -1,0 +1,47 @@
+[
+  {
+    "id": "aaaaaaaa-0001-0001-0001-000000000001",
+    "source": "nppes",
+    "run_type": "full",
+    "status": "completed",
+    "records_processed": 9494438,
+    "records_inserted": 9494438,
+    "records_updated": 0,
+    "records_skipped": 0,
+    "records_errored": 0,
+    "started_at": "2026-05-10T03:00:00Z",
+    "completed_at": "2026-05-10T04:22:11Z",
+    "duration_seconds": 4931,
+    "error_message": null
+  },
+  {
+    "id": "aaaaaaaa-0002-0002-0002-000000000002",
+    "source": "fda_ndc",
+    "run_type": "full",
+    "status": "failed",
+    "records_processed": 142000,
+    "records_inserted": 0,
+    "records_updated": 0,
+    "records_skipped": 0,
+    "records_errored": 3,
+    "started_at": "2026-05-16T02:01:00Z",
+    "completed_at": "2026-05-16T02:03:44Z",
+    "duration_seconds": 164,
+    "error_message": "Connection reset by peer on download.fda.gov"
+  },
+  {
+    "id": "aaaaaaaa-0003-0003-0003-000000000003",
+    "source": "ncpdp",
+    "run_type": "full",
+    "status": "running",
+    "records_processed": 5200,
+    "records_inserted": 5200,
+    "records_updated": 0,
+    "records_skipped": 0,
+    "records_errored": 0,
+    "started_at": "2026-05-17T09:00:00Z",
+    "completed_at": null,
+    "duration_seconds": null,
+    "error_message": null
+  }
+]

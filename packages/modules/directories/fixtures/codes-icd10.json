@@ -1,0 +1,82 @@
+[
+  {
+    "code": "Z87.891",
+    "description": "Personal history of nicotine dependence",
+    "category": "Z codes (Factors influencing health status)",
+    "status": "active",
+    "effective_date": "2016-10-01",
+    "_fixture": true
+  },
+  {
+    "code": "E11.9",
+    "description": "Type 2 diabetes mellitus without complications",
+    "category": "Endocrine, nutritional and metabolic diseases",
+    "status": "active",
+    "effective_date": "2016-10-01",
+    "_fixture": true
+  },
+  {
+    "code": "I10",
+    "description": "Essential (primary) hypertension",
+    "category": "Diseases of the circulatory system",
+    "status": "active",
+    "effective_date": "2016-10-01",
+    "_fixture": true
+  },
+  {
+    "code": "J18.9",
+    "description": "Pneumonia, unspecified organism",
+    "category": "Diseases of the respiratory system",
+    "status": "active",
+    "effective_date": "2016-10-01",
+    "_fixture": true
+  },
+  {
+    "code": "K21.0",
+    "description": "Gastro-esophageal reflux disease with esophagitis",
+    "category": "Diseases of the digestive system",
+    "status": "active",
+    "effective_date": "2016-10-01",
+    "_fixture": true
+  },
+  {
+    "code": "M54.5",
+    "description": "Low back pain",
+    "category": "Diseases of the musculoskeletal system",
+    "status": "active",
+    "effective_date": "2016-10-01",
+    "_fixture": true
+  },
+  {
+    "code": "F32.9",
+    "description": "Major depressive disorder, single episode, unspecified",
+    "category": "Mental, Behavioral and Neurodevelopmental disorders",
+    "status": "active",
+    "effective_date": "2016-10-01",
+    "_fixture": true
+  },
+  {
+    "code": "N39.0",
+    "description": "Urinary tract infection, site not specified",
+    "category": "Diseases of the genitourinary system",
+    "status": "active",
+    "effective_date": "2016-10-01",
+    "_fixture": true
+  },
+  {
+    "code": "R05.9",
+    "description": "Cough, unspecified",
+    "category": "Symptoms, signs and abnormal clinical and laboratory findings",
+    "status": "active",
+    "effective_date": "2022-10-01",
+    "_fixture": true
+  },
+  {
+    "code": "Z51.11",
+    "description": "Encounter for antineoplastic chemotherapy",
+    "category": "Z codes (Factors influencing health status)",
+    "status": "active",
+    "effective_date": "2016-10-01",
+    "_fixture": true
+  }
+]

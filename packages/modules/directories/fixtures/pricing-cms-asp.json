@@ -1,0 +1,47 @@
+[
+  {
+    "hcpcs_code": "J0135",
+    "drug_name": "Adalimumab injection",
+    "asp_unit": "per 10 mg",
+    "asp_price": "649.12",
+    "quarter": "2026Q1",
+    "effective_date": "2026-01-01",
+    "_fixture": true
+  },
+  {
+    "hcpcs_code": "J0696",
+    "drug_name": "Ceftriaxone sodium injection",
+    "asp_unit": "per 500 mg",
+    "asp_price": "4.88",
+    "quarter": "2026Q1",
+    "effective_date": "2026-01-01",
+    "_fixture": true
+  },
+  {
+    "hcpcs_code": "J3490",
+    "drug_name": "Unclassified drugs",
+    "asp_unit": "per injection",
+    "asp_price": "0.00",
+    "quarter": "2026Q1",
+    "effective_date": "2026-01-01",
+    "_fixture": true
+  },
+  {
+    "hcpcs_code": "Q9956",
+    "drug_name": "Octafluoropropane microspheres",
+    "asp_unit": "per mL",
+    "asp_price": "121.37",
+    "quarter": "2026Q1",
+    "effective_date": "2026-01-01",
+    "_fixture": true
+  },
+  {
+    "hcpcs_code": "G0008",
+    "drug_name": "Influenza virus vaccine administration",
+    "asp_unit": "per administration",
+    "asp_price": "9.50",
+    "quarter": "2026Q1",
+    "effective_date": "2026-01-01",
+    "_fixture": true
+  }
+]

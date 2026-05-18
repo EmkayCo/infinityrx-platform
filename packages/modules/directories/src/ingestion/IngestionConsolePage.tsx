@@ -94,6 +94,7 @@ export function IngestionConsolePage({
 }: IngestionConsolePageProps) {
   const [drawerSource, setDrawerSource] = useState<string | null>(null);
   const [inFlightRuns, setInFlightRuns] = useState<Record<string, string>>({}); // source → run_id
+  const [completedDeltas, setCompletedDeltas] = useState<Record<string, number>>({}); // source → records_processed
 
   const { data: statuses = [], isLoading } = useQuery<SourceStatus[]>({
     queryKey: ["ingestion-status"],
@@ -118,18 +119,21 @@ export function IngestionConsolePage({
     setInFlightRuns((prev) => ({ ...prev, [source]: runId }));
   }
 
-  function handleRunComplete(source: string) {
+  function handleRunComplete(source: string, result?: { records_processed?: number }) {
     setInFlightRuns((prev) => {
       const next = { ...prev };
       delete next[source];
       return next;
     });
+    if (result?.records_processed != null) {
+      setCompletedDeltas((prev) => ({ ...prev, [source]: result.records_processed! }));
+    }
   }
 
   return (
     <div data-testid="ingestion-console-page" className="p-6">
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Ingestion Console</h1>
+        <h1 className="text-2xl font-semibold" data-testid="ingestion-console-title">Ingestion Console</h1>
         {isLoading && (
           <span className="text-sm text-gray-500">Loading status…</span>
         )}
@@ -187,7 +191,7 @@ export function IngestionConsolePage({
                   <td className="px-4 py-3">
                     {!row.triggerable ? (
                       <span
-                        data-testid={`status-static-${row.source}`}
+                        data-testid={row.source === "bpg" ? "bpg-live-api-label" : `status-static-${row.source}`}
                         className="text-xs text-gray-500 italic"
                       >
                         {row.staticStatus}
@@ -196,7 +200,7 @@ export function IngestionConsolePage({
                       <RunProgressBar
                         runId={inFlightRunId}
                         source={row.source}
-                        onComplete={() => handleRunComplete(row.source)}
+                        onComplete={(result) => handleRunComplete(row.source, result)}
                         ingestBaseUrl={ingestBaseUrl}
                       />
                     ) : (
@@ -217,7 +221,15 @@ export function IngestionConsolePage({
 
                   {/* Records */}
                   <td className="px-4 py-3 text-right text-xs">
-                    {records !== null ? records.toLocaleString() : "—"}
+                    {completedDeltas[row.source] != null ? (
+                      <span data-testid="run-complete-delta">
+                        {completedDeltas[row.source]!.toLocaleString()} records
+                      </span>
+                    ) : records !== null ? (
+                      records.toLocaleString()
+                    ) : (
+                      "—"
+                    )}
                   </td>
 
                   {/* Errors */}

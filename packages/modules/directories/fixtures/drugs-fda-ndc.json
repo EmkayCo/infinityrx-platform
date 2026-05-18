@@ -1,0 +1,122 @@
+[
+  {
+    "ndc11": "00071015523",
+    "brand_name": "Lipitor",
+    "generic_name": "atorvastatin calcium",
+    "dosage_form": "tablet",
+    "route": "oral",
+    "strength": "20 mg",
+    "labeler_name": "Parke-Davis",
+    "product_type": "HUMAN PRESCRIPTION DRUG",
+    "marketing_status": "Prescription",
+    "_fixture": true
+  },
+  {
+    "ndc11": "00093314956",
+    "brand_name": "Metformin Hydrochloride",
+    "generic_name": "metformin hydrochloride",
+    "dosage_form": "tablet",
+    "route": "oral",
+    "strength": "500 mg",
+    "labeler_name": "Teva Pharmaceuticals",
+    "product_type": "HUMAN PRESCRIPTION DRUG",
+    "marketing_status": "Prescription",
+    "_fixture": true
+  },
+  {
+    "ndc11": "00310012330",
+    "brand_name": "Synthroid",
+    "generic_name": "levothyroxine sodium",
+    "dosage_form": "tablet",
+    "route": "oral",
+    "strength": "50 mcg",
+    "labeler_name": "AbbVie Inc.",
+    "product_type": "HUMAN PRESCRIPTION DRUG",
+    "marketing_status": "Prescription",
+    "_fixture": true
+  },
+  {
+    "ndc11": "00173019600",
+    "brand_name": "Ventolin HFA",
+    "generic_name": "albuterol sulfate",
+    "dosage_form": "aerosol",
+    "route": "inhalation",
+    "strength": "90 mcg",
+    "labeler_name": "GlaxoSmithKline",
+    "product_type": "HUMAN PRESCRIPTION DRUG",
+    "marketing_status": "Prescription",
+    "_fixture": true
+  },
+  {
+    "ndc11": "00006099254",
+    "brand_name": "Crestor",
+    "generic_name": "rosuvastatin calcium",
+    "dosage_form": "tablet",
+    "route": "oral",
+    "strength": "10 mg",
+    "labeler_name": "AstraZeneca Pharmaceuticals",
+    "product_type": "HUMAN PRESCRIPTION DRUG",
+    "marketing_status": "Prescription",
+    "_fixture": true
+  },
+  {
+    "ndc11": "00078059815",
+    "brand_name": "Entresto",
+    "generic_name": "sacubitril/valsartan",
+    "dosage_form": "tablet",
+    "route": "oral",
+    "strength": "49mg-51mg",
+    "labeler_name": "Novartis Pharmaceuticals",
+    "product_type": "HUMAN PRESCRIPTION DRUG",
+    "marketing_status": "Prescription",
+    "_fixture": true
+  },
+  {
+    "ndc11": "00002321485",
+    "brand_name": "Humalog",
+    "generic_name": "insulin lispro",
+    "dosage_form": "injection",
+    "route": "subcutaneous",
+    "strength": "100 units/mL",
+    "labeler_name": "Eli Lilly and Company",
+    "product_type": "HUMAN PRESCRIPTION DRUG",
+    "marketing_status": "Prescription",
+    "_fixture": true
+  },
+  {
+    "ndc11": "55289064810",
+    "brand_name": "Xarelto",
+    "generic_name": "rivaroxaban",
+    "dosage_form": "tablet",
+    "route": "oral",
+    "strength": "10 mg",
+    "labeler_name": "Janssen Pharmaceuticals",
+    "product_type": "HUMAN PRESCRIPTION DRUG",
+    "marketing_status": "Prescription",
+    "_fixture": true
+  },
+  {
+    "ndc11": "00904584560",
+    "brand_name": "Lisinopril",
+    "generic_name": "lisinopril",
+    "dosage_form": "tablet",
+    "route": "oral",
+    "strength": "10 mg",
+    "labeler_name": "Major Pharmaceuticals",
+    "product_type": "HUMAN PRESCRIPTION DRUG",
+    "marketing_status": "Prescription",
+    "_fixture": true
+  },
+  {
+    "ndc11": "00378180010",
+    "brand_name": "Amlodipine Besylate",
+    "generic_name": "amlodipine besylate",
+    "dosage_form": "tablet",
+    "route": "oral",
+    "strength": "5 mg",
+    "labeler_name": "Mylan Pharmaceuticals",
+    "product_type": "HUMAN PRESCRIPTION DRUG",
+    "marketing_status": "Prescription",
+    "_fixture": true
+  }
+]
