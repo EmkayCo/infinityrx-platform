@@ -1,6 +1,6 @@
 # Dev / reference full-composition manifest.
 # Used by `npm run operator:dev` and by Plan A's manifest-validator test.
-# Modules list is EMPTY in Plan A — Plan D's reclaimrx scaffolding adds it.
+# SP-2 Plan A adds the directories module (federated search spine).
 instance_name: operator-dev
 audience: operator
 auth_profile: development
@@ -8,7 +8,12 @@ branding:
   primary_color: "#1f2937"
 modules:
   - prescriber-directory
-required_backends: []
+  - directories
+required_backends:
+  - prescriber-directory
+  - pharmacy-directory
+  - drug-database
+  - core-platform
 required_shared_services:
   - postgres
   - redis
@@ -18,12 +23,21 @@ required_env:
   - JWT_SECRET
   - NEXTAUTH_SECRET
   - INFINITYRX_ENV
-required_health: []
-required_seed_data: []
+  - PRESCRIBER_DIRECTORY_URL
+  - PHARMACY_DIRECTORY_URL
+  - DRUG_DATABASE_URL
+  - CORE_PLATFORM_URL
+required_health:
+  - http://prescriber-directory:8010/health
+  - http://pharmacy-directory:8009/health
+  - http://drug-database:8011/health
+required_seed_data:
+  - directories/fixtures
 required_queues: []
 required_jobs: []
 required_buckets: []
-required_integrations: []
+required_integrations:
+  - shared-ingestion-api
 required_secrets:
   - secret://jwt/signing-key
   - secret://nextauth/secret
