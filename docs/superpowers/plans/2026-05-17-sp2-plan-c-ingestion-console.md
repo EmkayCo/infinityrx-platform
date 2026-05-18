@@ -196,10 +196,13 @@ const INGESTION_BASE =
 | `GET /api/directories/ingest/runs/{run_id}` | `GET .../api/v1/data-ingestion/runs/{run_id}` (routes.py:333) | spec §7.2 step 8 |
 | `POST /api/directories/ingest/{source}/cancel` | `POST .../api/v1/data-ingestion/{source}/cancel` (routes.py:355) | spec §6.4 |
 
-**Source validation in BFF:** Before proxying, validate `source` against the
-known source keys from Plan A's `DatasetKeySchema`. If source is not in the
-allowed set, return 404 to prevent SSRF (structural injection via `source`
-path parameter).
+**Source validation in BFF:** Before proxying, validate `source` against
+`TRIGGERABLE_SOURCES` (defined below). Do NOT validate against Plan A's
+`DatasetKeySchema` — that enum covers only the 18 browse-cluster keys and
+does not include `nppes_monthly`, `nppes_deactivation`, which are valid
+ingestion trigger targets. `TRIGGERABLE_SOURCES` is the authoritative
+allowlist (20 keys). If source is not in the allowed set, return 404 to
+prevent SSRF (structural injection via `source` path parameter).
 
 ```typescript
 // Allowed source keys — only these can be triggered via BFF
@@ -383,7 +386,7 @@ proxy routes with `TRIGGERABLE_SOURCES` allowlist and JWT auth.
 
 **Tests:**
 - `tests/unit/ingestion/IngestionConsolePage.test.tsx`:
-  - Table renders one row per source key (18 rows — 15 loaders + rxnorm + oig_leie + dea_registrations)
+  - Table renders one row per source key (21 rows from IngestionSourceKeySchema: 20 TRIGGERABLE_SOURCES + fdb which is non-triggerable but shown with "Pending B9" status)
   - BPG row shows "Live API — no schedule"; no trigger button present in that row
   - FDB row shows "Pending B9"; no trigger button
   - relay-health does NOT appear in the table
