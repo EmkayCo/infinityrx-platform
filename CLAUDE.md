@@ -8,18 +8,15 @@
 - **AUDIT FINDING:** Built primitives must be MOUNTED on production apps — hash chain, MFA gate, security headers, rate limiter all existed but were never wired into live request paths. Every middleware/router primitive needs an integration test through `create_app()`.
 
 ## Rules Files
-All builders MUST read these rules files before starting work:
-- `.claude/rules/security.md`
-- `.claude/rules/financial-precision.md`
-- `.claude/rules/phi-compliance.md`
-- `.claude/rules/tenant-isolation.md`
-- `.claude/rules/event-bus.md`
-- `.claude/rules/hipaa-2026.md`
-- `.claude/rules/architecture.md`
-- `.claude/rules/performance.md`
-- `.claude/rules/code-standards.md`
-- `.claude/rules/error-handling.md`
-- `.claude/rules/testing.md`
+Full rules live in `.claude/rules/*.md` — read on demand for the specific concern. Werkbench hooks enforce TDD discipline, docs currency, codex-at-gate, dev-password leaks, and `datetime.utcnow()` usage at the harness level. The hooks do NOT enforce the four invariants below — those are load-bearing for every change touching money, PHI, tenants, or events:
+
+**INVARIANTS (must be honored even if you don't open the rule file):**
+1. **Money:** Python `Decimal` only, never `float`. Every `.quantize()` MUST pass `rounding=ROUND_HALF_UP`. `Decimal(str(value))` when converting from external sources. DB columns `sa.Numeric(x,2|4)`, never `sa.Float`. Wrap `func.sum()`/`func.avg()` results in `Decimal(str(...))`. Use `shared/utils/money.py:penny_allocate()` for splits. Pre-commit rejects `float`/`Float` in `*/services/` or `*/models/` touching money. (Full: `.claude/rules/financial-precision.md`)
+2. **PHI:** All PHI columns use `EncryptedString` from `shared/crypto/sqlalchemy_types.py` with tenant-scoped AAD. Models with patient data inherit `PHIMixin`. NEVER log PHI fields (`member_name`, `dob`, `ssn`, `address`, `phone`, `email`) at any level — including error/exception messages. Responses with PHI MUST set `Cache-Control: no-store`. Every PHI read = separate audit entry `action="phi_access"`. (Full: `.claude/rules/phi-compliance.md`)
+3. **Tenant isolation:** `tenant_id` in EVERY query WHERE clause via `TenantScopedMixin` + `install_tenant_loader`. Use `shared.db.tenant_context.current_tenant_id` only — no module-local contextvars. Redis keys prefixed `tenant:{tenant_id}:`. API: validate `x-tenant-id` as UUID, return 403 on mismatch. Every endpoint needs an automated cross-tenant isolation test. (Full: `.claude/rules/tenant-isolation.md`)
+4. **Event bus:** `EventEnvelope` for ALL events — never raw `(topic, dict)`. Every event sets `ordering_key` (entity id), `idempotency_key` (business key), `schema_version` (start `"1.0"`), and dot-notation type (`claim.ingested`). Consumers wrap with `idempotent_handler`. `Decimal` amounts serialized as `str()` in payloads. (Full: `.claude/rules/event-bus.md`)
+
+Other rules (security, hipaa-2026, architecture, performance, code-standards, error-handling, testing) are referenced on demand — pull them when working in their area. The harness no longer auto-inlines them at session start.
 
 ## Agent Files
 Builder agents are in `.claude/agents/build-agents/`. Each builder reads their agent file + all rules files + their module's PRD before starting work.
