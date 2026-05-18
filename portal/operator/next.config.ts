@@ -10,7 +10,7 @@ const sharedDir = path.resolve(__dirname, "../shared");
 function runPrebuild() {
   const repoRoot = path.resolve(__dirname, "..", "..");
   try {
-    execSync("node --loader tsx packages/scripts/build-manifest.ts", {
+    execSync("node --import tsx packages/scripts/build-manifest.ts", {
       cwd: repoRoot,
       stdio: "inherit",
       env: {
