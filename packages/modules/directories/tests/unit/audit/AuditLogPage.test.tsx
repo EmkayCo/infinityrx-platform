@@ -21,7 +21,7 @@ function wrap(ui: React.ReactElement) {
 }
 
 const SAMPLE_AUDIT_PAGE = {
-  entries: [
+  items: [
     {
       id: 1,
       action: "POST /api/v1/data-ingestion/nppes/trigger",
@@ -114,7 +114,7 @@ describe("AuditLogPage", () => {
     mockFetch.mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ entries: [], total: 0, limit: 50, offset: 0 }),
+      json: async () => ({ items: [], total: 0, limit: 50, offset: 0 }),
     });
     wrap(<AuditLogPage />);
     await waitFor(() =>

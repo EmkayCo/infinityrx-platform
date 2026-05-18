@@ -41,7 +41,7 @@ const AUTH_HEADER = `Bearer ${VALID_TOKEN}`;
 const mockFetch = vi.fn();
 
 const SAMPLE_AUDIT_PAGE = {
-  entries: [
+  items: [
     {
       id: 1,
       action: "POST /api/v1/data-ingestion/nppes/trigger",
@@ -158,7 +158,7 @@ describe("getAuditLog — JWT forwarding", () => {
     const res = await getAuditLog(req);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.entries).toHaveLength(1);
+    expect(body.items).toHaveLength(1);
     expect(body.total).toBe(1);
   });
 
