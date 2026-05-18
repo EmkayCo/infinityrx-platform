@@ -12,6 +12,9 @@ export default defineConfig({
       "@infinityrx/ui": resolve(here, "../../ui/src/index.ts"),
       "@infinityrx/shell": resolve(here, "../../shell/src/index.ts"),
       "@infinityrx/qa-harness": resolve(here, "../../qa-harness/src/index.ts"),
+      // next/* not installed in this package; provide stubs so Vite resolves
+      // imports before vi.mock() intercepts them in BFF tests.
+      "next/server": resolve(here, "src/__mocks__/next-server.ts"),
     },
   },
   test: {
