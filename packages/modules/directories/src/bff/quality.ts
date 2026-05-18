@@ -288,8 +288,9 @@ export async function getQuality(req: NextRequest): Promise<NextResponse> {
     { status: 200 },
   );
   res.headers.set("x-correlation-id", correlationId);
-  // Quality data is not PHI (reference data only) — cache at proxy layer.
-  res.headers.set("Cache-Control", "s-maxage=60, stale-while-revalidate=30");
+  // Quality response includes tenant-scoped dismiss state and pharmacy stats.
+  // Must not be shared across tenants at any proxy layer.
+  res.headers.set("Cache-Control", "private, no-store");
   return res;
 }
 
