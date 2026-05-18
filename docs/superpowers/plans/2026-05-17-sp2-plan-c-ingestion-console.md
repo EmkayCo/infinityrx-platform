@@ -237,9 +237,14 @@ Table of all registered sources. Data source: BFF `GET /api/directories/quality`
 | Actions | `TriggerRefreshButton` + "View history" → `RunHistoryDrawer` |
 
 **Rows for no-loader sources:**
-- `bpg`: "Live API — no schedule" in Status column; no trigger button; no history link
-- `fdb`: "Pending B9" in Status; no trigger; no history
-- relay-health: NOT shown (not a loader, not in scope)
+- `bpg`: NOT shown in the ingestion console. BPG is a live external API with no
+  IngestionSchedule row — it is not in IngestionSourceKeySchema (21 keys). BPG
+  is surfaced only on the pricing browse surface (Plan B) with a "Live API —
+  no ingestion schedule" label. Plan E E2E confirms: `ingestion-row-bpg` is
+  expected NOT visible.
+- `fdb`: "Pending B9" in Status; no trigger button; no history link. fdb IS in
+  IngestionSourceKeySchema (as the 21st key) but NOT in TRIGGERABLE_SOURCES.
+- relay-health: NOT shown (not a loader, not in IngestionSourceKeySchema)
 
 ### D-C3 — `TriggerRefreshButton` (`src/ingestion/TriggerRefreshButton.tsx`)
 
@@ -387,7 +392,7 @@ proxy routes with `TRIGGERABLE_SOURCES` allowlist and JWT auth.
 **Tests:**
 - `tests/unit/ingestion/IngestionConsolePage.test.tsx`:
   - Table renders one row per source key (21 rows from IngestionSourceKeySchema: 20 TRIGGERABLE_SOURCES + fdb which is non-triggerable but shown with "Pending B9" status)
-  - BPG row shows "Live API — no schedule"; no trigger button present in that row
+  - BPG row does NOT appear in the table (bpg is not in IngestionSourceKeySchema — it has no IngestionSchedule row and is surfaced only on the pricing browse surface)
   - FDB row shows "Pending B9"; no trigger button
   - relay-health does NOT appear in the table
   - Source with `records_errored > 0` shows orange badge
