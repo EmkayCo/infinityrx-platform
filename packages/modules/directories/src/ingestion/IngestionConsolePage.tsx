@@ -191,7 +191,7 @@ export function IngestionConsolePage({
                   <td className="px-4 py-3">
                     {!row.triggerable ? (
                       <span
-                        data-testid={row.source === "bpg" ? "bpg-live-api-label" : `status-static-${row.source}`}
+                        data-testid={`status-static-${row.source}`}
                         className="text-xs text-gray-500 italic"
                       >
                         {row.staticStatus}

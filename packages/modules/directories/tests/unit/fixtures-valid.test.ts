@@ -77,11 +77,12 @@ describe("fixtures/prescribers.json", () => {
     expect(prescribers.length).toBeGreaterThanOrEqual(1);
   });
 
-  test("every entry has required fields: npi, display_name, primary_specialty, status", () => {
+  test("every entry has required fields: npi, name_first, name_last, credential", () => {
     for (const p of prescribers as Array<Record<string, unknown>>) {
       expect(typeof p["npi"]).toBe("string");
-      expect(typeof p["display_name"]).toBe("string");
-      expect(p["status"]).toBeDefined();
+      expect(typeof p["name_first"]).toBe("string");
+      expect(typeof p["name_last"]).toBe("string");
+      expect(typeof p["credential"]).toBe("string");
     }
   });
 
@@ -111,11 +112,11 @@ describe("fixtures/pharmacies.json", () => {
     expect(pharmacies.length).toBeGreaterThanOrEqual(1);
   });
 
-  test("every entry has required fields: nabp_id, store_name, status", () => {
+  test("every entry has required fields: nabp, name, npi", () => {
     for (const p of pharmacies as Array<Record<string, unknown>>) {
-      expect(typeof p["nabp_id"]).toBe("string");
-      expect(typeof p["store_name"]).toBe("string");
-      expect(p["status"]).toBeDefined();
+      expect(typeof p["nabp"]).toBe("string");
+      expect(typeof p["name"]).toBe("string");
+      expect(typeof p["npi"]).toBe("string");
     }
   });
 });
@@ -173,15 +174,15 @@ describe("fixtures/codes-hcpcs.json", () => {
     expect(codesHcpcs.length).toBeGreaterThanOrEqual(1);
   });
 
-  test("every entry has required fields: hcpcs_code, description", () => {
+  test("every entry has required fields: code, description", () => {
     for (const c of codesHcpcs as Array<Record<string, unknown>>) {
-      expect(typeof c["hcpcs_code"]).toBe("string");
+      expect(typeof c["code"]).toBe("string");
       expect(typeof c["description"]).toBe("string");
     }
   });
 
   test("HCPCS code J0135 (Adalimumab injection) is present", () => {
-    const codes = (codesHcpcs as Array<Record<string, unknown>>).map((c) => c["hcpcs_code"]);
+    const codes = (codesHcpcs as Array<Record<string, unknown>>).map((c) => c["code"]);
     expect(codes).toContain("J0135");
   });
 });
@@ -215,10 +216,10 @@ describe("fixtures/pricing-cms-asp.json", () => {
     expect(pricingCmsAsp.length).toBeGreaterThanOrEqual(1);
   });
 
-  test("every entry has required fields: hcpcs_code, payment_limit, quarter", () => {
+  test("every entry has required fields: hcpcs_code, asp_price, quarter", () => {
     for (const p of pricingCmsAsp as Array<Record<string, unknown>>) {
       expect(typeof p["hcpcs_code"]).toBe("string");
-      expect(p["payment_limit"] !== undefined).toBe(true);
+      expect(typeof p["asp_price"]).toBe("string");
       expect(typeof p["quarter"]).toBe("string");
     }
   });
@@ -232,11 +233,11 @@ describe("fixtures/pricing-cms-nadac.json", () => {
     expect(pricingCmsNadac.length).toBeGreaterThanOrEqual(1);
   });
 
-  test("every entry has required fields: ndc11, nadac_per_unit, as_of_date", () => {
+  test("every entry has required fields: ndc11, nadac_per_unit, effective_date", () => {
     for (const p of pricingCmsNadac as Array<Record<string, unknown>>) {
       expect(typeof p["ndc11"]).toBe("string");
-      expect(p["nadac_per_unit"] !== undefined).toBe(true);
-      expect(typeof p["as_of_date"]).toBe("string");
+      expect(typeof p["nadac_per_unit"]).toBe("string");
+      expect(typeof p["effective_date"]).toBe("string");
     }
   });
 });
@@ -249,11 +250,11 @@ describe("fixtures/exclusions-ofac.json", () => {
     expect(exclusionsOfac.length).toBeGreaterThanOrEqual(1);
   });
 
-  test("every entry has required fields: sdn_name, program, entity_type", () => {
+  test("every entry has required fields: entity_name, program, sdn_type", () => {
     for (const e of exclusionsOfac as Array<Record<string, unknown>>) {
-      expect(typeof e["sdn_name"]).toBe("string");
+      expect(typeof e["entity_name"]).toBe("string");
       expect(typeof e["program"]).toBe("string");
-      expect(typeof e["entity_type"]).toBe("string");
+      expect(typeof e["sdn_type"]).toBe("string");
     }
   });
 });

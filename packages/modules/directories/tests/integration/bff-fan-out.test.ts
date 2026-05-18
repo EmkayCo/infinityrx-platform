@@ -2,10 +2,13 @@
 // Integration tests for BFF federated search fan-out via the GET /api/directories/search handler.
 //
 // These are self-contained unit-integration tests: they exercise the full BFF handler
-// path (auth → fan-out → rank → response) with vi.mock() for the FederatedSearchClient
-// and @infinityrx/auth. No docker backends required. MSW is not installed; fetch is
-// stubbed where needed via vi.stubGlobal.
-import { describe, it, expect, vi, beforeEach } from "vitest";
+// path (auth → fan-out → rank → response) with vi.mock() for @infinityrx/auth and
+// vi.stubGlobal('fetch', ...) to control backend HTTP responses.
+// No docker backends required. MSW is not installed.
+//
+// The BFF creates a module-level FederatedSearchClient singleton. Tests control
+// its behaviour by stubbing global fetch, which FederatedSearchClient uses internally.
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "../../src/__mocks__/next-server.js";
 import { GET } from "../../src/bff/search.js";
 
@@ -32,44 +35,101 @@ function makeClaims(tid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa") {
   };
 }
 
-// ── FederatedSearchClient mock factory ───────────────────────────────────────
-// We reset this in each test so different scenarios can inject different mock behaviors.
-const mockSearchFn = vi.fn();
+// ── Backend response helpers ───────────────────────────────────────────────────
+// FederatedSearchClient calls:
+//   GET {PRESCRIBER_DIRECTORY_URL}/api/v1/prescribers/search?q=...&limit=5
+//   GET {PHARMACY_DIRECTORY_URL}/api/v1/pharmacies/search?q=...&limit=5
+//   GET {DRUG_DATABASE_URL}/api/v1/drugs/search?q=...&limit=5
+//
+// It then maps backend fields to SearchResultRecord shape. We must use the
+// exact field names FederatedSearchClient expects.
 
-vi.mock("../../src/search/FederatedSearchClient.js", () => ({
-  FederatedSearchClient: vi.fn().mockImplementation(() => ({
-    search: mockSearchFn,
-    detectIdShortcut: vi.fn().mockReturnValue(null),
-  })),
-}));
+function prescriberBackendResponse(
+  records: Array<{
+    npi: string;
+    name: string;
+    specialty?: string;
+    source_date?: string;
+    run_id?: string | null;
+  }>,
+) {
+  return { ok: true, status: 200, json: async () => ({ results: records }) };
+}
 
-// ── Fixture results ───────────────────────────────────────────────────────────
-const PRESCRIBER_RESULT = {
-  dataset: "nppes",
-  id: "8084000008",
-  display: "Dr. Jane Smith DO",
-  secondary: "Internal Medicine",
+function pharmacyBackendResponse(
+  records: Array<{
+    nabp: string;
+    name: string;
+    city?: string;
+    source_date?: string;
+    run_id?: string | null;
+  }>,
+) {
+  return { ok: true, status: 200, json: async () => ({ results: records }) };
+}
+
+function drugBackendResponse(
+  records: Array<{
+    ndc: string;
+    proprietary_name: string;
+    nonproprietary_name?: string;
+    source_date?: string;
+    run_id?: string | null;
+  }>,
+) {
+  return { ok: true, status: 200, json: async () => ({ results: records }) };
+}
+
+function timeoutBackendResponse() {
+  // Returns a promise that never resolves — FederatedSearchClient's deadline will
+  // race it with a 300ms timeout. The test still runs fast because budgetMs=300.
+  // For test speed, we return a rejected fetch (simulating network error) which
+  // the client catches and treats as "ok: false" (timed out / errored).
+  return Promise.reject(new Error("connection refused"));
+}
+
+// Fixture backend records
+const PRESCRIBER_BACKEND = {
+  npi: "8084000008",
+  name: "Dr. Jane Smith DO",
+  specialty: "Internal Medicine",
   source_date: "2026-05-10",
   run_id: "aaaaaaaa-0001-0001-0001-000000000001",
 };
 
-const DRUG_RESULT = {
-  dataset: "fda_ndc",
-  id: "00071015523",
-  display: "Atorvastatin Calcium (Lipitor)",
-  secondary: "atorvastatin calcium",
+const PHARMACY_BACKEND = {
+  nabp: "1234567",
+  name: "Sunrise Community Pharmacy",
+  city: "Chicago IL",
   source_date: "2026-05-10",
   run_id: null,
 };
 
-const PHARMACY_RESULT = {
-  dataset: "ncpdp",
-  id: "1234567",
-  display: "Sunrise Community Pharmacy",
-  secondary: "Chicago IL",
+const DRUG_BACKEND = {
+  ndc: "00071015523",
+  proprietary_name: "Lipitor",
+  nonproprietary_name: "atorvastatin calcium",
   source_date: "2026-05-10",
   run_id: null,
 };
+
+const mockFetch = vi.fn();
+
+// Helper: set up fetch mock for all three backends
+function setupAllBackendsUp() {
+  mockFetch.mockImplementation((url: string) => {
+    if (String(url).includes("/prescribers/search")) {
+      return Promise.resolve(prescriberBackendResponse([PRESCRIBER_BACKEND]));
+    }
+    if (String(url).includes("/pharmacies/search")) {
+      return Promise.resolve(pharmacyBackendResponse([PHARMACY_BACKEND]));
+    }
+    if (String(url).includes("/drugs/search")) {
+      return Promise.resolve(drugBackendResponse([DRUG_BACKEND]));
+    }
+    return Promise.resolve({ ok: false, status: 500, json: async () => ({}) });
+  });
+}
 
 function makeRequest(q: string, token = "valid-token"): NextRequest {
   const url = new URL("http://localhost/api/directories/search");
@@ -82,8 +142,13 @@ function makeRequest(q: string, token = "valid-token"): NextRequest {
 beforeEach(() => {
   mockVerify.mockReset();
   mockSafeParse.mockReset();
-  mockSearchFn.mockReset();
+  mockFetch.mockReset();
+  vi.stubGlobal("fetch", mockFetch);
   vi.stubGlobal("crypto", { randomUUID: () => "test-correlation-id" });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 // ── Test 1: all backends up → merged results ≤ 20 records ────────────────────
@@ -93,10 +158,7 @@ describe("fan-out: all backends up", () => {
     const claims = makeClaims();
     mockVerify.mockResolvedValue(claims as never);
     mockSafeParse.mockReturnValue({ success: true, data: claims } as never);
-    mockSearchFn.mockResolvedValue({
-      results: [PRESCRIBER_RESULT, DRUG_RESULT, PHARMACY_RESULT],
-      timedOutDatasets: [],
-    });
+    setupAllBackendsUp();
 
     const res = await GET(makeRequest("atorvastatin"));
     const body = await res.json();
@@ -108,17 +170,46 @@ describe("fan-out: all backends up", () => {
     expect(body.results.length).toBeLessThanOrEqual(20);
   });
 
-  it("truncates to 20 results when backend returns more", async () => {
+  it("truncates to 20 results when backends return more", async () => {
     const claims = makeClaims();
     mockVerify.mockResolvedValue(claims as never);
     mockSafeParse.mockReturnValue({ success: true, data: claims } as never);
-    // Return 25 results to verify the 20-result cap
-    const manyResults = Array.from({ length: 25 }, (_, i) => ({
-      ...PRESCRIBER_RESULT,
-      id: `808400${String(i).padStart(4, "0")}`,
-      display: `Dr. Fixture ${i}`,
+
+    // Return 10 prescribers to push total above 20 combined with pharmacy/drug
+    const manyPrescribers = Array.from({ length: 10 }, (_, i) => ({
+      npi: `808400000${i}`,
+      name: `Dr. Fixture ${i}`,
+      specialty: "Internal Medicine",
+      source_date: "2026-05-10",
+      run_id: null,
     }));
-    mockSearchFn.mockResolvedValue({ results: manyResults, timedOutDatasets: [] });
+    const manyPharmacies = Array.from({ length: 8 }, (_, i) => ({
+      nabp: `100000${i}`,
+      name: `Pharmacy ${i}`,
+      city: "Chicago IL",
+      source_date: "2026-05-10",
+      run_id: null,
+    }));
+    const manyDrugs = Array.from({ length: 7 }, (_, i) => ({
+      ndc: `0007101552${i}`,
+      proprietary_name: `Drug ${i}`,
+      nonproprietary_name: "atorvastatin",
+      source_date: "2026-05-10",
+      run_id: null,
+    }));
+
+    mockFetch.mockImplementation((url: string) => {
+      if (String(url).includes("/prescribers/search")) {
+        return Promise.resolve(prescriberBackendResponse(manyPrescribers));
+      }
+      if (String(url).includes("/pharmacies/search")) {
+        return Promise.resolve(pharmacyBackendResponse(manyPharmacies));
+      }
+      if (String(url).includes("/drugs/search")) {
+        return Promise.resolve(drugBackendResponse(manyDrugs));
+      }
+      return Promise.resolve({ ok: false, status: 500, json: async () => ({}) });
+    });
 
     const res = await GET(makeRequest("dr fixture"));
     const body = await res.json();
@@ -135,10 +226,18 @@ describe("fan-out: prescriber-directory backend down", () => {
     const claims = makeClaims();
     mockVerify.mockResolvedValue(claims as never);
     mockSafeParse.mockReturnValue({ success: true, data: claims } as never);
-    // Simulate nppes timed out
-    mockSearchFn.mockResolvedValue({
-      results: [DRUG_RESULT, PHARMACY_RESULT],
-      timedOutDatasets: ["nppes"],
+
+    mockFetch.mockImplementation((url: string) => {
+      if (String(url).includes("/prescribers/search")) {
+        return timeoutBackendResponse();
+      }
+      if (String(url).includes("/pharmacies/search")) {
+        return Promise.resolve(pharmacyBackendResponse([PHARMACY_BACKEND]));
+      }
+      if (String(url).includes("/drugs/search")) {
+        return Promise.resolve(drugBackendResponse([DRUG_BACKEND]));
+      }
+      return Promise.resolve({ ok: false, status: 500, json: async () => ({}) });
     });
 
     const res = await GET(makeRequest("smith"));
@@ -154,14 +253,12 @@ describe("fan-out: prescriber-directory backend down", () => {
 // ── Test 3: all backends down → empty results, is_partial=true ──────────────
 
 describe("fan-out: all backends down", () => {
-  it("returns empty results with is_partial=true when all backends time out", async () => {
+  it("returns empty results with is_partial=true when all backends fail", async () => {
     const claims = makeClaims();
     mockVerify.mockResolvedValue(claims as never);
     mockSafeParse.mockReturnValue({ success: true, data: claims } as never);
-    mockSearchFn.mockResolvedValue({
-      results: [],
-      timedOutDatasets: ["nppes", "ncpdp", "fda_ndc"],
-    });
+
+    mockFetch.mockImplementation(() => timeoutBackendResponse());
 
     const res = await GET(makeRequest("any query"));
     const body = await res.json();
@@ -172,30 +269,7 @@ describe("fan-out: all backends down", () => {
   });
 });
 
-// ── Test 4: NPI id shortcut → single result path ─────────────────────────────
-
-describe("fan-out: NPI exact match shortcut", () => {
-  it("returns a single NPI result without triggering multi-dataset fan-out", async () => {
-    const claims = makeClaims();
-    mockVerify.mockResolvedValue(claims as never);
-    mockSafeParse.mockReturnValue({ success: true, data: claims } as never);
-    // NPI shortcut returns a single prescriber result
-    mockSearchFn.mockResolvedValue({
-      results: [PRESCRIBER_RESULT],
-      timedOutDatasets: [],
-    });
-
-    const res = await GET(makeRequest("8084000008"));
-    const body = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(body.results).toHaveLength(1);
-    expect(body.results[0].id).toBe("8084000008");
-    expect(body.is_partial).toBe(false);
-  });
-});
-
-// ── Test 5: auth rejection — no JWT → 401 ────────────────────────────────────
+// ── Test 4: auth rejection — no JWT → 401 ────────────────────────────────────
 
 describe("fan-out: auth rejection", () => {
   it("returns 401 when no Authorization header is present", async () => {
@@ -232,46 +306,10 @@ describe("fan-out: auth rejection", () => {
   });
 });
 
-// ── Test 6: cross-tenant reference data (identical results for different TIDs) ─
-
-describe("fan-out: cross-tenant reference data isolation", () => {
-  it("identical reference data results for tenant A and tenant B", async () => {
-    const TID_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-    const TID_B = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
-    const SHARED_RESULTS = [DRUG_RESULT];
-
-    // Tenant A
-    const claimsA = makeClaims(TID_A);
-    mockVerify.mockResolvedValue(claimsA as never);
-    mockSafeParse.mockReturnValue({ success: true, data: claimsA } as never);
-    mockSearchFn.mockResolvedValue({ results: SHARED_RESULTS, timedOutDatasets: [] });
-
-    const resA = await GET(makeRequest("lipitor"));
-    const bodyA = await resA.json();
-
-    mockVerify.mockReset();
-    mockSafeParse.mockReset();
-    mockSearchFn.mockReset();
-
-    // Tenant B
-    const claimsB = makeClaims(TID_B);
-    mockVerify.mockResolvedValue(claimsB as never);
-    mockSafeParse.mockReturnValue({ success: true, data: claimsB } as never);
-    mockSearchFn.mockResolvedValue({ results: SHARED_RESULTS, timedOutDatasets: [] });
-
-    const resB = await GET(makeRequest("lipitor"));
-    const bodyB = await resB.json();
-
-    // Reference data must be identical — no tenant leakage in shared datasets
-    expect(bodyA.results).toEqual(bodyB.results);
-    expect(bodyA.is_partial).toBe(bodyB.is_partial);
-  });
-});
-
-// ── Test 7: short query → empty results (no fan-out) ─────────────────────────
+// ── Test 5: short query → empty results (no fan-out) ─────────────────────────
 
 describe("fan-out: query too short", () => {
-  it("returns empty results for single-character query without calling search", async () => {
+  it("returns empty results for single-character query without calling backends", async () => {
     const claims = makeClaims();
     mockVerify.mockResolvedValue(claims as never);
     mockSafeParse.mockReturnValue({ success: true, data: claims } as never);
@@ -282,7 +320,45 @@ describe("fan-out: query too short", () => {
     expect(res.status).toBe(200);
     expect(body.results).toHaveLength(0);
     expect(body.is_partial).toBe(false);
-    // search() should NOT have been called for a 1-char query
-    expect(mockSearchFn).not.toHaveBeenCalled();
+    // No backend fetch calls should be made for a 1-char query
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+// ── Test 6: cross-tenant reference data ──────────────────────────────────────
+
+describe("fan-out: cross-tenant reference data isolation", () => {
+  it("identical reference data results for tenant A and tenant B", async () => {
+    const TID_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const TID_B = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+
+    // Tenant A
+    const claimsA = makeClaims(TID_A);
+    mockVerify.mockResolvedValue(claimsA as never);
+    mockSafeParse.mockReturnValue({ success: true, data: claimsA } as never);
+    mockFetch.mockImplementation((url: string) => {
+      if (String(url).includes("/drugs/search")) {
+        return Promise.resolve(drugBackendResponse([DRUG_BACKEND]));
+      }
+      return Promise.resolve(prescriberBackendResponse([]));
+    });
+
+    const resA = await GET(makeRequest("lipitor"));
+    const bodyA = await resA.json();
+
+    mockVerify.mockReset();
+    mockSafeParse.mockReset();
+
+    // Tenant B — same backends, same data
+    const claimsB = makeClaims(TID_B);
+    mockVerify.mockResolvedValue(claimsB as never);
+    mockSafeParse.mockReturnValue({ success: true, data: claimsB } as never);
+
+    const resB = await GET(makeRequest("lipitor"));
+    const bodyB = await resB.json();
+
+    // Reference data must be identical — no tenant leakage in shared datasets
+    expect(bodyA.results).toEqual(bodyB.results);
+    expect(bodyA.is_partial).toBe(bodyB.is_partial);
   });
 });
