@@ -19,10 +19,16 @@ import codesHcpcs from "../../fixtures/codes-hcpcs.json";
 import codesIcd10 from "../../fixtures/codes-icd10.json";
 import pricingCmsAsp from "../../fixtures/pricing-cms-asp.json";
 import pricingCmsNadac from "../../fixtures/pricing-cms-nadac.json";
+import pricingMedicaidBins from "../../fixtures/pricing-medicaid-bins.json";
+import pricingBpg from "../../fixtures/pricing-bpg.json";
 import exclusionsOfac from "../../fixtures/exclusions-ofac.json";
 import exclusionsSam from "../../fixtures/exclusions-sam.json";
+import exclusionsOig from "../../fixtures/exclusions-oig.json";
+import exclusionsState from "../../fixtures/exclusions-state.json";
 import ingestionRuns from "../../fixtures/ingestion-runs.json";
 import ingestionSchedules from "../../fixtures/ingestion-schedules.json";
+import crossLinks from "../../fixtures/cross-links.json";
+import datasetsMeta from "../../fixtures/datasets-meta.json";
 
 // ── Shared schemas ─────────────────────────────────────────────────────────────
 
@@ -382,5 +388,142 @@ describe("fixtures/ingestion-schedules.json", () => {
     );
     const unique = new Set(sources);
     expect(unique.size).toBe(sources.length);
+  });
+});
+
+// ── Medicaid BINs pricing fixture ──────────────────────────────────────────────
+
+describe("fixtures/pricing-medicaid-bins.json", () => {
+  test("is an array with at least 1 entry", () => {
+    expect(Array.isArray(pricingMedicaidBins)).toBe(true);
+    expect(pricingMedicaidBins.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("every entry has required fields: bin, plan_name, state, program_type", () => {
+    for (const p of pricingMedicaidBins as Array<Record<string, unknown>>) {
+      expect(typeof p["bin"]).toBe("string");
+      expect(typeof p["plan_name"]).toBe("string");
+      expect(typeof p["state"]).toBe("string");
+      expect(typeof p["program_type"]).toBe("string");
+    }
+  });
+
+  test("BIN 610014 is present", () => {
+    const bins = (pricingMedicaidBins as Array<Record<string, unknown>>).map((p) => p["bin"]);
+    expect(bins).toContain("610014");
+  });
+});
+
+// ── BPG pricing fixture ────────────────────────────────────────────────────────
+
+describe("fixtures/pricing-bpg.json", () => {
+  test("is an array with at least 1 entry", () => {
+    expect(Array.isArray(pricingBpg)).toBe(true);
+    expect(pricingBpg.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("every entry has _live_api=true and _mock=true (BPG is live-API only)", () => {
+    for (const p of pricingBpg as Array<Record<string, unknown>>) {
+      expect(p["_live_api"]).toBe(true);
+      expect(p["_mock"]).toBe(true);
+    }
+  });
+
+  test("every entry has required fields: ndc11, proprietary_name, unit_price", () => {
+    for (const p of pricingBpg as Array<Record<string, unknown>>) {
+      expect(typeof p["ndc11"]).toBe("string");
+      expect(typeof p["proprietary_name"]).toBe("string");
+      expect(typeof p["unit_price"]).toBe("string");
+    }
+  });
+});
+
+// ── OIG LEIE exclusions fixture ────────────────────────────────────────────────
+
+describe("fixtures/exclusions-oig.json", () => {
+  test("is an array with at least 1 entry", () => {
+    expect(Array.isArray(exclusionsOig)).toBe(true);
+    expect(exclusionsOig.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("every entry has required fields: exclusion_type, last_name, exclusion_date", () => {
+    for (const e of exclusionsOig as Array<Record<string, unknown>>) {
+      expect(typeof e["exclusion_type"]).toBe("string");
+      expect(typeof e["last_name"]).toBe("string");
+      expect(typeof e["exclusion_date"]).toBe("string");
+    }
+  });
+});
+
+// ── State exclusions fixture ───────────────────────────────────────────────────
+
+describe("fixtures/exclusions-state.json", () => {
+  test("is an array with at least 1 entry", () => {
+    expect(Array.isArray(exclusionsState)).toBe(true);
+    expect(exclusionsState.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("every entry has required fields: state, entity_name, exclusion_date, program", () => {
+    for (const e of exclusionsState as Array<Record<string, unknown>>) {
+      expect(typeof e["state"]).toBe("string");
+      expect(typeof e["entity_name"]).toBe("string");
+      expect(typeof e["exclusion_date"]).toBe("string");
+      expect(typeof e["program"]).toBe("string");
+    }
+  });
+});
+
+// ── Cross-links fixture ────────────────────────────────────────────────────────
+
+describe("fixtures/cross-links.json", () => {
+  test("is an array with at least 1 entry", () => {
+    expect(Array.isArray(crossLinks)).toBe(true);
+    expect(crossLinks.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("prescriber_to_sam_exclusion cross-link present: NPI 8084009009 → SAM-GUID-00001", () => {
+    const link = (crossLinks as Array<Record<string, unknown>>).find(
+      (l) => l["link_type"] === "prescriber_to_sam_exclusion" && l["prescriber_npi"] === "8084009009",
+    );
+    expect(link).toBeDefined();
+    expect(link!["sam_guid"]).toBe("SAM-GUID-00001");
+  });
+});
+
+// ── Datasets meta fixture ──────────────────────────────────────────────────────
+
+describe("fixtures/datasets-meta.json", () => {
+  const DATASET_KEYS = [
+    "nppes", "ncpdp", "fda_ndc", "fda_orange_book", "fda_purple_book",
+    "fda_drug_shortages", "fda_rems", "rxnorm", "hcpcs", "icd10_cm",
+    "cms_asp", "cms_nadac", "state_medicaid_bins", "cms_opt_out",
+    "ofac_sdn", "sam_exclusions", "oig_leie", "dea_registrations",
+  ] as const;
+
+  test("is an array with exactly 18 entries (one per DatasetKeySchema key)", () => {
+    expect(Array.isArray(datasetsMeta)).toBe(true);
+    expect(datasetsMeta.length).toBe(18);
+  });
+
+  test("every entry has required fields: key, label, cluster, source_url, update_frequency", () => {
+    for (const d of datasetsMeta as Array<Record<string, unknown>>) {
+      expect(typeof d["key"]).toBe("string");
+      expect(typeof d["label"]).toBe("string");
+      expect(typeof d["cluster"]).toBe("string");
+      expect(typeof d["source_url"]).toBe("string");
+      expect(typeof d["update_frequency"]).toBe("string");
+    }
+  });
+
+  test("dataset keys match DatasetKeySchema exactly — all 18 keys present", () => {
+    const presentKeys = (datasetsMeta as Array<Record<string, unknown>>).map((d) => d["key"] as string);
+    for (const expected of DATASET_KEYS) {
+      expect(presentKeys, `DatasetKey '${expected}' missing from datasets-meta.json`).toContain(expected);
+    }
+  });
+
+  test("dataset key values are unique (no duplicates)", () => {
+    const keys = (datasetsMeta as Array<Record<string, unknown>>).map((d) => d["key"]);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });

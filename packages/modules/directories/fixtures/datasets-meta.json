@@ -1,0 +1,20 @@
+[
+  { "key": "nppes", "label": "NPPES Prescribers", "cluster": "prescribers", "source_url": "https://download.cms.gov/nppes/NPI_Files.html", "update_frequency": "weekly" },
+  { "key": "ncpdp", "label": "NCPDP Pharmacies", "cluster": "pharmacies", "source_url": "https://www.ncpdp.org/", "update_frequency": "monthly" },
+  { "key": "fda_ndc", "label": "FDA NDC Drug Database", "cluster": "drugs", "source_url": "https://www.fda.gov/drugs/drug-approvals-and-databases/national-drug-code-directory", "update_frequency": "weekly" },
+  { "key": "fda_orange_book", "label": "FDA Orange Book", "cluster": "drugs", "source_url": "https://www.fda.gov/drugs/drug-approvals-and-databases/orange-book-data-files", "update_frequency": "monthly" },
+  { "key": "fda_purple_book", "label": "FDA Purple Book", "cluster": "drugs", "source_url": "https://purplebooksearch.fda.gov/", "update_frequency": "monthly" },
+  { "key": "fda_drug_shortages", "label": "FDA Drug Shortages", "cluster": "drugs", "source_url": "https://www.fda.gov/drugs/drug-safety-and-availability/drug-shortages", "update_frequency": "daily" },
+  { "key": "fda_rems", "label": "FDA REMS Programs", "cluster": "drugs", "source_url": "https://www.accessdata.fda.gov/scripts/cder/rems/", "update_frequency": "monthly" },
+  { "key": "rxnorm", "label": "RxNorm", "cluster": "drugs", "source_url": "https://www.nlm.nih.gov/research/umls/rxnorm/", "update_frequency": "monthly" },
+  { "key": "hcpcs", "label": "HCPCS Level II Codes", "cluster": "codes", "source_url": "https://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets", "update_frequency": "annual" },
+  { "key": "icd10_cm", "label": "ICD-10-CM Codes", "cluster": "codes", "source_url": "https://www.cdc.gov/nchs/icd/icd-10-cm.htm", "update_frequency": "annual" },
+  { "key": "cms_asp", "label": "CMS ASP Pricing", "cluster": "pricing", "source_url": "https://www.cms.gov/Medicare/Medicare-Fee-for-Service-Part-B-Drugs/McrPartBDrugAvgSalesPrice", "update_frequency": "quarterly" },
+  { "key": "cms_nadac", "label": "CMS NADAC Pricing", "cluster": "pricing", "source_url": "https://www.medicaid.gov/medicaid/prescription-drugs/pharmacy-pricing/index.html", "update_frequency": "weekly" },
+  { "key": "state_medicaid_bins", "label": "State Medicaid BINs", "cluster": "pricing", "source_url": "https://www.medicaid.gov/", "update_frequency": "quarterly" },
+  { "key": "cms_opt_out", "label": "CMS Opt-Out Providers", "cluster": "prescribers", "source_url": "https://data.cms.gov/provider-characteristics/medicare-provider-supplier-enrollment/opt-out-affidavits", "update_frequency": "monthly" },
+  { "key": "ofac_sdn", "label": "OFAC SDN List", "cluster": "exclusions", "source_url": "https://www.treasury.gov/ofac/downloads/sdn.csv", "update_frequency": "daily" },
+  { "key": "sam_exclusions", "label": "SAM.gov Exclusions", "cluster": "exclusions", "source_url": "https://sam.gov/data-services/Exclusions", "update_frequency": "daily" },
+  { "key": "oig_leie", "label": "OIG LEIE Exclusions", "cluster": "exclusions", "source_url": "https://oig.hhs.gov/exclusions/exclusions_list.asp", "update_frequency": "monthly" },
+  { "key": "dea_registrations", "label": "DEA Registrations", "cluster": "prescribers", "source_url": "https://www.deadiversion.usdoj.gov/", "update_frequency": "monthly" }
+]

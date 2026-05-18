@@ -1,0 +1,14 @@
+[
+  {
+    "link_type": "prescriber_to_sam_exclusion",
+    "prescriber_npi": "8084009009",
+    "prescriber_name": "Dr. Thomas Anderson MD",
+    "sam_guid": "SAM-GUID-00001",
+    "exclusion_type": "INELIGIBLE",
+    "entity_name": "ABC MEDICAL SUPPLY CO",
+    "agency": "HHS-OIG",
+    "exclusion_date": "2023-06-01",
+    "_note": "Cross-link: NPI 8084009009 (Thomas Anderson) appears in both prescribers fixture and SAM exclusions fixture. Used for cross-link E2E test.",
+    "_fixture": true
+  }
+]

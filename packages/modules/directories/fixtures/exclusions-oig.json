@@ -1,0 +1,23 @@
+[
+  {
+    "exclusion_type": "I",
+    "last_name": "DOE",
+    "first_name": "JOHN",
+    "middle_name": "",
+    "business_name": "",
+    "general": "Individual",
+    "specialty": "Internal Medicine",
+    "upin": "",
+    "npi": "8084008001",
+    "dob": "19600101",
+    "address": "123 MAIN ST",
+    "city": "CHICAGO",
+    "state": "IL",
+    "zip": "60601",
+    "exclusion_date": "2022-03-15",
+    "reinstatement_date": null,
+    "waiver_date": null,
+    "waiver_state": "",
+    "_fixture": true
+  }
+]

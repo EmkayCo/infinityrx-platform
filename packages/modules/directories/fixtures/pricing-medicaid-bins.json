@@ -1,0 +1,22 @@
+[
+  {
+    "bin": "610014",
+    "pcn": "ADV",
+    "group_id": "RX0001",
+    "plan_name": "Medicaid Managed Care Plan A",
+    "state": "IL",
+    "program_type": "managed_care",
+    "effective_date": "2026-01-01",
+    "_fixture": true
+  },
+  {
+    "bin": "003858",
+    "pcn": "MED",
+    "group_id": "RX0002",
+    "plan_name": "Medicaid Fee-For-Service Plan B",
+    "state": "CA",
+    "program_type": "fee_for_service",
+    "effective_date": "2026-01-01",
+    "_fixture": true
+  }
+]

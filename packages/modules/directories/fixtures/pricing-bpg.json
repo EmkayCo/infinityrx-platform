@@ -1,0 +1,28 @@
+[
+  {
+    "ndc11": "00071015523",
+    "proprietary_name": "Lipitor",
+    "nonproprietary_name": "Atorvastatin Calcium",
+    "strength": "20 mg",
+    "unit_price": "0.1400",
+    "currency": "USD",
+    "effective_date": "2026-05-01",
+    "_live_api": true,
+    "_mock": true,
+    "_note": "BPG is a live-API source, not a batch ingestion source. This fixture is for test harness use only.",
+    "_fixture": true
+  },
+  {
+    "ndc11": "00071012424",
+    "proprietary_name": "Lipitor",
+    "nonproprietary_name": "Atorvastatin Calcium",
+    "strength": "40 mg",
+    "unit_price": "0.1600",
+    "currency": "USD",
+    "effective_date": "2026-05-01",
+    "_live_api": true,
+    "_mock": true,
+    "_note": "BPG is a live-API source, not a batch ingestion source. This fixture is for test harness use only.",
+    "_fixture": true
+  }
+]

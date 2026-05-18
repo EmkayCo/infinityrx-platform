@@ -1,0 +1,13 @@
+[
+  {
+    "state": "IL",
+    "entity_name": "MIDWEST PHARMACY GROUP LLC",
+    "entity_type": "organization",
+    "npi": "9999000001",
+    "exclusion_date": "2024-01-10",
+    "reinstatement_date": null,
+    "reason": "Medicaid fraud conviction",
+    "program": "Illinois Medicaid",
+    "_fixture": true
+  }
+]
