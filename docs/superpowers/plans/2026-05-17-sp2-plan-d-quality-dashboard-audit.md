@@ -124,7 +124,7 @@ export const DatasetQualitySchema = z.object({
   next_run_at: z.string().nullable(),
   cluster: z.enum(["prescribers","pharmacies","drugs","codes","pricing","exclusions"]),
   is_dismissed: z.boolean().default(false),      // from Redis alert-dismiss key
-  no_loader: z.boolean().default(false),         // bpg, fdb — no ingestion trigger
+  no_loader: z.boolean().default(false),         // fdb only — B9-blocked, no ingestion trigger. bpg is NOT in this schema (no IngestionSchedule row).
   b9_blocked: z.boolean().default(false),        // fdb only
 });
 export type DatasetQuality = z.infer<typeof DatasetQualitySchema>;
@@ -166,7 +166,9 @@ export type QualityResponse = z.infer<typeof QualityResponseSchema>;
    - Apply cluster mapping (from Plan A's CLUSTER_LABELS equivalent)
    - Apply is_dismissed: check Redis key dir:alert_dismissed:{tid}:{source}
    - Apply b9_blocked for fdb
-   - Apply no_loader for bpg, fdb
+   - Apply no_loader for fdb (fdb is in IngestionSourceKeySchema but not TRIGGERABLE_SOURCES)
+   - Note: bpg is NOT in IngestionSourceKeySchema — it has no IngestionSchedule row and is
+     absent from the quality dashboard entirely. BPG appears only on the pricing browse surface.
 
 4. Return QualityResponse:
    { datasets: DatasetQuality[], as_of: <ISO datetime> }
