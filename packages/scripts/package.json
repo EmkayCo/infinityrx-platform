@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc -b",
     "validate-manifest": "tsx validate-manifest.ts",
+    "build-manifest": "cd ../.. && tsx packages/scripts/build-manifest.ts",
     "test": "vitest run"
   },
   "dependencies": {

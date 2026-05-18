@@ -1,3 +1,4 @@
 # Allow-list of external network endpoints the platform may call out to.
 # Empty in Plan A; populated as modules declare requires.integrations.
-allowed_integrations: []
+allowed_integrations:
+  - shared-ingestion-api  # SP-2 Plan C: portal directories module proxies to shared/data_ingestion router mounted in prescriber-directory backend
