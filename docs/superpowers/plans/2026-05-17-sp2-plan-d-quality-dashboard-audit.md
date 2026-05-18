@@ -364,7 +364,7 @@ and `POST /api/directories/quality/dismiss/{source}` per D-D2 and D-D6.
 - `packages/modules/directories/src/quality/index.ts`
 
 **Tests:** `packages/modules/directories/tests/unit/quality/QualityDashboardPanel.test.tsx`:
-- Renders one chip per source (18 total minus bpg, relay-health = N rows)
+- Renders one chip per source (21 rows from IngestionSourceKeySchema: 18 browse keys + nppes_monthly + nppes_deactivation + fdb; bpg and relay-health are excluded — bpg has no IngestionSchedule row, relay-health is not a loader)
 - Source with `last_run_at` today → green chip
 - Source with `last_run_at` 10 days ago → yellow chip
 - Source with `last_run_at` null → red chip, "Never loaded"
