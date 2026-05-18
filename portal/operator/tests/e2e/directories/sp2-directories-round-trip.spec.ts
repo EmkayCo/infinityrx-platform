@@ -242,7 +242,7 @@ const AUDIT_RESPONSE = {
 
 // ── Auth mock helper ─────────────────────────────────────────────────────────
 
-async function setupAuthRoutes(page: import("@playwright/test").Page) {
+async function setupAuthRoutes(page: Page) {
   await page.route("**/api/auth/session", (route) => {
     route.fulfill({
       status: 200,
@@ -257,6 +257,12 @@ async function setupAuthRoutes(page: import("@playwright/test").Page) {
       body: JSON.stringify({ csrfToken: "mock-csrf-token" }),
     });
   });
+  // Navigate to BASE so the page is same-origin with the directories BFF routes.
+  // fetchViaPage() fires fetch() via page.evaluate() — from about:blank the fetch
+  // would be cross-origin to localhost:3000 and may trigger CORS preflight.
+  // page.route() mocks do NOT add CORS headers, so preflight would fail.
+  // This navigate runs after routes are registered so the auth mocks apply.
+  await page.goto(BASE);
 }
 
 // ── Test suite ────────────────────────────────────────────────────────────────
@@ -863,6 +869,9 @@ test.describe("SP-2 round-trip: cross-tenant reference data isolation", () => {
         }),
       });
     });
+
+    // Navigate to BASE first so fetchViaPage runs same-origin (not cross-origin from about:blank)
+    await page.goto(BASE);
 
     // Tenant A request — fetchViaPage fires from page context, intercepted by page.route()
     const { status: statusA, body: bodyA } = await fetchViaPage(

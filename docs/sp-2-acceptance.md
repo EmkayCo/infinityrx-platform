@@ -4,7 +4,7 @@
 **Sprint:** SP-2  
 **Prepared by:** SP-2 Plan E execution agent (a7d01b650013cd863)  
 **Date:** 2026-05-18  
-**Verdict:** READY FOR CODEX GATE-CLOSE REVIEW (R4 — after addressing codex R3 NO-GO)  
+**Verdict:** READY FOR CODEX GATE-CLOSE REVIEW (R5 — after addressing codex R4 NO-GO)  
 
 ---
 
@@ -26,7 +26,18 @@ failures, zero skips. All five plans (A–E) complete and gate-reviewed.
   to bring fixture count to 18 per DatasetKeySchema. Added 16 fixture validation tests.
 - BLOCK 3: Acceptance document updated to match actual implementation.
 
-**Codex R3 NO-GO addressed** (this commit):
+**Codex R4 NO-GO addressed** (this commit):
+- BLOCK 1 resolved: `fetchViaPage()` calls on unnavigated pages (`about:blank`) were cross-origin
+  to `localhost:3000`. Browser `fetch()` from a cross-origin page triggers CORS preflight;
+  `page.route().fulfill()` mocks do not add CORS headers, so preflight would fail with
+  `TypeError: Failed to fetch`. Fix: added `await page.goto(BASE)` at the end of
+  `setupAuthRoutes()` (all tests that use `beforeEach` → `setupAuthRoutes` are now
+  same-origin before any `fetchViaPage` call). The cross-tenant test (no `setupAuthRoutes`)
+  gets an explicit `await page.goto(BASE)` before its first `fetchViaPage` call.
+- P2 advisory resolved: acceptance doc test count verification line removed stale commit
+  hash (`85b94c23`); now references the vitest and playwright commands directly.
+
+**Codex R3 NO-GO addressed** (commit 51e9a253):
 - BLOCK 1 resolved: `page.request.get/post()` in Playwright bypasses `page.route()` handlers —
   `APIRequestContext` requests go directly to the network and are NOT intercepted by
   `route.fulfill()` mocks. All 16 API-assertion calls in the E2E spec have been replaced
@@ -275,7 +286,7 @@ BFF wiring is confirmed via API-layer assertions.
 | E (E2E + Fixtures) | ~102 | search-relevance, bff-fan-out, ingestion-idempotency, fixtures-valid (56 tests after R1 additions) |
 | **Total** | **456** | **30 test files, 0 failures, 0 skips** |
 
-Test count verified by running `npx vitest run` from `packages/modules/directories` at HEAD `85b94c23`.
+Test count verified by running `npx vitest run` from `packages/modules/directories`. The E2E spec (Playwright) runs separately via `npx playwright test` from `portal/operator`.
 
 ---
 
