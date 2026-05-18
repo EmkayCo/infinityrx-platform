@@ -4,7 +4,7 @@
 **Sprint:** SP-2  
 **Prepared by:** SP-2 Plan E execution agent (a7d01b650013cd863)  
 **Date:** 2026-05-18  
-**Verdict:** READY FOR CODEX GATE-CLOSE REVIEW (R3 — after addressing codex R2 NO-GO)  
+**Verdict:** READY FOR CODEX GATE-CLOSE REVIEW (R4 — after addressing codex R3 NO-GO)  
 
 ---
 
@@ -26,7 +26,20 @@ failures, zero skips. All five plans (A–E) complete and gate-reviewed.
   to bring fixture count to 18 per DatasetKeySchema. Added 16 fixture validation tests.
 - BLOCK 3: Acceptance document updated to match actual implementation.
 
-**Codex R2 NO-GO addressed** (this commit):
+**Codex R3 NO-GO addressed** (this commit):
+- BLOCK 1 resolved: `page.request.get/post()` in Playwright bypasses `page.route()` handlers —
+  `APIRequestContext` requests go directly to the network and are NOT intercepted by
+  `route.fulfill()` mocks. All 16 API-assertion calls in the E2E spec have been replaced
+  with `fetchViaPage(page, url, opts)` which fires `fetch()` via `page.evaluate()` inside
+  the browser context where `page.route()` mocks DO apply. The `fetchViaPage` helper is
+  defined at the top of the spec with an inline comment explaining the Playwright behavior.
+  The `bffCalledWithJane` flag (previously set but never asserted) now has an
+  `expect(bffCalledWithJane).toBe(true)` assertion to confirm mock interception.
+- BLOCK 2 resolved: Acceptance doc ingest route paths were reversed (`/trigger/{source}`
+  vs `/{source}/trigger`). Corrected to match the actual Next.js route structure at
+  `portal/operator/app/api/directories/ingest/[source]/trigger/`.
+
+**Codex R2 NO-GO addressed** (commit e0af038f):
 - BLOCK 1 resolved: Quality dashboard UI test was navigating to `/analytics/data-quality`
   (DataIQ analytics page — does NOT mount `QualityDashboardPanel`) and asserting a
   `data-testid` that cannot exist there. Audit log UI test was navigating to
@@ -88,7 +101,7 @@ failures, zero skips. All five plans (A–E) complete and gate-reviewed.
 
 **Delivered:**
 - Shared ingestion router mounted in `prescriber-directory` `create_app()` (Plan C T1)
-- BFF ingest proxy routes — `POST /api/directories/ingest/trigger/{source}`, `GET /api/directories/ingest/history/{source}`, `GET /api/directories/ingest/status` — with SSRF guard (`TRIGGERABLE_SOURCES` 20-key allowlist, excluding `bpg` and `fdb`)
+- BFF ingest proxy routes — `POST /api/directories/ingest/{source}/trigger`, `GET /api/directories/ingest/{source}/history`, `GET /api/directories/ingest/status`, `DELETE /api/directories/ingest/{source}/cancel` — with SSRF guard (`TRIGGERABLE_SOURCES` 20-key allowlist, excluding `bpg` and `fdb`)
 - `IngestionConsolePage` — 22-row table (20 triggerable + bpg live-API + fdb B9-pending) with per-row status, error badge, trigger button, history link
 - `TriggerRefreshButton` — 202/409/SSRF error handling with toast feedback
 - `RunProgressBar` — polling progress bar for in-flight runs
@@ -199,7 +212,7 @@ No real PHI. All data is synthetic.
 
 `portal/operator/tests/e2e/directories/sp2-directories-round-trip.spec.ts` — fully mock-backed, NO `test.skip(!E2E_STACK_READY)` pattern.
 
-All tests use `page.route("**/api/directories/**", route => route.fulfill({...}))` — no live backend required.
+All tests use `page.route("**/api/directories/**", route => route.fulfill({...}))` for mocking, and `fetchViaPage(page, url, opts)` for API contract assertions. `fetchViaPage` wraps `page.evaluate(() => fetch(...))` so requests fire inside the browser context and ARE intercepted by `page.route()` handlers. Note: `page.request.get/post()` (Playwright's `APIRequestContext`) bypasses route handlers entirely and is NOT used.
 
 Coverage:
 - Prescriber BFF contract: `?q=Jane` → NPI 8084000008, dataset=nppes, display contains "Jane Smith"

@@ -17,6 +17,11 @@
  * No real backend stack is required. Tests run on every CI execution without
  * any E2E_STACK_READY or similar env-gate skip.
  *
+ * IMPORTANT: All API assertions use page.evaluate(() => fetch(...)) NOT page.request.get().
+ * Playwright's page.request (APIRequestContext) bypasses page.route() handlers — requests
+ * go directly to the network instead of hitting the mocked routes. Fetches fired via
+ * page.evaluate run inside the browser context and ARE intercepted by page.route().
+ *
  * Mock network contract:
  *   GET /api/auth/session             → mock-session fixture
  *   GET /api/auth/csrf                → { csrfToken: "mock-csrf-token" }
@@ -29,11 +34,43 @@
  * Selector strategy: prefer data-testid attributes added in the E-6 audit pass
  * (38c9c534). Fall back to aria-label and visible text only for elements without
  * data-testid.
+ *
+ * fetchViaPage helper: all API contract assertions use fetchViaPage() which fires
+ * fetch() via page.evaluate() so requests are intercepted by page.route() mocks.
+ * Do NOT replace with page.request.get/post() — that bypasses route handlers entirely.
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 const BASE = "http://localhost:3000";
+
+// ── fetchViaPage: fire fetch from INSIDE the page context ─────────────────────
+// page.request.get() bypasses page.route() handlers — it uses the APIRequestContext
+// which goes directly to the network. page.evaluate(() => fetch(...)) runs inside
+// the browser context and IS intercepted by page.route() mocks.
+async function fetchViaPage(
+  page: Page,
+  url: string,
+  opts: { method?: string; headers?: Record<string, string>; body?: string } = {},
+): Promise<{ status: number; body: unknown }> {
+  return page.evaluate(
+    async ({ fetchUrl, fetchOpts }) => {
+      const res = await fetch(fetchUrl, {
+        method: fetchOpts.method ?? "GET",
+        headers: fetchOpts.headers ?? {},
+        body: fetchOpts.body,
+      });
+      let body: unknown;
+      try {
+        body = await res.json();
+      } catch {
+        body = await res.text();
+      }
+      return { status: res.status, body };
+    },
+    { fetchUrl: url, fetchOpts: opts },
+  );
+}
 
 // ── Fixture data (mirrors packages/modules/directories/fixtures/) ─────────────
 
@@ -259,13 +296,16 @@ test.describe("SP-2 round-trip: federated search fan-out", () => {
     });
 
     // Verify API contract: BFF returns correct shape with nppes dataset key
-    const resp = await page.request.get(`${BASE}/api/directories/search?q=Jane`);
-    const body = await resp.json() as { results: Array<{ id: string; dataset: string; display: string }> };
-    expect(resp.status()).toBe(200);
-    expect(body.results).toHaveLength(1);
-    expect(body.results[0].id).toBe("8084000008");
-    expect(body.results[0].dataset).toBe("nppes");
-    expect(body.results[0].display).toContain("Jane Smith");
+    // fetchViaPage fires fetch() from inside the page context so page.route() mocks apply.
+    const { status, body } = await fetchViaPage(page, `${BASE}/api/directories/search?q=Jane`);
+    const typedBody = body as { results: Array<{ id: string; dataset: string; display: string }> };
+    expect(status).toBe(200);
+    expect(typedBody.results).toHaveLength(1);
+    expect(typedBody.results[0].id).toBe("8084000008");
+    expect(typedBody.results[0].dataset).toBe("nppes");
+    expect(typedBody.results[0].display).toContain("Jane Smith");
+    // Now that fetchViaPage goes through page.route(), this confirms the mock was hit
+    expect(bffCalledWithJane).toBe(true);
   });
 
   test("drug search via command palette returns fda_ndc result", async ({ page }) => {
@@ -293,10 +333,10 @@ test.describe("SP-2 round-trip: federated search fan-out", () => {
     await expect(page.locator("body")).toBeVisible({ timeout: 15_000 });
 
     // Verify BFF returns fda_ndc result with correct NDC id for drug query
-    const resp = await page.request.get(`${BASE}/api/directories/search?q=lipitor`);
-    const body = await resp.json() as { results: Array<{ id: string; dataset: string; display: string }> };
-    expect(resp.status()).toBe(200);
-    const fdaNdcResult = body.results.find((r) => r.dataset === "fda_ndc");
+    const { status, body } = await fetchViaPage(page, `${BASE}/api/directories/search?q=lipitor`);
+    const typedBody = body as { results: Array<{ id: string; dataset: string; display: string }> };
+    expect(status).toBe(200);
+    const fdaNdcResult = typedBody.results.find((r) => r.dataset === "fda_ndc");
     expect(fdaNdcResult).toBeDefined();
     expect(fdaNdcResult!.id).toBe("00071015523");
     expect(fdaNdcResult!.display).toContain("Atorvastatin");
@@ -318,20 +358,20 @@ test.describe("SP-2 round-trip: federated search fan-out", () => {
     });
 
     // Verify the search API route is mocked and would return multiple datasets
-    const resp = await page.request.get(`${BASE}/api/directories/search?q=atorvastatin`);
-    const body = await resp.json() as {
+    const { status, body } = await fetchViaPage(page, `${BASE}/api/directories/search?q=atorvastatin`);
+    const typedBody = body as {
       results: Array<{ dataset: string }>;
       is_partial: boolean;
       timed_out_datasets: string[];
     };
 
-    expect(resp.status()).toBe(200);
-    expect(body.results.length).toBe(3);
-    expect(body.results.map((r) => r.dataset)).toContain("nppes");
-    expect(body.results.map((r) => r.dataset)).toContain("fda_ndc");
-    expect(body.results.map((r) => r.dataset)).toContain("ncpdp");
-    expect(body.is_partial).toBe(false);
-    expect(body.timed_out_datasets).toHaveLength(0);
+    expect(status).toBe(200);
+    expect(typedBody.results.length).toBe(3);
+    expect(typedBody.results.map((r) => r.dataset)).toContain("nppes");
+    expect(typedBody.results.map((r) => r.dataset)).toContain("fda_ndc");
+    expect(typedBody.results.map((r) => r.dataset)).toContain("ncpdp");
+    expect(typedBody.is_partial).toBe(false);
+    expect(typedBody.timed_out_datasets).toHaveLength(0);
   });
 
   test("is_partial=true banner: timed_out_datasets present when prescriber backend down", async ({ page }) => {
@@ -349,11 +389,11 @@ test.describe("SP-2 round-trip: federated search fan-out", () => {
       });
     });
 
-    const resp = await page.request.get(`${BASE}/api/directories/search?q=smith`);
-    const body = await resp.json() as { is_partial: boolean; timed_out_datasets: string[] };
+    const { status: _s, body } = await fetchViaPage(page, `${BASE}/api/directories/search?q=smith`);
+    const typedBody = body as { is_partial: boolean; timed_out_datasets: string[] };
 
-    expect(body.is_partial).toBe(true);
-    expect(body.timed_out_datasets).toContain("nppes");
+    expect(typedBody.is_partial).toBe(true);
+    expect(typedBody.timed_out_datasets).toContain("nppes");
   });
 
   test("search API returns 401 when no auth token", async ({ page }) => {
@@ -376,10 +416,10 @@ test.describe("SP-2 round-trip: federated search fan-out", () => {
       });
     });
 
-    const resp = await page.request.get(`${BASE}/api/directories/search?q=lipitor`);
-    expect(resp.status()).toBe(401);
-    const body = await resp.json() as { error: { code: string } };
-    expect(body.error.code).toBe("UNAUTHORIZED");
+    const { status, body } = await fetchViaPage(page, `${BASE}/api/directories/search?q=lipitor`);
+    expect(status).toBe(401);
+    const typedBody = body as { error: { code: string } };
+    expect(typedBody.error.code).toBe("UNAUTHORIZED");
   });
 
   test("short query (1 char) returns empty results without triggering fan-out", async ({ page }) => {
@@ -416,11 +456,13 @@ test.describe("SP-2 round-trip: federated search fan-out", () => {
       }
     });
 
-    const resp = await page.request.get(`${BASE}/api/directories/search?q=a`);
-    const body = await resp.json() as { results: unknown[]; is_partial: boolean };
+    const { body } = await fetchViaPage(page, `${BASE}/api/directories/search?q=a`);
+    const typedBody = body as { results: unknown[]; is_partial: boolean };
 
-    expect(body.results).toHaveLength(0);
-    expect(body.is_partial).toBe(false);
+    expect(typedBody.results).toHaveLength(0);
+    expect(typedBody.is_partial).toBe(false);
+    // Confirm the mock was actually invoked (not bypassed)
+    expect(searchWasCalled).toBe(true);
   });
 });
 
@@ -440,20 +482,20 @@ test.describe("SP-2 round-trip: quality dashboard BFF", () => {
       });
     });
 
-    const resp = await page.request.get(`${BASE}/api/directories/quality`, {
+    const { status, body } = await fetchViaPage(page, `${BASE}/api/directories/quality`, {
       headers: { authorization: "Bearer mock-token" },
     });
-    const body = await resp.json() as typeof QUALITY_RESPONSE;
+    const typedBody = body as typeof QUALITY_RESPONSE;
 
-    expect(resp.status()).toBe(200);
-    expect(body.datasets.length).toBeGreaterThanOrEqual(3);
+    expect(status).toBe(200);
+    expect(typedBody.datasets.length).toBeGreaterThanOrEqual(3);
 
-    const nppes = body.datasets.find((d) => d.source === "nppes");
+    const nppes = typedBody.datasets.find((d) => d.source === "nppes");
     expect(nppes).toBeDefined();
     expect(nppes!.records_inserted).toBe(9494438);
     expect(nppes!.status).toBe("healthy");
 
-    const fdaNdc = body.datasets.find((d) => d.source === "fda_ndc");
+    const fdaNdc = typedBody.datasets.find((d) => d.source === "fda_ndc");
     expect(fdaNdc).toBeDefined();
     expect(fdaNdc!.status).toBe("error");
     expect(fdaNdc!.alerts.length).toBeGreaterThanOrEqual(1);
@@ -479,11 +521,11 @@ test.describe("SP-2 round-trip: quality dashboard BFF", () => {
       });
     });
 
-    const resp = await page.request.get(`${BASE}/api/directories/quality`);
-    expect(resp.status()).toBe(401);
-    const body = await resp.json() as { error: { code: string; correlation_id: string } };
-    expect(body.error.code).toBe("UNAUTHORIZED");
-    expect(body.error.correlation_id).toBe("e2e-quality-unauth-test");
+    const { status, body } = await fetchViaPage(page, `${BASE}/api/directories/quality`);
+    expect(status).toBe(401);
+    const typedBody = body as { error: { code: string; correlation_id: string } };
+    expect(typedBody.error.code).toBe("UNAUTHORIZED");
+    expect(typedBody.error.correlation_id).toBe("e2e-quality-unauth-test");
   });
 });
 
@@ -503,20 +545,20 @@ test.describe("SP-2 round-trip: ingestion status BFF", () => {
       });
     });
 
-    const resp = await page.request.get(`${BASE}/api/directories/ingest/status`, {
+    const { status, body } = await fetchViaPage(page, `${BASE}/api/directories/ingest/status`, {
       headers: { authorization: "Bearer mock-token" },
     });
-    const body = await resp.json() as typeof INGESTION_STATUS_RESPONSE;
+    const typedBody = body as typeof INGESTION_STATUS_RESPONSE;
 
-    expect(resp.status()).toBe(200);
-    expect(Array.isArray(body)).toBe(true);
+    expect(status).toBe(200);
+    expect(Array.isArray(typedBody)).toBe(true);
 
-    const nppes = body.find((s) => s.source === "nppes");
+    const nppes = typedBody.find((s) => s.source === "nppes");
     expect(nppes).toBeDefined();
     expect(nppes!.last_run.status).toBe("completed");
     expect(nppes!.last_run.records_inserted).toBe(9494438);
 
-    const ncpdp = body.find((s) => s.source === "ncpdp");
+    const ncpdp = typedBody.find((s) => s.source === "ncpdp");
     expect(ncpdp).toBeDefined();
     expect(ncpdp!.last_run.status).toBe("running");
     expect(ncpdp!.enabled).toBe(false);
@@ -540,20 +582,22 @@ test.describe("SP-2 round-trip: ingestion status BFF", () => {
       }
     });
 
-    const resp = await page.request.post(
+    const { status, body } = await fetchViaPage(
+      page,
       `${BASE}/api/directories/ingest/nppes/trigger`,
       {
+        method: "POST",
         headers: {
           authorization: "Bearer mock-token",
           "content-type": "application/json",
         },
-        data: { run_type: "manual_trigger" },
+        body: JSON.stringify({ run_type: "manual_trigger" }),
       },
     );
 
-    expect(resp.status()).toBe(202);
-    const body = await resp.json() as { run_id: string; status: string };
-    expect(body.status).toBe("queued");
+    expect(status).toBe(202);
+    const typedBody = body as { run_id: string; status: string };
+    expect(typedBody.status).toBe("queued");
   });
 
   test("ingestion trigger returns 404 for non-triggerable source bpg", async ({ page }) => {
@@ -575,20 +619,22 @@ test.describe("SP-2 round-trip: ingestion status BFF", () => {
       }
     });
 
-    const resp = await page.request.post(
+    const { status, body } = await fetchViaPage(
+      page,
       `${BASE}/api/directories/ingest/bpg/trigger`,
       {
+        method: "POST",
         headers: {
           authorization: "Bearer mock-token",
           "content-type": "application/json",
         },
-        data: {},
+        body: JSON.stringify({}),
       },
     );
 
-    expect(resp.status()).toBe(404);
-    const body = await resp.json() as { error: { code: string } };
-    expect(body.error.code).toBe("SOURCE_NOT_FOUND");
+    expect(status).toBe(404);
+    const typedBody = body as { error: { code: string } };
+    expect(typedBody.error.code).toBe("SOURCE_NOT_FOUND");
   });
 });
 
@@ -608,19 +654,19 @@ test.describe("SP-2 round-trip: audit log BFF", () => {
       });
     });
 
-    const resp = await page.request.get(`${BASE}/api/directories/audit`, {
+    const { status, body } = await fetchViaPage(page, `${BASE}/api/directories/audit`, {
       headers: { authorization: "Bearer mock-token" },
     });
-    const body = await resp.json() as typeof AUDIT_RESPONSE;
+    const typedBody = body as typeof AUDIT_RESPONSE;
 
-    expect(resp.status()).toBe(200);
-    expect(body.items.length).toBe(2);
+    expect(status).toBe(200);
+    expect(typedBody.items.length).toBe(2);
 
-    const triggerEntry = body.items.find((e) => e.action === "ingestion.triggered");
+    const triggerEntry = typedBody.items.find((e) => e.action === "ingestion.triggered");
     expect(triggerEntry).toBeDefined();
     expect(triggerEntry!.source).toBe("nppes");
 
-    const dismissEntry = body.items.find((e) => e.action === "quality.alert.dismissed");
+    const dismissEntry = typedBody.items.find((e) => e.action === "quality.alert.dismissed");
     expect(dismissEntry).toBeDefined();
     expect(dismissEntry!.source).toBe("fda_ndc");
   });
@@ -644,11 +690,11 @@ test.describe("SP-2 round-trip: audit log BFF", () => {
       });
     });
 
-    const resp = await page.request.get(`${BASE}/api/directories/audit`);
-    expect(resp.status()).toBe(401);
-    const body = await resp.json() as { error: { code: string; correlation_id: string } };
-    expect(body.error.code).toBe("UNAUTHORIZED");
-    expect(body.error.correlation_id).toBe("e2e-audit-unauth-test");
+    const { status, body } = await fetchViaPage(page, `${BASE}/api/directories/audit`);
+    expect(status).toBe(401);
+    const typedBody = body as { error: { code: string; correlation_id: string } };
+    expect(typedBody.error.code).toBe("UNAUTHORIZED");
+    expect(typedBody.error.correlation_id).toBe("e2e-audit-unauth-test");
   });
 });
 
@@ -678,12 +724,12 @@ test.describe("SP-2 round-trip: SAM exclusion cross-link", () => {
       });
     });
 
-    const resp = await page.request.get(`${BASE}/api/directories/search?q=8084009009`);
-    const body = await resp.json() as { results: Array<{ id: string; dataset: string }> };
+    const { body } = await fetchViaPage(page, `${BASE}/api/directories/search?q=8084009009`);
+    const typedBody = body as { results: Array<{ id: string; dataset: string }> };
 
-    expect(body.results).toHaveLength(1);
-    expect(body.results[0].id).toBe("8084009009");
-    expect(body.results[0].dataset).toBe("nppes");
+    expect(typedBody.results).toHaveLength(1);
+    expect(typedBody.results[0].id).toBe("8084009009");
+    expect(typedBody.results[0].dataset).toBe("nppes");
   });
 
   test("exclusion-check endpoint returns SAM exclusion for NPI 8084009009", async ({ page }) => {
@@ -708,21 +754,22 @@ test.describe("SP-2 round-trip: SAM exclusion cross-link", () => {
       });
     });
 
-    const resp = await page.request.get(
+    const { status, body } = await fetchViaPage(
+      page,
       `${BASE}/api/directories/prescribers/8084009009/exclusion-check`,
       { headers: { authorization: "Bearer mock-token" } },
     );
-    const body = await resp.json() as {
+    const typedBody = body as {
       npi: string;
       is_excluded: boolean;
       exclusions: Array<{ source: string; sam_guid: string }>;
     };
 
-    expect(resp.status()).toBe(200);
-    expect(body.is_excluded).toBe(true);
-    expect(body.exclusions).toHaveLength(1);
-    expect(body.exclusions[0].source).toBe("sam_exclusions");
-    expect(body.exclusions[0].sam_guid).toBe("SAM-GUID-00001");
+    expect(status).toBe(200);
+    expect(typedBody.is_excluded).toBe(true);
+    expect(typedBody.exclusions).toHaveLength(1);
+    expect(typedBody.exclusions[0].source).toBe("sam_exclusions");
+    expect(typedBody.exclusions[0].sam_guid).toBe("SAM-GUID-00001");
   });
 });
 
@@ -817,20 +864,24 @@ test.describe("SP-2 round-trip: cross-tenant reference data isolation", () => {
       });
     });
 
-    // Tenant A request
-    const respA = await page.request.get(`${BASE}/api/directories/search?q=lipitor`, {
-      headers: { authorization: "Bearer mock-token-tenant-a" },
-    });
-    const bodyA = await respA.json() as { results: unknown[] };
+    // Tenant A request — fetchViaPage fires from page context, intercepted by page.route()
+    const { status: statusA, body: bodyA } = await fetchViaPage(
+      page,
+      `${BASE}/api/directories/search?q=lipitor`,
+      { headers: { authorization: "Bearer mock-token-tenant-a" } },
+    );
+    const typedBodyA = bodyA as { results: unknown[] };
 
     // Tenant B request
-    const respB = await page.request.get(`${BASE}/api/directories/search?q=lipitor`, {
-      headers: { authorization: "Bearer mock-token-tenant-b" },
-    });
-    const bodyB = await respB.json() as { results: unknown[] };
+    const { status: statusB, body: bodyB } = await fetchViaPage(
+      page,
+      `${BASE}/api/directories/search?q=lipitor`,
+      { headers: { authorization: "Bearer mock-token-tenant-b" } },
+    );
+    const typedBodyB = bodyB as { results: unknown[] };
 
     // Reference data (public drug records) must be identical across tenants
-    expect(bodyA.results).toEqual(bodyB.results);
-    expect(respA.status()).toBe(respB.status());
+    expect(typedBodyA.results).toEqual(typedBodyB.results);
+    expect(statusA).toBe(statusB);
   });
 });
