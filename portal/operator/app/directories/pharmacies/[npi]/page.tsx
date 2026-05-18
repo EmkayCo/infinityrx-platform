@@ -1,3 +1,8 @@
-// SP-2 Plan B: thin re-export shell.
-// Logic migrated to @infinityrx/module-directories — PharmacyDetailPage.
-export { PharmacyDetailPage as default } from "@infinityrx/module-directories";
+// SP-2 Plan B: page wrapper with route param.
+// Logic in @infinityrx/module-directories — PharmacyDetailPage.
+import { PharmacyDetailPage } from "@infinityrx/module-directories";
+
+export default async function Page({ params }: { params: Promise<{ npi: string }> }) {
+  const { npi } = await params;
+  return <PharmacyDetailPage npi={npi} />;
+}

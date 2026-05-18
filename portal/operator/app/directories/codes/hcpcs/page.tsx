@@ -1,3 +1,7 @@
-// SP-2 Plan B: thin re-export shell.
-// Logic migrated to @infinityrx/module-directories — HcpcsListPage.
-export { HcpcsListPage as default } from "@infinityrx/module-directories";
+// SP-2 Plan B: page wrapper.
+// Logic in @infinityrx/module-directories — HcpcsListPage.
+import { HcpcsListPage } from "@infinityrx/module-directories";
+
+export default function Page() {
+  return <HcpcsListPage />;
+}

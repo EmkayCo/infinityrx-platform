@@ -1,3 +1,8 @@
-// SP-2 Plan B: thin re-export shell.
-// Logic migrated to @infinityrx/module-directories — DrugDetailPage.
-export { DrugDetailPage as default } from "@infinityrx/module-directories";
+// SP-2 Plan B: page wrapper with route param.
+// Logic in @infinityrx/module-directories — DrugDetailPage.
+import { DrugDetailPage } from "@infinityrx/module-directories";
+
+export default async function Page({ params }: { params: Promise<{ ndc: string }> }) {
+  const { ndc } = await params;
+  return <DrugDetailPage ndc={ndc} />;
+}
