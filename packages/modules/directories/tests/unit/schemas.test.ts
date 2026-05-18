@@ -1,8 +1,12 @@
 // tests/unit/schemas.test.ts
 // Validates zod shapes, ID_PATTERNS, and DatasetKey enum for the directories module.
+// Plan D: adds IngestionSourceKeySchema, DatasetQualitySchema, QualityResponseSchema.
 import { describe, it, expect } from "vitest";
 import {
   DatasetKeySchema,
+  IngestionSourceKeySchema,
+  DatasetQualitySchema,
+  QualityResponseSchema,
   SearchResultRecordSchema,
   SearchResponseSchema,
   ID_PATTERNS,
@@ -237,5 +241,182 @@ describe("ID_PATTERNS", () => {
       expect(ID_PATTERNS.ICD10.test("887")).toBe(false);    // digit first
       expect(ID_PATTERNS.ICD10.test("Z8")).toBe(false);     // only 1 digit
     });
+  });
+});
+
+// ── Plan D: IngestionSourceKeySchema ────────────────────────────────────────
+
+describe("IngestionSourceKeySchema", () => {
+  it("accepts all 18 browse-cluster keys", () => {
+    const browseKeys = [
+      "nppes", "ncpdp", "fda_ndc", "fda_orange_book", "fda_purple_book",
+      "fda_drug_shortages", "fda_rems", "rxnorm", "hcpcs", "icd10_cm",
+      "cms_asp", "cms_nadac", "state_medicaid_bins", "cms_opt_out",
+      "ofac_sdn", "sam_exclusions", "oig_leie", "dea_registrations",
+    ];
+    for (const key of browseKeys) {
+      expect(() => IngestionSourceKeySchema.parse(key)).not.toThrow();
+    }
+  });
+
+  it("accepts the 3 ingestion-only keys", () => {
+    expect(() => IngestionSourceKeySchema.parse("nppes_monthly")).not.toThrow();
+    expect(() => IngestionSourceKeySchema.parse("nppes_deactivation")).not.toThrow();
+    expect(() => IngestionSourceKeySchema.parse("fdb")).not.toThrow();
+  });
+
+  it("has 21 total keys (18 browse + 3 ingestion-only)", () => {
+    // The enum values array length verifies the superset count.
+    expect(IngestionSourceKeySchema.options).toHaveLength(21);
+  });
+
+  it("rejects bpg (live API, no IngestionSchedule row)", () => {
+    expect(() => IngestionSourceKeySchema.parse("bpg")).toThrow();
+  });
+
+  it("rejects relay-health (not a loader)", () => {
+    expect(() => IngestionSourceKeySchema.parse("relay-health")).toThrow();
+  });
+
+  it("rejects unknown keys", () => {
+    expect(() => IngestionSourceKeySchema.parse("unknown_source")).toThrow();
+    expect(() => IngestionSourceKeySchema.parse("")).toThrow();
+  });
+});
+
+// ── Plan D: DatasetQualitySchema ─────────────────────────────────────────────
+
+describe("DatasetQualitySchema", () => {
+  const validQualityRow = {
+    source: "nppes" as const,
+    last_run_at: "2026-05-15T12:00:00Z",
+    last_success_at: "2026-05-15T12:00:00Z",
+    last_run_status: "completed" as const,
+    records_inserted: 100000,
+    records_errored: 0,
+    cron_expression: "0 3 1 * *",
+    next_run_at: "2026-06-01T03:00:00Z",
+    cluster: "prescribers" as const,
+  };
+
+  it("parses a valid quality row with defaults", () => {
+    const parsed = DatasetQualitySchema.parse(validQualityRow);
+    expect(parsed.source).toBe("nppes");
+    expect(parsed.cluster).toBe("prescribers");
+    expect(parsed.is_dismissed).toBe(false);
+    expect(parsed.no_loader).toBe(false);
+    expect(parsed.b9_blocked).toBe(false);
+  });
+
+  it("is_dismissed defaults to false when omitted", () => {
+    const parsed = DatasetQualitySchema.parse(validQualityRow);
+    expect(parsed.is_dismissed).toBe(false);
+  });
+
+  it("accepts is_dismissed: true", () => {
+    const parsed = DatasetQualitySchema.parse({ ...validQualityRow, is_dismissed: true });
+    expect(parsed.is_dismissed).toBe(true);
+  });
+
+  it("accepts null last_run_at and last_success_at", () => {
+    const parsed = DatasetQualitySchema.parse({
+      ...validQualityRow,
+      last_run_at: null,
+      last_success_at: null,
+      last_run_status: null,
+      records_inserted: null,
+      records_errored: null,
+      cron_expression: null,
+      next_run_at: null,
+    });
+    expect(parsed.last_run_at).toBeNull();
+    expect(parsed.last_success_at).toBeNull();
+    expect(parsed.last_run_status).toBeNull();
+  });
+
+  it("accepts all valid last_run_status values", () => {
+    const statuses = ["completed", "completed_core", "failed", "skipped_unchanged", "running"] as const;
+    for (const status of statuses) {
+      const parsed = DatasetQualitySchema.parse({ ...validQualityRow, last_run_status: status });
+      expect(parsed.last_run_status).toBe(status);
+    }
+  });
+
+  it("accepts fdb with b9_blocked and no_loader flags", () => {
+    const parsed = DatasetQualitySchema.parse({
+      source: "fdb",
+      last_run_at: null,
+      last_success_at: null,
+      last_run_status: null,
+      records_inserted: null,
+      records_errored: null,
+      cron_expression: null,
+      next_run_at: null,
+      cluster: "drugs",
+      b9_blocked: true,
+      no_loader: true,
+    });
+    expect(parsed.source).toBe("fdb");
+    expect(parsed.b9_blocked).toBe(true);
+    expect(parsed.no_loader).toBe(true);
+  });
+
+  it("rejects unknown cluster value", () => {
+    expect(() =>
+      DatasetQualitySchema.parse({ ...validQualityRow, cluster: "unknown_cluster" }),
+    ).toThrow();
+  });
+
+  it("rejects bpg as source (not in IngestionSourceKeySchema)", () => {
+    expect(() =>
+      DatasetQualitySchema.parse({ ...validQualityRow, source: "bpg" }),
+    ).toThrow();
+  });
+});
+
+// ── Plan D: QualityResponseSchema ────────────────────────────────────────────
+
+describe("QualityResponseSchema", () => {
+  it("parses a valid quality response envelope", () => {
+    const response = {
+      datasets: [
+        {
+          source: "nppes",
+          last_run_at: "2026-05-15T12:00:00Z",
+          last_success_at: "2026-05-15T12:00:00Z",
+          last_run_status: "completed",
+          records_inserted: 9000000,
+          records_errored: 0,
+          cron_expression: "0 3 1 * *",
+          next_run_at: "2026-06-01T03:00:00Z",
+          cluster: "prescribers",
+        },
+      ],
+      as_of: "2026-05-18T07:00:00Z",
+    };
+    const parsed = QualityResponseSchema.parse(response);
+    expect(parsed.datasets).toHaveLength(1);
+    expect(parsed.as_of).toBe("2026-05-18T07:00:00Z");
+    expect(parsed.is_partial).toBe(false);
+  });
+
+  it("parses empty datasets array with as_of string", () => {
+    const response = { datasets: [], as_of: "2026-05-18T07:00:00Z" };
+    const parsed = QualityResponseSchema.parse(response);
+    expect(parsed.datasets).toHaveLength(0);
+  });
+
+  it("is_partial defaults to false when omitted", () => {
+    const parsed = QualityResponseSchema.parse({ datasets: [], as_of: "2026-05-18T07:00:00Z" });
+    expect(parsed.is_partial).toBe(false);
+  });
+
+  it("accepts is_partial: true for degraded backend responses", () => {
+    const parsed = QualityResponseSchema.parse({
+      datasets: [],
+      as_of: "2026-05-18T07:00:00Z",
+      is_partial: true,
+    });
+    expect(parsed.is_partial).toBe(true);
   });
 });
