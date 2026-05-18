@@ -15,6 +15,10 @@ export default defineConfig({
       // next/* not installed in this package; provide stubs so Vite resolves
       // imports before vi.mock() intercepts them in BFF tests.
       "next/server": resolve(here, "src/__mocks__/next-server.ts"),
+      // sonner not installed in this workspace; provide stub so ingestion
+      // components can import it. Tests that assert on toast calls use
+      // vi.mock("sonner", ...) to replace with spies.
+      "sonner": resolve(here, "src/__mocks__/sonner.ts"),
     },
   },
   test: {
@@ -24,7 +28,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/surfaces/**", "src/ingestion/**", "src/quality/**", "src/audit/**"],
+      exclude: ["src/surfaces/**", "src/quality/**", "src/audit/**"],
     },
   },
 });
