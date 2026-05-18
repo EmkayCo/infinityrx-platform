@@ -260,7 +260,7 @@ Per spec §9.5.
 // Tests (requires prescriber-directory with ingestion router mounted per Plan C):
 // 1. POST /api/directories/ingest/fda_ndc/trigger → 200, {run_id, status:"running"}
 // 2. POST same source while first running → 409 with message "already has a running job"
-// 3. POST non-triggerable source (bpg) → 404
+// 3. POST non-triggerable source (fdb) → 404 (fdb is in IngestionSourceKeySchema but not TRIGGERABLE_SOURCES; bpg is not in IngestionSourceKeySchema at all — POST bpg → 404 also acceptable as a second sub-case)
 // 4. POST unknown source → 404
 // 5. Mock run completion → GET /api/directories/quality returns updated record counts
 ```
@@ -393,9 +393,9 @@ test.describe("SP-2 Directories round-trip", () => {
     await expect(page.locator('[data-testid="trigger-refresh-btn"][data-source="bpg"]')).not.toBeVisible();
   });
 
-  test("Ingestion console: BPG row has no trigger, FDB row shows B9 pending", async ({ page }) => {
+  test("Ingestion console: BPG row absent, FDB row shows B9 pending", async ({ page }) => {
     await page.goto(`${BASE}/directories/ingestion`, { waitUntil: "networkidle" });
-    // BPG: "Live API — no schedule" label, no trigger button
+    // BPG: NOT in ingestion console at all (no IngestionSchedule row, not in IngestionSourceKeySchema)
     await expect(page.locator('[data-testid="ingestion-row-bpg"]')).not.toBeVisible();
     // FDB: "Pending B9" status
     const fdbRow = page.locator('[data-testid="ingestion-row-fdb"]');
