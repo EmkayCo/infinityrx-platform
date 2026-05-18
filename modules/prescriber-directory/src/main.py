@@ -8,18 +8,56 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
+from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 
+from shared.data_ingestion.api.routes import _get_db as _ingestion_get_db
+from shared.data_ingestion.api.routes import router as ingestion_router
 from shared.events.dlq import DLQService, build_dlq_router
 from shared.middleware import RateLimitConfig, RateLimitMiddleware, SecurityHeadersMiddleware
 
 from src.api.router import router
+from src.db.session import _get_session_factory
 
 logger = logging.getLogger("prescriber-directory.main")
+
+
+# ---------------------------------------------------------------------------
+# Ingestion router DB bridge (Plan C — SP-2)
+# ---------------------------------------------------------------------------
+
+
+def _ingestion_db_override(request: Request) -> Iterator[Session]:
+    """Bridge prescriber-directory's session factory to the shared ingestion router.
+
+    The shared ingestion router reads its DB session from request.state.db
+    (via _get_db dependency). prescriber-directory's routes use Depends() with
+    its own factory. This generator bridges the two by pulling a session from
+    the module session factory and attaching it to request.state, then yielding
+    it as the dependency value.
+
+    LESSON-006 compliance: this helper is covered 100% by
+    tests/test_ingestion_mount.py which exercises it through create_app().
+    """
+    factory = _get_session_factory()
+    session = factory()
+    try:
+        request.state.db = session
+        if not hasattr(request.state, "correlation_id"):
+            request.state.correlation_id = str(uuid.uuid4())
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 class _EmptyDLQRepository:
@@ -101,6 +139,11 @@ def create_app() -> FastAPI:
             get_permissions=_get_dlq_permissions,
         )
     )
+
+    # SP-2 Plan C: mount shared ingestion router; bridge session via dependency override.
+    # Auth note: ingestion backend is unauthed (BFF is the auth gate per Plan A §10.3).
+    app.include_router(ingestion_router, prefix="/api/v1/data-ingestion")
+    app.dependency_overrides[_ingestion_get_db] = _ingestion_db_override
 
     @app.get("/health")
     async def health() -> dict:
