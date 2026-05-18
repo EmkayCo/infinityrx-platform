@@ -20,7 +20,7 @@ interface AuditEntry {
 }
 
 interface AuditPage {
-  entries: AuditEntry[];
+  items: AuditEntry[];
   total: number;
   limit: number;
   offset: number;
@@ -30,6 +30,11 @@ export interface AuditLogPageProps {
   auditBaseUrl?: string;
   /** Called when a run_id link is clicked — opens RunHistoryDrawer */
   onRunIdClick?: (runId: string, source: string) => void;
+  /**
+   * Fetch function — inject a token-bearing GET client so the BFF auth gate
+   * is satisfied. Defaults to the global fetch for test compatibility.
+   */
+  fetchFn?: (url: string) => Promise<Response>;
 }
 
 const PAGE_SIZE = 50;
@@ -37,9 +42,10 @@ const PAGE_SIZE = 50;
 async function fetchAuditPage(
   auditBaseUrl: string,
   offset: number,
+  fetchFn: (url: string) => Promise<Response>,
 ): Promise<{ data: AuditPage | null; status: number }> {
   const path = `${auditBaseUrl}/api/directories/audit?limit=${PAGE_SIZE}&offset=${offset}`;
-  const res = await fetch(path);
+  const res = await fetchFn(path);
   if (res.status === 403) {
     return { data: null, status: 403 };
   }
@@ -52,12 +58,13 @@ async function fetchAuditPage(
 export function AuditLogPage({
   auditBaseUrl = "",
   onRunIdClick,
+  fetchFn = (url) => fetch(url),
 }: AuditLogPageProps) {
   const [offset, setOffset] = useState(0);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["dir:audit", offset],
-    queryFn: () => fetchAuditPage(auditBaseUrl, offset),
+    queryFn: () => fetchAuditPage(auditBaseUrl, offset, fetchFn),
     staleTime: 30_000,
   });
 
@@ -90,7 +97,7 @@ export function AuditLogPage({
   const page = data?.data;
 
   // Empty state is correct behavior — no ingestion runs have been triggered yet.
-  if (!page || page.entries.length === 0) {
+  if (!page || page.items.length === 0) {
     return (
       <div className="audit-log-page audit-log-page--empty">
         <p className="audit-log-page__empty-text">
@@ -117,7 +124,7 @@ export function AuditLogPage({
           </tr>
         </thead>
         <tbody>
-          {page.entries.map((entry) => (
+          {page.items.map((entry) => (
             <tr key={entry.id} data-audit-id={entry.id}>
               <td>{new Date(entry.timestamp).toLocaleString()}</td>
               <td>{entry.action}</td>
