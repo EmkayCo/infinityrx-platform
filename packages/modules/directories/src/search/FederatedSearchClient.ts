@@ -53,11 +53,13 @@ export class FederatedSearchClient {
     const limit = this.opts.limitPerDataset;
 
     // Races each fetch against the remaining wall-time budget. Returns fallback on timeout.
+    // Always races (never short-circuits) so that already-resolved promises (e.g. in tests)
+    // can win even when remaining budget is near zero.
     const withDeadline = async <T>(p: Promise<T>, fallback: T): Promise<T> => {
       const remaining = deadline - Date.now();
-      if (remaining <= 0) return fallback;
+      const timeoutMs = Math.max(0, remaining);
       const timeout = new Promise<T>((res) =>
-        setTimeout(() => res(fallback), remaining),
+        setTimeout(() => res(fallback), timeoutMs),
       );
       return Promise.race([p, timeout]);
     };
