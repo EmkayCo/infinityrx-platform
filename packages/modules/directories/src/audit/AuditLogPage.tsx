@@ -63,7 +63,7 @@ export function AuditLogPage({
   const [offset, setOffset] = useState(0);
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["dir:audit", offset],
+    queryKey: ["dir:audit", auditBaseUrl, offset],
     queryFn: () => fetchAuditPage(auditBaseUrl, offset, fetchFn),
     staleTime: 30_000,
   });

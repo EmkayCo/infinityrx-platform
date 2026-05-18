@@ -64,6 +64,40 @@ afterEach(() => {
 });
 
 describe("AuditLogPage", () => {
+  it("uses auditBaseUrl in the cache key so swapping the prop refetches", async () => {
+    // Shared QueryClient across both renders so cache persists.
+    // Without auditBaseUrl in the queryKey, render 2 serves render 1's
+    // cached response and mockFetch would only be called once.
+    const sharedClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+
+    const renderA = render(
+      <QueryClientProvider client={sharedClient}>
+        <AuditLogPage auditBaseUrl="https://api-A.example" />
+      </QueryClientProvider>,
+    );
+    await waitFor(() =>
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("https://api-A.example/api/directories/audit"),
+      ),
+    );
+    renderA.unmount();
+
+    const renderB = render(
+      <QueryClientProvider client={sharedClient}>
+        <AuditLogPage auditBaseUrl="https://api-B.example" />
+      </QueryClientProvider>,
+    );
+    await waitFor(() =>
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("https://api-B.example/api/directories/audit"),
+      ),
+    );
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    renderB.unmount();
+  });
+
   it("renders loading state initially", () => {
     mockFetch.mockReturnValue(new Promise(() => {}));
     wrap(<AuditLogPage />);
