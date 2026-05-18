@@ -3,3 +3,5 @@ export * from "./schemas.js";
 export * from "./rankResults.js";
 export * from "./FederatedSearchClient.js";
 export * from "./useDirectoriesSearch.js";
+export * from "./DirectoriesCommandPalette.js";
+export * from "./DirectoriesCommandPaletteDialog.js";
