@@ -4,7 +4,7 @@
 **Sprint:** SP-2  
 **Prepared by:** SP-2 Plan E execution agent (a7d01b650013cd863)  
 **Date:** 2026-05-18  
-**Verdict:** READY FOR CODEX GATE-CLOSE REVIEW (R5 — after addressing codex R4 NO-GO)  
+**Verdict:** GO — Codex gate-close PASSED (R5, 2026-05-18)  
 
 ---
 
@@ -310,10 +310,13 @@ Test count verified by running `npx vitest run` from `packages/modules/directori
 ## 5. Commit Range
 
 Base: `wave/B10-w5` (d9c69152)  
-HEAD: `85b94c23`  
-Commits: 42
+HEAD: `165d47d3`  
+Commits: 46
 
 Key commits:
+- `165d47d3` — fix(sp2-e-codex-r4): navigate to BASE before fetchViaPage; CORS preflight fix
+- `51e9a253` — fix(sp2-e-codex-r3): replace page.request with fetchViaPage; fix ingest route paths
+- `e0af038f` — fix(sp2-e-codex-r2): replace false UI-navigation E2E tests with honest BFF auth-guard assertions
 - `85b94c23` — fix(sp2-e-codex-r1): address 3 BLOCKs from codex gate-close NO-GO
 - `5bff2e84` — docs(sp2-e): write SP-2 acceptance document
 - `2424d2d5` — fix(sp2-e-gate): field names, bff-fan-out fetch-stub, status-static testid
