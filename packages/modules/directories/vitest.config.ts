@@ -28,7 +28,9 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/surfaces/**", "src/quality/**", "src/audit/**"],
+      // Plan D ships quality/ and audit/ — include them in coverage.
+      // surfaces/ contains thin UI wrappers tested via portal E2E (Plan E).
+      exclude: ["src/surfaces/**"],
     },
   },
 });
