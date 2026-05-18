@@ -169,7 +169,20 @@ export default config;
 // src/search/schemas.ts
 import { z } from "zod";
 
-/** Dataset cluster keys — 6 browse clusters + sub-keys for disambiguation */
+/**
+ * Dataset cluster keys — 18 PRIMARY browse-cluster source keys.
+ *
+ * IMPORTANT: This enum intentionally contains 18 keys, not 20.
+ * `nppes_monthly` and `nppes_deactivation` are scheduler sub-modes of `nppes`
+ * (separate cron schedules for the same NPPES browse cluster). They appear in
+ * TRIGGERABLE_SOURCES (Plan C) for ingestion triggering but are NOT separate
+ * browse surfaces — they share the Prescribers cluster with `nppes`.
+ * Search results and browse cluster items only use these 18 keys.
+ *
+ * TRIGGERABLE_SOURCES (Plan C) has 20 keys = these 18 + nppes_monthly + nppes_deactivation.
+ * That is correct and intentional — ingestion can be triggered per sub-mode,
+ * but search results always carry the parent source key ("nppes").
+ */
 export const DatasetKeySchema = z.enum([
   "nppes",
   "ncpdp",
