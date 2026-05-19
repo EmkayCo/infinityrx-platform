@@ -649,6 +649,60 @@ class TestOutboxDispatcherPollAndPublish:
 
         db_session.refresh(row)
         assert row.status == "failed"
+
+    async def test_row_marked_failed_on_post_increment_threshold(self, db_session):
+        """R10 WARN-6 / R11 WARN-11: a row with attempt_count=9 that fails
+        ONCE more must be marked status='failed' on the SAME poll cycle —
+        not deferred to the next poll. Proves the terminal-failure check
+        runs AFTER the increment in `_dispatch_row`'s except branch.
+        """
+        from src.models.tables import OutboxEvent
+        from shared.events.types import EventEnvelope
+
+        hold_id = uuid.uuid4()
+        tenant_id = uuid.uuid4()
+        envelope = EventEnvelope(
+            event_type="payment.hold_released",
+            tenant_id=tenant_id,
+            correlation_id=uuid.uuid4(),
+            source_module="reclaimrx",
+            ordering_key=str(hold_id),
+            idempotency_key=f"hold:release:{hold_id}",
+            payload={"hold_id": str(hold_id)},
+        )
+        row = OutboxEvent(
+            id=str(uuid.uuid4()),
+            tenant_id=str(tenant_id),
+            event_type="payment.hold_released",
+            envelope_json=json.dumps(envelope.to_wire()),
+            status="pending",
+            created_at=datetime.now(UTC),
+            published_at=None,
+            attempt_count=9,         # one shy of _MAX_ATTEMPTS
+            last_error=None,
+            idempotency_key=f"hold:release:{hold_id}",
+        )
+        db_session.add(row)
+        db_session.commit()
+
+        failing_bus = MagicMock()
+        failing_bus.publish = AsyncMock(side_effect=ConnectionError("broker down"))
+
+        dispatcher = OutboxDispatcher(
+            session_factory=lambda: db_session,
+            bus=failing_bus,
+            batch_size=10,
+            poll_interval_seconds=0,
+        )
+        await dispatcher._poll_once()
+
+        db_session.refresh(row)
+        assert row.attempt_count == 10  # incremented from 9
+        assert row.status == "failed"   # post-increment terminal branch fired
+        # PHI invariant: last_error stores class label only (R5 BLOCK-12 / R11 BLOCK-31)
+        assert row.last_error is not None
+        assert row.last_error.endswith(".ConnectionError")
+        assert "broker down" not in row.last_error
 ```
 
 **Confirm failure:**
@@ -928,14 +982,17 @@ class OutboxDispatcher:
             # PHI from the original envelope payload (event-bus.md + phi-compliance.md).
             # last_error stores exception class label only.
             #
-            # R7 WARN-5 fix: the prior comment claimed `logger.exception()`
-            # at the outer OutboxDispatcher loop captured a stack trace,
-            # but this except branch swallows the exception (the row is
-            # transitioned back to 'pending' and the loop continues), so
-            # the outer loop never sees it. We now call `logger.exception()`
-            # HERE so the stack trace IS persisted. Stack traces only
-            # contain code locations + filenames — no envelope payload
-            # data — so they do not leak PHI per phi-compliance.md.
+            # R11 BLOCK-31 fix: do NOT use `logger.exception(...)` here.
+            # `logger.exception` is `logger.error(..., exc_info=True)`, which
+            # the standard logging formatter renders by appending the FULL
+            # exception representation (`type: str(exc)`) at the end of the
+            # log record. `str(exc)` is exactly what we must keep out of
+            # logs — broker errors may carry envelope payload fragments
+            # (PHI) in the exception message. Use `logger.error(...)` with
+            # default `exc_info=False` so only the structured extra fields
+            # are recorded. The exception class lives in `svc_error_class`
+            # and `row.last_error`; that is enough for ops triage without
+            # leaking message content.
             error_label = f"{exc.__class__.__module__}.{exc.__class__.__name__}"
             row.attempt_count += 1
             row.last_error = error_label
@@ -948,7 +1005,7 @@ class OutboxDispatcher:
             if row.attempt_count >= _MAX_ATTEMPTS:
                 row.status = "failed"
                 session.commit()
-                logger.exception(
+                logger.error(
                     "reclaimrx.outbox_dispatcher.row_failed_max_attempts",
                     extra={
                         "svc_outbox_id": row.id,
@@ -962,7 +1019,7 @@ class OutboxDispatcher:
             # Revert claim → pending so another dispatcher can retry on next poll.
             row.status = "pending"
             session.commit()
-            logger.exception(
+            logger.error(
                 "reclaimrx.outbox_dispatcher.publish_failed",
                 extra={
                     "svc_outbox_id": row.id,
@@ -1332,8 +1389,11 @@ class ReclaimRxDLQRepository:
         (`get(entry_id) -> EventDLQEntry | None`). When the caller is the shared
         `DLQService.replay` or `DLQService.drop` (which both call
         `self._repo.get(entry_id)` with NO tenant_id kwarg), we resolve
-        tenant from `shared.db.tenant_context.current_tenant_id()`
-        (populated by the tenant middleware at request entry). If neither
+        tenant from `shared.db.tenant_context.current_tenant_id.get()`
+        (`current_tenant_id` is a ContextVar, NOT a callable — calling
+        it as a function raises TypeError; see R10 BLOCK-30 / R11 NIT-8).
+        The ContextVar is populated by the tenant middleware at request
+        entry. If neither
         explicit nor contextvar tenant is available we return None — the
         shared service treats None as "not found" and raises KeyError,
         which the FastAPI router maps to 404. Direct callers may still
@@ -2604,7 +2664,7 @@ python -m pytest \
 - **Advisory lock key** — `zlib.crc32(f"graph_run:{tenant_id}".encode()) & 0x7FFFFFFF` — NOT Python `hash()` (audit §9, codex BLOCK 7). Referenced in dlq_monitor.py docstring as a reminder for Plan A3.
 - **EventEnvelope fields** — `event_type`, `tenant_id` (uuid.UUID), `correlation_id`, `source_module`. NOT `type`, NOT `emitted_at` (audit §2, codex BLOCK 4).
 - **Redis idempotency key format** — `tenant:{tenant_id}:reclaimrx:idempotency:{raw_key}` (tenant-isolation.md).
-- **No PHI in logs** — `last_error` on OutboxEvent stores exception class label only (`exc.__class__.__module__ + "." + exc.__class__.__name__`); NEVER the exception args/message, since those may carry envelope payload contents (R5 BLOCK-12 / R4 NEW-2). Stack traces are logged via `logger.exception(...)` INSIDE `_dispatch_row`'s except branch (R7 WARN-5 / R8 BLOCK-28 fix) — that branch catches+swallows the publish exception, so the outer `OutboxDispatcher.start()` loop never sees it. Stack traces only contain code locations + filenames, no envelope payload data, so logging them at the catch point is PHI-safe.
+- **No PHI in logs** — `last_error` on OutboxEvent stores exception class label only (`exc.__class__.__module__ + "." + exc.__class__.__name__`); NEVER the exception args/message, since those may carry envelope payload contents (R5 BLOCK-12 / R4 NEW-2). `_dispatch_row`'s except branch logs via `logger.error(..., extra={...svc_error_class...})` with `exc_info` DEFAULT (False) — NOT `logger.exception(...)` (R11 BLOCK-31 fix). `logger.exception` is `logger.error(..., exc_info=True)`, which the standard formatter renders by appending `type: str(exc)` to the record — exactly the PHI surface we are excluding. Class name + structured extras give ops triage what it needs; if a publish exception's stack is needed for debugging, retrieve it from the broker side (RabbitMQ/Service Bus DLQ) where the original message is already isolated from PHI logs.
 - **100% coverage** on audit_chain_job, outbox service, dlq_repository, idempotency_keys.
 - **Sync SQLAlchemy** — reclaimrx currently uses sync sessions (audit §10 finding: "No async SQLAlchemy"). DLQ repository and cleanup job use async engine; the module-level sync session factory continues for everything else.
 
