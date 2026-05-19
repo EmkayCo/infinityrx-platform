@@ -1,4 +1,4 @@
-"""Investigation service — business logic for the investigation workflow state machine."""
+﻿"""Investigation service — business logic for the investigation workflow state machine."""
 from __future__ import annotations
 
 import uuid
@@ -9,6 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.models.tables import Investigation, InvestigationActivity, Recovery
+from decimal import ROUND_HALF_UP
+
 from src.utils.constants import VALID_STATUS_TRANSITIONS
 from src.utils.money import money
 
@@ -297,3 +299,77 @@ class InvestigationService:
         self._session.add(activity)
         self._session.flush()
         return activity
+
+    # ── State machine transition ──────────────────────────────────────────────
+
+    def transition(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        investigation_id: str,
+        to_state: str,
+        role: str,
+        user_id: uuid.UUID,
+        reason: str,
+        outcome_label: str | None = None,
+        recovered_amount: Decimal | None = None,
+    ) -> "Investigation":
+        """Validate and apply a status transition.  Writes append-only audit row.
+
+        Raises
+        ------
+        ValueError(code='NOT_FOUND')        -- investigation absent or wrong tenant.
+        InvalidTransitionError              -- illegal transition, missing role, missing fields.
+        """
+        from src.utils.constants import validate_transition, InvalidTransitionError  # noqa: PLC0415
+
+        inv = (
+            self._session.execute(
+                select(Investigation).where(
+                    Investigation.id == investigation_id,
+                    Investigation.tenant_id == str(tenant_id),
+                )
+            )
+            .scalar_one_or_none()
+        )
+        if inv is None:
+            raise ValueError("NOT_FOUND")
+
+        fields: dict[str, object] = {"reason": reason}
+        if outcome_label is not None:
+            fields["outcome_label"] = outcome_label
+        if recovered_amount is not None:
+            fields["recovered_amount"] = recovered_amount
+
+        # Raises InvalidTransitionError on violation -- let it propagate unchanged
+        validate_transition(inv.status, to_state, role=role, fields=fields)
+
+        from_state = inv.status
+        inv.status = to_state
+        inv.updated_at = _now()
+
+        if to_state == "closed_confirmed":
+            inv.resolved_at = _now()
+            if recovered_amount is not None:
+                inv.actual_recovered = recovered_amount.quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+        elif to_state in ("closed_false_positive", "closed_no_action"):
+            inv.resolved_at = _now()
+        elif to_state == "open" and from_state in ("closed_confirmed", "closed_false_positive", "closed_no_action"):
+            # admin re-open: clear resolved fields
+            inv.resolved_at = None
+            inv.actual_recovered = Decimal("0.00")
+
+        # Append-only audit activity row
+        activity = InvestigationActivity(
+            id=str(uuid.uuid4()),
+            investigation_id=inv.id,
+            tenant_id=str(tenant_id),
+            activity_type="status_transition",
+            description=f"Status changed from '{from_state}' to '{to_state}'. Reason: {reason}",
+            performed_by=str(user_id),
+        )
+        self._session.add(activity)
+        self._session.flush()
+        return inv
