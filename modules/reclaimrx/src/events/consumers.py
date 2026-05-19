@@ -32,6 +32,7 @@ from src.models.tables import (
 from src.services.investigation_service import InvestigationService
 from src.services.payment_hold_service import PaymentHoldService
 from src.services.rule_engine import ClaimContext, RuleDefinition, RuleEvaluator
+from src.consumers.accumulator_consumer import AccumulatorConsumer
 
 _logger = logging.getLogger(__name__)
 
@@ -687,4 +688,8 @@ CONSUMER_ROUTING: dict[str, Any] = {
     "payment.return_suspicious": handle_payment_return_suspicious,
     "pharmacy.application_submitted": handle_pharmacy_application_submitted,
     "pharmacy.ownership_changed": handle_pharmacy_ownership_changed,
+    "accumulator.updated": lambda envelope, *, db, bus: AccumulatorConsumer(db).handle(
+        str(envelope.idempotency_key or envelope.correlation_id),
+        {**envelope.payload, "envelope_tenant_id": str(envelope.tenant_id)},
+    ) if db is not None else None,
 }

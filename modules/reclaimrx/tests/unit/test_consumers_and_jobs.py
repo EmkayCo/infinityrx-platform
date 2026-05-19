@@ -100,6 +100,7 @@ class TestEventConsumers:
 
     def test_consumer_routing_has_all_handlers(self) -> None:
         expected_topics = {
+            "accumulator.updated",
             "claim.adjudicated",
             "claim.reversed",
             "ap.created",
