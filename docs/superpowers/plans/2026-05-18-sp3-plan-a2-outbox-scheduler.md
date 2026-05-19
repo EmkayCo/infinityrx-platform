@@ -999,13 +999,14 @@ class OutboxDispatcher:
             # PHI from the original envelope payload (event-bus.md + phi-compliance.md).
             # last_error stores exception class label only.
             #
-            # R11 BLOCK-31 fix: do NOT use `logger.exception(...)` here.
-            # `logger.exception` is `logger.error(..., exc_info=True)`, which
-            # the standard logging formatter renders by appending the FULL
-            # exception representation (`type: str(exc)`) at the end of the
-            # log record. `str(exc)` is exactly what we must keep out of
-            # logs — broker errors may carry envelope payload fragments
-            # (PHI) in the exception message. Use `logger.error(...)` with
+            # R11 BLOCK-31 fix: do NOT use `logger.exception` here.
+            # `logger.exception` calls `logger.error` with `exc_info=True`,
+            # which the standard logging formatter renders by appending
+            # the FULL exception representation (`type: str(exc)`) at the
+            # end of the log record. `str(exc)` is exactly what we must
+            # keep out of logs — broker errors may carry envelope payload
+            # fragments
+            # (PHI) in the exception message. Use `logger.error` with
             # default `exc_info=False` so only the structured extra fields
             # are recorded. The exception class lives in `svc_error_class`
             # and `row.last_error`; that is enough for ops triage without
