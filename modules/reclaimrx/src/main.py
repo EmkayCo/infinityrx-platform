@@ -1,4 +1,4 @@
-"""ReclaimRx FastAPI application entry point.
+﻿"""ReclaimRx FastAPI application entry point.
 
 create_app() is the canonical application factory (LESSON-006):
 all middleware, routers, and event-bus subscriptions must be mounted here
@@ -155,6 +155,20 @@ def create_app() -> FastAPI:
     app.add_middleware(RateLimitMiddleware, config=RateLimitConfig())
     app.add_middleware(SecurityHeadersMiddleware)
 
+    # SP-3: custom HTTPException handler so build_error_envelope() responses
+    # are returned directly (not wrapped in {"detail": ...}).
+    from fastapi import Request  # noqa: PLC0415
+    from fastapi.exceptions import HTTPException as _HTTPException  # noqa: PLC0415
+    from fastapi.responses import JSONResponse  # noqa: PLC0415
+
+    @app.exception_handler(_HTTPException)
+    async def _http_exception_handler(request: Request, exc: _HTTPException) -> JSONResponse:
+        # If detail is a dict with an "error" key, return it directly.
+        if isinstance(exc.detail, dict) and "error" in exc.detail:
+            return JSONResponse(status_code=exc.status_code, content=exc.detail)
+        # Otherwise use FastAPI's default {"detail": ...} format.
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
     app.include_router(router)
     app.include_router(
         build_dlq_router(
@@ -209,3 +223,4 @@ def create_app() -> FastAPI:
 app = create_app()
 
 __all__ = ["app", "create_app"]
+

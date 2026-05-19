@@ -1,4 +1,4 @@
-"""ReclaimRx FastAPI router — thin API layer; all logic in services."""
+﻿"""ReclaimRx FastAPI router — thin API layer; all logic in services."""
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src._shim.auth import CurrentUser
+from src._shim.auth import CurrentUser, require_role
 from src.api.dependencies import get_current_user, get_db, require_investigator
 from src.api.schemas import (
     AccumulatorDetectionRead,
@@ -49,7 +49,9 @@ from src.models.tables import (
 from src.services.investigation_service import InvestigationService
 from src.services.payment_hold_service import PaymentHoldService
 from src.services.rule_engine import ClaimContext, RuleDefinition, RuleEvaluator
+from pydantic import BaseModel
 from src.utils.money import money
+from src.api.errors import build_error_envelope
 
 router = APIRouter(prefix="/api/v1/reclaimrx", tags=["reclaimrx"])
 
@@ -397,6 +399,108 @@ def add_investigation_activity(
     return activity
 
 
+
+
+# ── State Machine Transitions (SP-3 A3) ──────────────────────────────────────
+
+class TransitionRequest(BaseModel):
+    to_state: str
+    reason: str
+    outcome_label: str | None = None
+    recovered_amount: Decimal | None = None
+    evidence_ref: str | None = None
+
+
+@router.post(
+    "/investigations/{investigation_id}/transitions",
+    response_model=dict,
+    status_code=200,
+)
+def transition_investigation_status(
+    investigation_id: str,
+    body: TransitionRequest,
+    user: CurrentUser = Depends(require_role("reclaimrx.investigator", "reclaimrx.admin")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Transition an investigation status through the spec §5.5.1 state machine."""
+    import uuid as _uuid  # noqa: PLC0415
+    from src.utils.constants import InvalidTransitionError  # noqa: PLC0415
+
+    role = (
+        "reclaimrx.admin"
+        if user.has_role("reclaimrx.admin")
+        else "reclaimrx.investigator"
+    )
+
+    svc = InvestigationService(db)
+    correlation_id = str(_uuid.uuid4())
+
+    inv_row = db.execute(
+        select(Investigation).where(
+            Investigation.id == investigation_id,
+            Investigation.tenant_id == str(user.tenant_id),
+        )
+    ).scalar_one_or_none()
+    if inv_row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=build_error_envelope(
+                "NOT_FOUND",
+                "Investigation not found.",
+                correlation_id=correlation_id,
+            ),
+        )
+    prev_status = inv_row.status
+
+    try:
+        inv = svc.transition(
+            tenant_id=user.tenant_id,
+            investigation_id=investigation_id,
+            to_state=body.to_state,
+            role=role,
+            user_id=user.id,
+            reason=body.reason,
+            outcome_label=body.outcome_label,
+            recovered_amount=body.recovered_amount,
+        )
+        db.commit()
+    except InvalidTransitionError as exc:
+        # Must come before ValueError since InvalidTransitionError inherits ValueError
+        raise HTTPException(
+            status_code=422,
+            detail=build_error_envelope(
+                exc.code,
+                str(exc),
+                field=",".join(exc.allowed_next),
+                correlation_id=correlation_id,
+            ),
+        ) from exc
+    except ValueError as exc:
+        msg = str(exc)
+        if "NOT_FOUND" in msg:
+            raise HTTPException(
+                status_code=404,
+                detail=build_error_envelope(
+                    "NOT_FOUND",
+                    "Investigation not found.",
+                    correlation_id=correlation_id,
+                ),
+            ) from exc
+        raise HTTPException(
+            status_code=500,
+            detail=build_error_envelope(
+                "INTERNAL",
+                "Unexpected error.",
+                correlation_id=correlation_id,
+            ),
+        ) from exc
+
+    return {
+        "id": inv.id,
+        "status": inv.status,
+        "previous_status": prev_status,
+        "correlation_id": correlation_id,
+    }
 # ── Recoveries ────────────────────────────────────────────────────────────────
 
 @router.get("/recoveries", response_model=list[RecoveryRead])
@@ -632,3 +736,5 @@ def list_tips(
         stmt = stmt.where(TipRecord.status == status)
     stmt = stmt.order_by(TipRecord.created_at.desc()).limit(limit)
     return list(db.execute(stmt).scalars())
+
+
