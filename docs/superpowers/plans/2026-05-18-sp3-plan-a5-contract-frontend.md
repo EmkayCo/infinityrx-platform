@@ -285,7 +285,7 @@ export const PaymentHoldSchema = z.object({
   tenant_id: UuidSchema,
   investigation_id: UuidSchema.nullable(),
   status: HoldStatusSchema,
-  amount_threshold: DecimalStringSchema.nullable(),
+  amount_threshold: NonNegativeDecimalStringSchema.nullable(),
   entity_type: z.string(),
   entity_id: z.string(),
   placed_by: z.string(),
@@ -421,9 +421,9 @@ export type DashboardSummary = z.infer<typeof DashboardSummarySchema>;
 // ── Threshold config ───────────────────────────────────────────────────────
 
 export const MlScoreThresholdsSchema = z.object({
-  open: DecimalStringSchema,
-  auto_hold: DecimalStringSchema,
-  escalate: DecimalStringSchema,
+  open: NonNegativeDecimalStringSchema,
+  auto_hold: NonNegativeDecimalStringSchema,
+  escalate: NonNegativeDecimalStringSchema,
 });
 
 export const ThresholdConfigSchema = z.object({
@@ -431,19 +431,19 @@ export const ThresholdConfigSchema = z.object({
   version: z.number().int().positive(),
   effective_at: z.string().datetime(),
   superseded_at: z.string().datetime().nullable(),
-  rule_thresholds: z.record(z.string(), DecimalStringSchema),
+  rule_thresholds: z.record(z.string(), NonNegativeDecimalStringSchema),
   ml_score_thresholds: MlScoreThresholdsSchema,
-  graph_density_threshold: DecimalStringSchema,
-  accumulator_anomaly_sensitivity: DecimalStringSchema,
+  graph_density_threshold: NonNegativeDecimalStringSchema,
+  accumulator_anomaly_sensitivity: NonNegativeDecimalStringSchema,
   updated_by: z.string(),
 });
 export type ThresholdConfig = z.infer<typeof ThresholdConfigSchema>;
 
 export const ThresholdUpdateRequestSchema = z.object({
-  rule_thresholds: z.record(z.string(), DecimalStringSchema).optional(),
+  rule_thresholds: z.record(z.string(), NonNegativeDecimalStringSchema).optional(),
   ml_score_thresholds: MlScoreThresholdsSchema.optional(),
-  graph_density_threshold: DecimalStringSchema.optional(),
-  accumulator_anomaly_sensitivity: DecimalStringSchema.optional(),
+  graph_density_threshold: NonNegativeDecimalStringSchema.optional(),
+  accumulator_anomaly_sensitivity: NonNegativeDecimalStringSchema.optional(),
   reason: z.string().min(1),
 });
 export type ThresholdUpdateRequest = z.infer<typeof ThresholdUpdateRequestSchema>;

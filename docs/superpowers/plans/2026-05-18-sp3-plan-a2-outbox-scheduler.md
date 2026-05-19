@@ -719,12 +719,12 @@ class OutboxDispatcher:
     async def _poll_once(self) -> None:
         """Single poll: atomically claim pending batch, publish, update status.
 
-        R1 BLOCK 3 fix: claim rows via UPDATE ... WHERE status='pending'
-        RETURNING ... so concurrent dispatchers cannot pick the same row.
-        The Postgres semantics relied on here are equivalent to
-        SELECT FOR UPDATE SKIP LOCKED — a row whose status is being
-        transitioned by one transaction is invisible to another's
-        WHERE status='pending' predicate at REPEATABLE READ.
+        R1 BLOCK 3 fix: claim rows via UPDATE-with-RETURNING gated by
+        WHERE status='pending', so concurrent dispatchers cannot pick
+        the same row. The Postgres semantics relied on here are
+        equivalent to SELECT FOR UPDATE SKIP LOCKED — a row whose
+        status is being transitioned by one transaction is invisible
+        to another's WHERE status='pending' predicate at REPEATABLE READ.
 
         On non-Postgres (SQLite test fixture) we fall back to the
         SELECT-then-flip pattern under SAVEPOINT isolation, which is
@@ -749,7 +749,7 @@ class OutboxDispatcher:
     def _claim_postgres(self, session: Session) -> list[OutboxEvent]:
         """Atomically transition the next batch from 'pending' to 'publishing'
         and return the claimed rows. Two concurrent dispatchers cannot claim
-        the same row because the UPDATE ... WHERE status='pending' predicate
+        the same row because the UPDATE-WHERE-status='pending' predicate
         is atomic.
         """
         ids_result = session.execute(
@@ -832,10 +832,13 @@ class OutboxDispatcher:
             row.published_at = datetime.now(UTC)
             session.commit()
         except Exception as exc:  # noqa: BLE001
-            # Sanitize: do not log PHI from payload
-            error_str = f"{type(exc).__name__}: {str(exc)[:200]}"
+            # R4 NEW-2 fix: never serialize exception args — they can carry
+            # PHI from the original envelope payload (event-bus.md + phi-compliance.md).
+            # Log exception class name and Python module only. Stack trace is
+            # captured separately by logger.exception() at OutboxDispatcher level.
+            error_label = f"{exc.__class__.__module__}.{exc.__class__.__name__}"
             row.attempt_count += 1
-            row.last_error = error_str
+            row.last_error = error_label
             # Revert claim → pending so another dispatcher can retry on next poll.
             row.status = "pending"
             session.commit()
@@ -845,7 +848,7 @@ class OutboxDispatcher:
                     "svc_outbox_id": row.id,
                     "svc_event_type": row.event_type,
                     "svc_attempt_count": row.attempt_count,
-                    "svc_error": error_str,
+                    "svc_error_class": error_label,
                 },
             )
 ```
@@ -993,7 +996,7 @@ class TestReclaimRxDLQRepository:
         )
         await repo.save(entry)
 
-        fetched = await repo.get(entry_id)
+        fetched = await repo.get(entry_id, tenant_id=tenant_id)
         assert fetched is not None
         assert fetched.event_type == "payment.hold_released"
         assert fetched.failure_reason == "broker timeout"
@@ -1042,7 +1045,7 @@ import pytest
 
 
 class TestTenantPrefixedIdempotencyKeys:
-    """Redis idempotency keys must be prefixed tenant:{tenant_id}:reclaimrx:idempotency:..."""
+    """Redis idempotency keys must be prefixed tenant:{tenant_id}:reclaimrx:idempotency:{key}."""
 
     def test_build_redis_key_format(self):
         """build_redis_key() returns correctly prefixed key."""
@@ -1755,8 +1758,8 @@ async def verify_audit_hash_chain(
                 extra={
                     "svc_entry_id": str(entry.id),
                     "svc_tenant_id": tid,
-                    "svc_expected_prev": expected_prev[:16] + "...",
-                    "svc_actual_prev": str(entry.prev_entry_hash)[:16] + "...",
+                    "svc_expected_prev_prefix16": expected_prev[:16],
+                    "svc_actual_prev_prefix16": str(entry.prev_entry_hash)[:16],
                     "audit_action": "audit_chain_verification",
                 },
             )
