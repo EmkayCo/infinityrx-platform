@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import uuid
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import create_engine, event
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
 from src._shim.auth import CurrentUser, set_current_user
 from src._shim.db import Base
@@ -75,3 +77,68 @@ def default_user():
     set_current_user(user)
     yield
     set_current_user(None)
+
+
+@pytest.fixture()
+def db_session(db) -> Session:
+    """Alias for `db` — used by A2 tests (outbox, dispatcher, scheduler)."""
+    return db
+
+
+@pytest.fixture()
+def tenant_a_id() -> str:
+    """Return TEST_TENANT_ID as a string (used by atomicity integration tests)."""
+    return str(TEST_TENANT_ID)
+
+
+@pytest.fixture()
+def mock_event_bus():
+    """Mock EventBus with async publish for dispatcher unit tests."""
+    bus = MagicMock()
+    bus.publish = AsyncMock(return_value=None)
+    return bus
+
+
+@pytest.fixture()
+async def async_db_engine():
+    """Async SQLite in-memory engine for DLQ repository tests.
+
+    EventDLQEntry uses schema='core' (Postgres-specific). SQLite supports schema
+    aliases via ATTACH DATABASE. We attach a second in-memory database as 'core'
+    so the ORM's 'core.event_dlq' table reference resolves correctly.
+    The table is created via raw DDL to avoid JSONB/UUID column type issues.
+    """
+    from sqlalchemy import text
+    from sqlalchemy.pool import StaticPool
+
+    # Use a named file-based in-memory DB so ATTACH can reference the same
+    # connection. StaticPool ensures the same underlying connection is reused.
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    async with engine.begin() as conn:
+        # Attach a second in-memory DB as 'core' schema alias
+        await conn.execute(text("ATTACH DATABASE ':memory:' AS core"))
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS core.event_dlq ("
+            "  id TEXT PRIMARY KEY,"
+            "  event_id TEXT,"
+            "  tenant_id TEXT,"
+            "  event_type TEXT NOT NULL,"
+            "  envelope TEXT,"
+            "  failure_reason TEXT,"
+            "  attempt_count INTEGER DEFAULT 0,"
+            "  first_failed_at DATETIME,"
+            "  last_failed_at DATETIME,"
+            "  dlq_topic TEXT,"
+            "  replayed_at DATETIME,"
+            "  status TEXT DEFAULT 'queued'"
+            ")"
+        ))
+
+    yield engine
+    await engine.dispose()

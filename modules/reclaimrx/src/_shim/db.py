@@ -96,3 +96,48 @@ def create_all() -> None:
 
 def drop_all() -> None:
     Base.metadata.drop_all(get_engine())
+
+
+# ---------------------------------------------------------------------------
+# Async engine (for PostgresIdempotencyStore and DLQ repository)
+# ---------------------------------------------------------------------------
+
+try:
+    from sqlalchemy.ext.asyncio import create_async_engine
+    _HAS_ASYNC = True
+except ImportError:  # pragma: no cover
+    _HAS_ASYNC = False  # type: ignore[assignment]
+
+_async_engine = None
+
+
+def get_async_engine_for_idempotency():
+    """Return the module's async engine, built lazily from the SAME URL as the
+    existing sync engine.
+
+    Single source of truth: configure_engine(url) is the only place the URL is
+    set; the async engine inherits it by reading get_engine().url. No parallel
+    URL resolver.
+
+    Used by PostgresIdempotencyStore and ReclaimRxDLQRepository. One instance
+    per process.
+    """
+    global _async_engine
+    if _async_engine is None:
+        sync_url = str(get_engine().url)
+        if sync_url.startswith("postgresql+psycopg2://"):
+            async_url = sync_url.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
+        elif sync_url.startswith("postgresql://"):
+            async_url = sync_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif sync_url.startswith("sqlite:///"):
+            async_url = sync_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+        elif sync_url.startswith("sqlite://"):
+            # bare sqlite:// (in-memory) -- map to aiosqlite in-memory
+            async_url = "sqlite+aiosqlite://"
+        else:
+            raise RuntimeError(
+                f"Unsupported sync URL for async wrapping: {sync_url!r}. "
+                "Add a branch here when introducing a new dialect."
+            )
+        _async_engine = create_async_engine(async_url, future=True)
+    return _async_engine

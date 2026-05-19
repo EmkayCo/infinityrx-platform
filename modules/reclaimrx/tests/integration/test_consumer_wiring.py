@@ -34,9 +34,15 @@ def _envelope(event_type: str, ordering: str = "1") -> EventEnvelope:
 
 
 @pytest.fixture(autouse=True)
-def _reset_idempotency_store() -> None:
-    from src.events import _idempotency_store
-    _idempotency_store._store.clear()
+def _reset_idempotency_store(monkeypatch) -> None:
+    """Reset the module-level idempotency store to a fresh InMemoryIdempotencyStore
+    for each test. After A2 §6c, the production store is PostgresIdempotencyStore;
+    consumer-wiring tests need a durable-free test double. The reset also ensures
+    cross-test isolation (idempotency keys from test N do not bleed into test N+1).
+    """
+    from shared.events.idempotency import InMemoryIdempotencyStore
+    import src.events as _events_module
+    monkeypatch.setattr(_events_module, "_idempotency_store", InMemoryIdempotencyStore())
 
 
 @contextmanager
