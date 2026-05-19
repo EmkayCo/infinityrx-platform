@@ -491,6 +491,7 @@ TDD: MUST FAIL before Task 4 implements the dispatcher.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import uuid
 from datetime import UTC, datetime
@@ -499,6 +500,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.outbox.outbox_dispatcher import OutboxDispatcher  # FAILS until Task 4
+
+
+def _shared_session(db_session):
+    """Return a context-manager factory that yields `db_session` without
+    closing it on exit.
+
+    R13 WARN-13 fix: `OutboxDispatcher._poll_once` (and `_reclaim_orphans`)
+    enter the result of `self._session_factory()` as a context manager:
+    `with self._session_factory() as session:`. Passing `lambda: db_session`
+    directly would let `Session.__exit__` close the SAVEPOINT-test-fixture
+    session, expunging objects so subsequent `db_session.refresh(row)`
+    would raise DetachedInstanceError. `contextlib.nullcontext(db_session)`
+    yields the same session without calling close on it.
+    """
+    return lambda: contextlib.nullcontext(db_session)
 
 
 class TestOutboxDispatcherPollAndPublish:
@@ -537,7 +553,7 @@ class TestOutboxDispatcherPollAndPublish:
         db_session.commit()
 
         dispatcher = OutboxDispatcher(
-            session_factory=lambda: db_session,
+            session_factory=_shared_session(db_session),
             bus=mock_event_bus,
             batch_size=10,
             poll_interval_seconds=0,
@@ -585,7 +601,7 @@ class TestOutboxDispatcherPollAndPublish:
         failing_bus.publish = AsyncMock(side_effect=ConnectionError("broker down"))
 
         dispatcher = OutboxDispatcher(
-            session_factory=lambda: db_session,
+            session_factory=_shared_session(db_session),
             bus=failing_bus,
             batch_size=10,
             poll_interval_seconds=0,
@@ -640,7 +656,7 @@ class TestOutboxDispatcherPollAndPublish:
         failing_bus.publish = AsyncMock(side_effect=ConnectionError("still down"))
 
         dispatcher = OutboxDispatcher(
-            session_factory=lambda: db_session,
+            session_factory=_shared_session(db_session),
             bus=failing_bus,
             batch_size=10,
             poll_interval_seconds=0,
@@ -690,7 +706,7 @@ class TestOutboxDispatcherPollAndPublish:
         failing_bus.publish = AsyncMock(side_effect=ConnectionError("broker down"))
 
         dispatcher = OutboxDispatcher(
-            session_factory=lambda: db_session,
+            session_factory=_shared_session(db_session),
             bus=failing_bus,
             batch_size=10,
             poll_interval_seconds=0,
