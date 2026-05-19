@@ -47,7 +47,7 @@ from src.models.tables import (
     TipRecord,
 )
 from src.services.investigation_service import InvestigationService
-from src.services.payment_hold_service import PaymentHoldService
+from src.services.payment_hold_service import HoldInvestigationMismatchError, PaymentHoldService
 from src.services.rule_engine import ClaimContext, RuleDefinition, RuleEvaluator
 from pydantic import BaseModel
 from src.utils.money import money
@@ -576,26 +576,71 @@ def list_holds(
     )
 
 
-@router.delete("/holds/{hold_id}", response_model=PaymentHoldRead)
-def release_hold(
+
+
+
+class HoldReleaseRequest(BaseModel):
+    reason: str
+    investigation_id: str | None = None
+
+
+@router.post("/holds/{hold_id}/release", response_model=dict)
+def release_hold_v2(
     hold_id: str,
-    reason: str = Query(default="Released"),
+    body: HoldReleaseRequest,
     db: Session = Depends(get_db),
-    user: CurrentUser = Depends(require_investigator),
-) -> PaymentHold:
+    user: CurrentUser = Depends(require_role("reclaimrx.investigator", "reclaimrx.admin")),
+) -> dict:
+    if not body.reason or not body.reason.strip():
+        raise HTTPException(
+            status_code=422,
+            detail=build_error_envelope("REASON_REQUIRED", "Field reason is required."),
+        )
     svc = PaymentHoldService(db)
     try:
-        hold = svc.release_hold(
+        result, _replay = svc.release_hold(
             tenant_id=user.tenant_id,
             hold_id=hold_id,
             released_by=user.id,
-            reason=reason,
+            reason=body.reason,
+            investigation_id=body.investigation_id,
         )
+    except HoldInvestigationMismatchError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail=build_error_envelope("HOLD_INVESTIGATION_MISMATCH", str(exc)),
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": str(exc)}) from exc
+        code = str(exc)
+        if code == "NOT_FOUND":
+            raise HTTPException(
+                status_code=404,
+                detail=build_error_envelope("NOT_FOUND", f"Hold {hold_id} not found."),
+            ) from exc
+        if code.startswith("HOLD_NOT_ACTIVE:"):
+            state = code.split(":", 1)[1]
+            raise HTTPException(
+                status_code=422,
+                detail=build_error_envelope(
+                    "HOLD_NOT_ACTIVE",
+                    f"Hold is in state {state!r} and cannot be released.",
+                    field=state,
+                ),
+            ) from exc
+        if code.startswith("ALREADY_RELEASED:"):
+            parts = code.split(":", 2)
+            released_by_val = parts[1] if len(parts) > 1 else ""
+            released_at_val = parts[2] if len(parts) > 2 else ""
+            env = build_error_envelope("ALREADY_RELEASED", "Hold already released by another actor.")
+            env["error"]["released_by"] = released_by_val
+            env["error"]["released_at"] = released_at_val
+            raise HTTPException(status_code=409, detail=env) from exc
+        raise HTTPException(
+            status_code=500,
+            detail=build_error_envelope("INTERNAL_ERROR", "Unexpected error."),
+        ) from exc
     db.commit()
-    return hold
-
+    return result
 
 # ── Entity Profiles ───────────────────────────────────────────────────────────
 

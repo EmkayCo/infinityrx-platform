@@ -40,6 +40,7 @@ class TestPaymentHoldPlacement:
         assert any(e.topic == "fwa.payment_hold_placed" for e in events)
 
     def test_release_hold_deactivates_record(self, db: Session) -> None:
+        from src.models.tables import PaymentHold as _PH
         svc = PaymentHoldService(db)
         hold = svc.place_hold(
             tenant_id=TEST_TENANT_ID,
@@ -50,18 +51,22 @@ class TestPaymentHoldPlacement:
             hold_scope="all",
         )
         db.flush()
-        released = svc.release_hold(
+        result, is_replay = svc.release_hold(
             tenant_id=TEST_TENANT_ID,
             hold_id=hold.id,
             released_by=TEST_USER_ID,
             reason="Investigation resolved - no fraud found",
         )
         db.flush()
-        assert released.is_active is False
-        assert released.released_by == str(TEST_USER_ID)
-        assert released.release_reason == "Investigation resolved - no fraud found"
+        assert is_replay is False
+        # Verify DB state directly
+        db.expire(hold)
+        assert hold.is_active is False
+        assert hold.released_by == str(TEST_USER_ID)
+        assert hold.release_reason == "Investigation resolved - no fraud found"
 
-    def test_release_hold_publishes_event(self, db: Session) -> None:
+    def test_release_hold_writes_outbox_event(self, db: Session) -> None:
+        from src.models.tables import OutboxEvent as _OE
         svc = PaymentHoldService(db)
         hold = svc.place_hold(
             tenant_id=TEST_TENANT_ID,
@@ -72,6 +77,7 @@ class TestPaymentHoldPlacement:
             hold_scope="all",
         )
         db.flush()
+        before = db.query(_OE).count()
         svc.release_hold(
             tenant_id=TEST_TENANT_ID,
             hold_id=hold.id,
@@ -79,8 +85,10 @@ class TestPaymentHoldPlacement:
             reason="Cleared",
         )
         db.flush()
-        events = published_events()
-        assert any(e.topic == "fwa.payment_hold_released" for e in events)
+        after = db.query(_OE).count()
+        assert after == before + 1
+        row = db.query(_OE).order_by(_OE.created_at.desc()).first()
+        assert row.event_type == "payment.hold_released"
 
     def test_list_active_holds_tenant_scoped(self, db: Session) -> None:
         svc = PaymentHoldService(db)
@@ -107,7 +115,7 @@ class TestPaymentHoldPlacement:
             hold_scope="all",
         )
         db.flush()
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(ValueError, match="NOT_FOUND"):
             svc.release_hold(
                 tenant_id=OTHER_TENANT_ID,
                 hold_id=hold.id,
@@ -136,7 +144,9 @@ class TestPaymentHoldEventPayload:
         assert "entity_id" in payload
         assert "hold_id" in payload
 
-    def test_hold_released_event_contains_required_fields(self, db: Session) -> None:
+    def test_hold_released_outbox_event_contains_required_fields(self, db: Session) -> None:
+        import json
+        from src.models.tables import OutboxEvent as _OE
         svc = PaymentHoldService(db)
         hold = svc.place_hold(
             tenant_id=TEST_TENANT_ID,
@@ -154,9 +164,10 @@ class TestPaymentHoldEventPayload:
             reason="Test done",
         )
         db.flush()
-        events = [e for e in published_events() if e.topic == "fwa.payment_hold_released"]
-        assert len(events) >= 1
-        payload = events[0].payload
+        row = db.query(_OE).filter(_OE.event_type == "payment.hold_released").order_by(_OE.created_at.desc()).first()
+        assert row is not None
+        envelope = json.loads(row.envelope_json) if isinstance(row.envelope_json, str) else row.envelope_json
+        payload = envelope.get("payload", envelope)
         assert "hold_id" in payload
         assert "tenant_id" in payload
         assert "release_reason" in payload

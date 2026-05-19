@@ -7,7 +7,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from src._shim.auth import CurrentUser
+from src._shim.auth import CurrentUser, set_current_user
 from src.api.dependencies import get_current_user, get_db
 from src.api.router import router
 from src.services.detection_rule_seeder import seed_detection_rules
@@ -19,15 +19,18 @@ def build_app(db: Session) -> FastAPI:
     app = FastAPI()
     app.include_router(router)
 
+    _user = CurrentUser(
+        id=TEST_USER_ID,
+        tenant_id=TEST_TENANT_ID,
+        roles=["investigator", "tenant_admin", "reclaimrx.investigator", "reclaimrx.admin"],
+    )
+    set_current_user(_user)
+
     def _db_override():
         yield db
 
     app.dependency_overrides[get_db] = _db_override
-    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
-        id=TEST_USER_ID,
-        tenant_id=TEST_TENANT_ID,
-        roles=["investigator", "tenant_admin"],
-    )
+    app.dependency_overrides[get_current_user] = lambda: _user
     return app
 
 
@@ -184,17 +187,19 @@ class TestPaymentHoldEndpoints:
         assert create_resp.status_code == 201
         hold_id = create_resp.json()["id"]
 
-        release_resp = client.delete(
-            f"/api/v1/reclaimrx/holds/{hold_id}",
-            params={"reason": "Investigation resolved"},
+        release_resp = client.post(
+            f"/api/v1/reclaimrx/holds/{hold_id}/release",
+            json={"reason": "Investigation resolved"},
+            headers={"Idempotency-Key": f"hold:release:{hold_id}:test"},
         )
         assert release_resp.status_code == 200
-        assert release_resp.json()["is_active"] is False
+        assert release_resp.json()["status"] == "released"
 
     def test_release_nonexistent_hold_returns_404(self, client: TestClient) -> None:
-        resp = client.delete(
-            f"/api/v1/reclaimrx/holds/{uuid.uuid4()}",
-            params={"reason": "Test reason"},
+        resp = client.post(
+            f"/api/v1/reclaimrx/holds/{uuid.uuid4()}/release",
+            json={"reason": "Test reason"},
+            headers={"Idempotency-Key": "hold:release:nonexistent:test"},
         )
         assert resp.status_code == 404
 

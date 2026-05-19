@@ -94,7 +94,7 @@ class InvestigationService:
             )
         inv.status = new_status
         inv.updated_at = _now()
-        if new_status in ("recovered", "closed_no_action", "closed_referred"):
+        if new_status in ("closed_confirmed", "closed_false_positive", "closed_no_action"):
             inv.resolved_at = _now()
 
         self._add_activity(

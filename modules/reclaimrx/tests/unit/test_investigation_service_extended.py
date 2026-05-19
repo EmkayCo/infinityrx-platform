@@ -30,10 +30,10 @@ def _make_inv(db: Session, svc: InvestigationService, **kwargs) -> Investigation
 
 
 class TestStatusTransitionResolved:
-    def test_status_transition_to_recovered_sets_resolved_at(self, db: Session) -> None:
+    def test_status_transition_to_closed_confirmed_sets_resolved_at(self, db: Session) -> None:
         svc = InvestigationService(db)
         inv = _make_inv(db, svc)
-        # open -> in_progress -> recovery_in_progress -> recovered
+        # open -> in_progress -> closed_confirmed (spec §5.5.1 terminal state)
         svc.update_status(
             tenant_id=TEST_TENANT_ID,
             investigation_id=inv.id,
@@ -43,21 +43,16 @@ class TestStatusTransitionResolved:
         svc.update_status(
             tenant_id=TEST_TENANT_ID,
             investigation_id=inv.id,
-            new_status="recovery_in_progress",
-            user_id=TEST_USER_ID,
-        )
-        svc.update_status(
-            tenant_id=TEST_TENANT_ID,
-            investigation_id=inv.id,
-            new_status="recovered",
+            new_status="closed_confirmed",
             user_id=TEST_USER_ID,
         )
         assert inv.resolved_at is not None
-        assert inv.status == "recovered"
+        assert inv.status == "closed_confirmed"
 
-    def test_status_transition_to_closed_referred_sets_resolved_at(self, db: Session) -> None:
+    def test_status_transition_to_closed_false_positive_sets_resolved_at(self, db: Session) -> None:
         svc = InvestigationService(db)
         inv = _make_inv(db, svc)
+        # open -> in_progress -> closed_false_positive (spec §5.5.1 terminal state)
         svc.update_status(
             tenant_id=TEST_TENANT_ID,
             investigation_id=inv.id,
@@ -67,7 +62,7 @@ class TestStatusTransitionResolved:
         svc.update_status(
             tenant_id=TEST_TENANT_ID,
             investigation_id=inv.id,
-            new_status="closed_referred",
+            new_status="closed_false_positive",
             user_id=TEST_USER_ID,
         )
         assert inv.resolved_at is not None
