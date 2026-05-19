@@ -2983,8 +2983,12 @@ def test_transitions_endpoint_registered(client):
     set_current_user(CurrentUser(id=uuid.uuid4(), tenant_id=uuid.uuid4(), roles=["reclaimrx.investigator"]))
     resp = client.post("/api/v1/reclaimrx/investigations/no-such-id/transitions",
                        json={"to_state": "in_progress", "reason": "x"})
-    # 404 (not found) proves route is registered; would be 405/404-page if missing
+    # R6 WARN-1 fix: 404 alone cannot distinguish "route registered, entity
+    # not found" from "route not registered" — both return 404 in FastAPI.
+    # Asserting the envelope code proves our build_error_envelope() handler
+    # produced the response (not FastAPI's default unrouted-path 404).
     assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "NOT_FOUND"
 
 
 def test_hold_release_endpoint_registered(client):
@@ -2994,7 +2998,10 @@ def test_hold_release_endpoint_registered(client):
     resp = client.post("/api/v1/reclaimrx/holds/no-such-id/release",
                        json={"reason": "test", "investigation_id": str(uuid.uuid4())},
                        headers={"Idempotency-Key": "hold:release:no-such-id:test"})
+    # R6 WARN-1 fix: assert the envelope code so we know the A3 route's
+    # build_error_envelope() ran (not FastAPI's default 404 path).
     assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "NOT_FOUND"
 
 
 def test_old_delete_hold_route_gone(client):
