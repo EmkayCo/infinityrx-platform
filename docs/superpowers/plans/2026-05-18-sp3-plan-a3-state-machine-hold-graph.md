@@ -1082,6 +1082,14 @@ class TestTransitionsEndpoint:
 Add Pydantic schema and route to `router.py`. Add near the investigation section (after existing `PUT /investigations/{id}`):
 
 ```python
+# ── Imports (add at top of router.py if not already present) ───────────────────
+# R4 WARN-1 fix: build_error_envelope is FIRST used in this Task 3 route
+# (transition_investigation_status, 404/500/422 branches below). It is also
+# used by Task 4 (release_hold_v2) and Task 7 (trigger_graph_run). Without
+# this import at Task 3 the executor following strict TDD order would hit
+# NameError before reaching Task 4.
+from src.api.errors import build_error_envelope  # noqa: E402
+
 # ── Schemas (add at top of router.py near existing schema classes) ─────────────
 
 class TransitionRequest(BaseModel):
@@ -1109,10 +1117,16 @@ class TransitionResponse(BaseModel):
 def transition_investigation_status(
     investigation_id: str,
     body: TransitionRequest,
-    db: Session = Depends(get_db),
+    # R4 WARN-2 fix: dep order is `user → db` so the
+    # 401 → 403 role → business chain mirrors the A4 invariant
+    # (`shared/auth/dependencies.py` requires role check resolved before
+    # any DB session is opened). The prior `db → user` order opened a
+    # session for unauthenticated requests, which leaked connections
+    # under 401-storm conditions.
     user: CurrentUser = Depends(
         require_role("reclaimrx.investigator", "reclaimrx.admin")
     ),
+    db: Session = Depends(get_db),
 ) -> dict:
     """Transition an investigation's status through the spec §5.5.1 state machine.
 
@@ -1303,6 +1317,17 @@ def _seed(db: Session):
     return tid, inv_id, hold_id, user_id
 
 
+def _idem(hold_id: str, actor: uuid.UUID | str | None = None) -> dict[str, str]:
+    """Build the Idempotency-Key header required by POST /holds/{id}/release.
+
+    R4 BLOCK-1 fix: every release request requires `Idempotency-Key` as a
+    FastAPI `Header(..., alias="Idempotency-Key")`. Tests omitting it get
+    422 before any business logic. Helper keeps tests DRY and the key
+    format consistent with A4 BLOCK 6 (`hold:release:{hold_id}:{actor_id}`).
+    """
+    return {"Idempotency-Key": f"hold:release:{hold_id}:{actor or 'test'}"}
+
+
 class TestHoldRelease:
     def test_old_delete_route_is_gone(self, client, db):
         tid, inv_id, hold_id, _ = _seed(db)
@@ -1313,11 +1338,13 @@ class TestHoldRelease:
 
     def test_viewer_cannot_release(self, client, db):
         tid, inv_id, hold_id, _ = _seed(db)
-        set_current_user(CurrentUser(id=uuid.uuid4(), tenant_id=uuid.UUID(tid),
+        uid = uuid.uuid4()
+        set_current_user(CurrentUser(id=uid, tenant_id=uuid.UUID(tid),
                                      roles=["reclaimrx.viewer"]))
         resp = client.post(
             f"/api/v1/reclaimrx/holds/{hold_id}/release",
             json={"reason": "releasing", "investigation_id": inv_id},
+            headers=_idem(hold_id, uid),
         )
         assert resp.status_code == 403
 
@@ -1329,6 +1356,7 @@ class TestHoldRelease:
         resp = client.post(
             f"/api/v1/reclaimrx/holds/{hold_id}/release",
             json={"reason": "Resolved — no fraud", "investigation_id": inv_id},
+            headers=_idem(hold_id, uid),
         )
         assert resp.status_code == 200
         body = resp.json()
@@ -1337,22 +1365,26 @@ class TestHoldRelease:
 
     def test_missing_reason_returns_422(self, client, db):
         tid, inv_id, hold_id, _ = _seed(db)
-        set_current_user(CurrentUser(id=uuid.uuid4(), tenant_id=uuid.UUID(tid),
+        uid = uuid.uuid4()
+        set_current_user(CurrentUser(id=uid, tenant_id=uuid.UUID(tid),
                                      roles=["reclaimrx.investigator"]))
         resp = client.post(
             f"/api/v1/reclaimrx/holds/{hold_id}/release",
             json={"reason": "", "investigation_id": inv_id},
+            headers=_idem(hold_id, uid),
         )
         assert resp.status_code == 422
         assert resp.json()["error"]["code"] == "REASON_REQUIRED"
 
     def test_investigation_mismatch_returns_403(self, client, db):
         tid, inv_id, hold_id, _ = _seed(db)
-        set_current_user(CurrentUser(id=uuid.uuid4(), tenant_id=uuid.UUID(tid),
+        uid = uuid.uuid4()
+        set_current_user(CurrentUser(id=uid, tenant_id=uuid.UUID(tid),
                                      roles=["reclaimrx.investigator"]))
         resp = client.post(
             f"/api/v1/reclaimrx/holds/{hold_id}/release",
             json={"reason": "done", "investigation_id": str(uuid.uuid4())},  # wrong inv
+            headers=_idem(hold_id, uid),
         )
         assert resp.status_code == 403
         assert resp.json()["error"]["code"] == "HOLD_INVESTIGATION_MISMATCH"
@@ -1365,11 +1397,14 @@ class TestHoldRelease:
         set_current_user(CurrentUser(id=uid, tenant_id=uuid.UUID(tid),
                                      roles=["reclaimrx.investigator"]))
         payload = {"reason": "Same reason", "investigation_id": inv_id}
+        idem = _idem(hold_id, uid)
 
-        resp1 = client.post(f"/api/v1/reclaimrx/holds/{hold_id}/release", json=payload)
+        resp1 = client.post(f"/api/v1/reclaimrx/holds/{hold_id}/release",
+                            json=payload, headers=idem)
         assert resp1.status_code == 200
 
-        resp2 = client.post(f"/api/v1/reclaimrx/holds/{hold_id}/release", json=payload)
+        resp2 = client.post(f"/api/v1/reclaimrx/holds/{hold_id}/release",
+                            json=payload, headers=idem)
         assert resp2.status_code == 200
         assert resp2.json()["idempotent_replay"] is True
 
@@ -1383,7 +1418,8 @@ class TestHoldRelease:
         set_current_user(CurrentUser(id=uid_a, tenant_id=uuid.UUID(tid),
                                      roles=["reclaimrx.investigator"]))
         resp1 = client.post(f"/api/v1/reclaimrx/holds/{hold_id}/release",
-                            json={"reason": "Reason A", "investigation_id": inv_id})
+                            json={"reason": "Reason A", "investigation_id": inv_id},
+                            headers=_idem(hold_id, uid_a))
         assert resp1.status_code == 200
 
         # Attempt release with actor B (different user)
@@ -1391,7 +1427,8 @@ class TestHoldRelease:
         set_current_user(CurrentUser(id=uid_b, tenant_id=uuid.UUID(tid),
                                      roles=["reclaimrx.investigator"]))
         resp2 = client.post(f"/api/v1/reclaimrx/holds/{hold_id}/release",
-                            json={"reason": "Reason A", "investigation_id": inv_id})
+                            json={"reason": "Reason A", "investigation_id": inv_id},
+                            headers=_idem(hold_id, uid_b))
         assert resp2.status_code == 409
         body = resp2.json()
         assert body["error"]["code"] == "ALREADY_RELEASED"
@@ -1404,11 +1441,16 @@ class TestHoldRelease:
                                      roles=["reclaimrx.investigator"]))
 
         resp1 = client.post(f"/api/v1/reclaimrx/holds/{hold_id}/release",
-                            json={"reason": "First reason", "investigation_id": inv_id})
+                            json={"reason": "First reason", "investigation_id": inv_id},
+                            headers=_idem(hold_id, uid))
         assert resp1.status_code == 200
 
+        # Second attempt MUST use a different Idempotency-Key (the contract
+        # is that the SAME key replays the same response; we want the
+        # business-logic 409 branch, so we must vary the key too).
         resp2 = client.post(f"/api/v1/reclaimrx/holds/{hold_id}/release",
-                            json={"reason": "Different reason", "investigation_id": inv_id})
+                            json={"reason": "Different reason", "investigation_id": inv_id},
+                            headers={"Idempotency-Key": f"hold:release:{hold_id}:{uid}:retry"})
         assert resp2.status_code == 409
 
     # ── Idempotency Case C: hold in non-active non-released state → 422 ───────
@@ -1429,10 +1471,12 @@ class TestHoldRelease:
         db.add_all([inv, hold])
         db.flush()
 
-        set_current_user(CurrentUser(id=uuid.uuid4(), tenant_id=uuid.UUID(tid),
+        uid = uuid.uuid4()
+        set_current_user(CurrentUser(id=uid, tenant_id=uuid.UUID(tid),
                                      roles=["reclaimrx.investigator"]))
         resp = client.post(f"/api/v1/reclaimrx/holds/{hold_id}/release",
-                           json={"reason": "try to release expired", "investigation_id": inv_id})
+                           json={"reason": "try to release expired", "investigation_id": inv_id},
+                           headers=_idem(hold_id, uid))
         assert resp.status_code == 422
         body = resp.json()
         assert body["error"]["code"] == "HOLD_NOT_ACTIVE"
@@ -1449,7 +1493,8 @@ class TestHoldRelease:
 
         before_count = db.query(OutboxEvent).count()
         client.post(f"/api/v1/reclaimrx/holds/{hold_id}/release",
-                    json={"reason": "Resolved", "investigation_id": inv_id})
+                    json={"reason": "Resolved", "investigation_id": inv_id},
+                    headers=_idem(hold_id, uid))
         after_count = db.query(OutboxEvent).count()
         assert after_count == before_count + 1
 
@@ -2864,10 +2909,12 @@ Add to `router.py`:
 ```python
 @router.post("/graph-runs/trigger", status_code=202)
 def trigger_graph_run(
-    db: Session = Depends(get_db),
+    # R4 WARN-2 fix: `user → db` order so 401/403 role checks resolve
+    # before any DB session is opened. Matches A4 dep-order invariant.
     user: CurrentUser = Depends(
         require_role("reclaimrx.investigator", "reclaimrx.admin")
     ),
+    db: Session = Depends(get_db),
 ) -> dict:
     """Trigger an on-demand graph analysis run (rate-limited: 1/hr/tenant).
 
@@ -2937,8 +2984,11 @@ def test_transitions_endpoint_registered(client):
 
 def test_hold_release_endpoint_registered(client):
     set_current_user(CurrentUser(id=uuid.uuid4(), tenant_id=uuid.uuid4(), roles=["reclaimrx.investigator"]))
+    # R4 BLOCK-1 fix: Idempotency-Key header is mandatory; FastAPI 422s
+    # the request before any 404 route resolution otherwise.
     resp = client.post("/api/v1/reclaimrx/holds/no-such-id/release",
-                       json={"reason": "test", "investigation_id": str(uuid.uuid4())})
+                       json={"reason": "test", "investigation_id": str(uuid.uuid4())},
+                       headers={"Idempotency-Key": "hold:release:no-such-id:test"})
     assert resp.status_code == 404
 
 
