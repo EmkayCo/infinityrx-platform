@@ -252,7 +252,14 @@ Callers invoke write() INSIDE the same DB transaction as the domain change
 atomically with the domain row — no dual-write risk (R1 BLOCK 4).
 
 The outbox_dispatcher (Task 4) polls pending rows and publishes them to
-the event bus with retry/exponential-backoff semantics.
+the event bus. On per-row publish failure the row is reverted to
+status='pending' (with attempt_count incremented) and retried on the
+NEXT poll cycle. After _MAX_ATTEMPTS failures the row is moved to
+status='failed' and an alert is logged. No per-row delay/backoff is
+implemented — retry cadence is bounded by the dispatcher's fixed
+`poll_interval_seconds` (default 1.0s). Per-row exponential backoff
+requires a `next_attempt_at` column on `reclaimrx_outbox_events` and
+is deferred to a follow-on wave (R6 BLOCK-20).
 """
 from __future__ import annotations
 
@@ -386,9 +393,18 @@ from src.outbox.event_outbox import OutboxService
 
 
 def test_rollback_drops_both_rows(db, tenant_a_id):
-    """Updating PaymentHold + writing outbox, then rollback → neither persists."""
+    """Mutating PaymentHold + writing outbox, then rollback → hold reverts AND
+    no outbox row persists.
+
+    R6 WARN-3 fix: the old test seeded the hold inside the rolled-back
+    transaction so `refreshed is None` was trivially true regardless of
+    OutboxService behavior. Now we commit the seed FIRST (with status
+    'active'), then mutate (status → 'released') + write outbox + rollback,
+    then assert the hold reverted to 'active' (proving atomicity bound
+    the mutation to the outbox write) and no outbox row exists.
+    """
     hold = _seed_hold(db, tenant_a_id)
-    db.flush()
+    db.commit()  # seed survives — proves the rollback only undoes the mutation
 
     # Domain mutation + outbox write, both in the same session/transaction
     hold.status = "released"
@@ -401,16 +417,20 @@ def test_rollback_drops_both_rows(db, tenant_a_id):
         idempotency_key=f"hold:release:{hold.id}",
     )
 
-    # ROLLBACK (simulate domain failure)
+    # ROLLBACK (simulate domain failure AFTER the outbox row was added to the session)
     db.rollback()
 
-    refreshed = db.execute(select(PaymentHold).where(PaymentHold.id == hold.id)).scalar_one_or_none()
+    refreshed = db.execute(
+        select(PaymentHold).where(PaymentHold.id == hold.id)
+    ).scalar_one_or_none()
     outbox_row = db.execute(
         select(OutboxEvent).where(OutboxEvent.idempotency_key == f"hold:release:{hold.id}")
     ).scalar_one_or_none()
-    # Both rows must be absent — the rollback erased the hold-creation flush
-    # AND the outbox row.
-    assert refreshed is None
+    # Hold reverted to its committed (pre-mutation) state.
+    assert refreshed is not None
+    assert refreshed.status == "active"
+    assert refreshed.released_at is None
+    # Outbox row never persisted — the rollback discarded it.
     assert outbox_row is None
 
 
@@ -652,8 +672,14 @@ Polls pending OutboxEvent rows, publishes to the event bus, marks rows
 published. On failure, increments attempt_count and sets last_error.
 After MAX_ATTEMPTS failures, marks the row failed and logs an alert.
 
-Spec §7.2: dispatcher polls every 1s, exponential backoff on failure,
-10 attempts max then status='failed' + alert (audit §8, D14).
+Spec §7.2: dispatcher polls every 1s, retries failed rows on the NEXT
+poll cycle (no per-row delay; retry cadence is the dispatcher's
+poll_interval), 10 attempts max then status='failed' + alert
+(audit §8, D14). R6 BLOCK-20: per-row exponential backoff requires a
+`next_attempt_at` column and is deferred to a follow-on wave; the
+spec line that originally said "exponential backoff" is reconciled
+to "fixed retry on next poll" — both bound mean-time-to-publish and
+satisfy the at-least-once delivery requirement.
 """
 from __future__ import annotations
 
@@ -680,10 +706,29 @@ _DEFAULT_BATCH_SIZE: int = 50
 class OutboxDispatcher:
     """Long-running asyncio dispatcher for the transactional outbox.
 
+    R6 BLOCK-14 architectural note: this dispatcher is **system-wide**.
+    A single dispatcher process drains the `reclaimrx_outbox_events`
+    table for ALL tenants. Each row carries its own `tenant_id` (set
+    by `OutboxService.write` from the envelope), which is propagated
+    through `EventEnvelope.tenant_id` and consumers self-filter
+    downstream. The dispatcher must NOT install the tenant loader on
+    its session — it intentionally reads across tenants. A cross-tenant
+    isolation test (test_dispatcher_publishes_all_tenants) proves this.
+
+    R6 BLOCK-13 orphan recovery: on `start()`, the dispatcher does a
+    one-shot reclaim of any rows left in `status='publishing'` by a
+    crashed previous run, returning them to `pending` so the new run
+    will retry them. THIS MODEL ASSUMES SOLO DEPLOYMENT — one
+    dispatcher process per cluster. Scaling out to multiple dispatchers
+    requires adding a `claim_expires_at TIMESTAMPTZ` column to
+    `reclaimrx_outbox_events` and reclaiming only rows whose lease has
+    expired — this is explicitly deferred to a follow-on wave (tracked
+    in B12-backlog/outbox-multi-dispatcher).
+
     Usage (in FastAPI lifespan)::
 
         dispatcher = OutboxDispatcher(
-            session_factory=get_session,
+            session_factory=get_sessionmaker(),   # sessionmaker callable
             bus=event_bus,
         )
         task = asyncio.create_task(dispatcher.start())
@@ -706,7 +751,12 @@ class OutboxDispatcher:
         self._running = False
 
     async def start(self) -> None:
-        """Blocking coroutine — run until cancelled."""
+        """Blocking coroutine — run until cancelled.
+
+        R6 BLOCK-13 fix: reclaim orphans (publishing rows from a crashed
+        prior run) BEFORE entering the poll loop. Solo-deployment model.
+        """
+        self._reclaim_orphans()
         self._running = True
         logger.info("reclaimrx.outbox_dispatcher.started",
                     extra={"svc_batch_size": self._batch_size,
@@ -718,6 +768,36 @@ class OutboxDispatcher:
                 logger.exception("reclaimrx.outbox_dispatcher.poll_error")
             if self._poll_interval > 0:
                 await asyncio.sleep(self._poll_interval)
+
+    def _reclaim_orphans(self) -> None:
+        """Revert any rows stuck in 'publishing' from a prior crashed run.
+
+        R6 BLOCK-13 fix. Runs once at start(). Solo-deployment model: if a
+        second dispatcher is running concurrently, this WILL clobber its
+        in-flight claims — see class docstring deferral note.
+
+        Increments `attempt_count` so a row that crashed mid-publish does
+        not retry forever; once attempt_count >= _MAX_ATTEMPTS the row is
+        moved to `failed` by `_dispatch_row` like any other failed row.
+        """
+        with self._session_factory() as session:
+            result = session.execute(
+                text(
+                    """
+                    UPDATE reclaimrx_outbox_events
+                    SET status = 'pending',
+                        attempt_count = attempt_count + 1
+                    WHERE status = 'publishing'
+                    """
+                )
+            )
+            count = result.rowcount or 0
+            session.commit()
+            if count > 0:
+                logger.warning(
+                    "reclaimrx.outbox_dispatcher.orphans_reclaimed",
+                    extra={"svc_orphan_count": count},
+                )
 
     async def stop(self) -> None:
         """Signal the dispatcher to stop after the current poll completes."""
@@ -736,22 +816,23 @@ class OutboxDispatcher:
         On non-Postgres (SQLite test fixture) we fall back to the
         SELECT-then-flip pattern under SAVEPOINT isolation, which is
         deterministic in single-process test mode.
+
+        R3 BLOCK 12 fix: exceptions propagate to the outer `start()` loop,
+        which logs+backs off. No silent swallowing.
+
+        R6 BLOCK-16 fix: session is now owned by THIS poll cycle (created
+        + closed inside the `with` block). Long-lived sessions would leak
+        connections forever in production. `_session_factory` is a
+        sessionmaker callable (see __init__ + R6 BLOCK-15 wiring fix).
         """
-        # R3 BLOCK 12 fix: dropped the prior `try/finally: return` wrapper
-        # that silently swallowed dispatch exceptions. Session is
-        # caller-managed (the OutboxDispatcher's session_factory owns
-        # the lifecycle, so test fixtures can retain the connection for
-        # SAVEPOINT rollback and the production runtime can reuse a
-        # single connection across poll cycles). Exceptions propagate
-        # naturally so the OutboxDispatcher's outer loop can log + back off.
-        session = self._session_factory()
-        dialect = session.bind.dialect.name if session.bind else ""
-        if dialect == "postgresql":
-            rows = self._claim_postgres(session)
-        else:
-            rows = self._claim_generic(session)
-        for row in rows:
-            await self._dispatch_row(session, row)
+        with self._session_factory() as session:
+            dialect = session.bind.dialect.name if session.bind else ""
+            if dialect == "postgresql":
+                rows = self._claim_postgres(session)
+            else:
+                rows = self._claim_generic(session)
+            for row in rows:
+                await self._dispatch_row(session, row)
 
     def _claim_postgres(self, session: Session) -> list[OutboxEvent]:
         """Atomically transition the next batch from 'pending' to 'publishing'
@@ -880,7 +961,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.events.outbox_service import OutboxService
+from src.outbox.event_outbox import OutboxService  # R6 BLOCK-18 fix: was src.events.outbox_service
 from src.outbox.outbox_dispatcher import OutboxDispatcher
 
 
@@ -926,10 +1007,12 @@ async def test_two_dispatchers_each_claim_disjoint_rows():
         async def publish(self, envelope):
             self._sink.append(envelope.idempotency_key)
 
+    # R6 BLOCK-18 fix: constructor parameter is `poll_interval_seconds`,
+    # not `poll_interval`. Previous kwarg raised TypeError at construction.
     disp_a = OutboxDispatcher(session_factory=Session, bus=CollectingBus(published_a),
-                              batch_size=5, poll_interval=0.01)
+                              batch_size=5, poll_interval_seconds=0.01)
     disp_b = OutboxDispatcher(session_factory=Session, bus=CollectingBus(published_b),
-                              batch_size=5, poll_interval=0.01)
+                              batch_size=5, poll_interval_seconds=0.01)
 
     # Race them
     await asyncio.gather(disp_a._poll_once(), disp_b._poll_once())
@@ -938,6 +1021,57 @@ async def test_two_dispatchers_each_claim_disjoint_rows():
     assert len(seen) == 10, f"expected 10 distinct rows, got {len(seen)}"
     assert set(published_a).isdisjoint(set(published_b)), (
         f"dispatchers published overlapping rows: A={published_a}, B={published_b}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_publishes_all_tenants():
+    """R6 BLOCK-14: dispatcher is system-wide; rows from all tenants must be published.
+
+    Seed 3 rows under tenant_a + 3 rows under tenant_b. One dispatcher
+    poll publishes ALL 6 rows. The dispatcher does NOT install the
+    tenant loader on its session (no tenant filtering). tenant_id is
+    preserved on each published envelope so downstream consumers
+    self-filter.
+    """
+    pg_url = os.environ["RECLAIMRX_TEST_PG_URL"]
+    engine = create_engine(pg_url)
+    Session = sessionmaker(bind=engine)
+
+    tenant_a = uuid.uuid4()
+    tenant_b = uuid.uuid4()
+
+    with Session() as session:
+        svc = OutboxService(session)
+        for tid in (tenant_a, tenant_b):
+            for i in range(3):
+                svc.write(
+                    event_type="payment.hold_released",
+                    tenant_id=tid,
+                    payload={"hold_id": f"{tid}:{i}"},
+                    ordering_key=f"{tid}:{i}",
+                    idempotency_key=f"cross:{tid}:{i}",
+                )
+        session.commit()
+
+    published_envelopes: list = []
+
+    class CollectingBus:
+        async def publish(self, envelope):
+            published_envelopes.append(envelope)
+
+    dispatcher = OutboxDispatcher(
+        session_factory=Session, bus=CollectingBus(),
+        batch_size=10, poll_interval_seconds=0.01,
+    )
+    await dispatcher._poll_once()
+
+    tenant_ids_published = {env.tenant_id for env in published_envelopes}
+    assert len(published_envelopes) == 6, (
+        f"expected 6 rows published, got {len(published_envelopes)}"
+    )
+    assert tenant_ids_published == {tenant_a, tenant_b}, (
+        f"expected both tenants represented, got {tenant_ids_published}"
     )
 ```
 
@@ -1144,13 +1278,36 @@ class ReclaimRxDLQRepository:
         self,
         entry_id: uuid.UUID,
         *,
-        tenant_id: uuid.UUID,
+        tenant_id: uuid.UUID | None = None,
     ) -> EventDLQEntry | None:
         """Fetch one DLQ entry, scoped to a specific tenant.
 
-        R2 BLOCK 9 fix + R3 BLOCK 9 / 13 follow-up: tenant_id is REQUIRED.
-        Router MUST pass `current_tenant_id()` from request context.
+        R6 BLOCK-17 fix: `tenant_id` is OPTIONAL to satisfy the shared
+        `shared.events.dlq.DLQRepository` protocol signature
+        (`get(entry_id) -> ... | None`). When the caller is the shared
+        `DLQService.replay` or `DLQService.drop` (which both call
+        `self._repo.get(entry_id)` with NO tenant_id kwarg), we resolve
+        tenant from `shared.db.tenant_context.current_tenant_id()`
+        (populated by the tenant middleware at request entry). If neither
+        explicit nor contextvar tenant is available we return None — the
+        shared service treats None as "not found" and raises KeyError,
+        which the FastAPI router maps to 404. Direct callers may still
+        pass `tenant_id=` explicitly for clarity / out-of-band tools.
+
+        R2 BLOCK 9 fix + R3 BLOCK 9 / 13 follow-up: tenant filtering is
+        unconditional — every query filters by tenant_id regardless of
+        whether it was passed in or resolved from the context.
         """
+        if tenant_id is None:
+            from shared.db.tenant_context import current_tenant_id  # noqa: PLC0415
+            resolved = current_tenant_id()
+            if resolved is None:
+                logger.warning(
+                    "reclaimrx.dlq_repository.no_tenant_context",
+                    extra={"audit_action": "dlq_get_missing_tenant"},
+                )
+                return None
+            tenant_id = resolved
         async with self._engine.connect() as conn:
             from sqlalchemy.ext.asyncio import AsyncSession  # noqa: PLC0415
             async_session = AsyncSession(bind=conn)
@@ -1696,12 +1853,20 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger("reclaimrx.jobs.audit_chain")
 
 
-async def verify_audit_hash_chain(
+def verify_audit_hash_chain(
     session: Session,
     *,
     tenant_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     """Walk ThresholdConfigAudit entries, verify hash chain integrity.
+
+    R6 WARN-2 fix: this is a plain `def` (not `async def`). The body uses
+    sync `session.execute()` / `session.scalars()` against a sync Session,
+    which would block the asyncio event loop for the full table-walk
+    duration if called directly from a coroutine. The scheduler wrapper
+    in `main.py` lifespan calls it via `asyncio.to_thread(...)` so the
+    sync work runs in a worker thread and the event loop stays
+    responsive during the daily scan.
 
     Args:
         session: SQLAlchemy Session (sync — reclaimrx uses sync sessions).
@@ -1855,12 +2020,16 @@ async def check_dlq_depth(engine: "AsyncEngine") -> dict[str, Any]:
 
     now = datetime.now(UTC)
 
+    # R6 BLOCK-19 fix: use `await conn.execute(...)` directly on the
+    # AsyncConnection instead of wrapping in an AsyncSession. The
+    # AsyncSession+MagicMock combination made unit testing impossible
+    # (SQLAlchemy internals tripped on the mock conn). Direct conn.execute
+    # is the supported SQLAlchemy idiom for non-ORM read-only aggregates,
+    # avoids one layer of session machinery, and lets the test fixture
+    # be a plain async mock.
     async with engine.connect() as conn:
-        from sqlalchemy.ext.asyncio import AsyncSession  # noqa: PLC0415
-        async_session = AsyncSession(bind=conn)
-
         # Aggregate query: count + oldest first_failed_at in a single round-trip.
-        result = await async_session.execute(
+        result = await conn.execute(
             select(
                 func.count(EventDLQEntry.id),
                 func.min(EventDLQEntry.first_failed_at),
@@ -1966,19 +2135,31 @@ async def test_boundary_exactly_at_threshold():
 
 def _stub_engine(count: int, oldest: datetime | None):
     """Build a mock AsyncEngine whose connect().__aenter__().execute() returns
-    a result whose .one() yields (count, oldest)."""
+    a result whose .one() yields (count, oldest).
+
+    R6 BLOCK-19 fix: paired with the implementation switch from
+    `AsyncSession(bind=conn).execute()` to `conn.execute()` directly,
+    we now only need to mock `conn.execute()` → result.one() — no
+    AsyncSession monkeypatching required. The mock is self-contained
+    and the tests above run as written.
+    """
+    result = MagicMock()
+    result.one = MagicMock(return_value=(count, oldest))
+
     conn = MagicMock()
     conn.__aenter__ = AsyncMock(return_value=conn)
     conn.__aexit__ = AsyncMock(return_value=None)
+    conn.execute = AsyncMock(return_value=result)
+
     engine = MagicMock()
     engine.connect = MagicMock(return_value=conn)
-    # The function uses `async_session = AsyncSession(bind=conn)`; we patch
-    # AsyncSession via monkeypatch in real usage. For brevity here, callers
-    # are expected to also monkeypatch AsyncSession in their test fixture.
     return engine
 ```
 
-Real fixture wiring will use a tmp Postgres or sqlite-with-DLQ-table per testing.md SAVEPOINT pattern.
+The mock above is sufficient for unit tests of the duration-threshold
+logic. An end-to-end DLQ depth test against a real Postgres / sqlite
+DLQ table lives in `tests/integration/test_dlq_monitor_real.py` and
+follows the testing.md SAVEPOINT pattern.
 
 **Run tests:**
 
@@ -2147,7 +2328,12 @@ from src.events.dlq_repository import ReclaimRxDLQRepository
 # In lifespan, after wire_consumers:
 #   1. OutboxDispatcher
 dispatcher = OutboxDispatcher(
-    session_factory=get_session,   # must be the module's sync session factory
+    # R6 BLOCK-15 fix: `get_session` in _shim/db.py is a generator-style
+    # FastAPI dependency (`Iterator[Session]`), NOT a Session factory.
+    # Passing it directly leaks generators into `session.bind`. We pass
+    # the sessionmaker itself (a Callable[[], Session]) which is the
+    # callable contract OutboxDispatcher expects.
+    session_factory=get_sessionmaker(),
     bus=bus,
 )
 dispatcher_task = asyncio.create_task(dispatcher.start())
@@ -2164,10 +2350,17 @@ async def _cleanup_job() -> None:
     await run_cleanup(async_engine, retention_days=7)
 
 async def _audit_chain_job() -> None:
+    # R6 WARN-2 fix: verify_audit_hash_chain is plain `def` (sync) so
+    # `session.execute()` / `session.scalars()` calls do not block the
+    # event loop. Run in worker thread via asyncio.to_thread.
     from src._shim.db import get_sessionmaker  # noqa: PLC0415
-    maker = get_sessionmaker()
-    with maker() as session:
-        await verify_audit_hash_chain(session)
+
+    def _run() -> None:
+        maker = get_sessionmaker()
+        with maker() as session:
+            verify_audit_hash_chain(session)
+
+    await asyncio.to_thread(_run)
 
 async def _dlq_depth_job() -> None:
     await check_dlq_depth(async_engine)
@@ -2181,9 +2374,17 @@ app.state.scheduler = scheduler
 
 yield  # <-- existing yield
 
-# Teardown (after yield)
+# Teardown (after yield) — R6 WARN-4 fix: stop() flips the running flag but
+# the underlying asyncio.Task may still be inside a `sleep(poll_interval)`
+# call (dispatcher) or a `sleep(60)` croniter wait (scheduler). Calling
+# stop() alone leaves the task running until the next wake-up — under ASGI
+# the process can be killed before the scheduler exits. Cancel + gather
+# guarantees clean shutdown.
 await dispatcher.stop()
 await scheduler.stop()
+dispatcher_task.cancel()
+scheduler_task.cancel()
+await asyncio.gather(dispatcher_task, scheduler_task, return_exceptions=True)
 
 # In create_app(): replace _get_dlq_service to use real repo
 async def _get_dlq_service() -> DLQService:

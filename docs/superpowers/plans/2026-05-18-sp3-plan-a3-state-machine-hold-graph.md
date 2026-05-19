@@ -1149,7 +1149,11 @@ def transition_investigation_status(
         if inv_row is None:
             raise HTTPException(
                 status_code=404,
-                detail={"error": {"code": "NOT_FOUND", "message": "Investigation not found.", "correlation_id": correlation_id}},
+                detail=build_error_envelope(
+                    "NOT_FOUND",
+                    "Investigation not found.",
+                    correlation_id=correlation_id,
+                ),
             )
         prev_status = inv_row.status
 
@@ -1169,20 +1173,29 @@ def transition_investigation_status(
         if "NOT_FOUND" in msg:
             raise HTTPException(
                 status_code=404,
-                detail={"error": {"code": "NOT_FOUND", "message": "Investigation not found.", "correlation_id": correlation_id}},
+                detail=build_error_envelope(
+                    "NOT_FOUND",
+                    "Investigation not found.",
+                    correlation_id=correlation_id,
+                ),
             ) from exc
-        raise HTTPException(status_code=500, detail={"error": {"code": "INTERNAL", "message": "Unexpected error.", "correlation_id": correlation_id}}) from exc
+        raise HTTPException(
+            status_code=500,
+            detail=build_error_envelope(
+                "INTERNAL",
+                "Unexpected error.",
+                correlation_id=correlation_id,
+            ),
+        ) from exc
     except InvalidTransitionError as exc:
         raise HTTPException(
             status_code=422,
-            detail={
-                "error": {
-                    "code": exc.code,
-                    "message": str(exc),
-                    "field": ",".join(exc.allowed_next),
-                    "correlation_id": correlation_id,
-                }
-            },
+            detail=build_error_envelope(
+                exc.code,
+                str(exc),
+                field=",".join(exc.allowed_next),
+                correlation_id=correlation_id,
+            ),
         ) from exc
 
     return {
@@ -1700,10 +1713,25 @@ async def release_hold_v2(
             ) from exc
         raise
 
-    if status_code == 409:
-        raise HTTPException(status_code=409, detail=response_body)
-    if status_code == 422:
-        raise HTTPException(status_code=422, detail=response_body)
+    if status_code in (409, 422):
+        # R3 BLOCK-2 fix: PaymentHoldService.release_hold() returns raw
+        # `{"error": {...}}` dicts for the 409 ALREADY_RELEASED and 422
+        # HOLD_NOT_ACTIVE branches. Route layer is responsible for the
+        # error-handling.md envelope contract, so we rebuild via
+        # build_error_envelope() and re-attach the case-specific fields
+        # (released_at/released_by/reason for 409; field for 422) which
+        # are NOT in the shared envelope schema.
+        svc_err = response_body["error"]
+        envelope = build_error_envelope(
+            svc_err["code"],
+            svc_err["message"],
+            field=svc_err.get("field"),
+            correlation_id=correlation_id,
+        )
+        for extra_key in ("released_at", "released_by", "reason"):
+            if extra_key in svc_err:
+                envelope["error"][extra_key] = svc_err[extra_key]
+        raise HTTPException(status_code=status_code, detail=envelope)
 
     db.commit()
     return response_body
@@ -1734,7 +1762,10 @@ async def release_hold_v2(
 ```python
 """Unit tests for accumulator_consumer.
 
-Tests 4 pattern detectors + idempotency + tenant_id consistency check.
+Tests the TWO A3 pattern detectors (`sudden_spike`, `multi_payer_convergence`)
+plus idempotency + tenant_id consistency. `reset_evasion` and
+`threshold_oscillation` detectors are explicitly deferred to B11 per the
+scope note above; their tests will be added in B11/follow-on/accumulator-patterns-3-4.
 """
 from __future__ import annotations
 
@@ -2853,15 +2884,17 @@ def trigger_graph_run(
         db.commit()
         return {"graph_run_id": gr.id, "status": gr.status, "correlation_id": correlation_id}
     except RunInProgressError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"error": {
-                "code": "RUN_IN_PROGRESS",
-                "message": "A graph run is already in-flight for this tenant.",
-                "existing_run_id": exc.existing_run_id,
-                "correlation_id": correlation_id,
-            }},
-        ) from exc
+        envelope = build_error_envelope(
+            "RUN_IN_PROGRESS",
+            "A graph run is already in-flight for this tenant.",
+            correlation_id=correlation_id,
+        )
+        # `existing_run_id` is an A3-specific contract field — surfaces the
+        # in-flight run so the UI can poll/link to it. build_error_envelope()
+        # doesn't model it (it's not in the shared error-handling.md schema),
+        # so we extend the envelope after construction.
+        envelope["error"]["existing_run_id"] = exc.existing_run_id
+        raise HTTPException(status_code=409, detail=envelope) from exc
 ```
 
 **Run:** `pytest modules/reclaimrx/tests/integration/test_graph_run_trigger.py -x` → expect ALL PASS.
