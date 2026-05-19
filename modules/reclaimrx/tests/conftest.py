@@ -31,6 +31,9 @@ def engine():
         future=True,
     )
 
+    # Import all ORM models so Base.metadata is fully populated before create_all.
+    import src.models.tables  # noqa: F401, PLC0415
+
     # Keep a single connection alive so in-memory tables persist for the whole session.
     _conn = eng.connect()
     Base.metadata.create_all(_conn)
