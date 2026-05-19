@@ -650,6 +650,7 @@ class TestOutboxDispatcherPollAndPublish:
         db_session.refresh(row)
         assert row.status == "failed"
 
+    @pytest.mark.asyncio
     async def test_row_marked_failed_on_post_increment_threshold(self, db_session):
         """R10 WARN-6 / R11 WARN-11: a row with attempt_count=9 that fails
         ONCE more must be marked status='failed' on the SAME poll cycle —
