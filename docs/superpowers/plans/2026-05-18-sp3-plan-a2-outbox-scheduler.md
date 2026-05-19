@@ -766,8 +766,12 @@ class OutboxDispatcher:
                 await self._poll_once()
             except Exception:
                 logger.exception("reclaimrx.outbox_dispatcher.poll_error")
-            if self._poll_interval > 0:
-                await asyncio.sleep(self._poll_interval)
+            # R8 BLOCK-25 fix (paired with ReclaimRxScheduler.start): ALWAYS
+            # yield to the event loop between polls. Passing 0 to
+            # asyncio.sleep still yields control once per iteration; a bare
+            # conditional sleep would busy-loop and starve `stop()` /
+            # task.cancel() under tick_interval=0 unit tests.
+            await asyncio.sleep(self._poll_interval)
 
     def _reclaim_orphans(self) -> None:
         """Revert any rows stuck in 'publishing' from a prior crashed run.
@@ -1278,16 +1282,21 @@ class ReclaimRxDLQRepository:
         status: str = "queued",
         limit: int = 100,
     ) -> list[EventDLQEntry]:
-        async with self._engine.connect() as conn:
-            from sqlalchemy.ext.asyncio import AsyncSession  # noqa: PLC0415
-            async_session = AsyncSession(bind=conn)
+        # R8 BLOCK-26 fix: bind AsyncSession to the engine (not to a
+        # connection we own), so SQLAlchemy owns the connection +
+        # transaction lifecycle through the session contextmanager. The
+        # prior `AsyncSession(bind=conn)` inside `engine.connect()` set
+        # up two competing transaction owners and silently corrupted
+        # DLQ reads under retry.
+        from sqlalchemy.ext.asyncio import AsyncSession  # noqa: PLC0415
+        async with AsyncSession(self._engine) as session:
             q = select(EventDLQEntry).where(EventDLQEntry.status == status)
             if tenant_id is not None:
                 q = q.where(EventDLQEntry.tenant_id == tenant_id)
             if event_type is not None:
                 q = q.where(EventDLQEntry.event_type == event_type)
             q = q.limit(limit)
-            result = await async_session.execute(q)
+            result = await session.execute(q)
             return list(result.scalars().all())
 
     async def get(
@@ -1324,10 +1333,12 @@ class ReclaimRxDLQRepository:
                 )
                 return None
             tenant_id = resolved
-        async with self._engine.connect() as conn:
-            from sqlalchemy.ext.asyncio import AsyncSession  # noqa: PLC0415
-            async_session = AsyncSession(bind=conn)
-            result = await async_session.execute(
+        # R8 BLOCK-26 fix: AsyncSession bound to the engine (not a
+        # caller-owned connection) so SQLAlchemy owns connection +
+        # transaction lifecycle.
+        from sqlalchemy.ext.asyncio import AsyncSession  # noqa: PLC0415
+        async with AsyncSession(self._engine) as session:
+            result = await session.execute(
                 select(EventDLQEntry).where(
                     EventDLQEntry.id == entry_id,
                     EventDLQEntry.tenant_id == tenant_id,
@@ -1379,11 +1390,16 @@ class ReclaimRxDLQRepository:
             return int(result.rowcount or 0)
 
     async def save(self, entry: EventDLQEntry) -> None:
+        # R8 BLOCK-26 fix: AsyncSession bound to the engine — NOT to a
+        # connection from `engine.begin()`. Binding to an already-owned
+        # connection meant both `engine.begin()` and `async_session.commit()`
+        # tried to manage the transaction, silently corrupting DLQ writes
+        # under concurrent replay. The session contextmanager handles
+        # connection acquisition + commit/rollback cleanly.
         from sqlalchemy.ext.asyncio import AsyncSession  # noqa: PLC0415
-        async with self._engine.begin() as conn:
-            async_session = AsyncSession(bind=conn)
-            async_session.add(entry)
-            await async_session.commit()
+        async with AsyncSession(self._engine) as session:
+            session.add(entry)
+            await session.commit()
 ```
 
 ### 6b — Idempotency key helper
@@ -1543,14 +1559,32 @@ import pytest
 from src.main import create_app
 
 
-def test_idempotency_store_is_postgres_not_in_memory():
+def test_idempotency_store_is_postgres_not_in_memory(monkeypatch):
     """get_idempotency_store() returns PostgresIdempotencyStore, not the
-    InMemoryIdempotencyStore stub."""
+    InMemoryIdempotencyStore stub.
+
+    R8 BLOCK-27 fix: monkeypatch `get_async_engine_for_idempotency` to
+    return a fake AsyncEngine. Calling `create_app()` triggers the
+    factory, and CI does not have a live Postgres at module load time
+    (the idempotency-store wiring is unit-level, not integration-level).
+    A real engine-bound integration test lives in
+    `test_idempotency_real_postgres.py` and is gated on
+    `RECLAIMRX_TEST_PG_URL`.
+    """
     from shared.events.idempotency import (
         PostgresIdempotencyStore,
         InMemoryIdempotencyStore,
     )
     from src.events import get_idempotency_store
+
+    # Stub the async engine factory so create_app() does not try to
+    # open a real Postgres connection at import-time.
+    from unittest.mock import MagicMock  # noqa: PLC0415
+    fake_engine = MagicMock(name="FakeAsyncEngine")
+    monkeypatch.setattr(
+        "src._shim.db.get_async_engine_for_idempotency",
+        lambda: fake_engine,
+    )
 
     # Force app initialization so wire_consumers runs
     _ = create_app()
@@ -1824,13 +1858,22 @@ class ReclaimRxScheduler:
         )
 
     async def start(self) -> None:
-        """Blocking coroutine — run until stop() is called."""
+        """Blocking coroutine — run until stop() is called.
+
+        R8 BLOCK-25 fix: ALWAYS yield to the event loop between ticks via
+        `asyncio.sleep(...)`. The prior guard `if self._tick_interval > 0:
+        await asyncio.sleep(...)` would skip the yield entirely when
+        tick_interval_seconds=0 (the value used by unit tests), producing
+        an infinite busy-loop that starved the event loop — stop()
+        running on the same loop would never get scheduled, so the
+        scheduler would never stop and pytest would hang. Passing 0 to
+        asyncio.sleep still yields control to the loop once per tick.
+        """
         self._running = True
         logger.info("reclaimrx.scheduler.started")
         while self._running:
             await self._tick()
-            if self._tick_interval > 0:
-                await asyncio.sleep(self._tick_interval)
+            await asyncio.sleep(self._tick_interval)
 
     async def stop(self) -> None:
         """Stop after the current tick completes."""
@@ -2505,7 +2548,7 @@ python -m pytest \
 - **Advisory lock key** — `zlib.crc32(f"graph_run:{tenant_id}".encode()) & 0x7FFFFFFF` — NOT Python `hash()` (audit §9, codex BLOCK 7). Referenced in dlq_monitor.py docstring as a reminder for Plan A3.
 - **EventEnvelope fields** — `event_type`, `tenant_id` (uuid.UUID), `correlation_id`, `source_module`. NOT `type`, NOT `emitted_at` (audit §2, codex BLOCK 4).
 - **Redis idempotency key format** — `tenant:{tenant_id}:reclaimrx:idempotency:{raw_key}` (tenant-isolation.md).
-- **No PHI in logs** — `last_error` on OutboxEvent stores exception class label only (`exc.__class__.__module__ + "." + exc.__class__.__name__`); NEVER the exception args/message, since those may carry envelope payload contents (R5 BLOCK-12 / R4 NEW-2). Stack traces remain available via `logger.exception()` at OutboxDispatcher outer-loop level.
+- **No PHI in logs** — `last_error` on OutboxEvent stores exception class label only (`exc.__class__.__module__ + "." + exc.__class__.__name__`); NEVER the exception args/message, since those may carry envelope payload contents (R5 BLOCK-12 / R4 NEW-2). Stack traces are logged via `logger.exception(...)` INSIDE `_dispatch_row`'s except branch (R7 WARN-5 / R8 BLOCK-28 fix) — that branch catches+swallows the publish exception, so the outer `OutboxDispatcher.start()` loop never sees it. Stack traces only contain code locations + filenames, no envelope payload data, so logging them at the catch point is PHI-safe.
 - **100% coverage** on audit_chain_job, outbox service, dlq_repository, idempotency_keys.
 - **Sync SQLAlchemy** — reclaimrx currently uses sync sessions (audit §10 finding: "No async SQLAlchemy"). DLQ repository and cleanup job use async engine; the module-level sync session factory continues for everything else.
 

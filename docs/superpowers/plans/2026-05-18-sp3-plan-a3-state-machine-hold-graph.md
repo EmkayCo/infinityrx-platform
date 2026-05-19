@@ -1334,7 +1334,12 @@ class TestHoldRelease:
         set_current_user(CurrentUser(id=uuid.uuid4(), tenant_id=uuid.UUID(tid),
                                      roles=["reclaimrx.investigator"]))
         resp = client.delete(f"/api/v1/reclaimrx/holds/{hold_id}?reason=done")
-        assert resp.status_code == 405  # Method Not Allowed (route removed)
+        # R5 BLOCK-1 fix: FastAPI returns 405 only when the path is registered
+        # with a DIFFERENT method. After Task 4b removes DELETE /holds/{hold_id}
+        # entirely, no route exists at that path — FastAPI returns 404, not 405.
+        # POST /holds/{hold_id}/release IS registered, but its path differs
+        # (extra `/release` suffix), so DELETE /holds/{hold_id} 404s.
+        assert resp.status_code == 404  # path no longer registered
 
     def test_viewer_cannot_release(self, client, db):
         tid, inv_id, hold_id, _ = _seed(db)
@@ -2995,7 +3000,10 @@ def test_hold_release_endpoint_registered(client):
 def test_old_delete_hold_route_gone(client):
     set_current_user(CurrentUser(id=uuid.uuid4(), tenant_id=uuid.uuid4(), roles=["reclaimrx.investigator"]))
     resp = client.delete("/api/v1/reclaimrx/holds/some-id?reason=test")
-    assert resp.status_code == 405
+    # R5 BLOCK-1 fix: see test_old_delete_route_is_gone — DELETE path is
+    # not registered at all, FastAPI 404s (405 only on method mismatch
+    # at a registered path).
+    assert resp.status_code == 404
 
 
 def test_graph_runs_trigger_endpoint_registered(client):
@@ -3060,7 +3068,7 @@ Must be 100% on all A3 paths. Fix any gaps before marking tasks complete.
 - [ ] `pytest modules/reclaimrx/tests/unit/test_investigation_service_transitions.py` — all pass
 - [ ] `pytest modules/reclaimrx/tests/integration/test_transitions_endpoint.py` — all pass (9 tests)
 - [ ] `pytest modules/reclaimrx/tests/integration/test_hold_release_endpoint.py` — all pass, outbox test passes, 3-case idempotency pass
-- [ ] `DELETE /holds/{hold_id}` route is GONE — 405 on call
+- [ ] `DELETE /holds/{hold_id}` route is GONE — 404 on call (path is unregistered; FastAPI returns 405 only on method mismatch at a registered path)
 - [ ] `pytest modules/reclaimrx/tests/unit/test_accumulator_consumer.py` — all pass
 - [ ] `pytest modules/reclaimrx/tests/unit/test_graph_job.py` — all pass, advisory lock key is `zlib.crc32(f"graph_run:{tenant_id}".encode()) & 0x7FFFFFFF`
 - [ ] `pytest modules/reclaimrx/tests/integration/test_graph_run_trigger.py` — all pass
