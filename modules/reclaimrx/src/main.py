@@ -24,12 +24,19 @@ logger = logging.getLogger("reclaimrx.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Startup: wire event-bus consumers (CR-01).
+    """Startup: wire event-bus consumers (CR-01) + scheduler jobs (D14 bindings 4-6).
 
     Loads all 8 reclaimrx CONSUMER_ROUTING handlers and subscribes them to
     the shared EventBus so the FWA pipeline actually receives live events.
+    Starts ReclaimRxScheduler with 3 registered jobs:
+      - cleanup_processed_events  (01:00 UTC daily)
+      - verify_audit_hash_chain   (03:00 UTC daily)
+      - check_dlq_depth           (every 15 min)
     Best-effort — a missing broker is fine in tests.
     """
+    import asyncio as _asyncio  # noqa: PLC0415
+
+    # --- Event-bus consumer wiring ---
     try:
         from shared.events.factory import get_event_bus  # noqa: PLC0415
         from .events import wire_consumers  # noqa: PLC0415
@@ -40,22 +47,77 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.event_bus = bus
     except Exception:  # pragma: no cover — best-effort
         logger.exception("reclaimrx.consumer_wiring_failed")
+
+    # --- Scheduler (D14 bindings 4-6) ---
+    from .jobs.reclaimrx_scheduler import ReclaimRxScheduler  # noqa: PLC0415
+
+    scheduler = ReclaimRxScheduler()
+
+    # Job: cleanup processed_events (event-bus.md: DELETE WHERE processed_at < NOW() - 7 days)
+    async def _cleanup_processed_events() -> None:
+        from sqlalchemy import text  # noqa: PLC0415
+        from ._shim.db import get_sessionmaker  # noqa: PLC0415
+        maker = get_sessionmaker()
+        session = maker()
+        try:
+            session.execute(
+                text("DELETE FROM core.processed_events WHERE processed_at < NOW() - INTERVAL '7 days'")
+            )
+            session.commit()
+        except Exception:  # pragma: no cover
+            logger.exception("reclaimrx.cleanup_processed_events.error")
+        finally:
+            session.close()
+
+    # Job: verify audit hash chain (hipaa-2026.md: daily integrity check)
+    async def _verify_audit_hash_chain() -> None:
+        from .jobs.audit_chain_job import verify_audit_hash_chain  # noqa: PLC0415
+        from ._shim.db import get_sessionmaker  # noqa: PLC0415
+        maker = get_sessionmaker()
+        session = maker()
+        try:
+            result = await _asyncio.to_thread(verify_audit_hash_chain, session, tenant_id=None)
+            if result["status"] == "alert":
+                logger.critical(
+                    "reclaimrx.audit_chain.daily_check_failed",
+                    extra={"svc_breaks": result["breaks"],
+                           "audit_action": "audit_chain_daily"},
+                )
+        except Exception:  # pragma: no cover
+            logger.exception("reclaimrx.audit_chain.daily_check_error")
+        finally:
+            session.close()
+
+    # Job: DLQ depth monitor (event-bus.md: alert when > 0 for > 15 min)
+    async def _check_dlq_depth() -> None:
+        from .jobs.dlq_monitor import check_dlq_depth  # noqa: PLC0415
+        from ._shim.db import get_async_engine_for_idempotency  # noqa: PLC0415
+        try:
+            await check_dlq_depth(get_async_engine_for_idempotency())
+        except Exception:  # pragma: no cover
+            logger.exception("reclaimrx.dlq_monitor.error")
+
+    scheduler.register("cleanup_processed_events", _cleanup_processed_events, cron="0 1 * * *")
+    scheduler.register("verify_audit_hash_chain", _verify_audit_hash_chain, cron="0 3 * * *")
+    scheduler.register("check_dlq_depth", _check_dlq_depth, cron="*/15 * * * *")
+
+    app.state.scheduler = scheduler
+    sched_task = _asyncio.create_task(scheduler.start())
+
     yield
 
-
-class _EmptyDLQRepository:
-    async def list(self, **_kwargs):
-        return []
-
-    async def get(self, _entry_id):
-        return None
-
-    async def save(self, _entry) -> None:  # pragma: no cover
-        return None
+    await scheduler.stop()
+    try:
+        await _asyncio.wait_for(sched_task, timeout=5.0)
+    except (_asyncio.TimeoutError, _asyncio.CancelledError):  # pragma: no cover
+        pass
 
 
 async def _get_dlq_service() -> DLQService:
-    return DLQService(repository=_EmptyDLQRepository())
+    """Return DLQService backed by ReclaimRxDLQRepository (D14 binding 3)."""
+    from .events.dlq_repository import ReclaimRxDLQRepository  # noqa: PLC0415
+    from ._shim.db import get_async_engine_for_idempotency  # noqa: PLC0415
+    return DLQService(repository=ReclaimRxDLQRepository(get_async_engine_for_idempotency()))
 
 
 async def _get_dlq_permissions() -> set[str]:
