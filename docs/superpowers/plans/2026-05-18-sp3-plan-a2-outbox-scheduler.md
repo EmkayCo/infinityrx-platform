@@ -939,6 +939,26 @@ class OutboxDispatcher:
             error_label = f"{exc.__class__.__module__}.{exc.__class__.__name__}"
             row.attempt_count += 1
             row.last_error = error_label
+            # R10 WARN-6 fix: check terminal-failure threshold AFTER the
+            # increment. Previously a row with attempt_count=9 incremented
+            # to 10 but stayed `pending`, only flipping to `failed` on the
+            # next poll — wasting one publish attempt and one outbox slot.
+            # We now mark it `failed` immediately when the post-increment
+            # count reaches _MAX_ATTEMPTS.
+            if row.attempt_count >= _MAX_ATTEMPTS:
+                row.status = "failed"
+                session.commit()
+                logger.exception(
+                    "reclaimrx.outbox_dispatcher.row_failed_max_attempts",
+                    extra={
+                        "svc_outbox_id": row.id,
+                        "svc_event_type": row.event_type,
+                        "svc_idempotency_key": row.idempotency_key,
+                        "svc_attempt_count": row.attempt_count,
+                        "svc_error_class": error_label,
+                    },
+                )
+                return
             # Revert claim → pending so another dispatcher can retry on next poll.
             row.status = "pending"
             session.commit()
@@ -1324,8 +1344,14 @@ class ReclaimRxDLQRepository:
         whether it was passed in or resolved from the context.
         """
         if tenant_id is None:
+            # R10 BLOCK-30 fix: `current_tenant_id` is a ContextVar
+            # (shared/db/tenant_context.py:45) — read its current value
+            # via `.get()`. Calling it as a function would raise
+            # `TypeError: 'ContextVar' object is not callable` on the
+            # first DLQ replay/drop where the shared DLQService called
+            # `repo.get(entry_id)` without an explicit tenant kwarg.
             from shared.db.tenant_context import current_tenant_id  # noqa: PLC0415
-            resolved = current_tenant_id()
+            resolved = current_tenant_id.get()
             if resolved is None:
                 logger.warning(
                     "reclaimrx.dlq_repository.no_tenant_context",
@@ -1609,8 +1635,15 @@ def test_idempotency_store_is_postgres_not_in_memory(monkeypatch):
     from src.events import get_idempotency_store  # noqa: PLC0415
     from src.main import create_app  # noqa: PLC0415
 
-    # Force app initialization so wire_consumers runs
-    _ = create_app()
+    # R10 NIT-7 fix: build the app + drive lifespan startup so the
+    # lifespan-registered wire_consumers() actually runs. Calling
+    # create_app() alone returns an unstarted FastAPI instance and
+    # registers the lifespan but does NOT execute it. TestClient as a
+    # context manager triggers startup + shutdown around the test body.
+    from fastapi.testclient import TestClient  # noqa: PLC0415
+    with TestClient(create_app()) as _client:
+        # Make at least one request so the lifespan startup completes.
+        _client.get("/health")
 
     store = get_idempotency_store()
     assert isinstance(store, PostgresIdempotencyStore), (
