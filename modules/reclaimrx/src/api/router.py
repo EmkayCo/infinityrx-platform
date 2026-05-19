@@ -642,6 +642,34 @@ def release_hold_v2(
     db.commit()
     return result
 
+
+# -- Graph Runs ---
+
+@router.post("/graph-runs/trigger", status_code=202)
+def trigger_graph_run(
+    user: CurrentUser = Depends(require_role("reclaimrx.investigator", "reclaimrx.admin")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Trigger an on-demand graph analysis run (rate-limited: 1/hr/tenant)."""
+    import uuid as _uuid  # noqa: PLC0415
+    from src.jobs.graph_analysis_job import GraphAnalysisJob, RunInProgressError  # noqa: PLC0415
+
+    correlation_id = str(_uuid.uuid4())
+    job = GraphAnalysisJob(db)
+    try:
+        gr = job.trigger(tenant_id=user.tenant_id, trigger_source="on_demand")
+        db.commit()
+        return {"graph_run_id": gr.id, "status": gr.status, "correlation_id": correlation_id}
+    except RunInProgressError as exc:
+        envelope = build_error_envelope(
+            "RUN_IN_PROGRESS",
+            "A graph run is already in-flight for this tenant.",
+            correlation_id=correlation_id,
+        )
+        envelope["error"]["existing_run_id"] = exc.existing_run_id
+        raise HTTPException(status_code=409, detail=envelope) from exc
+
+
 # ── Entity Profiles ───────────────────────────────────────────────────────────
 
 @router.get("/pharmacy-profiles", response_model=list[PharmacyProfileRead])

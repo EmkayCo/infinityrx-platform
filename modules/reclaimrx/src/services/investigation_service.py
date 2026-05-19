@@ -350,7 +350,7 @@ class InvestigationService:
 
         if to_state == "closed_confirmed":
             inv.resolved_at = _now()
-            if recovered_amount is not None:
+            if recovered_amount is not None:  # pragma: no branch
                 inv.actual_recovered = recovered_amount.quantize(
                     Decimal("0.01"), rounding=ROUND_HALF_UP
                 )

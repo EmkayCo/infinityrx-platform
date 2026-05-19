@@ -229,3 +229,20 @@ class TestTransitionMethod:
                 user_id=uuid.uuid4(),
                 reason="cross-tenant attempt",
             )
+
+
+    def test_closed_false_positive_via_transition(self, db):
+        inv = _make_investigation(db, status='in_progress')
+        svc = InvestigationService(db)
+        svc.transition(
+            tenant_id=uuid.UUID(inv.tenant_id),
+            investigation_id=inv.id,
+            to_state='closed_false_positive',
+            role='reclaimrx.investigator',
+            user_id=uuid.uuid4(),
+            reason='Review showed legitimate billing',
+            outcome_label='false_positive',
+        )
+        db.refresh(inv)
+        assert inv.status == 'closed_false_positive'
+        assert inv.resolved_at is not None

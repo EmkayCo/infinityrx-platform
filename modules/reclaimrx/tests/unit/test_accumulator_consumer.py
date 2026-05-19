@@ -115,3 +115,52 @@ class TestAccumulatorPatternDetectors:
         added_types = [type(c.args[0]).__name__ for c in db.add.call_args_list]
         assert "AccumulatorAnomaly" in added_types
         assert "Investigation" in added_types
+
+    def test_no_investigation_for_deferred_pattern(self, consumer, db):
+        from src.models.tables import AccumulatorAnomaly as _AA
+        import datetime as _dt
+        fake_anomaly = _AA(
+            id='fake-id',
+            tenant_id='test',
+            member_id='m1',
+            pattern_type='reset_evasion',
+            detected_at=_dt.datetime.now(_dt.UTC),
+            evidence_window_start=_dt.datetime.now(_dt.UTC),
+            evidence_window_end=_dt.datetime.now(_dt.UTC),
+            triggering_event_ids=[],
+        )
+        member_id, tid = self._member_and_tid()
+        from unittest.mock import patch as _patch
+        with _patch.object(consumer, '_detect_patterns', return_value=[fake_anomaly]):
+            with _patch.object(consumer, '_load_recent_window', return_value=[]):
+                consumer.handle(
+                    idempotency_key=f'accumulator:{member_id}:2026-Q2:6666',
+                    payload=_make_payload(member_id, tid, {}),
+                )
+        added_types = [type(c.args[0]).__name__ for c in db.add.call_args_list]
+        assert 'AccumulatorAnomaly' in added_types
+        assert 'Investigation' not in added_types
+
+    def test_empty_window_produces_no_spike(self, consumer, db):
+        member_id, tid = self._member_and_tid()
+        from unittest.mock import patch as _patch
+        with _patch.object(consumer, '_load_recent_window', return_value=[]):
+            consumer.handle(
+                idempotency_key=f'accumulator:{member_id}:2026-Q2:5555',
+                payload=_make_payload(member_id, tid, {'amounts': {'oop': '9999.00', 'deductible': '0.00'}}),
+            )
+        added = [c for c in db.add.call_args_list if hasattr(c.args[0], 'pattern_type')]
+        spike_rows = [r for r in added if r.args[0].pattern_type == 'sudden_spike']
+        assert len(spike_rows) == 0
+
+
+class TestAccumulatorLoadRecentWindow:
+    def test_load_recent_window_returns_empty_for_new_member(self, db):
+        from src.consumers.accumulator_consumer import AccumulatorConsumer
+        import uuid as _uuid
+        consumer = AccumulatorConsumer(db)
+        result = consumer._load_recent_window(
+            tenant_id=_uuid.UUID('11111111-1111-1111-1111-111111111111'),
+            member_id='NEW-MEMBER-999',
+        )
+        assert result == []

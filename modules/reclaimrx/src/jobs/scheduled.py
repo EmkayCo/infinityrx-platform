@@ -25,10 +25,24 @@ def job_recalculate_entity_profiles(session: Any, tenant_id: str) -> dict[str, i
 def job_rebuild_fraud_network_graph(session: Any, tenant_id: str) -> dict[str, Any]:
     """Rebuild the fraud network graph from claims data.
 
-    Runs nightly. Detects suspicious communities and publishes alerts.
+    Wraps GraphAnalysisJob; called by the asyncio cron scheduler (cron: 0 2 * * *).
     """
-    _logger.info("reclaimrx.job.rebuild_fraud_network_graph.start", extra={"tenant_id": tenant_id})
-    return {"communities_detected": 0, "suspicious_communities": 0}
+    from src.jobs.graph_analysis_job import GraphAnalysisJob, RunInProgressError  # noqa: PLC0415
+    import uuid as _uuid  # noqa: PLC0415
+
+    try:
+        job = GraphAnalysisJob(session)
+        gr = job.trigger(tenant_id=_uuid.UUID(tenant_id), trigger_source="cron")
+        return {
+            "communities_detected": gr.rings_detected,
+            "suspicious_communities": gr.investigations_opened,
+            "records_scanned": gr.records_scanned,
+            "status": gr.status,
+        }
+    except RunInProgressError:
+        _logger.info("reclaimrx.graph_job.skipped_run_in_progress",
+                     extra={"svc_tenant_id": tenant_id})
+        return {"communities_detected": 0, "suspicious_communities": 0, "skipped": True}
 
 
 def job_retrain_ml_models(session: Any, tenant_id: str) -> dict[str, Any]:
