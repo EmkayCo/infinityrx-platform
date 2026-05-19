@@ -575,7 +575,14 @@ class TestOutboxDispatcherPollAndPublish:
         db_session.refresh(row)
         assert row.status == "pending"
         assert row.attempt_count == 1
-        assert "broker down" in (row.last_error or "")
+        # R5 BLOCK-12 fix: last_error stores exception class label only
+        # (module.ClassName), never the raw exception args/message — those
+        # may contain PHI from the envelope payload. The mock raised
+        # ConnectionError("broker down"); we assert the class label and
+        # explicitly verify the message body is NOT present.
+        assert row.last_error is not None
+        assert row.last_error.endswith(".ConnectionError")
+        assert "broker down" not in row.last_error
 
     @pytest.mark.asyncio
     async def test_row_marked_failed_after_max_attempts(self, db_session):
@@ -2251,7 +2258,7 @@ python -m pytest \
 - **Advisory lock key** — `zlib.crc32(f"graph_run:{tenant_id}".encode()) & 0x7FFFFFFF` — NOT Python `hash()` (audit §9, codex BLOCK 7). Referenced in dlq_monitor.py docstring as a reminder for Plan A3.
 - **EventEnvelope fields** — `event_type`, `tenant_id` (uuid.UUID), `correlation_id`, `source_module`. NOT `type`, NOT `emitted_at` (audit §2, codex BLOCK 4).
 - **Redis idempotency key format** — `tenant:{tenant_id}:reclaimrx:idempotency:{raw_key}` (tenant-isolation.md).
-- **No PHI in logs** — `last_error` on OutboxEvent must be sanitized (200-char truncated type+message only).
+- **No PHI in logs** — `last_error` on OutboxEvent stores exception class label only (`exc.__class__.__module__ + "." + exc.__class__.__name__`); NEVER the exception args/message, since those may carry envelope payload contents (R5 BLOCK-12 / R4 NEW-2). Stack traces remain available via `logger.exception()` at OutboxDispatcher outer-loop level.
 - **100% coverage** on audit_chain_job, outbox service, dlq_repository, idempotency_keys.
 - **Sync SQLAlchemy** — reclaimrx currently uses sync sessions (audit §10 finding: "No async SQLAlchemy"). DLQ repository and cleanup job use async engine; the module-level sync session factory continues for everything else.
 

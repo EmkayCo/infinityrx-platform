@@ -518,7 +518,7 @@ export type InvestigationMlScoresResponse =
 /** Response for GET /investigations/{id} detail (spec endpoint 2). */
 export const InvestigationDetailResponseSchema = InvestigationSchema.extend({
   // Detail view adds the fields list view omits per spec §5.5
-  threshold_snapshot: z.record(z.string(), DecimalStringSchema).nullable(),
+  threshold_snapshot: z.record(z.string(), NonNegativeDecimalStringSchema).nullable(),
   status_transitions: z.array(InvestigationTransitionResponseSchema),
   notes: z.array(InvestigationNoteResponseSchema),
 });
