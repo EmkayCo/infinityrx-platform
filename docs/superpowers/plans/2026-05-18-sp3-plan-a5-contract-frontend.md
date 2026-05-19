@@ -151,6 +151,7 @@ export const InvestigationStatusSchema = z.enum([
 export type InvestigationStatus = z.infer<typeof InvestigationStatusSchema>;
 
 export const InvestigationSeveritySchema = z.enum(["low", "medium", "high", "critical"]);
+export type InvestigationSeverity = z.infer<typeof InvestigationSeveritySchema>;
 
 export const InvestigationSourceSchema = z.enum([
   "rule_firing",
@@ -159,6 +160,7 @@ export const InvestigationSourceSchema = z.enum([
   "accumulator_anomaly",
   "manual",
 ]);
+export type InvestigationSource = z.infer<typeof InvestigationSourceSchema>;
 
 export const OutcomeLabelSchema = z.enum(["confirmed", "false_positive", "no_action"]);
 
@@ -523,7 +525,7 @@ export const SPEC_55_ENDPOINT_COVERAGE = [
   { n:  2, method: "GET",  path: "/investigations/{id}",             req: null,                                response: InvestigationDetailResponseSchema },
   { n:  3, method: "POST", path: "/investigations/{id}/transitions", req: InvestigationTransitionRequestSchema, response: InvestigationTransitionResponseSchema },
   { n:  4, method: "POST", path: "/investigations/{id}/notes",       req: NoteRequestSchema,                   response: InvestigationNoteResponseSchema },
-  { n:  5, method: "GET",  path: "/investigations/{id}/ml-scores",   req: null,                                response: InvestigationMlScoresResponseSchema },
+  { n:  5, method: "GET",  path: "/rule-firings",                    req: null,                                response: RuleFiringListResponseSchema },
   { n:  6, method: "GET",  path: "/ml-scores",                       req: null,                                response: MlScoreListResponseSchema },
   { n:  7, method: "GET",  path: "/ml-scores/{id}/features",         req: null,                                response: MlScoreFeaturesSchema },
   { n:  8, method: "GET",  path: "/holds",                           req: null,                                response: HoldListResponseSchema },
@@ -597,15 +599,27 @@ export interface ListParams {
   limit?: number;
 }
 
+// R2 NEW-4 fix — InvestigationListParams uses the same enum unions defined
+// in types.ts, NOT broad `string`. Re-imports the inferred types so the
+// client interface signatures are strict-mode safe.
+import type {
+  InvestigationStatus,
+  InvestigationSeverity,
+  InvestigationSource,
+} from "./types.js";
+
 export interface InvestigationListParams extends ListParams {
-  status?: string;
-  severity?: string;
-  source?: string;
+  status?: InvestigationStatus;
+  severity?: InvestigationSeverity;
+  source?: InvestigationSource;
 }
 
+export type RecoveryPeriod = "mtd" | "qtd" | "ytd" | "last_30d" | "last_90d";
+export type RecoveryGroupBy = "program" | "pharmacy" | "rule" | "severity";
+
 export interface RecoveryParams {
-  period?: string;
-  group_by?: string;
+  period?: RecoveryPeriod;
+  group_by?: RecoveryGroupBy;
 }
 
 // ── Client interface (18 backend endpoints) ────────────────────────────────
@@ -761,6 +775,12 @@ import { isErrorEnvelope } from "../../error-envelope.js";
 import {
   InvestigationSchema,
   InvestigationListResponseSchema,
+  // R2 NEW-1 fix — dedicated response schemas wired through real.ts
+  InvestigationDetailResponseSchema,
+  InvestigationTransitionResponseSchema,
+  InvestigationNoteResponseSchema,
+  GraphRunDetailResponseSchema,
+  FraudRingDetailResponseSchema,
   RuleFiringListResponseSchema,
   MlScoreListResponseSchema,
   MlScoreFeaturesSchema,
@@ -802,21 +822,55 @@ export function createRealReclaimRxClient(config: ClientConfig): ReclaimRxClient
   const fetchImpl = config.fetch ?? globalThis.fetch;
 
   async function authedFetch(path: string, init?: RequestInit): Promise<Response> {
+    // R2 BLOCK 9 fix — wrap fetch in a try/catch so DNS, TLS, ECONNREFUSED,
+    // or AbortError surface as a typed RealClientError with code
+    // "NETWORK_ERROR". Without this, the contract test that asserts
+    // `code: "NETWORK_ERROR"` cannot pass — fetch throws a raw TypeError
+    // and consumers cannot distinguish transport failures from envelope errors.
     const token = await config.getAuthToken();
     const headers = new Headers(init?.headers);
     headers.set("Authorization", `Bearer ${token}`);
     headers.set("Content-Type", "application/json");
     headers.set(correlationHeader, crypto.randomUUID());
-    return fetchImpl(`${baseUrl}/api/v1/reclaimrx${path}`, { ...init, headers });
+    try {
+      return await fetchImpl(`${baseUrl}/api/v1/reclaimrx${path}`, {
+        ...init,
+        headers,
+      });
+    } catch (err) {
+      throw new RealClientError(
+        "NETWORK_ERROR",
+        err instanceof Error ? err.message : "fetch failed",
+        // no server-issued correlation_id on a network failure
+        undefined,
+      );
+    }
   }
 
   async function unwrap<T>(res: Response, schema: { parse(raw: unknown): T }): Promise<T> {
-    const body = (await res.json()) as unknown;
+    // R2 BLOCK 9 follow-up — guard against empty-body / non-JSON 200 responses.
+    let body: unknown;
+    try {
+      body = (await res.json()) as unknown;
+    } catch (err) {
+      // Server sent OK but no parseable JSON — treat as a malformed-response
+      // failure so Zod-level callers see a deterministic error code rather
+      // than a raw SyntaxError leak.
+      throw new RealClientError(
+        "MALFORMED_RESPONSE",
+        err instanceof Error ? err.message : "response body is not valid JSON",
+        undefined,
+      );
+    }
     if (!res.ok) {
       if (isErrorEnvelope(body)) {
         throw new RealClientError(body.error.code, body.error.message, body.error.correlation_id);
       }
-      throw new Error(`Unexpected error shape: HTTP ${res.status}`);
+      throw new RealClientError(
+        "UNEXPECTED_ERROR_SHAPE",
+        `Unexpected error shape: HTTP ${res.status}`,
+        undefined,
+      );
     }
     return schema.parse(body);
   }
@@ -841,28 +895,36 @@ export function createRealReclaimRxClient(config: ClientConfig): ReclaimRxClient
     },
 
     // Endpoint #2 — GET /investigations/{id}
+    // R2 NEW-1 fix: use InvestigationDetailResponseSchema (extended) not the
+    // narrower base InvestigationSchema — detail view includes
+    // threshold_snapshot, status_transitions, notes.
     async getInvestigation(id: string) {
       const res = await authedFetch(`/investigations/${encodeURIComponent(id)}`);
-      return unwrap(res, InvestigationSchema);
+      return unwrap(res, InvestigationDetailResponseSchema);
     },
 
     // Endpoint #3 — POST /investigations/{id}/transitions
+    // R2 NEW-1 fix: use InvestigationTransitionResponseSchema (dedicated)
+    // not the bare InvestigationSchema — server returns the transition
+    // record, not the full investigation row.
     async transitionInvestigation(id: string, req) {
       const validated = InvestigationTransitionRequestSchema.parse(req);
       const res = await authedFetch(`/investigations/${encodeURIComponent(id)}/transitions`, {
         method: "POST",
         body: JSON.stringify(validated),
       });
-      return unwrap(res, InvestigationSchema);
+      return unwrap(res, InvestigationTransitionResponseSchema);
     },
 
     // Endpoint #4 — POST /investigations/{id}/notes
+    // R2 NEW-1 fix: use InvestigationNoteResponseSchema (dedicated typed
+    // shape) instead of an inline `{ created: true }` ad-hoc literal.
     async addInvestigationNote(id: string, req) {
       const res = await authedFetch(`/investigations/${encodeURIComponent(id)}/notes`, {
         method: "POST",
         body: JSON.stringify(req),
       });
-      return unwrap(res, z.object({ created: z.literal(true) }));
+      return unwrap(res, InvestigationNoteResponseSchema);
     },
 
     // Endpoint #5 — GET /rule-firings
@@ -912,15 +974,18 @@ export function createRealReclaimRxClient(config: ClientConfig): ReclaimRxClient
     },
 
     // Endpoint #12 — GET /graph-runs/{run_id}
+    // R2 NEW-1 fix: use GraphRunDetailResponseSchema for the detail
+    // endpoint so the matrix and the client agree on the same schema.
     async getGraphRun(runId: string) {
       const res = await authedFetch(`/graph-runs/${encodeURIComponent(runId)}`);
-      return unwrap(res, GraphRunSchema);
+      return unwrap(res, GraphRunDetailResponseSchema);
     },
 
     // Endpoint #13 — GET /fraud-rings/{id}
+    // R2 NEW-1 fix: same treatment as #12 — detail schema alias.
     async getFraudRing(id: string) {
       const res = await authedFetch(`/fraud-rings/${encodeURIComponent(id)}`);
-      return unwrap(res, FraudRingSchema);
+      return unwrap(res, FraudRingDetailResponseSchema);
     },
 
     // Endpoint #14 — GET /recovery
@@ -1496,9 +1561,10 @@ describe("RealReclaimRxClient (injected fetch)", () => {
   // parse-failure case, every endpoint needs the 403 tenant-mismatch branch,
   // and the authedFetch wrapper needs a network-error branch.
 
-  // Zod parse failure per endpoint (12+ cases) — one row per spec §5.5 endpoint
+  // Zod parse failure per endpoint (all 14 GETs) — one row per spec §5.5 endpoint
   // whose response goes through unwrap<T>. Reuses the SPEC_55_ENDPOINT_COVERAGE
-  // matrix from types.ts so additions stay in sync.
+  // matrix from types.ts so additions stay in sync. R2 BLOCK 9 follow-up:
+  // exercises detail paths (with {id}/{run_id}) by injecting a placeholder.
   it.each(SPEC_55_ENDPOINT_COVERAGE.filter((e) => e.method === "GET"))(
     "endpoint #%i (%s) rejects malformed body via zod",
     async ({ path }) => {
@@ -1506,7 +1572,6 @@ describe("RealReclaimRxClient (injected fetch)", () => {
       const client = createRealReclaimRxClient({
         baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch,
       });
-      // Pick the client method for the endpoint by path
       const method = pickClientMethodForPath(client, path);
       await expect(method()).rejects.toThrow();
     },
@@ -1560,14 +1625,16 @@ describe("RealReclaimRxClient (injected fetch)", () => {
 
 // Test helper — maps a spec path to the matching client method. Throws on
 // unknown path so a missing method is caught at test time rather than as
-// a silent skip. Path matching is exact (no `{id}` interpolation in the
-// helper; the GET-only filter above only exercises endpoints whose method
-// takes zero required arguments after fixtures are seeded).
+// a silent skip. R2 BLOCK 9 follow-up: detail paths now mapped via a stub
+// id; the parametrized test only cares that the client method invokes
+// authedFetch + unwrap, so the supplied id is irrelevant.
 function pickClientMethodForPath(
   client: ReclaimRxClient,
   path: string,
 ): () => Promise<unknown> {
+  const PLACEHOLDER = "00000000-0000-0000-0000-000000000000";
   const map: Record<string, () => Promise<unknown>> = {
+    // List endpoints (zero-arg)
     "/investigations":                () => client.listInvestigations(),
     "/holds":                         () => client.listHolds(),
     "/graph-runs":                    () => client.listGraphRuns(),
@@ -1576,6 +1643,13 @@ function pickClientMethodForPath(
     "/thresholds":                    () => client.getThresholds(),
     "/accumulator-anomalies":         () => client.listAccumulatorAnomalies(),
     "/ml-scores":                     () => client.listMlScores(),
+    "/rule-firings":                  () => client.listRuleFirings(),
+    // Detail endpoints (one path arg — PLACEHOLDER id is enough to exercise
+    // the unwrap/Zod failure path; the test fakes the network response).
+    "/investigations/{id}":           () => client.getInvestigation(PLACEHOLDER),
+    "/ml-scores/{id}/features":       () => client.getMlScoreFeatures(PLACEHOLDER),
+    "/graph-runs/{run_id}":           () => client.getGraphRun(PLACEHOLDER),
+    "/fraud-rings/{id}":              () => client.getFraudRing(PLACEHOLDER),
   };
   const handler = map[path];
   if (!handler) {

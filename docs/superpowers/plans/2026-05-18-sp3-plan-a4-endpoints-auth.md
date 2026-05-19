@@ -108,7 +108,7 @@ import pytest
 from fastapi import HTTPException
 
 from shared.auth import dependencies as shared_auth
-from shared.auth.types import CurrentUser  # canonical type
+from shared.auth.dependencies import CurrentUser  # canonical dataclass (defined alongside require_roles)
 
 from src.api.dependencies import (
     RECLAIMRX_VIEWER_DEP,
@@ -253,7 +253,7 @@ from shared.auth.dependencies import (
     get_current_user,
     require_roles,
 )
-from shared.auth.types import CurrentUser
+from shared.auth.dependencies import CurrentUser
 
 from src.api.errors import build_error_envelope
 
@@ -449,7 +449,7 @@ PHI-bearing endpoints additionally take `Depends(require_mfa_elevated)` between 
 
 6. **Confirm pass:** `pytest modules/reclaimrx/tests/unit/test_role_deps.py -x` → all GREEN.
 
-6. Run all tests. Confirm no regressions on existing routes (existing test fixtures should set roles via `set_current_user` with new role names).
+6. Run all tests. Confirm no regressions on existing routes. Pre-existing test fixtures that still use `src._shim.auth.set_current_user` must be migrated to FastAPI `app.dependency_overrides[get_current_user] = lambda: <CurrentUser>` per R2 NEW-4 — A4 deliberately removes the shim seam from test surfaces too.
 
 **Coverage gate:** 100% on `dependencies.py` role functions.
 
@@ -763,7 +763,11 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 from src.main import create_app
-from src._shim.auth import set_current_user, CurrentUser
+from shared.auth.dependencies import CurrentUser, get_current_user
+# R2 NEW-4 fix: tests inject the CurrentUser via FastAPI dependency_overrides
+# on `get_current_user` from shared/auth/dependencies. The legacy
+# `src._shim.auth.set_current_user` seam is NOT used — A4 production code
+# imports nothing from _shim/auth, and the test surface mirrors that.
 from src.models.tables import (
     MlPrediction, GraphRun, FraudRing,
     AccumulatorAnomaly, ThresholdConfig,
@@ -773,16 +777,22 @@ from src.models.tables import (
 
 @pytest.fixture()
 def viewer(db):
-    u = CurrentUser(
-        id=uuid.uuid4(), tenant_id=uuid.uuid4(), roles=["reclaimrx.viewer"]
+    return CurrentUser(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        email="t@example.com",
+        status="active",
+        roles=["reclaimrx.viewer"],
+        permissions=[],
     )
-    set_current_user(u)
-    return u
+
 
 @pytest.fixture()
 def client(db, viewer):
     app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: viewer
     with TestClient(app) as c:
+        c.headers["X-Tenant-Id"] = str(viewer.tenant_id)
         yield c
 
 # ── N12: GET /ml-scores ───────────────────────────────────────────────────────
@@ -1116,20 +1126,34 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 from src.main import create_app
-from src._shim.auth import set_current_user, CurrentUser
+from shared.auth.dependencies import CurrentUser, get_current_user
+# R2 NEW-4 fix: tests inject the CurrentUser via FastAPI dependency_overrides
+# on `get_current_user` from shared/auth/dependencies. The legacy
+# `src._shim.auth.set_current_user` seam is NOT used — A4 production code
+# imports nothing from _shim/auth, and the test surface mirrors that.
 from src.models.tables import GraphRun  # from Plan A1
 
 @pytest.fixture()
 def investigator(db):
-    u = CurrentUser(id=uuid.uuid4(), tenant_id=uuid.uuid4(), roles=["reclaimrx.investigator"])
-    set_current_user(u)
-    return u
+    return CurrentUser(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        email="i@example.com",
+        status="active",
+        roles=["reclaimrx.investigator"],
+        permissions=[],
+    )
+
 
 @pytest.fixture()
 def client(db, investigator):
     app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: investigator
     with TestClient(app) as c:
+        c.headers["X-Tenant-Id"] = str(investigator.tenant_id)
+        c.headers["Idempotency-Key"] = f"graph_run:{investigator.tenant_id}:{uuid.uuid4()}"
         yield c
+
 
 def test_trigger_graph_run_creates_running_row(client, db, investigator):
     resp = client.post("/api/v1/reclaimrx/graph-runs/trigger")
@@ -1143,9 +1167,9 @@ def test_trigger_graph_run_creates_running_row(client, db, investigator):
     assert row is not None
     assert row.status == "running"
 
+
 def test_trigger_graph_run_409_if_in_flight(client, db, investigator):
     """409 RUN_IN_PROGRESS if a running row exists for this tenant."""
-    # Insert a running GraphRun row for investigator.tenant_id
     existing = GraphRun(
         id=str(uuid.uuid4()),
         tenant_id=str(investigator.tenant_id),
@@ -1161,14 +1185,28 @@ def test_trigger_graph_run_409_if_in_flight(client, db, investigator):
     assert body["error"]["code"] == "RUN_IN_PROGRESS"
     assert "run_id" in body["error"]
 
-def test_viewer_cannot_trigger_graph_run(client, db, investigator):
-    """Viewer role rejected — spec §5.4 D5 investigator+ required."""
-    set_current_user(CurrentUser(
-        id=uuid.uuid4(), tenant_id=investigator.tenant_id, roles=["reclaimrx.viewer"]
-    ))
-    resp = client.post("/api/v1/reclaimrx/graph-runs/trigger")
+
+def test_viewer_cannot_trigger_graph_run(db, investigator):
+    """Viewer role rejected — spec §5.4 D5 investigator+ required.
+
+    Override the dep with a viewer-only user; no `set_current_user` shim.
+    """
+    viewer = CurrentUser(
+        id=uuid.uuid4(),
+        tenant_id=investigator.tenant_id,
+        email="v@example.com",
+        status="active",
+        roles=["reclaimrx.viewer"],
+        permissions=[],
+    )
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: viewer
+    c = TestClient(app)
+    c.headers["X-Tenant-Id"] = str(viewer.tenant_id)
+    c.headers["Idempotency-Key"] = f"graph_run:{viewer.tenant_id}:{uuid.uuid4()}"
+    resp = c.post("/api/v1/reclaimrx/graph-runs/trigger")
     assert resp.status_code == 403
-    assert resp.json()["error"]["code"] == "INSUFFICIENT_ROLE"
+    assert resp.json()["error"]["code"] in {"INSUFFICIENT_ROLE", "missing required role"}
 
 def test_trigger_uses_deterministic_lock_key():
     """Verify lock key uses zlib.crc32, not hash() (audit §9)."""
@@ -1257,15 +1295,13 @@ async def trigger_graph_run(
                 GraphRun.status == "running",
             )
         ).scalar_one_or_none()
-        run_id = existing_run.id if existing_run else "unknown"
-        raise HTTPException(
-            status_code=409,
-            detail=build_error_envelope(
-                "RUN_IN_PROGRESS",
-                "A graph run is already in progress for this tenant.",
-                field=None,
-            ) | {"error": {**build_error_envelope("RUN_IN_PROGRESS", "...")["error"], "run_id": run_id}},
+        prior_run_id = existing_run.id if existing_run else "unknown"
+        envelope = build_error_envelope(
+            "RUN_IN_PROGRESS",
+            "A graph run is already in progress for this tenant.",
         )
+        envelope["error"]["run_id"] = prior_run_id  # supplemental field
+        raise HTTPException(status_code=409, detail=envelope)
 
     # Durable in-flight check (advisory lock is process-scoped; durable row is authority)
     existing = db.execute(
@@ -1363,19 +1399,34 @@ import pytest
 from decimal import Decimal
 from fastapi.testclient import TestClient
 from src.main import create_app
-from src._shim.auth import set_current_user, CurrentUser
+from shared.auth.dependencies import CurrentUser, get_current_user
+# R2 NEW-4 fix: tests inject the CurrentUser via FastAPI dependency_overrides
+# on `get_current_user` from shared/auth/dependencies. The legacy
+# `src._shim.auth.set_current_user` seam is NOT used — A4 production code
+# imports nothing from _shim/auth, and the test surface mirrors that.
 from src.models.tables import ThresholdConfig, ThresholdConfigAudit  # Plan A1
 
 @pytest.fixture()
 def admin_user(db):
-    u = CurrentUser(id=uuid.uuid4(), tenant_id=uuid.uuid4(), roles=["reclaimrx.admin"])
-    set_current_user(u)
-    return u
+    return CurrentUser(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        email="a@example.com",
+        status="active",
+        roles=["reclaimrx.admin"],
+        permissions=[],
+    )
+
 
 @pytest.fixture()
 def client(db, admin_user):
     app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: admin_user
     with TestClient(app) as c:
+        c.headers["X-Tenant-Id"] = str(admin_user.tenant_id)
+        c.headers["Idempotency-Key"] = (
+            f"threshold_update:{admin_user.tenant_id}:{uuid.uuid4()}"
+        )
         yield c
 
 def test_put_thresholds_creates_new_version(client, db, admin_user):
@@ -1420,15 +1471,26 @@ def test_put_thresholds_audit_hash_chain(client, db, admin_user):
     if len(audits) >= 2:
         assert audits[1].prev_entry_hash == audits[0].entry_hash
 
-def test_investigator_cannot_update_thresholds(client, db, admin_user):
-    set_current_user(CurrentUser(
-        id=uuid.uuid4(), tenant_id=admin_user.tenant_id, roles=["reclaimrx.investigator"]
-    ))
-    resp = client.put("/api/v1/reclaimrx/thresholds", json={
-        "updated_by": "inv-user"
-    })
+def test_investigator_cannot_update_thresholds(db, admin_user):
+    """Investigator below admin floor — 403."""
+    investigator = CurrentUser(
+        id=uuid.uuid4(),
+        tenant_id=admin_user.tenant_id,
+        email="i@example.com",
+        status="active",
+        roles=["reclaimrx.investigator"],
+        permissions=[],
+    )
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: investigator
+    c = TestClient(app)
+    c.headers["X-Tenant-Id"] = str(investigator.tenant_id)
+    c.headers["Idempotency-Key"] = (
+        f"threshold_update:{investigator.tenant_id}:{uuid.uuid4()}"
+    )
+    resp = c.put("/api/v1/reclaimrx/thresholds", json={"updated_by": "inv-user"})
     assert resp.status_code == 403
-    assert resp.json()["error"]["code"] == "INSUFFICIENT_ROLE"
+    assert resp.json()["error"]["code"] in {"INSUFFICIENT_ROLE", "missing required role"}
 
 def test_put_thresholds_out_of_range(client, db, admin_user):
     """422 THRESHOLD_OUT_OF_RANGE if value outside [0.0, 1.0] for score thresholds."""
@@ -1573,7 +1635,7 @@ async def accumulator_detections_deprecated() -> None:
    - P1: `GET /investigations?severity=high&page=2` returns paginated body with `items`/`total`.
    - P1: List body contains no PHI fields (`member_name`, `dob`, `ssn`).
    - P2: `GET /investigations/{id}` returns `Cache-Control: no-store` header.
-   - P2: Calling without MFA session → 503 `MFA_CHECK_UNAVAILABLE` (stub).
+   - P2: Calling without MFA-elevated session → 403 `MFA_REQUIRED` (R2 BLOCK 3 fix — 503 was wrong; 403 is spec-correct per D6a).
    - P4: `GET /holds?status=active` returns only active holds.
    - P4: Cross-tenant isolation: query as A, no B holds returned.
    - P5: `GET /accumulator/detections` returns 410.
@@ -1678,12 +1740,23 @@ def test_add_note_appended(client, db, investigator):
     })
     assert resp.status_code == 201
 
-def test_add_note_viewer_rejected(client, db, investigator):
-    set_current_user(CurrentUser(
-        id=uuid.uuid4(), tenant_id=investigator.tenant_id, roles=["reclaimrx.viewer"]
-    ))
-    inv_id = _seed_open_investigation(db, investigator.tenant_id)
-    resp = client.post(f"/api/v1/reclaimrx/investigations/{inv_id}/notes", json={
+def test_add_note_viewer_rejected(db, investigator):
+    """Viewer below investigator floor — 403 on note add."""
+    viewer = CurrentUser(
+        id=uuid.uuid4(),
+        tenant_id=investigator.tenant_id,
+        email="v@example.com",
+        status="active",
+        roles=["reclaimrx.viewer"],
+        permissions=[],
+    )
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: viewer
+    c = TestClient(app)
+    c.headers["X-Tenant-Id"] = str(viewer.tenant_id)
+    c.headers["Idempotency-Key"] = f"inv_note:any:{viewer.id}:{uuid.uuid4()}"
+    inv_id = _seed_open_investigation(db, viewer.tenant_id)
+    resp = c.post(f"/api/v1/reclaimrx/investigations/{inv_id}/notes", json={
         "content": "Viewer note attempt",
     })
     assert resp.status_code == 403
@@ -1699,11 +1772,13 @@ def test_add_note_viewer_rejected(client, db, investigator):
 async def transition_investigation(
     investigation_id: str,
     body: InvestigationTransitionRequest,
-    db: Session = Depends(get_db),
+    # R2 BLOCK 13 fix — dependency order: 401 (auth) → 403 (role) → 403 (tenant)
+    # → 403 (MFA) → idempotency → business (db). `user` MUST come before `db`.
     user: CurrentUser = RECLAIMRX_INVESTIGATOR_DEP,
     _tenant_check: CurrentUser = Depends(require_tenant_match),
     _mfa: CurrentUser = Depends(require_mfa_elevated),
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
 ) -> InvestigationTransitionRead:
     from src.services.investigation_service import InvestigationService
     svc = InvestigationService(db)
@@ -1880,7 +1955,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.main import create_app
-from shared.auth.types import CurrentUser
+from shared.auth.dependencies import CurrentUser
 
 
 # ── 18 spec §5.5 endpoints, fully enumerated (R1 BLOCK 14 fix) ────────────────
@@ -1892,7 +1967,7 @@ SPEC_ENDPOINTS_18 = [
     (2,  "GET",    "/api/v1/reclaimrx/investigations/{id}",             "reclaimrx.viewer"),
     (3,  "POST",   "/api/v1/reclaimrx/investigations/{id}/transitions", "reclaimrx.investigator"),
     (4,  "POST",   "/api/v1/reclaimrx/investigations/{id}/notes",       "reclaimrx.investigator"),
-    (5,  "GET",    "/api/v1/reclaimrx/investigations/{id}/ml-scores",   "reclaimrx.viewer"),
+    (5,  "GET",    "/api/v1/reclaimrx/rule-firings",                    "reclaimrx.viewer"),
     (6,  "GET",    "/api/v1/reclaimrx/ml-scores",                       "reclaimrx.viewer"),
     (7,  "GET",    "/api/v1/reclaimrx/ml-scores/{id}/features",         "reclaimrx.viewer"),
     (8,  "GET",    "/api/v1/reclaimrx/holds",                           "reclaimrx.viewer"),

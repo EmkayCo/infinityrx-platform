@@ -1598,25 +1598,49 @@ class HoldInvestigationMismatchError(ValueError):
 
 ```python
 class HoldReleaseRequest(BaseModel):
+    """A4 BLOCK 1 fix — typed request body owned by A4 schemas; A3 references it.
+
+    `idempotency_key` is REQUIRED per A4 BLOCK 6 contract. Format:
+        hold:release:{hold_id}:{actor_id}
+    """
     reason: str
     investigation_id: str
+    idempotency_key: str
     emergency_reason_code: str | None = None  # LEGAL_HOLD | REGULATORY_DIRECTIVE | IRRECOVERABLE_HARM | OTHER_WITH_NOTE
     emergency_note: str | None = None
 
 
-@router.post("/holds/{hold_id}/release", status_code=200)
-def release_hold_v2(
+# A4 schema imports — Pydantic response model attached at decorator level
+# per A4 BLOCK 1 (typed response_model, not bare `dict`).
+from src.api.schemas import HoldReleaseRead  # noqa: E402
+from src.api.dependencies import (  # noqa: E402
+    RECLAIMRX_INVESTIGATOR_DEP,
+    require_tenant_match,
+    require_mfa_elevated,
+)
+from src.api.errors import build_error_envelope  # noqa: E402
+
+
+@router.post(
+    "/holds/{hold_id}/release",
+    status_code=200,
+    response_model=HoldReleaseRead,  # A4 BLOCK 1 fix — typed at decorator level
+)
+async def release_hold_v2(
     hold_id: str,
     body: HoldReleaseRequest,
+    # A4 BLOCK 13 dependency order: 401 → 403 role → 403 tenant → 403 MFA → business
+    user: CurrentUser = RECLAIMRX_INVESTIGATOR_DEP,
+    _tenant_check: CurrentUser = Depends(require_tenant_match),
+    _mfa: CurrentUser = Depends(require_mfa_elevated),
     db: Session = Depends(get_db),
-    user: CurrentUser = Depends(
-        require_role("reclaimrx.investigator", "reclaimrx.admin")
-    ),
-) -> dict:
-    """Release a payment hold.  Replaces DELETE /holds/{hold_id}.
+) -> HoldReleaseRead:
+    """Release a payment hold. Replaces DELETE /holds/{hold_id}.
 
-    Implements all 3 §7.2 idempotency cases.  Writes outbox row atomically.
-    Role: reclaimrx.investigator+.  Emergency override: reclaimrx.admin only.
+    Implements all 3 §7.2 idempotency cases. Writes outbox row atomically
+    with event_type=`payment.hold_released` (spec §11.5 lock).
+    Role: reclaimrx.investigator+. Emergency override: reclaimrx.admin only.
+    Idempotency key format (A4 BLOCK 6): `hold:release:{hold_id}:{actor_id}`.
     """
     import uuid as _uuid  # noqa: PLC0415
     correlation_id = str(_uuid.uuid4())
@@ -1624,7 +1648,12 @@ def release_hold_v2(
     if not body.reason:
         raise HTTPException(
             status_code=422,
-            detail={"error": {"code": "REASON_REQUIRED", "message": "reason is required.", "correlation_id": correlation_id}},
+            detail=build_error_envelope(
+                "REASON_REQUIRED",
+                "reason is required.",
+                field="reason",
+                correlation_id=correlation_id,
+            ),
         )
 
     is_admin = user.has_role("reclaimrx.admin")
@@ -1643,13 +1672,27 @@ def release_hold_v2(
     except ValueError as exc:
         msg = str(exc)
         if "NOT_FOUND" in msg:
-            raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "correlation_id": correlation_id}}) from exc
-        raise HTTPException(status_code=500, detail={"error": {"code": "INTERNAL", "correlation_id": correlation_id}}) from exc
+            raise HTTPException(
+                status_code=404,
+                detail=build_error_envelope(
+                    "NOT_FOUND", "Hold not found.", correlation_id=correlation_id,
+                ),
+            ) from exc
+        raise HTTPException(
+            status_code=500,
+            detail=build_error_envelope(
+                "INTERNAL", "Internal error.", correlation_id=correlation_id,
+            ),
+        ) from exc
     except Exception as exc:  # HoldInvestigationMismatchError
         if hasattr(exc, "code") and exc.code == "HOLD_INVESTIGATION_MISMATCH":  # type: ignore[union-attr]
             raise HTTPException(
                 status_code=403,
-                detail={"error": {"code": "HOLD_INVESTIGATION_MISMATCH", "message": str(exc), "correlation_id": correlation_id}},
+                detail=build_error_envelope(
+                    "HOLD_INVESTIGATION_MISMATCH",
+                    str(exc),
+                    correlation_id=correlation_id,
+                ),
             ) from exc
         raise
 
