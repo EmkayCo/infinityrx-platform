@@ -1441,7 +1441,7 @@ class TestHoldRelease:
         assert after_count == before_count + 1
 
         row = db.query(OutboxEvent).order_by(OutboxEvent.created_at.desc()).first()
-        assert row.event_type == "payment.hold_released"
+        assert row.event_type == "fwa.hold_released"
         assert row.status == "pending"
         assert row.idempotency_key == f"hold:release:{hold_id}"
 ```
@@ -1549,7 +1549,7 @@ class TestHoldRelease:
         # Use amount_threshold (NOT hold_amount — audit §1:145, codex BLOCK 5)
         amount_str = str(hold.amount_threshold or Decimal("0.00"))
         envelope = EventEnvelope(
-            event_type="payment.hold_released",
+            event_type="fwa.hold_released",
             tenant_id=tenant_id,          # uuid.UUID, not str
             correlation_id=uuid.uuid4(),
             source_module="reclaimrx",
@@ -1570,7 +1570,7 @@ class TestHoldRelease:
         outbox = OutboxEvent(
             id=str(uuid.uuid4()),
             tenant_id=str(tenant_id),
-            event_type="payment.hold_released",
+            event_type="fwa.hold_released",
             envelope_json=envelope.model_dump(mode="json"),
             status="pending",
             idempotency_key=f"hold:release:{hold_id}",

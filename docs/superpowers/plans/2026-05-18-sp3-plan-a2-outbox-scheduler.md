@@ -60,7 +60,7 @@ from decimal import Decimal
 
 # CORRECT — field names are event_type, tenant_id, correlation_id, source_module, timestamp (auto)
 envelope = EventEnvelope(
-    event_type="payment.hold_released",        # NOT "type"
+    event_type="fwa.hold_released",        # NOT "type"
     tenant_id=uuid.UUID(str(hold.tenant_id)),  # uuid.UUID — NOT str
     correlation_id=uuid.uuid4(),
     source_module="reclaimrx",
@@ -136,7 +136,7 @@ class TestOutboxServiceWrite:
         tenant_id = uuid.uuid4()
 
         svc.write(
-            event_type="payment.hold_released",
+            event_type="fwa.hold_released",
             tenant_id=tenant_id,
             idempotency_key=f"hold:release:{hold_id}",
             ordering_key=str(hold_id),
@@ -155,7 +155,7 @@ class TestOutboxServiceWrite:
             idempotency_key=f"hold:release:{hold_id}"
         ).one()
         assert row.status == "pending"
-        assert row.event_type == "payment.hold_released"
+        assert row.event_type == "fwa.hold_released"
         assert row.attempt_count == 0
         assert row.published_at is None
         assert row.last_error is None
@@ -205,7 +205,7 @@ class TestOutboxServiceWrite:
         key = f"hold:release:{hold_id}"
 
         svc.write(
-            event_type="payment.hold_released",
+            event_type="fwa.hold_released",
             tenant_id=tenant_id,
             idempotency_key=key,
             ordering_key=str(hold_id),
@@ -216,7 +216,7 @@ class TestOutboxServiceWrite:
 
         with pytest.raises(IntegrityError):
             svc.write(
-                event_type="payment.hold_released",
+                event_type="fwa.hold_released",
                 tenant_id=tenant_id,
                 idempotency_key=key,  # same key
                 ordering_key=str(hold_id),
@@ -274,7 +274,7 @@ class OutboxService:
 
         svc = OutboxService(db)
         svc.write(
-            event_type="payment.hold_released",
+            event_type="fwa.hold_released",
             tenant_id=tenant_uuid,
             idempotency_key=f"hold:release:{hold_id}",
             ordering_key=str(hold_id),
@@ -488,7 +488,7 @@ class TestOutboxDispatcherPollAndPublish:
         hold_id = uuid.uuid4()
         tenant_id = uuid.uuid4()
         envelope = EventEnvelope(
-            event_type="payment.hold_released",
+            event_type="fwa.hold_released",
             tenant_id=tenant_id,
             correlation_id=uuid.uuid4(),
             source_module="reclaimrx",
@@ -499,7 +499,7 @@ class TestOutboxDispatcherPollAndPublish:
         row = OutboxEvent(
             id=str(uuid.uuid4()),
             tenant_id=str(tenant_id),
-            event_type="payment.hold_released",
+            event_type="fwa.hold_released",
             envelope_json=json.dumps(envelope.to_wire()),
             status="pending",
             created_at=datetime.now(UTC),
@@ -533,7 +533,7 @@ class TestOutboxDispatcherPollAndPublish:
         hold_id = uuid.uuid4()
         tenant_id = uuid.uuid4()
         envelope = EventEnvelope(
-            event_type="payment.hold_released",
+            event_type="fwa.hold_released",
             tenant_id=tenant_id,
             correlation_id=uuid.uuid4(),
             source_module="reclaimrx",
@@ -544,7 +544,7 @@ class TestOutboxDispatcherPollAndPublish:
         row = OutboxEvent(
             id=str(uuid.uuid4()),
             tenant_id=str(tenant_id),
-            event_type="payment.hold_released",
+            event_type="fwa.hold_released",
             envelope_json=json.dumps(envelope.to_wire()),
             status="pending",
             created_at=datetime.now(UTC),
@@ -581,7 +581,7 @@ class TestOutboxDispatcherPollAndPublish:
         hold_id = uuid.uuid4()
         tenant_id = uuid.uuid4()
         envelope = EventEnvelope(
-            event_type="payment.hold_released",
+            event_type="fwa.hold_released",
             tenant_id=tenant_id,
             correlation_id=uuid.uuid4(),
             source_module="reclaimrx",
@@ -592,7 +592,7 @@ class TestOutboxDispatcherPollAndPublish:
         row = OutboxEvent(
             id=str(uuid.uuid4()),
             tenant_id=str(tenant_id),
-            event_type="payment.hold_released",
+            event_type="fwa.hold_released",
             envelope_json=json.dumps(envelope.to_wire()),
             status="pending",
             created_at=datetime.now(UTC),
@@ -975,8 +975,8 @@ class TestReclaimRxDLQRepository:
             id=entry_id,
             event_id=uuid.uuid4(),
             tenant_id=tenant_id,
-            event_type="payment.hold_released",
-            envelope={"event_type": "payment.hold_released", "tenant_id": str(tenant_id)},
+            event_type="fwa.hold_released",
+            envelope={"event_type": "fwa.hold_released", "tenant_id": str(tenant_id)},
             failure_reason="broker timeout",
             attempt_count=1,
             dlq_topic="reclaimrx.dlq",
@@ -988,7 +988,7 @@ class TestReclaimRxDLQRepository:
 
         fetched = await repo.get(entry_id)
         assert fetched is not None
-        assert fetched.event_type == "payment.hold_released"
+        assert fetched.event_type == "fwa.hold_released"
         assert fetched.failure_reason == "broker timeout"
 
     @pytest.mark.asyncio
@@ -1004,7 +1004,7 @@ class TestReclaimRxDLQRepository:
                 id=uuid.uuid4(),
                 event_id=uuid.uuid4(),
                 tenant_id=tenant_id,
-                event_type="payment.hold_released",
+                event_type="fwa.hold_released",
                 envelope={},
                 failure_reason="test",
                 attempt_count=1,

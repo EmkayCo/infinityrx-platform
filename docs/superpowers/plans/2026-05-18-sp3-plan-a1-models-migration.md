@@ -424,9 +424,9 @@ class TestOutboxEventModel:
         evt = OutboxEvent(
             id=str(event_id),
             tenant_id=str(tid),
-            event_type="payment.hold_released",
+            event_type="fwa.hold_released",
             envelope_json={
-                "event_type": "payment.hold_released",
+                "event_type": "fwa.hold_released",
                 "tenant_id": str(tid),
                 "schema_version": "1.0",
             },
@@ -963,7 +963,7 @@ class OutboxEvent(Base):
 
     event_type: Mapped[str] = mapped_column(
         String(100), nullable=False
-    )  # dot-notation e.g. 'payment.hold_released'
+    )  # dot-notation e.g. 'fwa.hold_released'
     envelope_json: Mapped[dict] = mapped_column(
         JSON, nullable=False
     )  # Full EventEnvelope as dict — fields: event_type, tenant_id, etc.
@@ -1204,7 +1204,7 @@ class TestOutboxEventsTable:
                 "(id, tenant_id, event_type, envelope_json, status, "
                 " created_at, attempt_count, idempotency_key) VALUES "
                 "('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', :tid, "
-                " 'payment.hold_released', '{}', 'pending', now(), 0, :ikey)"
+                " 'fwa.hold_released', '{}', 'pending', now(), 0, :ikey)"
             ), {"tid": tid, "ikey": ikey})
             with pytest.raises(Exception, match="unique|duplicate"):
                 conn.execute(text(
@@ -1212,7 +1212,7 @@ class TestOutboxEventsTable:
                     "(id, tenant_id, event_type, envelope_json, status, "
                     " created_at, attempt_count, idempotency_key) VALUES "
                     "('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', :tid, "
-                    " 'payment.hold_released', '{}', 'pending', now(), 0, :ikey)"
+                    " 'fwa.hold_released', '{}', 'pending', now(), 0, :ikey)"
                 ), {"tid": tid, "ikey": ikey})
             conn.rollback()
 
@@ -2072,7 +2072,7 @@ def seeded_engine():
             "INSERT INTO reclaimrx_outbox_events "
             "(id, tenant_id, event_type, envelope_json, status, "
             " created_at, attempt_count, idempotency_key) VALUES "
-            f"(gen_random_uuid(), '{tid_a}', 'payment.hold_released', "
+            f"(gen_random_uuid(), '{tid_a}', 'fwa.hold_released', "
             " '{{}}', 'published', now(), 1, "
             f"'hold:release:rls-test-{tid_a}')"
         ))

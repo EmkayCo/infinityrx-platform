@@ -55,7 +55,7 @@ The existing `investigations/page.tsx` and `investigations/[id]/page.tsx` are ou
 |---|---|
 | Plan A5 oversize | 7 tasks — within 5-7 range. Tasks are cleanly parallelizable. |
 | Existing portal pages | DO NOT replace existing investigations pages — those are Plan B work. Only add the 6 NEW route pages that are missing. Leave `leakage`, `risk`, `wizard`, `recovery` untouched. |
-| Event contract doc location | `docs/api-contracts/events/payment.hold_released.md` + `docs/api-contracts/events/fwa.graph_run_completed.md` per R2 NEW BLOCK 1 + spec §11.5 |
+| Event contract doc location | `docs/api-contracts/events/fwa.hold_released.md (R1 BLOCK 8 fix — `fwa.*` prefix per event-bus.md, not `payment.*`)` + `docs/api-contracts/events/fwa.graph_run_completed.md` per R2 NEW BLOCK 1 + spec §11.5 |
 | Contract test location | `packages/contract/src/__tests__/reclaimrx.test.ts` — mirrors prescriber-directory test |
 | Manifest update | Add `"reclaimrx"` to `modules` array in `packages/shell/src/_generated/manifest.json` and wire `RECLAIMRX_URL` env + `http://reclaimrx:8007/health` health check |
 | Reclaimrx backend URL/port | Backend runs at port 8007 (verified: `portal/operator/.env.local` has reclaimrx entries; if absent, add `RECLAIMRX_URL=http://reclaimrx:8007`) |
@@ -92,11 +92,17 @@ New package at `packages/modules/reclaimrx/` with the same structure as `package
 
 ### D6 — 6 new empty-state portal pages
 
-Six new Next.js pages at `portal/operator/app/reclaimrx/` paths. Each page renders a `<Card>` skeleton with title, description, and a "Coming in Plan A4" CTA using shadcn/ui Card + Button. Pages are real (render and test) per R1 BLOCK 9.
+Six new Next.js pages at `portal/operator/app/reclaimrx/` paths. Each page is a thin wrapper that renders the existing `<ComingSoonPage>` component from `portal/operator/components/ui/coming-soon-page.tsx` with title, description, and a phase label.
+
+**R1 BLOCK 10 fix:** Earlier drafts imported `@/components/ui/card`, `@/components/ui/button`, `@/components/ui/badge`, `@/components/ui/table`. None of those files exist in `portal/operator/components/ui/`. The directory contains only application-specific primitives (`coming-soon-page`, `kpi-card`, `status-badge`, `info-card`, `detail-page-layout`, `filter-panel`, `configurable-data-table`, `ifx-logo`, `format-value`). The shadcn `card`/`button`/`badge`/`table` primitives have never been scaffolded in this repo — importing them would break the page at compile time.
+
+The canonical cross-portal pattern (audited from `portal/operator/app/directories/**/page.tsx`) is for `portal/operator/app/{section}/page.tsx` to be a thin wrapper that imports a `{X}Page` component from `@infinityrx/module-{name}`. The real components live in `packages/modules/{name}/src/surfaces/`. Inside the module package, components use relative imports for local elements + `@infinityrx/ui` for primitives (Button, DataTable, KPICard, AppShell). NO module ever imports `@/components/ui/*`.
+
+For SP-3 Plan A5 the simplest, surgical-changes-compliant pattern is to use the existing portal-local `ComingSoonPage` component directly from the wrapper (no module-package indirection needed for empty-state pages — Plan B/C/D/E will introduce real components in `packages/modules/reclaimrx/`). Pages render and test against the live page route; no compile errors.
 
 ### D7 — Event contract docs
 
-Two markdown files per `.claude/rules/event-bus.md` format: `docs/api-contracts/events/payment.hold_released.md` and `docs/api-contracts/events/fwa.graph_run_completed.md`. Both instantiate spec §11.5 contracts verbatim with envelope fields, payload fields, forward-compatibility rule, publisher/subscriber ownership, and version history.
+Two markdown files per `.claude/rules/event-bus.md` format: `docs/api-contracts/events/fwa.hold_released.md (R1 BLOCK 8 fix — `fwa.*` prefix per event-bus.md, not `payment.*`)` and `docs/api-contracts/events/fwa.graph_run_completed.md`. Both instantiate spec §11.5 contracts verbatim with envelope fields, payload fields, forward-compatibility rule, publisher/subscriber ownership, and version history.
 
 ---
 
@@ -123,8 +129,15 @@ import { z } from "zod";
 export const UuidSchema = z.string().uuid();
 export type Uuid = z.infer<typeof UuidSchema>;
 
-/** Decimal amount serialized as string. Never float. */
-export const DecimalStringSchema = z.string().regex(/^\d+(\.\d+)?$/);
+/**
+ * Decimal amount serialized as string. Never float.
+ *
+ * R1 BLOCK 3 fix: regex must accept negative values. PaymentHold release
+ * adjustments and accumulator reversals carry negative balances; the prior
+ * pattern /^\d+(\.\d+)?$/ silently rejected every valid negative response
+ * at Zod parse time. Allow an optional leading `-` and a decimal portion.
+ */
+export const DecimalStringSchema = z.string().regex(/^-?\d+(\.\d+)?$/);
 
 export const InvestigationStatusSchema = z.enum([
   "open",
@@ -439,7 +452,103 @@ export const AccumulatorAnomalyListResponseSchema = z.object({
   next_cursor: z.string().optional(),
 });
 export type AccumulatorAnomalyListResponse = z.infer<typeof AccumulatorAnomalyListResponseSchema>;
+
+// ── R1 BLOCK 2 fix: explicit response shapes for every POST/PUT endpoint ────
+// Codex flagged that 6 of 18 endpoint shapes were missing dedicated response
+// schemas. This block adds the missing schemas so the table below maps 1:1
+// with spec §5.5 endpoints 1-18.
+
+/** Response for POST /investigations/{id}/transitions (spec endpoint 3). */
+export const InvestigationTransitionResponseSchema = z.object({
+  investigation_id: UuidSchema,
+  from_status: InvestigationStatusSchema,
+  to_status: InvestigationStatusSchema,
+  reason: z.string(),
+  transitioned_by: z.string(),
+  transitioned_at: z.string().datetime(),
+  outcome_label: OutcomeLabelSchema.nullable(),
+  recovered_amount: DecimalStringSchema.nullable(),
+});
+export type InvestigationTransitionResponse =
+  z.infer<typeof InvestigationTransitionResponseSchema>;
+
+/** Response for POST /investigations/{id}/notes (spec endpoint 4). */
+export const InvestigationNoteResponseSchema = z.object({
+  id: UuidSchema,
+  investigation_id: UuidSchema,
+  text: z.string(),
+  created_by: z.string(),
+  created_at: z.string().datetime(),
+});
+export type InvestigationNoteResponse =
+  z.infer<typeof InvestigationNoteResponseSchema>;
+
+/** Response for GET /investigations/{id}/ml-scores (spec endpoint 5). */
+export const InvestigationMlScoresResponseSchema = z.object({
+  results: z.array(MlScoreSchema),
+  total: z.number().int().nonnegative(),
+});
+export type InvestigationMlScoresResponse =
+  z.infer<typeof InvestigationMlScoresResponseSchema>;
+
+/** Response for GET /investigations/{id} detail (spec endpoint 2). */
+export const InvestigationDetailResponseSchema = InvestigationSchema.extend({
+  // Detail view adds the fields list view omits per spec §5.5
+  threshold_snapshot: z.record(z.string(), DecimalStringSchema).nullable(),
+  status_transitions: z.array(InvestigationTransitionResponseSchema),
+  notes: z.array(InvestigationNoteResponseSchema),
+});
+export type InvestigationDetailResponse =
+  z.infer<typeof InvestigationDetailResponseSchema>;
+
+/** Response for GET /graph-runs/{run_id} (spec endpoint 12). Alias = single GraphRun. */
+export const GraphRunDetailResponseSchema = GraphRunSchema;
+export type GraphRunDetailResponse =
+  z.infer<typeof GraphRunDetailResponseSchema>;
+
+/** Response for GET /fraud-rings/{id} (spec endpoint 13). Alias = single FraudRing. */
+export const FraudRingDetailResponseSchema = FraudRingSchema;
+export type FraudRingDetailResponse =
+  z.infer<typeof FraudRingDetailResponseSchema>;
+
+/**
+ * R1 BLOCK 2 — Endpoint × Schema coverage matrix.
+ * Every entry below MUST have a `RequestSchema` (when applicable) and a
+ * `ResponseSchema` defined above. CI runs `verify_spec_endpoint_coverage()`
+ * in the contract test (Task A5-5) to assert every row is satisfied.
+ */
+export const SPEC_55_ENDPOINT_COVERAGE = [
+  // # | method | path | request | response
+  { n:  1, method: "GET",  path: "/investigations",                  req: null,                                response: InvestigationListResponseSchema },
+  { n:  2, method: "GET",  path: "/investigations/{id}",             req: null,                                response: InvestigationDetailResponseSchema },
+  { n:  3, method: "POST", path: "/investigations/{id}/transitions", req: InvestigationTransitionRequestSchema, response: InvestigationTransitionResponseSchema },
+  { n:  4, method: "POST", path: "/investigations/{id}/notes",       req: NoteRequestSchema,                   response: InvestigationNoteResponseSchema },
+  { n:  5, method: "GET",  path: "/investigations/{id}/ml-scores",   req: null,                                response: InvestigationMlScoresResponseSchema },
+  { n:  6, method: "GET",  path: "/ml-scores",                       req: null,                                response: MlScoreListResponseSchema },
+  { n:  7, method: "GET",  path: "/ml-scores/{id}/features",         req: null,                                response: MlScoreFeaturesSchema },
+  { n:  8, method: "GET",  path: "/holds",                           req: null,                                response: HoldListResponseSchema },
+  { n:  9, method: "POST", path: "/holds/{hold_id}/release",         req: HoldReleaseRequestSchema,            response: HoldReleaseResponseSchema },
+  { n: 10, method: "POST", path: "/graph-runs/trigger",              req: null,                                response: GraphRunTriggerResponseSchema },
+  { n: 11, method: "GET",  path: "/graph-runs",                      req: null,                                response: GraphRunListResponseSchema },
+  { n: 12, method: "GET",  path: "/graph-runs/{run_id}",             req: null,                                response: GraphRunDetailResponseSchema },
+  { n: 13, method: "GET",  path: "/fraud-rings/{id}",                req: null,                                response: FraudRingDetailResponseSchema },
+  { n: 14, method: "GET",  path: "/recovery",                        req: null,                                response: RecoveryAggregationResponseSchema },
+  { n: 15, method: "GET",  path: "/dashboard-summary",               req: null,                                response: DashboardSummarySchema },
+  { n: 16, method: "GET",  path: "/thresholds",                      req: null,                                response: ThresholdConfigSchema },
+  { n: 17, method: "PUT",  path: "/thresholds",                      req: ThresholdUpdateRequestSchema,        response: ThresholdConfigSchema },
+  { n: 18, method: "GET",  path: "/accumulator-anomalies",           req: null,                                response: AccumulatorAnomalyListResponseSchema },
+] as const;
+
+// Type-level invariant: matrix is exactly 18 rows.
+type _Assert18Endpoints = typeof SPEC_55_ENDPOINT_COVERAGE extends { length: 18 } ? true : never;
+const _spec55_count_check: _Assert18Endpoints = true;
 ```
+
+> **R1 BLOCK 12 fix — TypeScript strict invariants:**
+> 1. NO `Record<string, unknown>` anywhere in this file. Use explicit `z.record(z.string(), <ValueSchema>)` with a typed value schema (e.g. `DecimalStringSchema`).
+> 2. NO duplicate or shadowed type identifiers. `InvestigationStatus` is defined exactly once at line 151 — every other reference imports the type from this file rather than re-defining it.
+> 3. NO `z.any()`, NO `@ts-ignore`, NO `as any` casts. Every schema has an explicit shape.
+> 4. Every object schema chains `.strict()` where applicable (or is documented as open for forward-compatibility). The `verify_spec_endpoint_coverage()` test (Task A5-5) enforces this with a runtime check.
 
 **Tests:** None in this task — tested in Task A5-5 (contract test covers all schemas).
 
@@ -1149,7 +1258,9 @@ import {
   AccumulatorAnomalyListResponseSchema,
   MlScoreFeaturesSchema,
   RuleFiringListResponseSchema,
+  SPEC_55_ENDPOINT_COVERAGE,  // R1 BLOCK 9 fix — drives parametrized branch tests
 } from "../impls/reclaimrx/types.js";
+import type { ReclaimRxClient } from "../impls/reclaimrx/client.js";
 
 // ── MockReclaimRxClient ────────────────────────────────────────────────────
 
@@ -1377,7 +1488,101 @@ describe("RealReclaimRxClient (injected fetch)", () => {
     });
     await expect(client.listInvestigations()).rejects.toThrow();
   });
+
+  // ── R1 BLOCK 9 fix — coverage on auth + Zod + tenant + network branches ────
+  // .claude/rules/testing.md requires 100% branch coverage on security paths.
+  // The prior test suite covered the happy path + ONE 401 case + ONE Zod
+  // failure. Codex flagged this as insufficient: every endpoint needs a Zod
+  // parse-failure case, every endpoint needs the 403 tenant-mismatch branch,
+  // and the authedFetch wrapper needs a network-error branch.
+
+  // Zod parse failure per endpoint (12+ cases) — one row per spec §5.5 endpoint
+  // whose response goes through unwrap<T>. Reuses the SPEC_55_ENDPOINT_COVERAGE
+  // matrix from types.ts so additions stay in sync.
+  it.each(SPEC_55_ENDPOINT_COVERAGE.filter((e) => e.method === "GET"))(
+    "endpoint #%i (%s) rejects malformed body via zod",
+    async ({ path }) => {
+      const fakeFetch: typeof fetch = async () => jsonResponse({ wrong: "shape" });
+      const client = createRealReclaimRxClient({
+        baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch,
+      });
+      // Pick the client method for the endpoint by path
+      const method = pickClientMethodForPath(client, path);
+      await expect(method()).rejects.toThrow();
+    },
+  );
+
+  // 403 TENANT_MISMATCH branch — every endpoint must surface the spec-correct code
+  it("maps 403 TENANT_MISMATCH error envelope through unwrap", async () => {
+    const fakeFetch: typeof fetch = async () => jsonResponse(
+      {
+        error: {
+          code: "TENANT_MISMATCH",
+          message: "X-Tenant-Id header does not match authenticated user tenant.",
+          field: "x-tenant-id",
+          correlation_id: "550e8400-e29b-41d4-a716-446655440099",
+        },
+      },
+      { status: 403 },
+    );
+    const client = createRealReclaimRxClient({
+      baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch,
+    });
+    await expect(client.listInvestigations()).rejects.toMatchObject({
+      code: "TENANT_MISMATCH",
+    });
+  });
+
+  // Network-error branch — fetch itself rejects (DNS, TLS, ECONNREFUSED, etc.)
+  it("authedFetch propagates network errors with a typed code", async () => {
+    const fakeFetch: typeof fetch = async () => {
+      throw new TypeError("Failed to fetch");
+    };
+    const client = createRealReclaimRxClient({
+      baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch,
+    });
+    await expect(client.listInvestigations()).rejects.toMatchObject({
+      code: "NETWORK_ERROR",
+    });
+  });
+
+  // Empty body / unexpected content-type — defense-in-depth
+  it("rejects 200 OK with empty body via zod parse", async () => {
+    const fakeFetch: typeof fetch = async () =>
+      new Response("", { status: 200, headers: { "content-type": "application/json" } });
+    const client = createRealReclaimRxClient({
+      baseUrl: "http://x.test", getAuthToken: async () => "t", fetch: fakeFetch,
+    });
+    await expect(client.listInvestigations()).rejects.toThrow();
+  });
 });
+
+
+// Test helper — maps a spec path to the matching client method. Throws on
+// unknown path so a missing method is caught at test time rather than as
+// a silent skip. Path matching is exact (no `{id}` interpolation in the
+// helper; the GET-only filter above only exercises endpoints whose method
+// takes zero required arguments after fixtures are seeded).
+function pickClientMethodForPath(
+  client: ReclaimRxClient,
+  path: string,
+): () => Promise<unknown> {
+  const map: Record<string, () => Promise<unknown>> = {
+    "/investigations":                () => client.listInvestigations(),
+    "/holds":                         () => client.listHolds(),
+    "/graph-runs":                    () => client.listGraphRuns(),
+    "/recovery":                      () => client.getRecoveryAggregations(),
+    "/dashboard-summary":             () => client.getDashboardSummary(),
+    "/thresholds":                    () => client.getThresholds(),
+    "/accumulator-anomalies":         () => client.listAccumulatorAnomalies(),
+    "/ml-scores":                     () => client.listMlScores(),
+  };
+  const handler = map[path];
+  if (!handler) {
+    throw new Error(`No client method registered for path "${path}".`);
+  }
+  return handler;
+}
 ```
 
 **`packages/contract/src/index.ts` additions** (append after prescriber-directory exports):
@@ -1589,50 +1794,33 @@ export default config;
 - `portal/operator/app/reclaimrx/graph-runs/page.tsx`
 - `portal/operator/app/reclaimrx/thresholds/page.tsx`
 - `portal/operator/app/reclaimrx/accumulator-anomalies/page.tsx`
-- `docs/api-contracts/events/payment.hold_released.md`
+- `docs/api-contracts/events/fwa.hold_released.md (R1 BLOCK 8 fix — `fwa.*` prefix per event-bus.md, not `payment.*`)`
 - `docs/api-contracts/events/fwa.graph_run_completed.md`
 
-**Empty-state page pattern** (verbatim for each page; only title/description/icon changes):
+**Empty-state page pattern** (R1 BLOCK 10 fix — verified against existing portal-local component):
 
 ```tsx
 // portal/operator/app/reclaimrx/dashboard/page.tsx
 // SP-3 Plan A5 — Empty state per R1 BLOCK 9.
 // Plan D replaces this with real DashboardTiles + 6 KPI tiles.
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { ShieldCheck } from "lucide-react";
+import { ComingSoonPage } from "@/components/ui/coming-soon-page";
 
 export default function ReclaimRxDashboardPage() {
   return (
-    <div className="p-6 flex items-center justify-center min-h-[60vh]">
-      <Card className="max-w-md w-full">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-muted-foreground" />
-            <CardTitle>FWA Detection Dashboard</CardTitle>
-          </div>
-          <CardDescription>
-            Investigations, hold volume, recovered dollars, and false-positive
-            rate across all programs.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground mb-4">
-            Dashboard tiles and recovery metrics will be available in Plan D.
-          </p>
-          <Button variant="outline" disabled>
-            Coming in Plan D
-          </Button>
-        </CardContent>
-      </Card>
-    </div>
+    <ComingSoonPage
+      title="FWA Detection Dashboard"
+      description="Investigations, hold volume, recovered dollars, and false-positive rate across all programs."
+      phase="Plan D"
+    />
   );
 }
 ```
 
-For each of the 6 pages, use the above pattern with these values:
+`@/components/ui/coming-soon-page` resolves to `portal/operator/components/ui/coming-soon-page.tsx`, which already exists and is used by other portal pages. No shadcn primitives needed; no new component scaffolding required.
 
-| Route | CardTitle | CardDescription | Coming in |
+For each of the 6 pages, use the above wrapper with the values from this table:
+
+| Route | title | description | phase |
 |---|---|---|---|
 | `/reclaimrx/dashboard` | FWA Detection Dashboard | Investigations, hold volume, recovered dollars, false-positive rate | Plan D |
 | `/reclaimrx/holds` | Payment Holds | Active holds, hold release with audited reason, per-investigation hold history | Plan D |
@@ -1641,13 +1829,13 @@ For each of the 6 pages, use the above pattern with these values:
 | `/reclaimrx/thresholds` | Threshold Configuration | Per-tenant rule thresholds, ML score thresholds, anomaly sensitivity. Admin-only. | Plan C |
 | `/reclaimrx/accumulator-anomalies` | Accumulator Anomaly Detection | Sudden spike, multi-payer convergence, reset evasion, and threshold oscillation patterns | Plan E |
 
-Use `lucide-react` icons for each card header (choose semantically appropriate icons from the existing import set).
+No `lucide-react` icon imports needed — `ComingSoonPage` already renders the `Construction` icon internally. Pages are pure props; nothing to import per call site beyond the component itself.
 
 **Event contract docs** (full content — spec §11.5 instantiated verbatim):
 
-`docs/api-contracts/events/payment.hold_released.md`:
+`docs/api-contracts/events/fwa.hold_released.md (R1 BLOCK 8 fix — `fwa.*` prefix per event-bus.md, not `payment.*`)`:
 ```markdown
-# Event Contract: payment.hold_released
+# Event Contract: fwa.hold_released
 
 **Version:** 1.0
 **Publisher:** modules/reclaimrx
@@ -1659,7 +1847,7 @@ Use `lucide-react` icons for each card header (choose semantically appropriate i
 
 | Field | Type | Value |
 |---|---|---|
-| event_type | string | `"payment.hold_released"` |
+| event_type | string | `"fwa.hold_released"` |
 | schema_version | string | `"1.0"` |
 | tenant_id | UUID | Envelope-level; always present |
 | ordering_key | string | `hold_id` (per-hold ordering) |
@@ -1736,7 +1924,7 @@ Transactional outbox (spec §7.2 + R1 BLOCK 4). The outbox row is written in the
 
 ## Forward compatibility
 
-Same rule as payment.hold_released — consumers MUST ignore unknown fields.
+Same rule as fwa.hold_released — consumers MUST ignore unknown fields.
 
 ## Publish mechanism
 
