@@ -1801,10 +1801,6 @@ def upgrade() -> None:
 
     # -------------------------------------------------------------------------
     # 7. ALTER reclaimrx_investigations — add 12 SP-3 scalar columns
-    # The existing Investigation ORM model at modules/reclaimrx/src/models/tables.py:374
-    # declares __tablename__ = "reclaimrx_investigations" in the default schema.
-    # This migration alters that exact physical table (public.reclaimrx_investigations).
-    # No schema= kwarg on op.add_column — default schema only.
     # -------------------------------------------------------------------------
     for col_def in [
         sa.Column("severity", sa.String(20), nullable=True),
