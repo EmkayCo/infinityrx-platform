@@ -422,6 +422,46 @@ class Investigation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
 
+    # SP-3 extensions — added by migration 0008_sp3_extensions
+    # These columns extend the existing Investigation model with the
+    # fields required by spec §5.2 and the 7-state investigation machine.
+    severity: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, index=True
+    )  # low|medium|high|critical
+    source: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )  # rule_firing|ml_score|graph_ring|accumulator_anomaly|manual
+    source_ref_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True
+    )  # UUID FK to source entity (untyped FK — source table varies by source type)
+    member_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )  # UUID FK — NOT PHI per spec D6; member_id is a UUID reference, not a name
+    opened_by: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )  # 'system' or JWT sub
+    closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    closed_by: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    outcome_label: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )  # confirmed|false_positive|no_action; null until closed
+    recovered_amount: Mapped[object | None] = mapped_column(
+        Numeric(15, 2), nullable=True
+    )  # Decimal; 100% coverage gate; financial-precision.md
+    hold_amount: Mapped[object | None] = mapped_column(
+        Numeric(15, 2), nullable=True
+    )  # Decimal; 100% coverage gate; financial-precision.md
+    threshold_config_version: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )  # version at time investigation was opened
+    threshold_snapshot: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True
+    )  # immutable copy of threshold values at open time (defense-in-depth)
+
     activities: Mapped[list[InvestigationActivity]] = relationship(back_populates="investigation", cascade="all, delete-orphan")
     recoveries: Mapped[list[Recovery]] = relationship(back_populates="investigation", cascade="all, delete-orphan")
 
@@ -610,6 +650,15 @@ class PaymentHold(Base):
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
+    # SP-3 extension: status replaces the boolean is_active for the 3-case
+    # idempotency logic in spec §7.2. is_active remains for backward compat
+    # with existing callers until they are migrated to status.
+    # Valid values: 'active' | 'released' | 'expired' | 'cancelled'
+    # CHECK constraint is in migration 0008.
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="active"
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
@@ -793,3 +842,343 @@ class CorrectiveActionItem(Base):
     completion_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     plan: Mapped[CorrectiveActionPlan] = relationship(back_populates="action_items")
+
+
+# =============================================================================
+# SP-3 NEW TABLES — added by migration 0008_sp3_extensions
+# =============================================================================
+
+
+class GraphRun(Base):
+    """Tracks a single graph-analysis batch run per tenant.
+
+    status enum: running | completed | completed_partial | failed
+    (no 'cancelled' per spec §3 — stale runs auto-fail via stale_timeout_at)
+
+    The durable 'running' row is the cross-process concurrency authority:
+    no two runs per tenant may be 'running' simultaneously. The advisory lock
+    (pg_try_advisory_xact_lock) is transaction-scoped and prevents the race
+    at INSERT time; this row persists as the long-term authority.
+
+    BLOCK 2 resolved: __tablename__ matches audit-verified naming convention.
+    """
+
+    __tablename__ = "reclaimrx_graph_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+
+    status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="running"
+    )  # running|completed|completed_partial|failed
+    trigger: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # cron|on_demand
+
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    failed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )  # sanitized — MUST NOT contain PHI
+
+    correlation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    stale_timeout_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )  # auto-fail if status='running' past this time
+
+    rings_detected: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    investigations_opened: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    records_scanned: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    lookback_window_days: Mapped[int] = mapped_column(Integer, default=90, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_graph_runs_tenant_status", "tenant_id", "status"),
+    )
+
+
+class FraudRing(Base):
+    """A fraud ring detected by the graph-analysis batch job.
+
+    Produced by graph_analysis_service; one FraudRing per dense subgraph
+    component per run. density_score is Numeric(8,4) — financial-precision.md
+    requires Numeric for all money-adjacent Decimal values.
+
+    entity_refs is a JSON array of {type, id, npi/nabp} dicts.
+    spawned_investigation_id may be null if ring density is below threshold
+    for auto-investigation.
+
+    BLOCK 2 resolved: FK references reclaimrx_graph_runs.id (full table name).
+    """
+
+    __tablename__ = "reclaimrx_fraud_rings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+
+    graph_run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("reclaimrx_graph_runs.id"),
+        nullable=False,
+        index=True,
+    )
+    detected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+
+    density_score: Mapped[object] = mapped_column(
+        Numeric(8, 4), nullable=False
+    )  # Numeric not Float — financial-precision.md
+
+    node_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    edge_count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    entity_refs: Mapped[list | None] = mapped_column(
+        JSON, nullable=True
+    )  # [{type, id, npi|nabp}]; capped at 500 nodes per spec §5.5#13
+
+    spawned_investigation_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("reclaimrx_investigations.id"),
+        nullable=True,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_fraud_rings_tenant_run", "tenant_id", "graph_run_id"),
+    )
+
+
+class AccumulatorAnomaly(Base):
+    """Accumulator manipulation anomaly detected by accumulator_consumer.
+
+    This is a NEW table — separate from the existing AccumulatorDetection
+    model (reclaimrx_accumulator_detections), which tracks copay-assistance
+    accumulator plan-type detection. AccumulatorAnomaly is for the four
+    SP-3 fraud pattern detectors (sudden_spike, multi_payer_convergence,
+    reset_evasion, threshold_oscillation).
+
+    member_id is a UUID reference — NOT PHI per spec D6 (it's a FK, not a name).
+    triggering_event_ids is a JSON array of accumulator.updated event_id strings.
+
+    BLOCK 2 resolved: NOT reclaimrx_accumulator_detections.
+    """
+
+    __tablename__ = "reclaimrx_accumulator_anomalies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+
+    member_id: Mapped[str] = mapped_column(
+        String(36), nullable=False, index=True
+    )  # UUID FK — NOT PHI (spec D6)
+    pattern_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # sudden_spike|multi_payer_convergence|reset_evasion|threshold_oscillation
+
+    detected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    evidence_window_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    evidence_window_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    triggering_event_ids: Mapped[list | None] = mapped_column(
+        JSON, nullable=True
+    )  # list of accumulator.updated event_id strings
+
+    spawned_investigation_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("reclaimrx_investigations.id"),
+        nullable=True,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_accumulator_anomalies_tenant_member", "tenant_id", "member_id"),
+        Index("ix_accumulator_anomalies_tenant_detected", "tenant_id", "detected_at"),
+    )
+
+
+class ThresholdConfig(Base):
+    """Versioned per-tenant FWA threshold configuration.
+
+    Each UPDATE creates a new version row (version monotonically increments
+    per tenant). superseded_at=null means this is the current version.
+    threshold_config_version on Investigation FKs to this table's version int.
+
+    rule_thresholds: JSON {rule_code: "0.XX"} — Decimal as string
+    ml_score_thresholds: JSON {open: "0.60", auto_hold: "0.80", escalate: "0.90"}
+    graph_density_threshold: Numeric(8,4)
+    accumulator_anomaly_sensitivity: Numeric(8,4)
+
+    All Decimal threshold values use Numeric — financial-precision.md.
+    """
+
+    __tablename__ = "reclaimrx_threshold_configs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    effective_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    superseded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )  # null = current active version
+
+    rule_thresholds: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True
+    )  # {rule_code: "decimal_str"}
+    ml_score_thresholds: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True
+    )  # {open, auto_hold, escalate} as decimal strings
+    graph_density_threshold: Mapped[object] = mapped_column(
+        Numeric(8, 4), nullable=False
+    )
+    accumulator_anomaly_sensitivity: Mapped[object] = mapped_column(
+        Numeric(8, 4), nullable=False
+    )
+
+    updated_by: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )  # JWT sub of the admin who made the change
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+    audit_entries: Mapped[list["ThresholdConfigAudit"]] = relationship(
+        back_populates="config", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        # Only one current version per tenant (superseded_at IS NULL)
+        # Enforced via partial unique index in migration — not expressible here
+        Index("ix_threshold_configs_tenant_version", "tenant_id", "version"),
+    )
+
+
+class ThresholdConfigAudit(Base):
+    """Per-field hash-chained audit for ThresholdConfig changes.
+
+    Per hipaa-2026.md: entry_hash is NOT NULL (MUST compute on every write;
+    never write with empty hash). prev_entry_hash chains to prior entry.
+    field uses dot-path notation per event-bus.md conventions.
+
+    BLOCK 2 resolved: FK reclaimrx_threshold_configs.id (full table name).
+    """
+
+    __tablename__ = "reclaimrx_threshold_config_audits"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+
+    threshold_config_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("reclaimrx_threshold_configs.id"),
+        nullable=False,
+        index=True,
+    )
+    field: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )  # dot-path e.g. 'ml_score_thresholds.open'
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str] = mapped_column(Text, nullable=False)
+
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    changed_by: Mapped[str] = mapped_column(String(255), nullable=False)  # JWT sub
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Hash chain — hipaa-2026.md MUST compute entry_hash on EVERY write
+    entry_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )  # NOT NULL enforced; SHA-256 hex of (prev_entry_hash + field + old + new + changed_at)
+    prev_entry_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )  # null for first entry per tenant-config
+
+    config: Mapped["ThresholdConfig"] = relationship(back_populates="audit_entries")
+
+    __table_args__ = (
+        Index("ix_threshold_config_audits_tenant", "tenant_id", "threshold_config_id"),
+    )
+
+
+class OutboxEvent(Base):
+    """Transactional outbox for reliable event publishing.
+
+    Every mutation that must emit an event (hold release, graph run complete)
+    writes an OutboxEvent row in the SAME database transaction as the state
+    change. The outbox_dispatcher background task polls pending rows and
+    publishes them to the event bus with retry + exponential backoff.
+
+    envelope_json holds the full EventEnvelope as dict (using correct fields:
+    event_type, tenant_id, correlation_id, source_module, payload, schema_version,
+    ordering_key, idempotency_key — per audit §2 + shared/events/types.py).
+
+    idempotency_key has a UNIQUE constraint so duplicate trigger attempts
+    do not produce duplicate outbox rows.
+    """
+
+    __tablename__ = "reclaimrx_outbox_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+
+    event_type: Mapped[str] = mapped_column(
+        String(100), nullable=False
+    )  # dot-notation e.g. 'payment.hold_released'
+    envelope_json: Mapped[dict] = mapped_column(
+        JSON, nullable=False
+    )  # Full EventEnvelope as dict — fields: event_type, tenant_id, etc.
+
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending"
+    )  # pending|published|failed
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )  # sanitized — MUST NOT contain PHI
+
+    idempotency_key: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )  # e.g. 'hold:release:{hold_id}'; UNIQUE constraint in __table_args__
+
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_outbox_events_idempotency_key"),
+        Index("ix_outbox_events_status_created", "status", "created_at"),
+        Index("ix_outbox_events_tenant_status", "tenant_id", "status"),
+    )
