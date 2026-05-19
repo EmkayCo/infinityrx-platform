@@ -260,9 +260,75 @@ class TestValidateTransition:
                 role="reclaimrx.investigator",
                 fields={"reason": "done", "outcome_label": "confirmed"},
             )
+
+    def test_closed_false_positive_requires_outcome_label(self):
+        # Spec §5.5.1: outcome_label required for ALL closed_* states.
+        with pytest.raises(InvalidTransitionError, match="MISSING_REQUIRED_FIELD"):
+            validate_transition(
+                "in_progress", "closed_false_positive",
+                role="reclaimrx.investigator",
+                fields={"reason": "not fraud"},  # missing outcome_label
+            )
+
+    def test_closed_no_action_requires_outcome_label(self):
+        # Spec §5.5.1: outcome_label required for ALL closed_* states.
+        with pytest.raises(InvalidTransitionError, match="MISSING_REQUIRED_FIELD"):
+            validate_transition(
+                "pending_review", "closed_no_action",
+                role="reclaimrx.investigator",
+                fields={"reason": "low priority"},  # missing outcome_label
+            )
+
+    def test_closed_false_positive_succeeds_with_outcome_label(self):
+        # Positive test: providing the matching outcome_label allows the transition.
+        validate_transition(
+            "in_progress", "closed_false_positive",
+            role="reclaimrx.investigator",
+            fields={"reason": "verified not fraud", "outcome_label": "false_positive"},
+        )
+
+    def test_closed_no_action_succeeds_with_outcome_label(self):
+        validate_transition(
+            "pending_review", "closed_no_action",
+            role="reclaimrx.investigator",
+            fields={"reason": "below threshold", "outcome_label": "no_action"},
+        )
+
+
+# ── TRANSITION_REQUIRED_FIELDS table coverage ─────────────────────────────────
+
+class TestTransitionRequiredFieldsTable:
+    def test_required_fields_constant_is_importable(self):
+        # Codex R1 BLOCK 1: constant must exist and be importable.
+        assert isinstance(TRANSITION_REQUIRED_FIELDS, dict)
+        assert len(TRANSITION_REQUIRED_FIELDS) >= 15  # 12 closed_* arcs + 3 reopen arcs
+
+    def test_closed_confirmed_arcs_require_recovered_amount(self):
+        for src in ("open", "in_progress", "pending_review", "escalated"):
+            required = TRANSITION_REQUIRED_FIELDS[(src, "closed_confirmed")]
+            assert "recovered_amount" in required
+            assert "outcome_label" in required
+            assert "reason" in required
+
+    def test_closed_false_positive_arcs_require_outcome_label_not_amount(self):
+        for src in ("open", "in_progress", "pending_review", "escalated"):
+            required = TRANSITION_REQUIRED_FIELDS[(src, "closed_false_positive")]
+            assert "outcome_label" in required
+            assert "recovered_amount" not in required
+
+    def test_closed_no_action_arcs_require_outcome_label_not_amount(self):
+        for src in ("open", "in_progress", "pending_review", "escalated"):
+            required = TRANSITION_REQUIRED_FIELDS[(src, "closed_no_action")]
+            assert "outcome_label" in required
+            assert "recovered_amount" not in required
+
+    def test_reopen_arcs_require_only_reason(self):
+        for src in ("closed_confirmed", "closed_false_positive", "closed_no_action"):
+            required = TRANSITION_REQUIRED_FIELDS[(src, "open")]
+            assert required == frozenset({"reason"})
 ```
 
-**Run:** `pytest modules/reclaimrx/tests/unit/test_state_machine.py -x` → expect ALL FAIL (ImportError).
+**Run:** `pytest modules/reclaimrx/tests/unit/test_state_machine.py -x` → expect ALL FAIL (ImportError on `TRANSITION_REQUIRED_FIELDS` + missing-field tests fail until 1b is implemented).
 
 ### 1b. Implement
 
@@ -328,6 +394,33 @@ _OUTCOME_LABEL_FOR_STATE: dict[str, str] = {
     "closed_confirmed": "confirmed",
     "closed_false_positive": "false_positive",
     "closed_no_action": "no_action",
+}
+
+# Required fields per (from_state, to_state) arc.
+# `reason` is required for every transition (enforced globally in validate_transition).
+# `outcome_label` is required for ALL closed_* targets (spec §5.5.1).
+# `recovered_amount` is required ONLY for closed_confirmed (spec §5.5.1).
+TRANSITION_REQUIRED_FIELDS: dict[tuple[str, str], frozenset[str]] = {
+    # closed_confirmed from any non-terminal source
+    ("open", "closed_confirmed"): frozenset({"reason", "outcome_label", "recovered_amount"}),
+    ("in_progress", "closed_confirmed"): frozenset({"reason", "outcome_label", "recovered_amount"}),
+    ("pending_review", "closed_confirmed"): frozenset({"reason", "outcome_label", "recovered_amount"}),
+    ("escalated", "closed_confirmed"): frozenset({"reason", "outcome_label", "recovered_amount"}),
+    # closed_false_positive — outcome_label required, NO recovered_amount
+    ("open", "closed_false_positive"): frozenset({"reason", "outcome_label"}),
+    ("in_progress", "closed_false_positive"): frozenset({"reason", "outcome_label"}),
+    ("pending_review", "closed_false_positive"): frozenset({"reason", "outcome_label"}),
+    ("escalated", "closed_false_positive"): frozenset({"reason", "outcome_label"}),
+    # closed_no_action — outcome_label required, NO recovered_amount
+    ("open", "closed_no_action"): frozenset({"reason", "outcome_label"}),
+    ("in_progress", "closed_no_action"): frozenset({"reason", "outcome_label"}),
+    ("pending_review", "closed_no_action"): frozenset({"reason", "outcome_label"}),
+    ("escalated", "closed_no_action"): frozenset({"reason", "outcome_label"}),
+    # Re-open from terminal (admin-only — role enforced separately)
+    ("closed_confirmed", "open"): frozenset({"reason"}),
+    ("closed_false_positive", "open"): frozenset({"reason"}),
+    ("closed_no_action", "open"): frozenset({"reason"}),
+    # All other arcs require only `reason` (global default).
 }
 
 
@@ -399,26 +492,27 @@ def validate_transition(
             allowed_next=allowed,
         )
 
-    # reason always required
-    if not fields.get("reason"):
-        raise InvalidTransitionError(
-            "MISSING_REQUIRED_FIELD",
-            "Field 'reason' is required for all status transitions.",
-            allowed_next=allowed,
-        )
-
-    # closed_confirmed requires outcome_label + recovered_amount
-    if to_state == "closed_confirmed":
-        if fields.get("outcome_label") != "confirmed":
-            _check_outcome_label(to_state, fields, allowed)
-        if not isinstance(fields.get("recovered_amount"), Decimal):
+    # All required fields per arc (driven by TRANSITION_REQUIRED_FIELDS table)
+    required = TRANSITION_REQUIRED_FIELDS.get((from_state, to_state), frozenset({"reason"}))
+    for field in required:
+        # `recovered_amount` has a type constraint as well as a presence constraint
+        if field == "recovered_amount":
+            if not isinstance(fields.get("recovered_amount"), Decimal):
+                raise InvalidTransitionError(
+                    "MISSING_REQUIRED_FIELD",
+                    "Field 'recovered_amount' (Decimal) is required for closed_confirmed.",
+                    allowed_next=allowed,
+                )
+            continue
+        # All other required fields: presence-only check (truthy)
+        if not fields.get(field):
             raise InvalidTransitionError(
                 "MISSING_REQUIRED_FIELD",
-                "Field 'recovered_amount' (Decimal) is required for closed_confirmed.",
+                f"Field '{field}' is required for transition '{from_state}' -> '{to_state}'.",
                 allowed_next=allowed,
             )
 
-    # Other terminal states require matching outcome_label if present
+    # outcome_label semantic check: if present AND target is a closed_* state, value must match
     if to_state in _OUTCOME_LABEL_FOR_STATE:
         _check_outcome_label(to_state, fields, allowed)
 
@@ -428,7 +522,8 @@ def _check_outcome_label(to_state: str, fields: dict[str, Any], allowed: list[st
     if expected is None:
         return
     provided = fields.get("outcome_label")
-    # outcome_label is optional for false_positive and no_action; but if provided, must match
+    # Presence is enforced upstream by TRANSITION_REQUIRED_FIELDS for all closed_* states.
+    # Here we only check value semantics: if provided, it must match the target state's expected label.
     if provided is not None and provided != expected:
         raise InvalidTransitionError(
             "OUTCOME_LABEL_MISMATCH",
@@ -1573,6 +1668,18 @@ def release_hold_v2(
 
 ## Task 5 — Accumulator detection consumer wiring
 
+> **Scope note (R1 CONCERN 5):** A3 wires ONLY two accumulator pattern detectors:
+> `sudden_spike` and `multi_payer_convergence`. The spec §11.5 list also names
+> `reset_evasion` and `threshold_oscillation` as `AccumulatorAnomaly.pattern_type`
+> values, but those two detectors require additional historical-window queries
+> against the AccumulatorEvent stream (90-day rolling reset cadence comparison,
+> threshold-bouncing detector) that are out of scope for SP-3 wave B10.
+>
+> Both deferred detectors are tracked under follow-on task **`B10-w5/follow-on/accumulator-patterns-3-4`**
+> (to be created in B11 backlog after SP-3 merges). Acceptance criteria for
+> A3 explicitly do not include them. Tests for the two implemented patterns
+> are exhaustive; tests for the deferred patterns will land with the follow-on.
+
 ### 5a. Write test first
 
 **File:** `modules/reclaimrx/tests/unit/test_accumulator_consumer.py` (NEW)
@@ -2233,15 +2340,118 @@ class GraphAnalysisJob:
         return {"nodes": 0, "edges": 0}
 
     def _run_graph_computation(self, tenant_id: uuid.UUID, graph_run_id: str) -> dict:
-        """Delegate to FraudNetworkAnalyzer.  Overridden in tests.
+        """Real graph computation via FraudNetworkAnalyzer.
 
-        Returns dict with keys: rings (list or int), investigations (int), records (int).
+        R1 BLOCK 2 fix: replaces previous stub that returned empty results.
+
+        Steps:
+          1. Query FlaggedClaim rows for this tenant within the lookback window.
+             (Tenant scoping enforced via WHERE clause; RLS GUC also active.)
+          2. Aggregate rows into GraphEdge instances (one per unique
+             pharmacy_npi/prescriber_npi/member_id triple) summing claim_count
+             and total_amount (Decimal).
+          3. Build the weighted graph via analyzer.build_graph().
+          4. Run analyzer.detect_communities() — Louvain or greedy-modularity
+             fallback (see graph_analysis.py:96–127).
+          5. Translate every CommunityResult to a ring dict; cap entity_refs
+             at 500 per spec §5.5 #13.
+          6. Return {"rings": [...], "investigations": <dense_count>,
+                     "records": <claims_scanned>}.
+
+        Overridden in unit tests via patch.object to inject deterministic data.
+        Integration test test_graph_job_real_computation_e2e (Task 5d, NEW)
+        exercises this path without mocks.
         """
-        from src.services.graph_analysis import FraudNetworkAnalyzer  # noqa: PLC0415
+        from collections import defaultdict
+        from datetime import datetime, timedelta, UTC
+        from decimal import Decimal
+
+        from src.models.tables import FlaggedClaim  # noqa: PLC0415
+        from src.services.graph_analysis import (  # noqa: PLC0415
+            FraudNetworkAnalyzer,
+            GraphEdge,
+        )
+
+        cutoff = datetime.now(UTC) - timedelta(days=_LOOKBACK_DAYS)
+        rows = self._session.execute(
+            select(
+                FlaggedClaim.pharmacy_npi,
+                FlaggedClaim.prescriber_npi,
+                FlaggedClaim.member_id,
+                FlaggedClaim.billed_amount,
+            ).where(
+                FlaggedClaim.tenant_id == str(tenant_id),
+                FlaggedClaim.date_of_service >= cutoff.date(),
+                FlaggedClaim.pharmacy_npi.is_not(None),
+                FlaggedClaim.prescriber_npi.is_not(None),
+                FlaggedClaim.member_id.is_not(None),
+            )
+        ).all()
+
+        records_scanned = len(rows)
+        if records_scanned == 0:
+            return {"rings": [], "investigations": 0, "records": 0}
+
+        # Aggregate rows into edges (one per unique pharmacy/prescriber/member triple)
+        edge_acc: dict[tuple[str, str, str], dict] = defaultdict(
+            lambda: {"claim_count": 0, "total_amount": Decimal("0")}
+        )
+        for pharm, presc, member, billed in rows:
+            key = (pharm, presc, member)
+            edge_acc[key]["claim_count"] += 1
+            if billed is not None:
+                edge_acc[key]["total_amount"] += Decimal(str(billed))
+
+        edges = [
+            GraphEdge(
+                pharmacy_npi=k[0],
+                prescriber_npi=k[1],
+                member_id=k[2],
+                claim_count=v["claim_count"],
+                total_amount=v["total_amount"],
+            )
+            for k, v in edge_acc.items()
+        ]
 
         analyzer = FraudNetworkAnalyzer()
-        # Build graph from DB (real impl uses tenant-scoped claim queries)
-        return {"rings": [], "investigations": 0, "records": 0}
+        graph = analyzer.build_graph(edges)
+        communities = analyzer.detect_communities(graph)
+
+        # Translate suspicious communities to ring dicts; dense rings spawn investigations.
+        rings: list[dict] = []
+        investigations_opened = 0
+        for community in communities:
+            if not community.is_suspicious:
+                continue
+            entity_refs = self._build_entity_refs(community)  # capped at 500
+            ring = {
+                "density_score": Decimal(str(community.self_referral_rate)).quantize(
+                    Decimal("0.0001"), rounding=ROUND_HALF_UP
+                ),
+                "node_count": len(community.nodes),
+                "edge_count": graph.subgraph(community.nodes).number_of_edges(),
+                "entity_refs": entity_refs,
+            }
+            rings.append(ring)
+            if ring["density_score"] >= _GRAPH_DENSITY_THRESHOLD:
+                investigations_opened += 1
+
+        return {
+            "rings": rings,
+            "investigations": investigations_opened,
+            "records": records_scanned,
+        }
+
+    def _build_entity_refs(self, community) -> list[dict]:
+        """Build entity_refs list, capped at 500 per spec §5.5 #13."""
+        refs: list[dict] = []
+        for npi in community.pharmacies:
+            refs.append({"type": "pharmacy", "id": npi, "npi": npi})
+        for npi in community.prescribers:
+            refs.append({"type": "prescriber", "id": npi, "npi": npi})
+        for member_id in community.members:
+            refs.append({"type": "member", "id": member_id})
+        return refs[:500]
 
     def _insert_graph_run(self, tenant_id: uuid.UUID, trigger_source: str) -> GraphRun:
         now = datetime.now(UTC)
@@ -2304,6 +2514,163 @@ def job_rebuild_fraud_network_graph(session: Any, tenant_id: str) -> dict[str, A
 ```
 
 **Run:** `pytest modules/reclaimrx/tests/unit/test_graph_job.py -x` → expect ALL PASS.
+
+### 6d. Integration test — real `_run_graph_computation` without mocks (R1 BLOCK 2 fix)
+
+The unit tests above all `patch.object(job, "_run_graph_computation", ...)`, so they
+never exercise the real FraudNetworkAnalyzer call. R1 BLOCK 2 requires at least one
+end-to-end test that runs the un-patched code path.
+
+**File:** `modules/reclaimrx/tests/integration/test_graph_job_real_computation.py` (NEW)
+
+```python
+"""Integration test: GraphAnalysisJob._run_graph_computation without mocks.
+
+Loads real FlaggedClaim fixtures, builds the real graph via NetworkX, runs
+real community detection, and asserts the returned dict matches the shape
+the persistence step expects (rings list with density_score/node_count/
+edge_count/entity_refs, plus investigations/records counters).
+"""
+from __future__ import annotations
+
+import uuid
+from datetime import date, datetime, UTC
+from decimal import Decimal
+
+import pytest
+
+from src.jobs.graph_analysis_job import GraphAnalysisJob
+from src.models.tables import FlaggedClaim
+
+
+@pytest.fixture
+def dense_pharmacy_prescriber_ring(db, tenant_a_id):
+    """Seed 12 FlaggedClaim rows: 1 pharmacy + 1 prescriber + 10 members.
+
+    Spec §5.5 #6 suspicion: single pharmacy/prescriber routing >5 members
+    is flagged as suspicious by FraudNetworkAnalyzer._assess_suspicion.
+    """
+    pharm = "1234567893"  # synthetic Luhn-valid NPI
+    presc = "1245319599"  # synthetic Luhn-valid NPI
+    for i in range(10):
+        db.add(FlaggedClaim(
+            id=str(uuid.uuid4()),
+            tenant_id=tenant_a_id,
+            auth_number=f"AUTH-{i:04d}",
+            date_of_service=date.today(),
+            pharmacy_npi=pharm,
+            prescriber_npi=presc,
+            member_id=f"MEMBER-{i:03d}",
+            rule_code="RULE_TEST",
+            rule_name="test ring fixture",
+            detection_mode="rule",
+            risk_score=50,
+            confidence_tier="medium",
+            severity="medium",
+            evidence={},
+            billed_amount=Decimal("100.00"),
+            investigation_status="open",
+        ))
+    db.flush()
+
+
+def test_graph_job_real_computation_e2e(db, tenant_a_id, dense_pharmacy_prescriber_ring):
+    """Run un-patched _run_graph_computation end-to-end and assert shape + content."""
+    job = GraphAnalysisJob(db)
+    # NOTE: deliberately NOT patching _run_graph_computation.
+    result = job._run_graph_computation(uuid.UUID(tenant_a_id), graph_run_id="test-run-1")
+
+    # Shape checks
+    assert isinstance(result, dict)
+    assert set(result.keys()) == {"rings", "investigations", "records"}
+    assert isinstance(result["rings"], list)
+    assert result["records"] == 10
+
+    # Content checks: at least one suspicious ring detected
+    assert len(result["rings"]) >= 1
+    ring = result["rings"][0]
+    assert isinstance(ring["density_score"], Decimal)
+    assert ring["node_count"] >= 3  # 1 pharm + 1 presc + 10 members → community has 12 nodes
+    assert ring["edge_count"] >= 1
+    assert isinstance(ring["entity_refs"], list)
+    assert len(ring["entity_refs"]) <= 500  # spec §5.5 #13 cap
+    # Verify entity_refs schema
+    for ref in ring["entity_refs"]:
+        assert "type" in ref and "id" in ref
+        assert ref["type"] in {"pharmacy", "prescriber", "member"}
+
+
+def test_graph_job_returns_empty_when_no_flagged_claims(db, tenant_a_id):
+    """Empty fixture set → empty result, records=0."""
+    job = GraphAnalysisJob(db)
+    result = job._run_graph_computation(uuid.UUID(tenant_a_id), graph_run_id="test-run-empty")
+    assert result == {"rings": [], "investigations": 0, "records": 0}
+
+
+def test_graph_job_skips_rows_missing_triple_fields(db, tenant_a_id):
+    """FlaggedClaim with NULL pharmacy/prescriber/member fields are filtered out."""
+    # One complete row + one row missing prescriber_npi
+    db.add(FlaggedClaim(
+        id=str(uuid.uuid4()),
+        tenant_id=tenant_a_id,
+        auth_number="AUTH-COMPLETE",
+        date_of_service=date.today(),
+        pharmacy_npi="1234567893",
+        prescriber_npi="1245319599",
+        member_id="MEMBER-001",
+        rule_code="R", rule_name="r", detection_mode="rule",
+        risk_score=50, confidence_tier="medium", severity="medium",
+        evidence={}, billed_amount=Decimal("100"),
+        investigation_status="open",
+    ))
+    db.add(FlaggedClaim(
+        id=str(uuid.uuid4()),
+        tenant_id=tenant_a_id,
+        auth_number="AUTH-MISSING-PRESC",
+        date_of_service=date.today(),
+        pharmacy_npi="1234567893",
+        prescriber_npi=None,  # missing — must be filtered
+        member_id="MEMBER-002",
+        rule_code="R", rule_name="r", detection_mode="rule",
+        risk_score=50, confidence_tier="medium", severity="medium",
+        evidence={}, billed_amount=Decimal("100"),
+        investigation_status="open",
+    ))
+    db.flush()
+
+    job = GraphAnalysisJob(db)
+    result = job._run_graph_computation(uuid.UUID(tenant_a_id), graph_run_id="test-run-filter")
+    assert result["records"] == 1  # only the complete row counts
+
+
+def test_graph_job_aggregates_duplicate_triples(db, tenant_a_id):
+    """Multiple FlaggedClaim rows with same (pharm, presc, member) collapse to one edge."""
+    pharm, presc, member = "1234567893", "1245319599", "MEMBER-001"
+    for i in range(3):
+        db.add(FlaggedClaim(
+            id=str(uuid.uuid4()),
+            tenant_id=tenant_a_id,
+            auth_number=f"AUTH-{i:04d}",
+            date_of_service=date.today(),
+            pharmacy_npi=pharm,
+            prescriber_npi=presc,
+            member_id=member,
+            rule_code="R", rule_name="r", detection_mode="rule",
+            risk_score=50, confidence_tier="medium", severity="medium",
+            evidence={}, billed_amount=Decimal("50.00"),
+            investigation_status="open",
+        ))
+    db.flush()
+
+    job = GraphAnalysisJob(db)
+    result = job._run_graph_computation(uuid.UUID(tenant_a_id), graph_run_id="test-run-agg")
+    # 3 rows collapse to 1 unique edge; records=3 (raw rows scanned)
+    assert result["records"] == 3
+```
+
+**Run:** `pytest modules/reclaimrx/tests/integration/test_graph_job_real_computation.py -x` → expect ALL PASS.
+
+This file MUST run with the FlaggedClaim table seeded (Plan A1 dependency) and MUST NOT be skipped. If networkx or python-louvain raises ImportError in CI, mark the test as a hard failure — the dependency is required for SP-3.
 
 ---
 
@@ -2448,7 +2815,9 @@ def trigger_graph_run(
 
 **File:** `modules/reclaimrx/tests/integration/test_create_app_a3_bindings.py` (NEW)
 
-Verifies A3 deliverables are wired through create_app() per LESSON-006:
+Verifies A3 deliverables are wired through create_app() per LESSON-006.
+
+### 8a. Write test first (R1 CONCERN 8 fix — explicit fail/pass cycle)
 
 ```python
 """Integration test: A3 deliverables reachable through create_app().
@@ -2494,6 +2863,24 @@ def test_graph_runs_trigger_endpoint_registered(client):
     resp = client.post("/api/v1/reclaimrx/graph-runs/trigger")
     assert resp.status_code == 403  # viewer blocked, route exists
 ```
+
+**Run BEFORE wiring (Tasks 3, 4, 7 router edits) is complete:**
+`pytest modules/reclaimrx/tests/integration/test_create_app_a3_bindings.py -x`
+→ **expect FAIL** — routes not yet registered, all four tests return 404/405 from the catch-all handler instead of from the route layer, OR the import of new schema modules fails.
+
+### 8b. Wire — verify routes mounted in router
+
+Confirm Task 3 router edit registers `POST /investigations/{id}/transitions`,
+Task 4 router edit registers `POST /holds/{hold_id}/release` and removes
+`DELETE /holds/{hold_id}`, and Task 7 router edit registers
+`POST /graph-runs/trigger`. No new code in Task 8b — this is a verification
+step that Tasks 3/4/7 are complete.
+
+**Run AFTER wiring:**
+`pytest modules/reclaimrx/tests/integration/test_create_app_a3_bindings.py -x`
+→ **expect ALL PASS** — every test now hits the real route handler.
+
+### 8c. Coverage gate run
 
 **Coverage run:**
 ```

@@ -14,7 +14,7 @@
 
 This plan delivers exactly:
 1. Six new ORM model classes in `modules/reclaimrx/src/models/tables.py` (extending the existing file)
-2. Eleven new columns on the existing `Investigation` model (ALTER TABLE)
+2. Twelve new scalar columns on the existing `Investigation` model (ALTER TABLE) — R1 CONCERN 6 fix; explicit count is twelve, not eleven, matching the spec §5.2 list and the migration column list below
 3. One new column on the existing `PaymentHold` model (`status`)
 4. Alembic migration `0008_sp3_extensions.py` — creates new tables, alters existing, adds RLS policies, adds indexes
 5. Unit tests proving every model instantiates correctly, indexes exist, RLS predicate SQL is syntactically correct
@@ -33,7 +33,7 @@ This plan does NOT write API endpoints, services, outbox logic, consumers, or co
 | RLS predicate pattern: `tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid` | `0007_flagged_npis.py:98–104` |
 | UUID column type in migrations: `postgresql.UUID(as_uuid=False)` | `0007_flagged_npis.py:42–44` |
 | ORM base class: `src._shim.db.Base` (module-local) | `modules/reclaimrx/src/models/tables.py:30` |
-| ORM tenant_id type: `String(36)` (existing tables) — NEW tables use `TenantScopedMixin` | audit §1 + `.claude/rules/tenant-isolation.md` |
+| ORM tenant_id type: `String(36)` for ALL tables (existing AND new) — R1 BLOCK 3 fix; mixin abandoned | audit §1 |
 | `PaymentHold` already has `released_by`, `released_at`, `release_reason` | `tables.py:607–609` — DO NOT add these again |
 | `PaymentHold` uses `is_active: Boolean` — needs `status: String(20)` added | audit §1, §10 |
 | `Investigation.__tablename__` = `reclaimrx_investigations` | `tables.py:374` |
@@ -41,7 +41,7 @@ This plan does NOT write API endpoints, services, outbox logic, consumers, or co
 | `AccumulatorDetection.__tablename__` = `reclaimrx_accumulator_detections` | `tables.py:491` |
 | `AccumulatorAnomaly` is NEW (not an extension of `AccumulatorDetection`) | audit §1 |
 | FK references use full `reclaimrx_*` table names | existing tables.py FKs at lines 433, 450 |
-| `TenantScopedMixin` from `shared.db.tenant_context` uses `SA_UUID(as_uuid=True)` | `shared/db/tenant_context.py:93` |
+| `TenantScopedMixin` from `shared.db.tenant_context` uses `SA_UUID(as_uuid=True)` — INCOMPATIBLE with this module's `String(36)` pattern; NOT used by A1 | `shared/db/tenant_context.py:93` |
 | No APScheduler anywhere — use asyncio + croniter | audit §7 |
 | Advisory lock deterministic hash: use `zlib.crc32` | audit §9 |
 | `EventEnvelope` fields: `event_type` + `timestamp` (not `type`/`emitted_at`) | audit §2 |
@@ -55,7 +55,7 @@ This plan does NOT write API endpoints, services, outbox logic, consumers, or co
 |---|---|
 | BLOCK 1: `PaymentHold.released_by` already exists | This plan does NOT add `released_by`. Adds only `status` column. |
 | BLOCK 2: Migration uses wrong table names | This plan uses exact `__tablename__` values from audit. |
-| BLOCK 3: `TenantScopedBase` invented | This plan uses `Base` + `TenantScopedMixin` per actual codebase. New tables inherit both. |
+| BLOCK 3: `TenantScopedBase` invented; `Base + TenantScopedMixin` internally inconsistent | **R1 BLOCK 3 fix:** A1 uses ONLY `Base` with explicit `tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)` on every new model. The `TenantScopedMixin` from `shared.db.tenant_context` uses `SA_UUID(as_uuid=True)`, which collides with this module's existing `String(36)` tenant_id column pattern (e.g. `Investigation` at tables.py:377). Mixing the two patterns produces a `tenant_id` type-mismatch on FK joins between new tables and existing tables. Tenant scoping is still enforced — by RLS at the database layer, and by the existing `install_tenant_loader` session pattern at the ORM layer, both of which operate on the `String(36)` column. |
 | BLOCK 5: `hold.hold_amount` does not exist | This plan documents that `amount_threshold` is the existing money column on PaymentHold. Separate `hold_amount` column on Investigation is added as `recovered_amount`/`hold_amount` (spec §5.2). |
 
 ---
@@ -77,6 +77,15 @@ against SQLite (in-memory) via the existing _shim.db machinery.
 
 LESSON-007 applies: PG_UUID columns hit _UUIDString in SQLite.
 LESSON-001 applies: SAVEPOINT-based isolation.
+
+R1 BLOCK 4 fix: replace tuple-destructure imports with direct named
+imports (the original `(*_, GraphRun, *_) = _import_models()` is a
+SyntaxError — two starred targets cannot appear in one unpacking).
+
+R1 BLOCK 5 fix: import the six new models BEFORE any
+`Base.metadata.create_all()` call, so each class's `__tablename__`
+is registered into `Base.metadata.tables` before table creation
+walks the metadata.
 """
 from __future__ import annotations
 
@@ -85,39 +94,85 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import event, inspect, text
+from sqlalchemy import Numeric, event, inspect, text
 from sqlalchemy.orm import Session
 
 from src._shim.db import Base, configure_engine, get_engine
 
+# ---------------------------------------------------------------------------
+# Model imports — MUST happen at module load time (R1 BLOCK 5 fix).
+# Importing each class triggers SQLAlchemy's mapper registration which
+# inserts the table into Base.metadata.tables. If these imports happen
+# inside fixtures (lazy), Base.metadata.create_all() in the engine fixture
+# would run against a metadata object that is missing the new tables.
+# ---------------------------------------------------------------------------
+from src.models.tables import (  # noqa: E402
+    AccumulatorAnomaly,
+    FraudRing,
+    GraphRun,
+    OutboxEvent,
+    ThresholdConfig,
+    ThresholdConfigAudit,
+)
+
+# Sanity assertion: all six classes registered themselves in metadata.
+_NEW_TABLE_NAMES = {
+    "reclaimrx_accumulator_anomalies",
+    "reclaimrx_fraud_rings",
+    "reclaimrx_graph_runs",
+    "reclaimrx_outbox_events",
+    "reclaimrx_threshold_configs",
+    "reclaimrx_threshold_config_audits",
+}
+assert _NEW_TABLE_NAMES.issubset(set(Base.metadata.tables.keys())), (
+    f"R1 BLOCK 5 regression: new tables missing from Base.metadata. "
+    f"Missing: {_NEW_TABLE_NAMES - set(Base.metadata.tables.keys())}"
+)
+
 
 # ---------------------------------------------------------------------------
-# Engine + SAVEPOINT fixture (LESSON-001 + LESSON-007)
+# UUID compatibility patch (LESSON-007) — apply BEFORE engine fixture runs.
+# Module-level patch covers BOTH new model tables (registered above) and any
+# existing model tables that the engine fixture's create_all will materialize.
+# ---------------------------------------------------------------------------
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID  # noqa: E402
+from sqlalchemy.types import String, TypeDecorator  # noqa: E402
+
+
+class _UUIDString(TypeDecorator):
+    """SQLite-compatible UUID stored as VARCHAR(36) (LESSON-007)."""
+
+    impl = String(36)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return str(value) if value is not None else None
+
+    def process_result_value(self, value, dialect):
+        return uuid.UUID(value) if value is not None else None
+
+
+for _table in Base.metadata.tables.values():
+    for _col in _table.columns:
+        if isinstance(_col.type, PG_UUID):
+            _col.type = _UUIDString()
+
+
+# ---------------------------------------------------------------------------
+# Engine + SAVEPOINT fixture (LESSON-001)
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
 def engine():
+    """In-memory SQLite engine with all metadata (including the six new
+    SP-3 tables) materialized.
+
+    R1 BLOCK 5 fix: model imports happen at module load above, BEFORE
+    create_all runs here. The patched UUID columns are also applied
+    above, so this fixture is a pure DDL step.
+    """
     configure_engine("sqlite:///:memory:")
     eng = get_engine()
-    # LESSON-007: swap PG_UUID columns to VARCHAR(36) for SQLite
-    from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-    from sqlalchemy.types import TypeDecorator, String
-
-    class _UUIDString(TypeDecorator):
-        impl = String(36)
-        cache_ok = True
-
-        def process_bind_param(self, value, dialect):
-            return str(value) if value is not None else None
-
-        def process_result_value(self, value, dialect):
-            return uuid.UUID(value) if value is not None else None
-
-    for table in Base.metadata.tables.values():
-        for col in table.columns:
-            if isinstance(col.type, PG_UUID):
-                col.type = _UUIDString()
-
     Base.metadata.create_all(eng)
     return eng
 
@@ -143,40 +198,14 @@ def db(engine):
 
 
 # ---------------------------------------------------------------------------
-# Import guard — tests will FAIL until models are added to tables.py
-# ---------------------------------------------------------------------------
-
-def _import_models():
-    # Late import so the test file itself can be collected without error
-    from src.models.tables import (  # noqa: PLC0415
-        AccumulatorAnomaly,
-        FraudRing,
-        GraphRun,
-        OutboxEvent,
-        ThresholdConfig,
-        ThresholdConfigAudit,
-    )
-    return (
-        AccumulatorAnomaly,
-        FraudRing,
-        GraphRun,
-        OutboxEvent,
-        ThresholdConfig,
-        ThresholdConfigAudit,
-    )
-
-
-# ---------------------------------------------------------------------------
 # FraudRing
 # ---------------------------------------------------------------------------
 
 class TestFraudRingModel:
     def test_tablename(self):
-        (_, FraudRing, *_) = _import_models()
         assert FraudRing.__tablename__ == "reclaimrx_fraud_rings"
 
     def test_instantiate_minimal(self, db):
-        (_, FraudRing, *_) = _import_models()
         tid = uuid.uuid4()
         run_id = uuid.uuid4()
         ring = FraudRing(
@@ -196,7 +225,6 @@ class TestFraudRingModel:
         assert fetched.node_count == 12
 
     def test_required_columns_present(self):
-        (_, FraudRing, *_) = _import_models()
         cols = {c.name for c in inspect(FraudRing).columns}
         required = {
             "id", "tenant_id", "graph_run_id", "detected_at",
@@ -206,9 +234,7 @@ class TestFraudRingModel:
         assert required.issubset(cols), f"Missing: {required - cols}"
 
     def test_density_score_is_numeric(self):
-        (_, FraudRing, *_) = _import_models()
         col = inspect(FraudRing).columns["density_score"]
-        from sqlalchemy import Numeric
         assert isinstance(col.type, Numeric)
         assert col.type.precision == 8
         assert col.type.scale == 4
@@ -220,20 +246,15 @@ class TestFraudRingModel:
 
 class TestGraphRunModel:
     def test_tablename(self):
-        (*_, GraphRun, *_) = _import_models()
-        # Destructure explicitly
-        (_, _, GraphRun, *_) = _import_models()
         assert GraphRun.__tablename__ == "reclaimrx_graph_runs"
 
     def test_status_values_documented(self):
-        (_, _, GraphRun, *_) = _import_models()
         # Status is a String column; valid values enforced by CHECK constraint in migration
         # Unit test just verifies the column exists and accepts known values
         cols = {c.name for c in inspect(GraphRun).columns}
         assert "status" in cols
 
     def test_instantiate_running(self, db):
-        (_, _, GraphRun, *_) = _import_models()
         tid = uuid.uuid4()
         run = GraphRun(
             id=str(uuid.uuid4()),
@@ -255,7 +276,6 @@ class TestGraphRunModel:
         assert fetched.rings_detected == 0
 
     def test_required_columns_present(self):
-        (_, _, GraphRun, *_) = _import_models()
         cols = {c.name for c in inspect(GraphRun).columns}
         required = {
             "id", "tenant_id", "status", "trigger", "started_at",
@@ -272,11 +292,9 @@ class TestGraphRunModel:
 
 class TestAccumulatorAnomalyModel:
     def test_tablename(self):
-        (AccumulatorAnomaly, *_) = _import_models()
         assert AccumulatorAnomaly.__tablename__ == "reclaimrx_accumulator_anomalies"
 
     def test_instantiate(self, db):
-        (AccumulatorAnomaly, *_) = _import_models()
         tid = uuid.uuid4()
         anomaly = AccumulatorAnomaly(
             id=str(uuid.uuid4()),
@@ -294,7 +312,6 @@ class TestAccumulatorAnomalyModel:
         assert fetched.pattern_type == "sudden_spike"
 
     def test_required_columns_present(self):
-        (AccumulatorAnomaly, *_) = _import_models()
         cols = {c.name for c in inspect(AccumulatorAnomaly).columns}
         required = {
             "id", "tenant_id", "member_id", "pattern_type",
@@ -316,11 +333,9 @@ class TestAccumulatorAnomalyModel:
 
 class TestThresholdConfigModel:
     def test_tablename(self):
-        (*_, ThresholdConfig, _) = _import_models()
         assert ThresholdConfig.__tablename__ == "reclaimrx_threshold_configs"
 
     def test_instantiate(self, db):
-        (*_, ThresholdConfig, _) = _import_models()
         tid = uuid.uuid4()
         cfg = ThresholdConfig(
             id=str(uuid.uuid4()),
@@ -341,8 +356,6 @@ class TestThresholdConfigModel:
         assert fetched.superseded_at is None
 
     def test_numeric_threshold_columns(self):
-        (*_, ThresholdConfig, _) = _import_models()
-        from sqlalchemy import Numeric
         cols = {c.name: c for c in inspect(ThresholdConfig).columns}
         for col_name in ("graph_density_threshold", "accumulator_anomaly_sensitivity"):
             assert isinstance(cols[col_name].type, Numeric), f"{col_name} must be Numeric"
@@ -354,11 +367,9 @@ class TestThresholdConfigModel:
 
 class TestThresholdConfigAuditModel:
     def test_tablename(self):
-        (*_, ThresholdConfigAudit) = _import_models()
         assert ThresholdConfigAudit.__tablename__ == "reclaimrx_threshold_config_audits"
 
     def test_instantiate(self, db):
-        (*_, ThresholdConfig, ThresholdConfigAudit) = _import_models()
         tid = uuid.uuid4()
         cfg = ThresholdConfig(
             id=str(uuid.uuid4()),
@@ -395,7 +406,6 @@ class TestThresholdConfigAuditModel:
 
     def test_entry_hash_not_nullable(self):
         """Enforces hipaa-2026.md: MUST compute entry_hash on EVERY audit log write."""
-        (*_, ThresholdConfigAudit) = _import_models()
         col = next(c for c in inspect(ThresholdConfigAudit).columns if c.name == "entry_hash")
         assert not col.nullable, "entry_hash must be NOT NULL per hipaa-2026.md"
 
@@ -406,16 +416,9 @@ class TestThresholdConfigAuditModel:
 
 class TestOutboxEventModel:
     def test_tablename(self):
-        (*_, OutboxEvent, *_) = _import_models()
-        # Unpack the 6th item
-        models = _import_models()
-        OutboxEvent = models[5]  # 0=AccumulatorAnomaly,1=FraudRing,2=GraphRun,3=OutboxEvent,...
-        # Use direct import
-        from src.models.tables import OutboxEvent as OE
-        assert OE.__tablename__ == "reclaimrx_outbox_events"
+        assert OutboxEvent.__tablename__ == "reclaimrx_outbox_events"
 
     def test_instantiate(self, db):
-        from src.models.tables import OutboxEvent
         tid = uuid.uuid4()
         event_id = uuid.uuid4()
         evt = OutboxEvent(
@@ -439,7 +442,6 @@ class TestOutboxEventModel:
         assert fetched.attempt_count == 0
 
     def test_idempotency_key_is_unique(self):
-        from src.models.tables import OutboxEvent
         from sqlalchemy import inspect as sa_inspect
         mapper = sa_inspect(OutboxEvent)
         # Check the __table_args__ has a UniqueConstraint on idempotency_key
@@ -454,7 +456,6 @@ class TestOutboxEventModel:
             "OutboxEvent must have UniqueConstraint on idempotency_key"
 
     def test_status_column_accepts_known_values(self, db):
-        from src.models.tables import OutboxEvent
         # status CHECK constraint is enforced in migration (Postgres);
         # SQLite does not enforce CHECKs in older versions.
         # This test verifies the three valid values are documented.
@@ -467,7 +468,7 @@ class TestOutboxEventModel:
 # ---------------------------------------------------------------------------
 
 class TestInvestigationExtensions:
-    """Verify the 11 new columns are present on the existing Investigation model."""
+    """Verify the 12 new scalar columns are present on the existing Investigation model (R1 CONCERN 6)."""
 
     def test_new_columns_present(self):
         from src.models.tables import Investigation
@@ -578,7 +579,7 @@ File: `modules/reclaimrx/src/models/tables.py`
 
 Append the following **after the `PaymentHold` class** (around line 614) and **before** the `TipRecord` class. Also extend `Investigation` and `PaymentHold` in-place.
 
-**1.2a — Extend Investigation model** (add 11 columns after line 423, before the `activities` relationship):
+**1.2a — Extend Investigation model** (add 12 scalar columns after line 423, before the `activities` relationship — R1 CONCERN 6: explicit count is twelve, matching the migration column list below):
 
 ```python
 # SP-3 extensions — added by migration 0008_sp3_extensions
@@ -634,6 +635,20 @@ status: Mapped[str] = mapped_column(
     String(20), nullable=False, default="active"
 )
 ```
+
+> **R1 CONCERN 9 — PaymentHold.idempotency_key explicit deferral.** The audit
+> calls out that `PaymentHold` also lacks an `idempotency_key` column.
+> A1 deliberately does NOT add it because A3's `POST /holds/{id}/release`
+> implements idempotency at the **outbox layer** via the
+> `reclaimrx_outbox_events.idempotency_key` UNIQUE constraint (composed as
+> `hold:release:{hold_id}` — see Plan A2 §6b and Plan A3 §7.2 case A/B/C).
+> No A1 consumer queries against a `PaymentHold.idempotency_key` column.
+>
+> A `PaymentHold.idempotency_key` column would only be needed if we ever
+> moved idempotency enforcement OFF the outbox and ONTO the hold row
+> itself — which is not the design. Tracked as future hardening under
+> `B11/follow-on/payment-hold-row-idempotency` for explicit decision
+> before that re-architecture lands.
 
 **1.2c — New model classes** (append after PaymentHold class, before TipRecord):
 
@@ -1065,7 +1080,7 @@ class TestNewTablesExist:
 
 class TestGraphRunsTable:
     def test_required_columns(self, pg_engine):
-        cols = get_table_columns(pg_engine, "reclaimrx", "graph_runs")
+        cols = get_table_columns(pg_engine, "public", "reclaimrx_graph_runs")
         required = {
             "id", "tenant_id", "status", "trigger", "started_at",
             "completed_at", "failed_at", "error_code", "error_message",
@@ -1080,7 +1095,7 @@ class TestGraphRunsTable:
         with pg_engine.connect() as conn:
             with pytest.raises(Exception, match="check"):
                 conn.execute(text(
-                    "INSERT INTO reclaimrx.graph_runs "
+                    "INSERT INTO reclaimrx_graph_runs "
                     "(id, tenant_id, status, trigger, started_at, correlation_id, "
                     " stale_timeout_at, rings_detected, investigations_opened, "
                     " records_scanned, lookback_window_days, created_at) VALUES "
@@ -1092,14 +1107,14 @@ class TestGraphRunsTable:
                 conn.rollback()
 
     def test_indexes(self, pg_engine):
-        indexes = get_indexes(pg_engine, "reclaimrx", "graph_runs")
+        indexes = get_indexes(pg_engine, "public", "reclaimrx_graph_runs")
         assert any("tenant" in idx and "status" in idx for idx in indexes), \
             f"Missing (tenant_id, status) index on graph_runs. Found: {indexes}"
 
 
 class TestFraudRingsTable:
     def test_required_columns(self, pg_engine):
-        cols = get_table_columns(pg_engine, "reclaimrx", "fraud_rings")
+        cols = get_table_columns(pg_engine, "public", "reclaimrx_fraud_rings")
         required = {
             "id", "tenant_id", "graph_run_id", "detected_at",
             "density_score", "node_count", "edge_count",
@@ -1112,21 +1127,21 @@ class TestFraudRingsTable:
             result = conn.execute(text(
                 "SELECT data_type, numeric_precision, numeric_scale "
                 "FROM information_schema.columns "
-                "WHERE table_schema='reclaimrx' AND table_name='fraud_rings' "
+                "WHERE table_schema='public' AND table_name='reclaimrx_fraud_rings' "
                 "AND column_name='density_score'"
             )).fetchone()
         assert result is not None
         assert result[0] == "numeric", "density_score must be numeric type"
 
     def test_indexes(self, pg_engine):
-        indexes = get_indexes(pg_engine, "reclaimrx", "fraud_rings")
+        indexes = get_indexes(pg_engine, "public", "reclaimrx_fraud_rings")
         assert any("tenant" in idx for idx in indexes), \
             f"Missing tenant_id index on fraud_rings. Found: {indexes}"
 
 
 class TestAccumulatorAnomaliesTable:
     def test_required_columns(self, pg_engine):
-        cols = get_table_columns(pg_engine, "reclaimrx", "accumulator_anomalies")
+        cols = get_table_columns(pg_engine, "public", "reclaimrx_accumulator_anomalies")
         required = {
             "id", "tenant_id", "member_id", "pattern_type",
             "detected_at", "evidence_window_start", "evidence_window_end",
@@ -1138,7 +1153,7 @@ class TestAccumulatorAnomaliesTable:
         with pg_engine.connect() as conn:
             with pytest.raises(Exception, match="check"):
                 conn.execute(text(
-                    "INSERT INTO reclaimrx.accumulator_anomalies "
+                    "INSERT INTO reclaimrx_accumulator_anomalies "
                     "(id, tenant_id, member_id, pattern_type, detected_at, "
                     " evidence_window_start, evidence_window_end, created_at) VALUES "
                     "('00000000-0000-0000-0000-000000000001', "
@@ -1151,7 +1166,7 @@ class TestAccumulatorAnomaliesTable:
 
 class TestThresholdConfigsTable:
     def test_required_columns(self, pg_engine):
-        cols = get_table_columns(pg_engine, "reclaimrx", "threshold_configs")
+        cols = get_table_columns(pg_engine, "public", "reclaimrx_threshold_configs")
         required = {
             "id", "tenant_id", "version", "effective_at", "superseded_at",
             "rule_thresholds", "ml_score_thresholds",
@@ -1162,7 +1177,7 @@ class TestThresholdConfigsTable:
 
     def test_partial_unique_index_for_current_version(self, pg_engine):
         """Only one active (superseded_at IS NULL) version per tenant."""
-        indexes = get_indexes(pg_engine, "reclaimrx", "threshold_configs")
+        indexes = get_indexes(pg_engine, "public", "reclaimrx_threshold_configs")
         # The partial unique index name from migration
         assert any("current" in idx or "active" in idx or "superseded" in idx
                    for idx in indexes), \
@@ -1171,7 +1186,7 @@ class TestThresholdConfigsTable:
 
 class TestOutboxEventsTable:
     def test_required_columns(self, pg_engine):
-        cols = get_table_columns(pg_engine, "reclaimrx", "outbox_events")
+        cols = get_table_columns(pg_engine, "public", "reclaimrx_outbox_events")
         required = {
             "id", "tenant_id", "event_type", "envelope_json", "status",
             "created_at", "published_at", "attempt_count", "last_error",
@@ -1185,7 +1200,7 @@ class TestOutboxEventsTable:
             tid = "00000000-0000-0000-0000-000000000099"
             ikey = "hold:release:test-unique-check"
             conn.execute(text(
-                "INSERT INTO reclaimrx.outbox_events "
+                "INSERT INTO reclaimrx_outbox_events "
                 "(id, tenant_id, event_type, envelope_json, status, "
                 " created_at, attempt_count, idempotency_key) VALUES "
                 "('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', :tid, "
@@ -1193,7 +1208,7 @@ class TestOutboxEventsTable:
             ), {"tid": tid, "ikey": ikey})
             with pytest.raises(Exception, match="unique|duplicate"):
                 conn.execute(text(
-                    "INSERT INTO reclaimrx.outbox_events "
+                    "INSERT INTO reclaimrx_outbox_events "
                     "(id, tenant_id, event_type, envelope_json, status, "
                     " created_at, attempt_count, idempotency_key) VALUES "
                     "('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', :tid, "
@@ -1203,50 +1218,53 @@ class TestOutboxEventsTable:
 
 
 class TestInvestigationAlterations:
+    """R1 BLOCK 2 fix: ALTER TABLE targets the deterministic ORM-aligned name.
+
+    The ORM at `tables.py:374` declares `Investigation.__tablename__ =
+    "reclaimrx_investigations"` in the default schema. Migration 0008 must
+    alter that physical table. No hedging "check both" pattern — the table
+    name is determined by the ORM, full stop.
+    """
+
     def test_new_columns_added(self, pg_engine):
-        cols = get_table_columns(pg_engine, "reclaimrx", "investigations")
-        # Note: migrations use the unqualified table name within _SCHEMA
-        # The ORM uses reclaimrx_investigations but the migration
-        # creates/alters within reclaimrx schema as 'investigations'
+        cols = get_table_columns(pg_engine, "public", "reclaimrx_investigations")
         required_new = {
             "severity", "source", "source_ref_id", "member_id",
             "opened_by", "closed_at", "closed_by", "outcome_label",
             "recovered_amount", "hold_amount",
             "threshold_config_version", "threshold_snapshot",
         }
-        # If the existing table uses the full prefixed name, adjust:
-        # Check both naming conventions
-        prefixed_cols = get_table_columns(
-            pg_engine, "public", "reclaimrx_investigations"
-        )
-        all_cols = cols | prefixed_cols
-        assert required_new.issubset(all_cols), \
-            f"Missing new columns on investigations: {required_new - all_cols}"
+        assert required_new.issubset(cols), \
+            f"Missing new columns on reclaimrx_investigations: {required_new - cols}"
 
 
 class TestPaymentHoldAlteration:
+    """R1 BLOCK 2 fix: same deterministic ORM-aligned table-name discipline."""
+
     def test_status_column_added(self, pg_engine):
-        # Check under both schema.table naming conventions
-        cols_reclaimrx = get_table_columns(pg_engine, "reclaimrx", "payment_holds")
-        cols_public = get_table_columns(pg_engine, "public", "reclaimrx_payment_holds")
-        all_cols = cols_reclaimrx | cols_public
-        assert "status" in all_cols, "PaymentHold.status column must be added"
+        cols = get_table_columns(pg_engine, "public", "reclaimrx_payment_holds")
+        assert "status" in cols, "PaymentHold.status column must be added"
 
     def test_existing_release_columns_unchanged(self, pg_engine):
-        cols_reclaimrx = get_table_columns(pg_engine, "reclaimrx", "payment_holds")
-        cols_public = get_table_columns(pg_engine, "public", "reclaimrx_payment_holds")
-        all_cols = cols_reclaimrx | cols_public
+        cols = get_table_columns(pg_engine, "public", "reclaimrx_payment_holds")
         # These ALREADY EXISTED — must not be removed (BLOCK 1 resolved)
-        assert {"released_by", "released_at", "release_reason"}.issubset(all_cols), \
+        assert {"released_by", "released_at", "release_reason"}.issubset(cols), \
             "Pre-existing release columns must not be dropped by migration 0008"
 
 
 class TestRLSPolicies:
-    """RLS policies must be created on all 6 new tables."""
+    """RLS policies must be created on all 6 new tables.
+
+    R1 BLOCK 1 + BLOCK 7 fix: tables live in PUBLIC schema with
+    `reclaimrx_*` prefix (matches ORM); pg_namespace lookups use
+    nspname='public'. The dedicated null-deny test class above
+    (TestRLSNullDenyUnderAppRole) covers the BYPASSRLS concern.
+    """
 
     NEW_TABLES = [
-        "graph_runs", "fraud_rings", "accumulator_anomalies",
-        "threshold_configs", "threshold_config_audits", "outbox_events",
+        "reclaimrx_graph_runs", "reclaimrx_fraud_rings",
+        "reclaimrx_accumulator_anomalies", "reclaimrx_threshold_configs",
+        "reclaimrx_threshold_config_audits", "reclaimrx_outbox_events",
     ]
 
     def test_rls_enabled(self, pg_engine):
@@ -1255,22 +1273,10 @@ class TestRLSPolicies:
                 result = conn.execute(text(
                     "SELECT relrowsecurity FROM pg_class c "
                     "JOIN pg_namespace n ON n.oid = c.relnamespace "
-                    "WHERE n.nspname = 'reclaimrx' AND c.relname = :t"
+                    "WHERE n.nspname = 'public' AND c.relname = :t"
                 ), {"t": table}).fetchone()
-                assert result is not None, f"Table reclaimrx.{table} not found in pg_class"
-                assert result[0] is True, f"RLS not enabled on reclaimrx.{table}"
-
-    def test_rls_null_deny(self, pg_engine):
-        """Per spec D8: session without app.current_tenant_id → zero rows (no exception)."""
-        with pg_engine.connect() as conn:
-            # Reset GUC so it's unset
-            conn.execute(text("RESET app.current_tenant_id"))
-            for table in self.NEW_TABLES:
-                count = conn.execute(text(
-                    f"SELECT COUNT(*) FROM reclaimrx.{table}"
-                )).scalar()
-                assert count == 0, \
-                    f"RLS null-deny failed: reclaimrx.{table} returned rows with no tenant GUC set"
+                assert result is not None, f"Table public.{table} not found in pg_class"
+                assert result[0] is True, f"RLS not enabled on public.{table}"
 
     def test_predicate_uses_correct_guc(self, pg_engine):
         """GUC must be app.current_tenant_id (not app.tenant_id — common mistake)."""
@@ -1278,11 +1284,11 @@ class TestRLSPolicies:
             for table in self.NEW_TABLES:
                 result = conn.execute(text(
                     "SELECT qual FROM pg_policies "
-                    "WHERE schemaname = 'reclaimrx' AND tablename = :t "
+                    "WHERE schemaname = 'public' AND tablename = :t "
                     "AND policyname = 'tenant_isolation'"
                 ), {"t": table}).fetchone()
                 assert result is not None, \
-                    f"No tenant_isolation policy on reclaimrx.{table}"
+                    f"No tenant_isolation policy on public.{table}"
                 assert "app.current_tenant_id" in result[0], \
                     f"Wrong GUC in RLS predicate for {table}: {result[0]}"
 
@@ -1291,21 +1297,18 @@ class TestRequiredIndexes:
     """Indexes required by .claude/rules/performance.md."""
 
     def test_investigation_tenant_severity_index(self, pg_engine):
-        # Check both schema variants
-        for schema, table in [
-            ("reclaimrx", "investigations"),
-            ("public", "reclaimrx_investigations"),
-        ]:
-            idxs = get_indexes(pg_engine, schema, table)
-            if idxs:
-                has_severity = any("severity" in i for i in idxs)
-                assert has_severity, \
-                    f"Missing (tenant_id, severity) index on {schema}.{table}. Found: {idxs}"
-                return
-        pytest.fail("Could not find investigations table in either schema")
+        """R1 BLOCK 2 fix: target the ORM-aligned table name deterministically.
+        Investigation.__tablename__ = 'reclaimrx_investigations' (public schema).
+        """
+        idxs = get_indexes(pg_engine, "public", "reclaimrx_investigations")
+        has_severity = any("severity" in i for i in idxs)
+        assert has_severity, (
+            f"Missing (tenant_id, severity) index on public.reclaimrx_investigations. "
+            f"Found: {idxs}"
+        )
 
     def test_outbox_status_index(self, pg_engine):
-        idxs = get_indexes(pg_engine, "reclaimrx", "outbox_events")
+        idxs = get_indexes(pg_engine, "public", "reclaimrx_outbox_events")
         assert any("status" in i for i in idxs), \
             f"Missing status index on outbox_events. Found: {idxs}"
 ```
@@ -1314,7 +1317,7 @@ class TestRequiredIndexes:
 ```bash
 cd modules/reclaimrx && RECLAIMRX_TEST_DB_URL=postgresql://... python -m pytest tests/integration/test_migration_0008.py -v -k "test_all_new_tables_created" 2>&1 | head -20
 ```
-Expected: `AssertionError: Table reclaimrx.graph_runs was not created` (migration not run yet).
+Expected: `AssertionError: Table public.reclaimrx_graph_runs was not created` (migration not run yet).
 
 ---
 
@@ -1325,23 +1328,23 @@ File: `modules/reclaimrx/alembic/versions/0008_sp3_extensions.py`
 ```python
 """SP-3 backend extensions: new tables + column extensions + RLS + indexes.
 
-New tables (reclaimrx schema):
-  - graph_runs            — durable per-tenant graph-analysis run tracking
-  - fraud_rings           — fraud rings detected per run
-  - accumulator_anomalies — accumulator manipulation anomalies (NOT extending
-                            accumulator_detections — this is a separate table)
-  - threshold_configs     — versioned per-tenant FWA threshold configuration
-  - threshold_config_audits — per-field hash-chained audit trail
-  - outbox_events         — transactional outbox for reliable event publishing
+New tables (public schema, `reclaimrx_*` prefix — ORM-aligned per R1 BLOCK 1):
+  - reclaimrx_graph_runs            — durable per-tenant graph-analysis run tracking
+  - reclaimrx_fraud_rings           — fraud rings detected per run
+  - reclaimrx_accumulator_anomalies — accumulator manipulation anomalies (NOT extending
+                                       accumulator_detections — this is a separate table)
+  - reclaimrx_threshold_configs     — versioned per-tenant FWA threshold configuration
+  - reclaimrx_threshold_config_audits — per-field hash-chained audit trail
+  - reclaimrx_outbox_events         — transactional outbox for reliable event publishing
 
 Altered tables:
-  - investigations        — 11 new columns (severity, source, source_ref_id,
+  - reclaimrx_investigations — 12 new scalar columns (severity, source, source_ref_id,
                             member_id, opened_by, closed_at, closed_by,
                             outcome_label, recovered_amount, hold_amount,
                             threshold_config_version, threshold_snapshot)
-  - payment_holds         — add status column (active|released|expired|cancelled)
-                            NOTE: released_by, released_at, release_reason
-                            ALREADY EXIST at tables.py:607-609 — DO NOT re-add.
+  - reclaimrx_payment_holds — add status column (active|released|expired|cancelled)
+                               NOTE: released_by, released_at, release_reason
+                               ALREADY EXIST at tables.py:607-609 — DO NOT re-add.
 
 RLS: FORCE ROW LEVEL SECURITY on all 6 new tables.
      GUC: app.current_tenant_id (matches 0002, 0003, 0006, 0007)
@@ -1374,12 +1377,36 @@ down_revision: Union[str, None] = "0007_flagged_npis"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-_SCHEMA = "reclaimrx"
 _APP_ROLE = os.environ.get("IFX_APP_ROLE", "ifx_dev_app")
 # GUC matches every prior migration in this module (0002, 0003, 0006, 0007)
 _RLS_PREDICATE = (
     "tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid"
 )
+
+# R1 BLOCKS 1 + 2 fix — single physical-naming convention for SP-3.
+#
+# The reclaimrx codebase already has an internal split:
+#   • migrations 0001-0007 create *unprefixed* tables inside the
+#     `reclaimrx` named schema (e.g. reclaimrx.investigations);
+#   • the ORM at `modules/reclaimrx/src/models/tables.py` declares
+#     *prefixed* tables in the default public schema (e.g.
+#     reclaimrx_investigations) with no `__table_args__["schema"]`.
+#
+# Codex R1 BLOCK 1+2 flagged this split as a data-layer hazard: an
+# executor following the original A1 plan verbatim would create
+# `reclaimrx.graph_runs` etc., but the ORM would query
+# `public.reclaimrx_graph_runs` and find nothing.
+#
+# RESOLUTION: this migration follows the ORM's pattern verbatim —
+# all new SP-3 tables are created in the default schema with the
+# `reclaimrx_*` prefix. No `schema=` kwarg on `op.create_table`,
+# no `schema=` on `op.create_index`, and the helper functions
+# below operate on bare (already-prefixed) table names.
+#
+# Existing pre-SP-3 tables in the `reclaimrx` schema are NOT moved.
+# They remain queryable through their own existing ORM models (if any)
+# or raw SQL. SP-3 does not own that migration debt — Wave B11+ will
+# audit and rationalize it.
 
 _GRAPH_RUN_STATUSES = "('running', 'completed', 'completed_partial', 'failed')"
 _GRAPH_RUN_TRIGGERS = "('cron', 'on_demand')"
@@ -1396,12 +1423,16 @@ _INVESTIGATION_OUTCOMES = "('confirmed', 'false_positive', 'no_action')"
 
 
 def _enable_rls(table: str) -> None:
-    """Enable + force RLS and create tenant_isolation policy."""
-    op.execute(f"ALTER TABLE {_SCHEMA}.{table} ENABLE ROW LEVEL SECURITY")
-    op.execute(f"ALTER TABLE {_SCHEMA}.{table} FORCE ROW LEVEL SECURITY")
+    """Enable + force RLS and create tenant_isolation policy.
+
+    `table` MUST be the fully prefixed name (e.g. `reclaimrx_graph_runs`).
+    R1 BLOCK 1 fix: no schema qualifier — these tables live in public.
+    """
+    op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+    op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
     op.execute(
         f"""
-        CREATE POLICY tenant_isolation ON {_SCHEMA}.{table}
+        CREATE POLICY tenant_isolation ON {table}
           FOR ALL
           USING      ({_RLS_PREDICATE})
           WITH CHECK ({_RLS_PREDICATE})
@@ -1412,22 +1443,24 @@ def _enable_rls(table: str) -> None:
 def _grant_rw(table: str) -> None:
     for role in ("ifx_dev_app", _APP_ROLE):
         op.execute(
-            f"GRANT SELECT, INSERT, UPDATE ON {_SCHEMA}.{table} TO {role}"
+            f"GRANT SELECT, INSERT, UPDATE ON {table} TO {role}"
         )
     for role in ("ifx_dev_admin", "ifx_prod_admin"):
         op.execute(
-            f"GRANT SELECT, INSERT, UPDATE, DELETE ON {_SCHEMA}.{table} TO {role}"
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO {role}"
         )
 
 
 def upgrade() -> None:
-    op.execute(f"CREATE SCHEMA IF NOT EXISTS {_SCHEMA}")
+    # R1 BLOCK 1 fix: all SP-3 tables live in public schema with `reclaimrx_*`
+    # prefix to match the ORM at `src/models/tables.py`. No schema creation
+    # needed (public always exists).
 
     # -------------------------------------------------------------------------
     # 1. graph_runs
     # -------------------------------------------------------------------------
     op.create_table(
-        "graph_runs",
+        "reclaimrx_graph_runs",
         sa.Column(
             "id",
             postgresql.UUID(as_uuid=False),
@@ -1467,30 +1500,28 @@ def upgrade() -> None:
             f"trigger IN {_GRAPH_RUN_TRIGGERS}",
             name="ck_graph_runs_trigger",
         ),
-        schema=_SCHEMA,
     )
     op.create_index(
         "ix_graph_runs_tenant_status",
-        "graph_runs",
+        "reclaimrx_graph_runs",
         ["tenant_id", "status"],
-        schema=_SCHEMA,
     )
     # Partial unique index: at most one 'running' row per tenant
     op.execute(
         f"""
         CREATE UNIQUE INDEX uq_graph_runs_one_running_per_tenant
-          ON {_SCHEMA}.graph_runs (tenant_id)
+          ON reclaimrx_graph_runs (tenant_id)
           WHERE status = 'running'
         """
     )
-    _enable_rls("graph_runs")
-    _grant_rw("graph_runs")
+    _enable_rls("reclaimrx_graph_runs")
+    _grant_rw("reclaimrx_graph_runs")
 
     # -------------------------------------------------------------------------
     # 2. fraud_rings
     # -------------------------------------------------------------------------
     op.create_table(
-        "fraud_rings",
+        "reclaimrx_fraud_rings",
         sa.Column(
             "id",
             postgresql.UUID(as_uuid=False),
@@ -1501,7 +1532,7 @@ def upgrade() -> None:
         sa.Column(
             "graph_run_id",
             postgresql.UUID(as_uuid=False),
-            sa.ForeignKey(f"{_SCHEMA}.graph_runs.id"),
+            sa.ForeignKey("reclaimrx_graph_runs.id"),
             nullable=False,
         ),
         sa.Column("detected_at", sa.DateTime(timezone=True), nullable=False,
@@ -1534,22 +1565,19 @@ def upgrade() -> None:
             "density_score >= 0 AND density_score <= 1",
             name="ck_fraud_rings_density_range",
         ),
-        schema=_SCHEMA,
     )
     op.create_index(
         "ix_fraud_rings_tenant_run",
-        "fraud_rings",
+        "reclaimrx_fraud_rings",
         ["tenant_id", "graph_run_id"],
-        schema=_SCHEMA,
     )
     op.create_index(
         "ix_fraud_rings_tenant_detected",
-        "fraud_rings",
+        "reclaimrx_fraud_rings",
         ["tenant_id", "detected_at"],
-        schema=_SCHEMA,
     )
-    _enable_rls("fraud_rings")
-    _grant_rw("fraud_rings")
+    _enable_rls("reclaimrx_fraud_rings")
+    _grant_rw("reclaimrx_fraud_rings")
 
     # -------------------------------------------------------------------------
     # 3. accumulator_anomalies
@@ -1558,7 +1586,7 @@ def upgrade() -> None:
     # AccumulatorAnomaly tracks SP-3 fraud pattern detection.
     # -------------------------------------------------------------------------
     op.create_table(
-        "accumulator_anomalies",
+        "reclaimrx_accumulator_anomalies",
         sa.Column(
             "id",
             postgresql.UUID(as_uuid=False),
@@ -1593,28 +1621,25 @@ def upgrade() -> None:
             f"pattern_type IN {_ACCUMULATOR_PATTERN_TYPES}",
             name="ck_accumulator_anomalies_pattern_type",
         ),
-        schema=_SCHEMA,
     )
     op.create_index(
         "ix_accumulator_anomalies_tenant_member",
-        "accumulator_anomalies",
+        "reclaimrx_accumulator_anomalies",
         ["tenant_id", "member_id"],
-        schema=_SCHEMA,
     )
     op.create_index(
         "ix_accumulator_anomalies_tenant_detected",
-        "accumulator_anomalies",
+        "reclaimrx_accumulator_anomalies",
         ["tenant_id", "detected_at"],
-        schema=_SCHEMA,
     )
-    _enable_rls("accumulator_anomalies")
-    _grant_rw("accumulator_anomalies")
+    _enable_rls("reclaimrx_accumulator_anomalies")
+    _grant_rw("reclaimrx_accumulator_anomalies")
 
     # -------------------------------------------------------------------------
     # 4. threshold_configs
     # -------------------------------------------------------------------------
     op.create_table(
-        "threshold_configs",
+        "reclaimrx_threshold_configs",
         sa.Column(
             "id",
             postgresql.UUID(as_uuid=False),
@@ -1656,30 +1681,28 @@ def upgrade() -> None:
             "accumulator_anomaly_sensitivity > 0 AND accumulator_anomaly_sensitivity <= 1",
             name="ck_threshold_configs_sensitivity_range",
         ),
-        schema=_SCHEMA,
     )
     op.create_index(
         "ix_threshold_configs_tenant_version",
-        "threshold_configs",
+        "reclaimrx_threshold_configs",
         ["tenant_id", "version"],
-        schema=_SCHEMA,
     )
     # Partial unique index: only one current (unsuperseded) version per tenant
     op.execute(
         f"""
         CREATE UNIQUE INDEX uq_threshold_configs_current_per_tenant
-          ON {_SCHEMA}.threshold_configs (tenant_id)
+          ON reclaimrx_threshold_configs (tenant_id)
           WHERE superseded_at IS NULL
         """
     )
-    _enable_rls("threshold_configs")
-    _grant_rw("threshold_configs")
+    _enable_rls("reclaimrx_threshold_configs")
+    _grant_rw("reclaimrx_threshold_configs")
 
     # -------------------------------------------------------------------------
     # 5. threshold_config_audits
     # -------------------------------------------------------------------------
     op.create_table(
-        "threshold_config_audits",
+        "reclaimrx_threshold_config_audits",
         sa.Column(
             "id",
             postgresql.UUID(as_uuid=False),
@@ -1690,7 +1713,7 @@ def upgrade() -> None:
         sa.Column(
             "threshold_config_id",
             postgresql.UUID(as_uuid=False),
-            sa.ForeignKey(f"{_SCHEMA}.threshold_configs.id"),
+            sa.ForeignKey("reclaimrx_threshold_configs.id"),
             nullable=False,
         ),
         sa.Column("field", sa.String(255), nullable=False),
@@ -1713,28 +1736,25 @@ def upgrade() -> None:
             "length(entry_hash) > 0",
             name="ck_threshold_config_audits_entry_hash_nonempty",
         ),
-        schema=_SCHEMA,
     )
     op.create_index(
         "ix_threshold_config_audits_tenant_config",
-        "threshold_config_audits",
+        "reclaimrx_threshold_config_audits",
         ["tenant_id", "threshold_config_id"],
-        schema=_SCHEMA,
     )
     op.create_index(
         "ix_threshold_config_audits_changed_at",
-        "threshold_config_audits",
+        "reclaimrx_threshold_config_audits",
         ["tenant_id", "changed_at"],
-        schema=_SCHEMA,
     )
-    _enable_rls("threshold_config_audits")
-    _grant_rw("threshold_config_audits")
+    _enable_rls("reclaimrx_threshold_config_audits")
+    _grant_rw("reclaimrx_threshold_config_audits")
 
     # -------------------------------------------------------------------------
     # 6. outbox_events
     # -------------------------------------------------------------------------
     op.create_table(
-        "outbox_events",
+        "reclaimrx_outbox_events",
         sa.Column(
             "id",
             postgresql.UUID(as_uuid=False),
@@ -1765,22 +1785,19 @@ def upgrade() -> None:
             name="ck_outbox_events_status",
         ),
         sa.UniqueConstraint("idempotency_key", name="uq_outbox_events_idempotency_key"),
-        schema=_SCHEMA,
     )
     op.create_index(
         "ix_outbox_events_status_created",
-        "outbox_events",
+        "reclaimrx_outbox_events",
         ["status", "created_at"],
-        schema=_SCHEMA,
     )
     op.create_index(
         "ix_outbox_events_tenant_status",
-        "outbox_events",
+        "reclaimrx_outbox_events",
         ["tenant_id", "status"],
-        schema=_SCHEMA,
     )
-    _enable_rls("outbox_events")
-    _grant_rw("outbox_events")
+    _enable_rls("reclaimrx_outbox_events")
+    _grant_rw("reclaimrx_outbox_events")
 
     # -------------------------------------------------------------------------
     # 7. ALTER reclaimrx_investigations — add 11 SP-3 columns
@@ -1874,40 +1891,62 @@ def downgrade() -> None:
     op.execute(
         "ALTER TABLE reclaimrx_payment_holds DROP CONSTRAINT IF EXISTS ck_payment_holds_status"
     )
+    # R1 CONCERN 8 fix: downgrade is the exact reverse of upgrade.
+    # 1. payment_holds — drop index, drop CHECK, drop column.
+    op.execute(
+        "ALTER TABLE reclaimrx_payment_holds DROP CONSTRAINT IF EXISTS ck_payment_holds_status"
+    )
     op.drop_index("ix_reclaimrx_payment_holds_tenant_status",
                   table_name="reclaimrx_payment_holds")
     op.drop_column("reclaimrx_payment_holds", "status")
 
-    # investigations
+    # 2. investigations — drop indexes, drop CHECKs, drop columns in REVERSE order.
     for idx in [
-        "ix_reclaimrx_investigations_tenant_severity",
-        "ix_reclaimrx_investigations_tenant_member_id",
         "ix_reclaimrx_investigations_tenant_source_ref",
+        "ix_reclaimrx_investigations_tenant_member_id",
+        "ix_reclaimrx_investigations_tenant_severity",
     ]:
         op.drop_index(idx, table_name="reclaimrx_investigations")
     for constraint in [
-        "ck_investigations_severity",
-        "ck_investigations_source",
         "ck_investigations_outcome_label",
+        "ck_investigations_source",
+        "ck_investigations_severity",
     ]:
         op.execute(
             f"ALTER TABLE reclaimrx_investigations DROP CONSTRAINT IF EXISTS {constraint}"
         )
+    # Columns dropped in EXACT reverse of upgrade insertion order.
     for col_name in [
-        "severity", "source", "source_ref_id", "member_id",
-        "opened_by", "closed_at", "closed_by", "outcome_label",
-        "recovered_amount", "hold_amount",
-        "threshold_config_version", "threshold_snapshot",
+        "threshold_snapshot",
+        "threshold_config_version",
+        "hold_amount",
+        "recovered_amount",
+        "outcome_label",
+        "closed_by",
+        "closed_at",
+        "opened_by",
+        "member_id",
+        "source_ref_id",
+        "source",
+        "severity",
     ]:
         op.drop_column("reclaimrx_investigations", col_name)
 
-    # new tables (reverse dependency order)
-    op.drop_table("outbox_events", schema=_SCHEMA)
-    op.drop_table("threshold_config_audits", schema=_SCHEMA)
-    op.drop_table("threshold_configs", schema=_SCHEMA)
-    op.drop_table("accumulator_anomalies", schema=_SCHEMA)
-    op.drop_table("fraud_rings", schema=_SCHEMA)
-    op.drop_table("graph_runs", schema=_SCHEMA)
+    # 3. New tables — drop partial unique indexes BEFORE the tables
+    # (Alembic does not auto-drop partial indexes created via raw SQL).
+    for idx in [
+        "uq_threshold_configs_current_per_tenant",
+        "uq_graph_runs_one_running_per_tenant",
+    ]:
+        op.execute(f"DROP INDEX IF EXISTS {idx}")
+
+    # 4. Drop tables in reverse dependency order (children before parents).
+    op.drop_table("reclaimrx_outbox_events")
+    op.drop_table("reclaimrx_threshold_config_audits")  # FK → threshold_configs
+    op.drop_table("reclaimrx_threshold_configs")
+    op.drop_table("reclaimrx_accumulator_anomalies")
+    op.drop_table("reclaimrx_fraud_rings")               # FK → graph_runs
+    op.drop_table("reclaimrx_graph_runs")
 ```
 
 **Apply migration and run integration tests:**
@@ -1953,54 +1992,84 @@ import pytest
 from sqlalchemy import create_engine, text
 
 DB_URL = os.environ.get("RECLAIMRX_TEST_DB_URL")
+APP_ROLE = os.environ.get("IFX_APP_ROLE", "ifx_dev_app")  # R1 BLOCK 7 fix
 pytestmark = pytest.mark.skipif(not DB_URL, reason="RECLAIMRX_TEST_DB_URL not set")
 
-NEW_TENANT_OWNED_TABLES = [
-    "graph_runs",
-    "fraud_rings",
-    "accumulator_anomalies",
-    "threshold_configs",
-    "threshold_config_audits",
-    "outbox_events",
+# R1 BLOCK 7 fix — RLS null-deny test requirements:
+#   1. Seed ALL six tenant-owned tables (prior version seeded only 4).
+#   2. Run assertions as the APPLICATION ROLE, not as the superuser the
+#      test fixture connects with. PostgreSQL superusers BYPASS RLS by
+#      default; a passing null-deny test under a superuser proves nothing.
+#   3. Verify tenant A sees their rows AND another tenant context (B) sees
+#      zero, in addition to the unset-GUC case.
+ALL_NEW_TENANT_OWNED_TABLES = [
+    "reclaimrx_graph_runs",
+    "reclaimrx_fraud_rings",
+    "reclaimrx_accumulator_anomalies",
+    "reclaimrx_threshold_configs",
+    "reclaimrx_threshold_config_audits",
+    "reclaimrx_outbox_events",
 ]
 
 
 @pytest.fixture(scope="module")
 def seeded_engine():
-    """Engine with seed data for tenant A. Tests run as tenant B (no GUC set)."""
+    """Engine with seed data for tenant A in ALL six tables."""
     engine = create_engine(DB_URL)
     tid_a = str(uuid.uuid4())
 
     with engine.begin() as conn:
-        # Set tenant_a context and insert one row per table
+        # Seed runs as superuser so RLS does not interfere with seeding;
+        # the cross-tenant assertions below explicitly SET ROLE to the
+        # non-BYPASSRLS app role.
         conn.execute(text(f"SET app.current_tenant_id = '{tid_a}'"))
 
+        # 1. graph_runs
+        graph_run_id = str(uuid.uuid4())
         conn.execute(text(
-            "INSERT INTO reclaimrx.graph_runs "
+            "INSERT INTO reclaimrx_graph_runs "
             "(id, tenant_id, status, trigger, started_at, correlation_id, "
             " stale_timeout_at, rings_detected, investigations_opened, "
             " records_scanned, lookback_window_days) VALUES "
-            f"(gen_random_uuid(), '{tid_a}', 'completed', 'cron', "
+            f"('{graph_run_id}', '{tid_a}', 'completed', 'cron', "
             " now(), gen_random_uuid()::text, now() + interval '6h', 0, 0, 0, 90)"
         ))
-        # threshold_configs (required by threshold_config_audits FK)
+        # 2. fraud_rings (R1 BLOCK 7 fix — was previously omitted)
+        conn.execute(text(
+            "INSERT INTO reclaimrx_fraud_rings "
+            "(id, tenant_id, graph_run_id, detected_at, density_score, "
+            " node_count, edge_count) VALUES "
+            f"(gen_random_uuid(), '{tid_a}', '{graph_run_id}', now(), "
+            " 0.85, 3, 5)"
+        ))
+        # 3. accumulator_anomalies (R1 BLOCK 7 fix — was previously omitted)
+        conn.execute(text(
+            "INSERT INTO reclaimrx_accumulator_anomalies "
+            "(id, tenant_id, member_id, pattern_type, detected_at, "
+            " evidence_window_start, evidence_window_end) VALUES "
+            f"(gen_random_uuid(), '{tid_a}', gen_random_uuid(), "
+            " 'sudden_spike', now(), now() - interval '7 days', now())"
+        ))
+        # 4. threshold_configs (required by threshold_config_audits FK)
         cfg_id = str(uuid.uuid4())
         conn.execute(text(
-            "INSERT INTO reclaimrx.threshold_configs "
+            "INSERT INTO reclaimrx_threshold_configs "
             "(id, tenant_id, version, effective_at, graph_density_threshold, "
             " accumulator_anomaly_sensitivity, updated_by) VALUES "
             f"('{cfg_id}', '{tid_a}', 1, now(), 0.70, 0.75, 'seed-user')"
         ))
+        # 5. threshold_config_audits
         conn.execute(text(
-            "INSERT INTO reclaimrx.threshold_config_audits "
+            "INSERT INTO reclaimrx_threshold_config_audits "
             "(id, tenant_id, threshold_config_id, field, new_value, "
             " changed_at, changed_by, entry_hash) VALUES "
             f"(gen_random_uuid(), '{tid_a}', '{cfg_id}', "
             " 'graph_density_threshold', '0.70', now(), 'seed-user', "
             " 'abc123def456abc123def456abc123def456abc123def456abc123def45')"
         ))
+        # 6. outbox_events
         conn.execute(text(
-            "INSERT INTO reclaimrx.outbox_events "
+            "INSERT INTO reclaimrx_outbox_events "
             "(id, tenant_id, event_type, envelope_json, status, "
             " created_at, attempt_count, idempotency_key) VALUES "
             f"(gen_random_uuid(), '{tid_a}', 'payment.hold_released', "
@@ -2013,29 +2082,62 @@ def seeded_engine():
     engine.dispose()
 
 
-@pytest.mark.parametrize("table", NEW_TENANT_OWNED_TABLES)
-def test_rls_null_deny_no_exception(seeded_engine, table):
-    """With no GUC set: query returns zero rows, raises no exception."""
+@pytest.mark.parametrize("table", ALL_NEW_TENANT_OWNED_TABLES)
+def test_rls_null_deny_under_app_role(seeded_engine, table):
+    """R1 BLOCK 7 fix: with NO GUC set AND running AS the app role
+    (which does NOT have BYPASSRLS), query MUST return zero rows.
+
+    Without `SET ROLE` the test connection runs as superuser, which bypasses
+    RLS by default — a passing assertion would prove nothing about real
+    multi-tenant safety in production.
+    """
     engine, _ = seeded_engine
     with engine.connect() as conn:
-        conn.execute(text("RESET app.current_tenant_id"))
-        count = conn.execute(
-            text(f"SELECT COUNT(*) FROM reclaimrx.{table}")
-        ).scalar()
+        conn.execute(text(f"SET ROLE {APP_ROLE}"))
+        try:
+            conn.execute(text("RESET app.current_tenant_id"))
+            count = conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
+        finally:
+            conn.execute(text("RESET ROLE"))
     assert count == 0, (
-        f"RLS null-deny FAILED: reclaimrx.{table} returned {count} rows "
-        "when app.current_tenant_id was not set"
+        f"RLS null-deny FAILED for {APP_ROLE}: {table} returned {count} rows "
+        "when app.current_tenant_id was not set. Either RLS is not enabled, "
+        "or the role has BYPASSRLS — both are production safety regressions."
     )
 
 
-def test_tenant_a_sees_own_rows(seeded_engine):
-    """Sanity: tenant A CAN see their own rows when GUC is set."""
+@pytest.mark.parametrize("table", ALL_NEW_TENANT_OWNED_TABLES)
+def test_tenant_b_sees_zero_rows_under_app_role(seeded_engine, table):
+    """R1 BLOCK 7 fix: a DIFFERENT tenant context AS the app role sees zero
+    rows belonging to tenant A. Distinct from null-deny — exercises the
+    `tenant_id = current_setting(...)::uuid` equality predicate."""
+    engine, _ = seeded_engine
+    tid_b = str(uuid.uuid4())
+    with engine.connect() as conn:
+        conn.execute(text(f"SET ROLE {APP_ROLE}"))
+        try:
+            conn.execute(text(f"SET app.current_tenant_id = '{tid_b}'"))
+            count = conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
+        finally:
+            conn.execute(text("RESET ROLE"))
+    assert count == 0, (
+        f"Cross-tenant leak: tenant B saw {count} rows in {table} "
+        f"that belong to tenant A."
+    )
+
+
+def test_tenant_a_sees_own_rows_under_app_role(seeded_engine):
+    """Sanity: tenant A AS the app role CAN see their own rows."""
     engine, tid_a = seeded_engine
     with engine.connect() as conn:
-        conn.execute(text(f"SET app.current_tenant_id = '{tid_a}'"))
-        count = conn.execute(
-            text("SELECT COUNT(*) FROM reclaimrx.graph_runs")
-        ).scalar()
+        conn.execute(text(f"SET ROLE {APP_ROLE}"))
+        try:
+            conn.execute(text(f"SET app.current_tenant_id = '{tid_a}'"))
+            count = conn.execute(
+                text("SELECT COUNT(*) FROM reclaimrx_graph_runs")
+            ).scalar()
+        finally:
+            conn.execute(text("RESET ROLE"))
     assert count >= 1, "Tenant A should see their own graph_run rows"
 ```
 
