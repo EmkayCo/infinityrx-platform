@@ -1441,7 +1441,7 @@ class TestHoldRelease:
         assert after_count == before_count + 1
 
         row = db.query(OutboxEvent).order_by(OutboxEvent.created_at.desc()).first()
-        assert row.event_type == "fwa.hold_released"
+        assert row.event_type == "payment.hold_released"
         assert row.status == "pending"
         assert row.idempotency_key == f"hold:release:{hold_id}"
 ```
@@ -1549,7 +1549,7 @@ class TestHoldRelease:
         # Use amount_threshold (NOT hold_amount — audit §1:145, codex BLOCK 5)
         amount_str = str(hold.amount_threshold or Decimal("0.00"))
         envelope = EventEnvelope(
-            event_type="fwa.hold_released",
+            event_type="payment.hold_released",
             tenant_id=tenant_id,          # uuid.UUID, not str
             correlation_id=uuid.uuid4(),
             source_module="reclaimrx",
@@ -1570,7 +1570,7 @@ class TestHoldRelease:
         outbox = OutboxEvent(
             id=str(uuid.uuid4()),
             tenant_id=str(tenant_id),
-            event_type="fwa.hold_released",
+            event_type="payment.hold_released",
             envelope_json=envelope.model_dump(mode="json"),
             status="pending",
             idempotency_key=f"hold:release:{hold_id}",
@@ -1881,9 +1881,19 @@ class AccumulatorConsumer:
         window = self._load_recent_window(tenant_id, member_id)
         anomalies = self._detect_patterns(member_id, tenant_id, oop, source_payer_id, window, event_id)
 
+        # R2 CONCERN N7 fix — keep this set in lock-step with the A3 scope note
+        # at the top of Task 5: only the two pattern detectors A3 actually
+        # implements (sudden_spike, multi_payer_convergence) may open
+        # investigations. `reset_evasion` and `threshold_oscillation` are
+        # deferred to B11/follow-on/accumulator-patterns-3-4; their detectors
+        # are not wired in A3, so no AccumulatorAnomaly row of those types
+        # should reach this loop in production — but if a backfilled or
+        # manually-seeded row sneaks through, we MUST NOT open an investigation
+        # for a detector type whose semantics A3 has not validated.
+        _A3_AUTO_OPEN_PATTERNS = frozenset({"sudden_spike", "multi_payer_convergence"})
         for anomaly in anomalies:
             self._session.add(anomaly)
-            if anomaly.pattern_type in ("sudden_spike", "multi_payer_convergence", "reset_evasion"):
+            if anomaly.pattern_type in _A3_AUTO_OPEN_PATTERNS:
                 inv = self._open_investigation(tenant_id, member_id, anomaly)
                 anomaly.spawned_investigation_id = inv.id
                 self._session.add(inv)

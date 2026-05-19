@@ -55,7 +55,7 @@ The existing `investigations/page.tsx` and `investigations/[id]/page.tsx` are ou
 |---|---|
 | Plan A5 oversize | 7 tasks — within 5-7 range. Tasks are cleanly parallelizable. |
 | Existing portal pages | DO NOT replace existing investigations pages — those are Plan B work. Only add the 6 NEW route pages that are missing. Leave `leakage`, `risk`, `wizard`, `recovery` untouched. |
-| Event contract doc location | `docs/api-contracts/events/fwa.hold_released.md (R1 BLOCK 8 fix — `fwa.*` prefix per event-bus.md, not `payment.*`)` + `docs/api-contracts/events/fwa.graph_run_completed.md` per R2 NEW BLOCK 1 + spec §11.5 |
+| Event contract doc location | `docs/api-contracts/events/payment.hold_released.md (R1 BLOCK 8 fix — `fwa.*` prefix per event-bus.md, not `payment.*`)` + `docs/api-contracts/events/fwa.graph_run_completed.md` per R2 NEW BLOCK 1 + spec §11.5 |
 | Contract test location | `packages/contract/src/__tests__/reclaimrx.test.ts` — mirrors prescriber-directory test |
 | Manifest update | Add `"reclaimrx"` to `modules` array in `packages/shell/src/_generated/manifest.json` and wire `RECLAIMRX_URL` env + `http://reclaimrx:8007/health` health check |
 | Reclaimrx backend URL/port | Backend runs at port 8007 (verified: `portal/operator/.env.local` has reclaimrx entries; if absent, add `RECLAIMRX_URL=http://reclaimrx:8007`) |
@@ -102,7 +102,7 @@ For SP-3 Plan A5 the simplest, surgical-changes-compliant pattern is to use the 
 
 ### D7 — Event contract docs
 
-Two markdown files per `.claude/rules/event-bus.md` format: `docs/api-contracts/events/fwa.hold_released.md (R1 BLOCK 8 fix — `fwa.*` prefix per event-bus.md, not `payment.*`)` and `docs/api-contracts/events/fwa.graph_run_completed.md`. Both instantiate spec §11.5 contracts verbatim with envelope fields, payload fields, forward-compatibility rule, publisher/subscriber ownership, and version history.
+Two markdown files per `.claude/rules/event-bus.md` format: `docs/api-contracts/events/payment.hold_released.md (R1 BLOCK 8 fix — `fwa.*` prefix per event-bus.md, not `payment.*`)` and `docs/api-contracts/events/fwa.graph_run_completed.md`. Both instantiate spec §11.5 contracts verbatim with envelope fields, payload fields, forward-compatibility rule, publisher/subscriber ownership, and version history.
 
 ---
 
@@ -1794,7 +1794,7 @@ export default config;
 - `portal/operator/app/reclaimrx/graph-runs/page.tsx`
 - `portal/operator/app/reclaimrx/thresholds/page.tsx`
 - `portal/operator/app/reclaimrx/accumulator-anomalies/page.tsx`
-- `docs/api-contracts/events/fwa.hold_released.md (R1 BLOCK 8 fix — `fwa.*` prefix per event-bus.md, not `payment.*`)`
+- `docs/api-contracts/events/payment.hold_released.md (R1 BLOCK 8 fix — `fwa.*` prefix per event-bus.md, not `payment.*`)`
 - `docs/api-contracts/events/fwa.graph_run_completed.md`
 
 **Empty-state page pattern** (R1 BLOCK 10 fix — verified against existing portal-local component):
@@ -1833,9 +1833,9 @@ No `lucide-react` icon imports needed — `ComingSoonPage` already renders the `
 
 **Event contract docs** (full content — spec §11.5 instantiated verbatim):
 
-`docs/api-contracts/events/fwa.hold_released.md (R1 BLOCK 8 fix — `fwa.*` prefix per event-bus.md, not `payment.*`)`:
+`docs/api-contracts/events/payment.hold_released.md (R1 BLOCK 8 fix — `fwa.*` prefix per event-bus.md, not `payment.*`)`:
 ```markdown
-# Event Contract: fwa.hold_released
+# Event Contract: payment.hold_released
 
 **Version:** 1.0
 **Publisher:** modules/reclaimrx
@@ -1847,7 +1847,7 @@ No `lucide-react` icon imports needed — `ComingSoonPage` already renders the `
 
 | Field | Type | Value |
 |---|---|---|
-| event_type | string | `"fwa.hold_released"` |
+| event_type | string | `"payment.hold_released"` |
 | schema_version | string | `"1.0"` |
 | tenant_id | UUID | Envelope-level; always present |
 | ordering_key | string | `hold_id` (per-hold ordering) |
@@ -1924,7 +1924,7 @@ Transactional outbox (spec §7.2 + R1 BLOCK 4). The outbox row is written in the
 
 ## Forward compatibility
 
-Same rule as fwa.hold_released — consumers MUST ignore unknown fields.
+Same rule as payment.hold_released — consumers MUST ignore unknown fields.
 
 ## Publish mechanism
 

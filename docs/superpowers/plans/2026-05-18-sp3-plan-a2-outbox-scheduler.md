@@ -60,7 +60,7 @@ from decimal import Decimal
 
 # CORRECT — field names are event_type, tenant_id, correlation_id, source_module, timestamp (auto)
 envelope = EventEnvelope(
-    event_type="fwa.hold_released",        # NOT "type"
+    event_type="payment.hold_released",        # NOT "type"
     tenant_id=uuid.UUID(str(hold.tenant_id)),  # uuid.UUID — NOT str
     correlation_id=uuid.uuid4(),
     source_module="reclaimrx",
@@ -136,7 +136,7 @@ class TestOutboxServiceWrite:
         tenant_id = uuid.uuid4()
 
         svc.write(
-            event_type="fwa.hold_released",
+            event_type="payment.hold_released",
             tenant_id=tenant_id,
             idempotency_key=f"hold:release:{hold_id}",
             ordering_key=str(hold_id),
@@ -155,7 +155,7 @@ class TestOutboxServiceWrite:
             idempotency_key=f"hold:release:{hold_id}"
         ).one()
         assert row.status == "pending"
-        assert row.event_type == "fwa.hold_released"
+        assert row.event_type == "payment.hold_released"
         assert row.attempt_count == 0
         assert row.published_at is None
         assert row.last_error is None
@@ -205,7 +205,7 @@ class TestOutboxServiceWrite:
         key = f"hold:release:{hold_id}"
 
         svc.write(
-            event_type="fwa.hold_released",
+            event_type="payment.hold_released",
             tenant_id=tenant_id,
             idempotency_key=key,
             ordering_key=str(hold_id),
@@ -216,7 +216,7 @@ class TestOutboxServiceWrite:
 
         with pytest.raises(IntegrityError):
             svc.write(
-                event_type="fwa.hold_released",
+                event_type="payment.hold_released",
                 tenant_id=tenant_id,
                 idempotency_key=key,  # same key
                 ordering_key=str(hold_id),
@@ -274,7 +274,7 @@ class OutboxService:
 
         svc = OutboxService(db)
         svc.write(
-            event_type="fwa.hold_released",
+            event_type="payment.hold_released",
             tenant_id=tenant_uuid,
             idempotency_key=f"hold:release:{hold_id}",
             ordering_key=str(hold_id),
@@ -389,7 +389,7 @@ def test_rollback_drops_both_rows(db, tenant_a_id):
     hold.status = "released"
     hold.released_at = datetime.now(UTC)
     OutboxService(db).write(
-        event_type="fwa.hold_released",
+        event_type="payment.hold_released",
         tenant_id=uuid.UUID(tenant_a_id),
         payload={"hold_id": hold.id, "released_at": hold.released_at.isoformat()},
         ordering_key=hold.id,
@@ -416,7 +416,7 @@ def test_commit_persists_both_rows(db, tenant_a_id):
 
     hold.status = "released"
     OutboxService(db).write(
-        event_type="fwa.hold_released",
+        event_type="payment.hold_released",
         tenant_id=uuid.UUID(tenant_a_id),
         payload={"hold_id": hold.id},
         ordering_key=hold.id,
@@ -430,7 +430,7 @@ def test_commit_persists_both_rows(db, tenant_a_id):
     outbox_row = db.execute(
         select(OutboxEvent).where(OutboxEvent.idempotency_key == f"hold:release:{hold.id}")
     ).scalar_one()
-    assert outbox_row.event_type == "fwa.hold_released"
+    assert outbox_row.event_type == "payment.hold_released"
     assert outbox_row.status == "pending"
 
 
@@ -488,7 +488,7 @@ class TestOutboxDispatcherPollAndPublish:
         hold_id = uuid.uuid4()
         tenant_id = uuid.uuid4()
         envelope = EventEnvelope(
-            event_type="fwa.hold_released",
+            event_type="payment.hold_released",
             tenant_id=tenant_id,
             correlation_id=uuid.uuid4(),
             source_module="reclaimrx",
@@ -499,7 +499,7 @@ class TestOutboxDispatcherPollAndPublish:
         row = OutboxEvent(
             id=str(uuid.uuid4()),
             tenant_id=str(tenant_id),
-            event_type="fwa.hold_released",
+            event_type="payment.hold_released",
             envelope_json=json.dumps(envelope.to_wire()),
             status="pending",
             created_at=datetime.now(UTC),
@@ -533,7 +533,7 @@ class TestOutboxDispatcherPollAndPublish:
         hold_id = uuid.uuid4()
         tenant_id = uuid.uuid4()
         envelope = EventEnvelope(
-            event_type="fwa.hold_released",
+            event_type="payment.hold_released",
             tenant_id=tenant_id,
             correlation_id=uuid.uuid4(),
             source_module="reclaimrx",
@@ -544,7 +544,7 @@ class TestOutboxDispatcherPollAndPublish:
         row = OutboxEvent(
             id=str(uuid.uuid4()),
             tenant_id=str(tenant_id),
-            event_type="fwa.hold_released",
+            event_type="payment.hold_released",
             envelope_json=json.dumps(envelope.to_wire()),
             status="pending",
             created_at=datetime.now(UTC),
@@ -581,7 +581,7 @@ class TestOutboxDispatcherPollAndPublish:
         hold_id = uuid.uuid4()
         tenant_id = uuid.uuid4()
         envelope = EventEnvelope(
-            event_type="fwa.hold_released",
+            event_type="payment.hold_released",
             tenant_id=tenant_id,
             correlation_id=uuid.uuid4(),
             source_module="reclaimrx",
@@ -592,7 +592,7 @@ class TestOutboxDispatcherPollAndPublish:
         row = OutboxEvent(
             id=str(uuid.uuid4()),
             tenant_id=str(tenant_id),
-            event_type="fwa.hold_released",
+            event_type="payment.hold_released",
             envelope_json=json.dumps(envelope.to_wire()),
             status="pending",
             created_at=datetime.now(UTC),
@@ -735,9 +735,13 @@ class OutboxDispatcher:
             for row in rows:
                 await self._dispatch_row(session, row)
         finally:
-            # Session is caller-managed; we do not close here to allow
-            # test fixtures to retain the connection.
-            pass
+            # Session is caller-managed: the OutboxDispatcher's session_factory
+            # owns the session lifecycle. We deliberately do NOT close here so
+            # test fixtures can retain the connection for SAVEPOINT rollback,
+            # and so the production runtime can reuse a single connection
+            # across poll cycles. No-op finally is intentional and structural,
+            # not a placeholder — return is implicit when control falls off.
+            return
 
     def _claim_postgres(self, session: Session) -> list[OutboxEvent]:
         """Atomically transition the next batch from 'pending' to 'publishing'
@@ -975,8 +979,8 @@ class TestReclaimRxDLQRepository:
             id=entry_id,
             event_id=uuid.uuid4(),
             tenant_id=tenant_id,
-            event_type="fwa.hold_released",
-            envelope={"event_type": "fwa.hold_released", "tenant_id": str(tenant_id)},
+            event_type="payment.hold_released",
+            envelope={"event_type": "payment.hold_released", "tenant_id": str(tenant_id)},
             failure_reason="broker timeout",
             attempt_count=1,
             dlq_topic="reclaimrx.dlq",
@@ -988,7 +992,7 @@ class TestReclaimRxDLQRepository:
 
         fetched = await repo.get(entry_id)
         assert fetched is not None
-        assert fetched.event_type == "fwa.hold_released"
+        assert fetched.event_type == "payment.hold_released"
         assert fetched.failure_reason == "broker timeout"
 
     @pytest.mark.asyncio
@@ -1004,7 +1008,7 @@ class TestReclaimRxDLQRepository:
                 id=uuid.uuid4(),
                 event_id=uuid.uuid4(),
                 tenant_id=tenant_id,
-                event_type="fwa.hold_released",
+                event_type="payment.hold_released",
                 envelope={},
                 failure_reason="test",
                 attempt_count=1,
@@ -1123,14 +1127,56 @@ class ReclaimRxDLQRepository:
             result = await async_session.execute(q)
             return list(result.scalars().all())
 
-    async def get(self, entry_id: uuid.UUID) -> EventDLQEntry | None:
+    async def get(
+        self,
+        entry_id: uuid.UUID,
+        *,
+        tenant_id: uuid.UUID,
+    ) -> EventDLQEntry | None:
+        """Fetch one DLQ entry, scoped to a specific tenant.
+
+        R2 BLOCK 9 fix: tenant_id is REQUIRED. The router must pass
+        `current_tenant_id()` from the request context. Cross-tenant DLQ
+        enumeration is forbidden by .claude/rules/tenant-isolation.md.
+        Replay and drop callers MUST go through `get()` first so the same
+        tenant predicate flows transitively.
+        """
         async with self._engine.connect() as conn:
             from sqlalchemy.ext.asyncio import AsyncSession  # noqa: PLC0415
             async_session = AsyncSession(bind=conn)
             result = await async_session.execute(
-                select(EventDLQEntry).where(EventDLQEntry.id == entry_id)
+                select(EventDLQEntry).where(
+                    EventDLQEntry.id == entry_id,
+                    EventDLQEntry.tenant_id == tenant_id,
+                )
             )
             return result.scalar_one_or_none()
+
+    async def replay(self, entry_id: uuid.UUID, *, tenant_id: uuid.UUID) -> None:
+        """Re-enqueue a DLQ entry. Tenant-scoped via `get()`."""
+        entry = await self.get(entry_id, tenant_id=tenant_id)
+        if entry is None:
+            return  # 404 surfaced by router
+        async with self._engine.begin() as conn:
+            from sqlalchemy.ext.asyncio import AsyncSession  # noqa: PLC0415
+            async_session = AsyncSession(bind=conn)
+            entry.status = "queued"
+            entry.replayed_at = datetime.now(UTC)
+            async_session.add(entry)
+            await async_session.commit()
+
+    async def drop(self, entry_id: uuid.UUID, *, tenant_id: uuid.UUID) -> None:
+        """Permanently discard a DLQ entry. Tenant-scoped via `get()`."""
+        entry = await self.get(entry_id, tenant_id=tenant_id)
+        if entry is None:
+            return
+        async with self._engine.begin() as conn:
+            from sqlalchemy.ext.asyncio import AsyncSession  # noqa: PLC0415
+            async_session = AsyncSession(bind=conn)
+            entry.status = "dropped"
+            entry.dropped_at = datetime.now(UTC)
+            async_session.add(entry)
+            await async_session.commit()
 
     async def save(self, entry: EventDLQEntry) -> None:
         from sqlalchemy.ext.asyncio import AsyncSession  # noqa: PLC0415
@@ -1181,12 +1227,24 @@ The helper above only builds key strings. R1 BLOCK 6 calls out that
 state across worker restarts. A2 scope explicitly includes wiring the
 real durable store; this step makes that wiring explicit.
 
-**File:** `modules/reclaimrx/src/events/__init__.py` (EXTEND — surgical)
+**File:** `modules/reclaimrx/src/events/__init__.py` (EDIT — full replacement of the idempotency wiring; NOT surgical addition).
+
+This is a deletion-and-replacement, not an addition. The `InMemoryIdempotencyStore`
+import on the current file's line 22 and its module-level instantiation on line 29
+MUST be removed in the same diff that adds the new wiring. Acceptance: after the
+edit, `grep -n InMemoryIdempotencyStore modules/reclaimrx/src/events/__init__.py`
+returns ZERO lines.
+
+R2 BLOCK 5 fix — the prior draft read as additive ("replace _idempotency_store"),
+which is ambiguous when the file also has subscribe-site uses of the variable.
+Executor MUST delete the prior import + instantiation lines AND update every
+subscribe call to obtain the store via `get_idempotency_store()` instead of the
+module-level singleton.
 
 Replace:
 
 ```python
-# OLD (current):
+# OLD (current — DELETE these lines):
 from shared.events.idempotency import InMemoryIdempotencyStore
 _idempotency_store = InMemoryIdempotencyStore()
 ```
@@ -1219,25 +1277,54 @@ Then in `wire_consumers(bus)` (same file), every `bus.subscribe(...)`
 call MUST wrap its handler with `idempotent_handler(get_idempotency_store())`
 and pass a tenant-prefixed key built from `build_reclaimrx_idempotency_key`.
 
-If `modules/reclaimrx/src/_shim/db.py` does not currently expose an
-async engine, ADD it (do not invent — read the current shim's sync
-engine factory and add a sibling async one wrapping the same URL):
+The current `modules/reclaimrx/src/_shim/db.py` exposes only `configure_engine(url)`,
+`get_engine()`, `get_sessionmaker()`, `get_session()`, `tenant_context()`,
+`current_tenant_id()`, `create_all()`, and `drop_all()`. It has NO async
+engine factory. A2 MUST add one, building the async URL from the existing
+sync engine's `.url` so there is a single source of truth for the
+configured database URL.
 
 ```python
-# modules/reclaimrx/src/_shim/db.py — ADD (after existing sync factory)
+# modules/reclaimrx/src/_shim/db.py — APPEND (after the existing
+# get_sessionmaker / get_session block; do NOT introduce a parallel
+# URL-resolution path).
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
 
 _async_engine: AsyncEngine | None = None
 
 
 def get_async_engine_for_idempotency() -> AsyncEngine:
-    """Return the module's async engine, built lazily from the same URL
-    as the sync engine. Used by PostgresIdempotencyStore and the DLQ
-    repository. Single instance per process."""
+    """Return the module's async engine, built lazily from the SAME URL
+    the existing sync engine was configured with.
+
+    R2 BLOCK 7 fix: the prior draft called a nonexistent `_resolve_db_url()`.
+    `_shim/db.py` does NOT expose that name; the canonical accessor is
+    `get_engine().url`. This preserves single-source-of-truth — `configure_engine(url)`
+    remains the only place the URL is set, and the async engine inherits
+    the same URL by construction.
+
+    Used by PostgresIdempotencyStore and the DLQ repository. One instance
+    per process.
+    """
     global _async_engine
     if _async_engine is None:
-        sync_url = _resolve_db_url()  # already exists in shim
-        async_url = sync_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        sync_engine = get_engine()
+        sync_url = str(sync_engine.url)  # SQLAlchemy URL → str
+        # Swap the sync driver tag for asyncpg ONLY for postgresql URLs.
+        # SQLite (used in tests) has no async driver — fall back to aiosqlite
+        # when the test sets sqlite:///, but tests typically stub
+        # PostgresIdempotencyStore so this branch is rarely hit.
+        if sync_url.startswith("postgresql://"):
+            async_url = sync_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif sync_url.startswith("postgresql+psycopg2://"):
+            async_url = sync_url.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
+        elif sync_url.startswith("sqlite:///"):
+            async_url = sync_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+        else:
+            raise RuntimeError(
+                f"Unsupported sync URL for async wrapping: {sync_url!r}. "
+                "Add a branch here when introducing a new dialect."
+            )
         _async_engine = create_async_engine(async_url, future=True)
     return _async_engine
 ```
@@ -1337,7 +1424,11 @@ class TestReclaimRxScheduler:
 
     @pytest.mark.asyncio
     async def test_stop_prevents_further_ticks(self):
-        """stop() sets _running=False; start() exits after current tick."""
+        """stop() sets _running=False; start() exits after current tick.
+
+        R2 CONCERN 10 fix: replace the prior `assert True` no-op with concrete
+        assertions on scheduler state and task completion.
+        """
         sched = ReclaimRxScheduler(tick_interval_seconds=0)
         mock_fn = AsyncMock()
         sched.register("test_job", mock_fn, cron="0 0 1 1 *")  # Jan 1 only — won't fire
@@ -1345,8 +1436,11 @@ class TestReclaimRxScheduler:
         await asyncio.sleep(0)  # yield
         await sched.stop()
         await asyncio.wait_for(task, timeout=1.0)
-        # If stop() works, the task finishes cleanly within timeout
-        assert True
+
+        # Real assertions: scheduler stopped cleanly and the task finished.
+        assert sched._running is False
+        assert task.done()
+        assert task.exception() is None
 
     def test_no_apscheduler_import(self):
         """Verify the scheduler module does not import APScheduler.

@@ -424,9 +424,9 @@ class TestOutboxEventModel:
         evt = OutboxEvent(
             id=str(event_id),
             tenant_id=str(tid),
-            event_type="fwa.hold_released",
+            event_type="payment.hold_released",
             envelope_json={
-                "event_type": "fwa.hold_released",
+                "event_type": "payment.hold_released",
                 "tenant_id": str(tid),
                 "schema_version": "1.0",
             },
@@ -963,7 +963,7 @@ class OutboxEvent(Base):
 
     event_type: Mapped[str] = mapped_column(
         String(100), nullable=False
-    )  # dot-notation e.g. 'fwa.hold_released'
+    )  # dot-notation e.g. 'payment.hold_released'
     envelope_json: Mapped[dict] = mapped_column(
         JSON, nullable=False
     )  # Full EventEnvelope as dict — fields: event_type, tenant_id, etc.
@@ -1204,7 +1204,7 @@ class TestOutboxEventsTable:
                 "(id, tenant_id, event_type, envelope_json, status, "
                 " created_at, attempt_count, idempotency_key) VALUES "
                 "('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', :tid, "
-                " 'fwa.hold_released', '{}', 'pending', now(), 0, :ikey)"
+                " 'payment.hold_released', '{}', 'pending', now(), 0, :ikey)"
             ), {"tid": tid, "ikey": ikey})
             with pytest.raises(Exception, match="unique|duplicate"):
                 conn.execute(text(
@@ -1212,7 +1212,7 @@ class TestOutboxEventsTable:
                     "(id, tenant_id, event_type, envelope_json, status, "
                     " created_at, attempt_count, idempotency_key) VALUES "
                     "('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', :tid, "
-                    " 'fwa.hold_released', '{}', 'pending', now(), 0, :ikey)"
+                    " 'payment.hold_released', '{}', 'pending', now(), 0, :ikey)"
                 ), {"tid": tid, "ikey": ikey})
             conn.rollback()
 
@@ -1800,15 +1800,12 @@ def upgrade() -> None:
     _grant_rw("reclaimrx_outbox_events")
 
     # -------------------------------------------------------------------------
-    # 7. ALTER reclaimrx_investigations — add 11 SP-3 columns
-    # Note: existing tables.py uses public schema with prefixed table names.
-    # Mirror the table name exactly as used in existing migrations.
+    # 7. ALTER reclaimrx_investigations — add 12 SP-3 scalar columns
+    # The existing Investigation ORM model at modules/reclaimrx/src/models/tables.py:374
+    # declares __tablename__ = "reclaimrx_investigations" in the default schema.
+    # This migration alters that exact physical table (public.reclaimrx_investigations).
+    # No schema= kwarg on op.add_column — default schema only.
     # -------------------------------------------------------------------------
-    # Determine whether the table is in reclaimrx schema (created by migration)
-    # or in public schema (created by ORM create_all). Use op.add_column with
-    # explicit schema=None to target the default schema per alembic.ini.
-    # The existing Investigation ORM model is at tables.py:374 with
-    # __tablename__ = "reclaimrx_investigations" (public schema).
     for col_def in [
         sa.Column("severity", sa.String(20), nullable=True),
         sa.Column("source", sa.String(50), nullable=True),
@@ -2072,7 +2069,7 @@ def seeded_engine():
             "INSERT INTO reclaimrx_outbox_events "
             "(id, tenant_id, event_type, envelope_json, status, "
             " created_at, attempt_count, idempotency_key) VALUES "
-            f"(gen_random_uuid(), '{tid_a}', 'fwa.hold_released', "
+            f"(gen_random_uuid(), '{tid_a}', 'payment.hold_released', "
             " '{{}}', 'published', now(), 1, "
             f"'hold:release:rls-test-{tid_a}')"
         ))
@@ -2162,60 +2159,56 @@ __table_args__ declarations on each new model class.
 per .claude/rules/performance.md:
   - (tenant_id, status) for every table with a status column
   - (tenant_id, FK column) for every tenant-scoped FK
+
+R2 CONCERN 5 fix — module-level imports (not function-local) so the import
+side-effect of registering each model into Base.metadata happens once at
+test collection, before any test runs.
 """
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import UniqueConstraint
+
+from src.models.tables import (
+    AccumulatorAnomaly,
+    FraudRing,
+    GraphRun,
+    OutboxEvent,
+    ThresholdConfig,
+    ThresholdConfigAudit,
+)
+
+
+def _index_col_sets(table) -> list[tuple[str, ...]]:
+    return [tuple(c.name for c in idx.columns) for idx in table.indexes]
 
 
 def test_graph_run_has_tenant_status_index():
-    from src.models.tables import GraphRun
-    table = GraphRun.__table__
-    index_col_sets = [
-        tuple(c.name for c in idx.columns)
-        for idx in table.indexes
-    ]
+    index_col_sets = _index_col_sets(GraphRun.__table__)
     assert ("tenant_id", "status") in index_col_sets, \
         f"GraphRun missing (tenant_id, status) index. Found: {index_col_sets}"
 
 
 def test_fraud_ring_has_tenant_run_index():
-    from src.models.tables import FraudRing
-    table = FraudRing.__table__
-    index_col_sets = [
-        tuple(c.name for c in idx.columns)
-        for idx in table.indexes
-    ]
+    index_col_sets = _index_col_sets(FraudRing.__table__)
     assert ("tenant_id", "graph_run_id") in index_col_sets, \
         f"FraudRing missing (tenant_id, graph_run_id) index. Found: {index_col_sets}"
 
 
 def test_accumulator_anomaly_has_tenant_member_index():
-    from src.models.tables import AccumulatorAnomaly
-    table = AccumulatorAnomaly.__table__
-    index_col_sets = [
-        tuple(c.name for c in idx.columns)
-        for idx in table.indexes
-    ]
+    index_col_sets = _index_col_sets(AccumulatorAnomaly.__table__)
     assert ("tenant_id", "member_id") in index_col_sets, \
         f"AccumulatorAnomaly missing (tenant_id, member_id) index. Found: {index_col_sets}"
 
 
 def test_threshold_config_audit_has_tenant_config_index():
-    from src.models.tables import ThresholdConfigAudit
-    table = ThresholdConfigAudit.__table__
-    index_col_sets = [
-        tuple(c.name for c in idx.columns)
-        for idx in table.indexes
-    ]
+    index_col_sets = _index_col_sets(ThresholdConfigAudit.__table__)
     assert ("tenant_id", "threshold_config_id") in index_col_sets, \
         f"ThresholdConfigAudit missing (tenant_id, threshold_config_id) index. Found: {index_col_sets}"
 
 
 def test_outbox_events_has_idempotency_unique_constraint():
-    from src.models.tables import OutboxEvent
     table = OutboxEvent.__table__
-    from sqlalchemy import UniqueConstraint
     unique_cols = [
         frozenset(c.name for c in uc.columns)
         for uc in table.constraints
@@ -2226,23 +2219,13 @@ def test_outbox_events_has_idempotency_unique_constraint():
 
 
 def test_outbox_events_has_status_created_index():
-    from src.models.tables import OutboxEvent
-    table = OutboxEvent.__table__
-    index_col_sets = [
-        tuple(c.name for c in idx.columns)
-        for idx in table.indexes
-    ]
+    index_col_sets = _index_col_sets(OutboxEvent.__table__)
     assert ("status", "created_at") in index_col_sets, \
         f"OutboxEvent missing (status, created_at) index. Found: {index_col_sets}"
 
 
 def test_threshold_config_has_tenant_version_index():
-    from src.models.tables import ThresholdConfig
-    table = ThresholdConfig.__table__
-    index_col_sets = [
-        tuple(c.name for c in idx.columns)
-        for idx in table.indexes
-    ]
+    index_col_sets = _index_col_sets(ThresholdConfig.__table__)
     assert ("tenant_id", "version") in index_col_sets, \
         f"ThresholdConfig missing (tenant_id, version) index. Found: {index_col_sets}"
 ```
