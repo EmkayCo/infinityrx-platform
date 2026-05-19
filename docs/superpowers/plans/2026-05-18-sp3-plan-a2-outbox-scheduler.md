@@ -1309,7 +1309,7 @@ class ReclaimRxDLQRepository:
 
         R6 BLOCK-17 fix: `tenant_id` is OPTIONAL to satisfy the shared
         `shared.events.dlq.DLQRepository` protocol signature
-        (`get(entry_id) -> ... | None`). When the caller is the shared
+        (`get(entry_id) -> EventDLQEntry | None`). When the caller is the shared
         `DLQService.replay` or `DLQService.drop` (which both call
         `self._repo.get(entry_id)` with NO tenant_id kwarg), we resolve
         tenant from `shared.db.tenant_context.current_tenant_id()`
@@ -1473,7 +1473,6 @@ from shared.events.idempotency import (
     PostgresIdempotencyStore,
     idempotent_handler,
 )
-from src._shim.db import get_async_engine_for_idempotency
 
 # Module-level singleton — built once from the async engine; consumer
 # wiring imports this object and passes it to idempotent_handler.
@@ -1481,9 +1480,19 @@ _idempotency_store: PostgresIdempotencyStore | None = None
 
 
 def get_idempotency_store() -> PostgresIdempotencyStore:
-    """Lazy accessor — wire_consumers() calls this once at startup."""
+    """Lazy accessor — wire_consumers() calls this once at startup.
+
+    R9 BLOCK-27 fix: the engine factory import lives INSIDE this function,
+    not at module scope. A module-scope `from src._shim.db import
+    get_async_engine_for_idempotency` would bind the factory at first
+    import of `src.events`, defeating any later `monkeypatch.setattr`
+    on `src._shim.db.get_async_engine_for_idempotency`. Importing
+    per-call lets tests stub the factory before `get_idempotency_store()`
+    is invoked.
+    """
     global _idempotency_store
     if _idempotency_store is None:
+        from src._shim.db import get_async_engine_for_idempotency  # noqa: PLC0415
         engine = get_async_engine_for_idempotency()
         _idempotency_store = PostgresIdempotencyStore(engine=engine)
     return _idempotency_store
@@ -1552,39 +1561,53 @@ def get_async_engine_for_idempotency() -> AsyncEngine:
 
 R1 BLOCK 6 fix: prove the in-memory store is gone and the durable store
 is used by every consumer registered via wire_consumers().
+
+R9 BLOCK-27 fix: do NOT import `src.main` or `src.events` at module
+scope — that would freeze a reference to `get_async_engine_for_idempotency`
+inside `src.events` BEFORE pytest runs the test (and therefore before
+monkeypatch.setattr could replace it). All imports happen inside the
+test body, AFTER the patch is in place.
 """
 from __future__ import annotations
 
 import pytest
-from src.main import create_app
 
 
 def test_idempotency_store_is_postgres_not_in_memory(monkeypatch):
     """get_idempotency_store() returns PostgresIdempotencyStore, not the
     InMemoryIdempotencyStore stub.
 
-    R8 BLOCK-27 fix: monkeypatch `get_async_engine_for_idempotency` to
-    return a fake AsyncEngine. Calling `create_app()` triggers the
-    factory, and CI does not have a live Postgres at module load time
-    (the idempotency-store wiring is unit-level, not integration-level).
-    A real engine-bound integration test lives in
-    `test_idempotency_real_postgres.py` and is gated on
-    `RECLAIMRX_TEST_PG_URL`.
+    R8 BLOCK-27 / R9 BLOCK-27 fix: stub `get_async_engine_for_idempotency`
+    BEFORE any production module imports it. CI does not have a live
+    Postgres at module load time (this is unit-level wiring; the real
+    integration variant lives in `test_idempotency_real_postgres.py` and
+    is gated on `RECLAIMRX_TEST_PG_URL`).
     """
-    from shared.events.idempotency import (
-        PostgresIdempotencyStore,
-        InMemoryIdempotencyStore,
-    )
-    from src.events import get_idempotency_store
-
-    # Stub the async engine factory so create_app() does not try to
-    # open a real Postgres connection at import-time.
     from unittest.mock import MagicMock  # noqa: PLC0415
+
+    # Stub the async engine factory FIRST, in the canonical location.
+    # The accessor in src.events imports it on every call to
+    # get_idempotency_store() (see R9 BLOCK-27 follow-up in events/__init__.py),
+    # so the patch takes effect even though src.events may already be
+    # imported by other tests in the same session.
     fake_engine = MagicMock(name="FakeAsyncEngine")
     monkeypatch.setattr(
         "src._shim.db.get_async_engine_for_idempotency",
         lambda: fake_engine,
     )
+
+    # Reset the module-level idempotency-store singleton so a prior
+    # test in this session cannot mask the patched factory.
+    import src.events as _events_module  # noqa: PLC0415
+    monkeypatch.setattr(_events_module, "_idempotency_store", None)
+
+    # Imports happen AFTER the patch + singleton reset.
+    from shared.events.idempotency import (  # noqa: PLC0415
+        PostgresIdempotencyStore,
+        InMemoryIdempotencyStore,
+    )
+    from src.events import get_idempotency_store  # noqa: PLC0415
+    from src.main import create_app  # noqa: PLC0415
 
     # Force app initialization so wire_consumers runs
     _ = create_app()
@@ -1861,8 +1884,8 @@ class ReclaimRxScheduler:
         """Blocking coroutine — run until stop() is called.
 
         R8 BLOCK-25 fix: ALWAYS yield to the event loop between ticks via
-        `asyncio.sleep(...)`. The prior guard `if self._tick_interval > 0:
-        await asyncio.sleep(...)` would skip the yield entirely when
+        `asyncio.sleep(self._tick_interval)`. The prior guard `if self._tick_interval > 0:
+        await asyncio.sleep(self._tick_interval)` would skip the yield entirely when
         tick_interval_seconds=0 (the value used by unit tests), producing
         an infinite busy-loop that starved the event loop — stop()
         running on the same loop would never get scheduled, so the
@@ -1945,7 +1968,7 @@ def verify_audit_hash_chain(
     sync `session.execute()` / `session.scalars()` against a sync Session,
     which would block the asyncio event loop for the full table-walk
     duration if called directly from a coroutine. The scheduler wrapper
-    in `main.py` lifespan calls it via `asyncio.to_thread(...)` so the
+    in `main.py` lifespan calls it via `asyncio.to_thread(_run)` so the
     sync work runs in a worker thread and the event loop stays
     responsive during the daily scan.
 
@@ -2101,7 +2124,7 @@ async def check_dlq_depth(engine: "AsyncEngine") -> dict[str, Any]:
 
     now = datetime.now(UTC)
 
-    # R6 BLOCK-19 fix: use `await conn.execute(...)` directly on the
+    # R6 BLOCK-19 fix: use `await conn.execute(stmt)` directly on the
     # AsyncConnection instead of wrapping in an AsyncSession. The
     # AsyncSession+MagicMock combination made unit testing impossible
     # (SQLAlchemy internals tripped on the mock conn). Direct conn.execute
@@ -2470,7 +2493,7 @@ await asyncio.gather(dispatcher_task, scheduler_task, return_exceptions=True)
 # In create_app(): replace _get_dlq_service to use real repo
 # R7 BLOCK-23 fix: the prior version referenced `async_engine` which was a
 # lifespan-local binding (visible only inside the `async def lifespan` body).
-# `_get_dlq_service` is wired as the FastAPI `Depends(...)` provider for the
+# `_get_dlq_service` is wired as the FastAPI `Depends(_get_dlq_service)` provider for the
 # DLQ router, called per-request — at request time the lifespan-local
 # variable is out of scope and the function would NameError. Resolve the
 # engine fresh on each call via `get_async_engine_for_idempotency()` — that
