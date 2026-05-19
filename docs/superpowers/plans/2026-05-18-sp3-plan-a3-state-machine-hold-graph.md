@@ -1600,12 +1600,14 @@ class HoldInvestigationMismatchError(ValueError):
 class HoldReleaseRequest(BaseModel):
     """A4 BLOCK 1 fix — typed request body owned by A4 schemas; A3 references it.
 
-    `idempotency_key` is REQUIRED per A4 BLOCK 6 contract. Format:
+    R3 NEW-R3-2 fix: `idempotency_key` is supplied via the `Idempotency-Key`
+    HTTP header (handler signature below uses `Header(..., alias="...")`),
+    NOT a body field. The header-only contract is the single source of truth
+    so two competing contracts cannot drift apart. Format:
         hold:release:{hold_id}:{actor_id}
     """
     reason: str
     investigation_id: str
-    idempotency_key: str
     emergency_reason_code: str | None = None  # LEGAL_HOLD | REGULATORY_DIRECTIVE | IRRECOVERABLE_HARM | OTHER_WITH_NOTE
     emergency_note: str | None = None
 
@@ -1629,10 +1631,12 @@ from src.api.errors import build_error_envelope  # noqa: E402
 async def release_hold_v2(
     hold_id: str,
     body: HoldReleaseRequest,
-    # A4 BLOCK 13 dependency order: 401 → 403 role → 403 tenant → 403 MFA → business
+    # A4 BLOCK 13 dependency order: 401 → 403 role → 403 tenant → 403 MFA → idempotency → business
     user: CurrentUser = RECLAIMRX_INVESTIGATOR_DEP,
     _tenant_check: CurrentUser = Depends(require_tenant_match),
     _mfa: CurrentUser = Depends(require_mfa_elevated),
+    # R3 NEW-R3-2 fix: idempotency-key arrives via Header, not body field.
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
     db: Session = Depends(get_db),
 ) -> HoldReleaseRead:
     """Release a payment hold. Replaces DELETE /holds/{hold_id}.

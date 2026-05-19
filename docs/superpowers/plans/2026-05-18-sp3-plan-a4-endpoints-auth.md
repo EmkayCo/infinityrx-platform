@@ -601,12 +601,21 @@ class HoldReleaseRequest(BaseModel):
     Plan A3 owns the handler logic (state-machine release + outbox publish).
     A4 owns the request schema, MFA gating, tenant header validation,
     and idempotency-key contract.
+
+    R3 NEW-R3-2 fix: `idempotency_key` is supplied as the `Idempotency-Key`
+    HTTP header — NOT a body field. The two-contract overlap was ambiguous
+    and prone to drift. The handler reads the header via
+    `Header(..., alias="Idempotency-Key")`.
     """
     reason: str
     investigation_id: str  # UUID; FK validated in A3 service layer
-    # idempotency_key composed by client as `hold:release:{hold_id}:{actor_id}`
-    # and asserted in headers — see R1 BLOCK 6 fix below (POST idempotency).
-    idempotency_key: str
+    emergency_reason_code: Literal[
+        "LEGAL_HOLD",
+        "REGULATORY_DIRECTIVE",
+        "IRRECOVERABLE_HARM",
+        "OTHER_WITH_NOTE",
+    ] | None = None
+    emergency_note: str | None = None
 
 
 class HoldReleaseRead(BaseModel):
@@ -977,9 +986,10 @@ async def list_ml_scores(
     claim_id: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, le=200),
-    db: Session = Depends(get_db),
+    # R3 NEW-R3-1 fix — dependency order: user → tenant → MFA → idempotency → db.
     user: CurrentUser = RECLAIMRX_VIEWER_DEP,
     _tenant_check: CurrentUser = Depends(require_tenant_match),
+    db: Session = Depends(get_db),
 ) -> MlScoreListRead:
     """R1 BLOCK 1 fix: typed response_model (not `dict`)."""
     stmt = (
@@ -1016,9 +1026,10 @@ async def list_ml_scores(
 @router.get("/ml-scores/{score_id}/features", response_model=MlScoreFeatureRead)
 async def get_ml_score_features(
     score_id: str,
-    db: Session = Depends(get_db),
+    # R3 NEW-R3-1 fix — user → tenant → db
     user: CurrentUser = RECLAIMRX_VIEWER_DEP,
     _tenant_check: CurrentUser = Depends(require_tenant_match),
+    db: Session = Depends(get_db),
 ) -> MlScoreFeatureRead:
     row = db.execute(
         select(MlPrediction).where(
@@ -1044,9 +1055,10 @@ async def get_ml_score_features(
 )
 async def list_investigation_ml_scores(
     investigation_id: str,
-    db: Session = Depends(get_db),
+    # R3 NEW-R3-1 fix — user → tenant → db
     user: CurrentUser = RECLAIMRX_VIEWER_DEP,
     _tenant_check: CurrentUser = Depends(require_tenant_match),
+    db: Session = Depends(get_db),
 ) -> InvestigationMlScoreListRead:
     """R1 BLOCK 1 fix: typed response_model (not `dict`)."""
     # Verify investigation belongs to tenant (non-enumerating per R1 BLOCK 6)
@@ -1244,15 +1256,14 @@ from datetime import timedelta
 
 @router.post("/graph-runs/trigger", status_code=202, response_model=GraphRunRead)
 async def trigger_graph_run(
-    db: Session = Depends(get_db),
-    # R1 BLOCK 13 fix — dependency order: 401 → 403 role → 403 tenant → 403 MFA → business.
+    # R3 NEW-R3-1 fix — user → tenant → MFA → idempotency → db.
     user: CurrentUser = RECLAIMRX_INVESTIGATOR_DEP,
     _tenant_check: CurrentUser = Depends(require_tenant_match),
-    # R1 BLOCK 3 fix — graph trigger requires MFA per spec §7.
     _mfa: CurrentUser = Depends(require_mfa_elevated),
-    # R1 BLOCK 6 fix — POST idempotency-key contract for graph trigger.
-    # Header is REQUIRED; client must compose as `graph_run:{tenant_id}:{actor_id}:{client_nonce}`.
+    # POST idempotency-key contract.
+    # Header REQUIRED; client composes as `graph_run:{tenant_id}:{actor_id}:{client_nonce}`.
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
 ) -> GraphRunRead:
     """
     Trigger on-demand graph run. Rate limit: 1/hr/tenant (D13).
@@ -1530,11 +1541,12 @@ def test_put_thresholds_cross_tenant_isolated(client, db, admin_user):
 @router.put("/thresholds", response_model=ThresholdConfigRead)
 async def update_thresholds(
     body: ThresholdUpdateRequest,
-    db: Session = Depends(get_db),
+    # R3 NEW-R3-1 fix — user → tenant → MFA → idempotency → db.
     user: CurrentUser = RECLAIMRX_ADMIN_DEP,
     _tenant_check: CurrentUser = Depends(require_tenant_match),
     _mfa: CurrentUser = Depends(require_mfa_elevated),
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
 ) -> ThresholdConfigRead:
     """Admin-only threshold update (spec endpoint #17, D5, R1 CONCERN 2).
     Delegates version bumping + per-field hash-chained audit to ThresholdService (Plan A2).
@@ -1583,8 +1595,11 @@ Add `severity: str | None`, `source: str | None`, `page: int`, `page_size: int` 
 async def get_investigation(
     investigation_id: str,
     response: Response,  # FastAPI Response injection for header setting
+    # R3 NEW-R3-1 fix — user → tenant → MFA → db. PHI detail endpoint.
+    user: CurrentUser = RECLAIMRX_VIEWER_DEP,
+    _tenant_check: CurrentUser = Depends(require_tenant_match),
+    _mfa: CurrentUser = Depends(require_mfa_elevated),
     db: Session = Depends(get_db),
-    user: CurrentUser = Depends(require_mfa_elevated),  # MFA gate per D6a
 ) -> InvestigationRead:
     inv = db.execute(
         select(Investigation).where(
@@ -1797,10 +1812,11 @@ async def transition_investigation(
 async def add_investigation_note(
     investigation_id: str,
     body: InvestigationNoteCreate,
-    db: Session = Depends(get_db),
+    # R3 NEW-R3-1 fix — user → tenant → idempotency → db.
     user: CurrentUser = RECLAIMRX_INVESTIGATOR_DEP,
     _tenant_check: CurrentUser = Depends(require_tenant_match),
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
 ) -> InvestigationNoteRead:
     """R1 BLOCK 1 fix: typed response_model (not `dict`)."""
     from src.services.investigation_service import InvestigationService
@@ -1889,9 +1905,10 @@ async def list_rule_firings(
     severity: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, le=200),
-    db: Session = Depends(get_db),
+    # R3 NEW-R3-1 fix — user → tenant → db.
     user: CurrentUser = RECLAIMRX_VIEWER_DEP,
     _tenant_check: CurrentUser = Depends(require_tenant_match),
+    db: Session = Depends(get_db),
 ) -> RuleFiringListRead:
     stmt = select(FlaggedClaim).where(
         FlaggedClaim.tenant_id == str(user.tenant_id)

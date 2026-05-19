@@ -55,7 +55,7 @@ The existing `investigations/page.tsx` and `investigations/[id]/page.tsx` are ou
 |---|---|
 | Plan A5 oversize | 7 tasks — within 5-7 range. Tasks are cleanly parallelizable. |
 | Existing portal pages | DO NOT replace existing investigations pages — those are Plan B work. Only add the 6 NEW route pages that are missing. Leave `leakage`, `risk`, `wizard`, `recovery` untouched. |
-| Event contract doc location | `docs/api-contracts/events/payment.hold_released.md (R1 BLOCK 8 fix — `fwa.*` prefix per event-bus.md, not `payment.*`)` + `docs/api-contracts/events/fwa.graph_run_completed.md` per R2 NEW BLOCK 1 + spec §11.5 |
+| Event contract doc location | `docs/api-contracts/events/payment.hold_released.md` + `docs/api-contracts/events/fwa.graph_run_completed.md` per R2 NEW BLOCK 1 + spec §11.5 |
 | Contract test location | `packages/contract/src/__tests__/reclaimrx.test.ts` — mirrors prescriber-directory test |
 | Manifest update | Add `"reclaimrx"` to `modules` array in `packages/shell/src/_generated/manifest.json` and wire `RECLAIMRX_URL` env + `http://reclaimrx:8007/health` health check |
 | Reclaimrx backend URL/port | Backend runs at port 8007 (verified: `portal/operator/.env.local` has reclaimrx entries; if absent, add `RECLAIMRX_URL=http://reclaimrx:8007`) |
@@ -102,7 +102,7 @@ For SP-3 Plan A5 the simplest, surgical-changes-compliant pattern is to use the 
 
 ### D7 — Event contract docs
 
-Two markdown files per `.claude/rules/event-bus.md` format: `docs/api-contracts/events/payment.hold_released.md (R1 BLOCK 8 fix — `fwa.*` prefix per event-bus.md, not `payment.*`)` and `docs/api-contracts/events/fwa.graph_run_completed.md`. Both instantiate spec §11.5 contracts verbatim with envelope fields, payload fields, forward-compatibility rule, publisher/subscriber ownership, and version history.
+Two markdown files per `.claude/rules/event-bus.md` format: `docs/api-contracts/events/payment.hold_released.md` and `docs/api-contracts/events/fwa.graph_run_completed.md`. Both instantiate spec §11.5 contracts verbatim with envelope fields, payload fields, forward-compatibility rule, publisher/subscriber ownership, and version history.
 
 ---
 
@@ -136,8 +136,25 @@ export type Uuid = z.infer<typeof UuidSchema>;
  * adjustments and accumulator reversals carry negative balances; the prior
  * pattern /^\d+(\.\d+)?$/ silently rejected every valid negative response
  * at Zod parse time. Allow an optional leading `-` and a decimal portion.
+ *
+ * Use `DecimalStringSchema` for fields that MAY be negative (adjustments,
+ * reversals, signed deltas). For fields that MUST be non-negative
+ * (scores 0-1, hold volumes, false-positive rates, recovered amounts —
+ * which are positive by definition), use `NonNegativeDecimalStringSchema`
+ * below. R3 NEW-8 fix.
  */
 export const DecimalStringSchema = z.string().regex(/^-?\d+(\.\d+)?$/);
+
+/**
+ * Non-negative decimal serialized as string.
+ *
+ * R3 NEW-8 fix: scores, hold volumes, recovered amounts, and false-positive
+ * rates are non-negative by definition; reusing the negative-accepting
+ * DecimalStringSchema for these would silently admit invalid server payloads
+ * (e.g. `-0.5` for `false_positive_rate`). Bind these fields to this stricter
+ * schema instead.
+ */
+export const NonNegativeDecimalStringSchema = z.string().regex(/^\d+(\.\d+)?$/);
 
 export const InvestigationStatusSchema = z.enum([
   "open",
@@ -214,7 +231,8 @@ export const RuleFiringSchema = z.object({
   rule_id: UuidSchema,
   rule_code: z.string(),
   claim_id: z.string(),
-  score: DecimalStringSchema,
+  // R3 NEW-8 fix: rule firing scores are 0-1 (non-negative).
+  score: NonNegativeDecimalStringSchema,
   fired_at: z.string().datetime(),
   investigation_id: UuidSchema.nullable(),
 });
@@ -234,7 +252,8 @@ export const MlScoreSchema = z.object({
   tenant_id: UuidSchema,
   claim_id: z.string(),
   model_id: UuidSchema,
-  score: DecimalStringSchema,
+  // R3 NEW-8 fix: ML scores are 0-1 (non-negative).
+  score: NonNegativeDecimalStringSchema,
   scored_at: z.string().datetime(),
   investigation_id: UuidSchema.nullable(),
 });
@@ -360,7 +379,8 @@ export const FraudRingSchema = z.object({
   tenant_id: UuidSchema,
   graph_run_id: UuidSchema,
   detected_at: z.string().datetime(),
-  density_score: DecimalStringSchema,
+  // R3 NEW-8 fix: density is a ratio 0-1, non-negative by definition.
+  density_score: NonNegativeDecimalStringSchema,
   node_count: z.number().int().nonnegative(),
   edge_count: z.number().int().nonnegative(),
   entity_refs: z.array(EntityRefSchema),
@@ -374,14 +394,15 @@ export type FraudRing = z.infer<typeof FraudRingSchema>;
 export const RecoveryAggregationSchema = z.object({
   period: z.string(),
   group_key: z.string(),
-  total_recovered: DecimalStringSchema,
+  // R3 NEW-8 fix: recovered dollars are non-negative by definition.
+  total_recovered: NonNegativeDecimalStringSchema,
   investigation_count: z.number().int().nonnegative(),
 });
 export type RecoveryAggregation = z.infer<typeof RecoveryAggregationSchema>;
 
 export const RecoveryAggregationResponseSchema = z.object({
   results: z.array(RecoveryAggregationSchema),
-  total_recovered: DecimalStringSchema,
+  total_recovered: NonNegativeDecimalStringSchema,
 });
 
 // ── Dashboard summary ──────────────────────────────────────────────────────
@@ -389,9 +410,10 @@ export const RecoveryAggregationResponseSchema = z.object({
 export const DashboardSummarySchema = z.object({
   open_investigations: z.number().int().nonnegative(),
   active_holds: z.number().int().nonnegative(),
-  hold_volume: DecimalStringSchema,
-  recovered_mtd: DecimalStringSchema,
-  false_positive_rate: DecimalStringSchema,
+  // R3 NEW-8 fix: dashboard sums and rates are non-negative by definition.
+  hold_volume: NonNegativeDecimalStringSchema,
+  recovered_mtd: NonNegativeDecimalStringSchema,
+  false_positive_rate: NonNegativeDecimalStringSchema,
   high_severity_open: z.number().int().nonnegative(),
 });
 export type DashboardSummary = z.infer<typeof DashboardSummarySchema>;
@@ -575,6 +597,12 @@ import type {
   Investigation,
   InvestigationTransitionRequest,
   NoteRequest,
+  // R3 NEW-5 fix — dedicated detail/transition/note response shapes
+  InvestigationDetailResponse,
+  InvestigationTransitionResponse,
+  InvestigationNoteResponse,
+  GraphRunDetailResponse,
+  FraudRingDetailResponse,
   RuleFiringListResponse,
   MlScoreListResponse,
   MlScoreFeatures,
@@ -627,14 +655,17 @@ export interface RecoveryParams {
 export interface ReclaimRxClient extends BaseClient {
   readonly name: "reclaimrx";
 
+  // R3 NEW-5 fix — interface signatures use the dedicated response schemas
+  // wired through real.ts (and now mock.ts) so TypeScript consumers see the
+  // SAME types from every binding of the client.
   // Endpoint #1
   listInvestigations(params?: InvestigationListParams): Promise<InvestigationListResponse>;
-  // Endpoint #2
-  getInvestigation(id: string): Promise<Investigation>;
-  // Endpoint #3
-  transitionInvestigation(id: string, req: InvestigationTransitionRequest): Promise<Investigation>;
-  // Endpoint #4
-  addInvestigationNote(id: string, req: NoteRequest): Promise<{ created: true }>;
+  // Endpoint #2 — detail extends base with threshold_snapshot/status_transitions/notes
+  getInvestigation(id: string): Promise<InvestigationDetailResponse>;
+  // Endpoint #3 — returns the transition record, not the full investigation
+  transitionInvestigation(id: string, req: InvestigationTransitionRequest): Promise<InvestigationTransitionResponse>;
+  // Endpoint #4 — typed note response (not an ad-hoc `{ created: true }`)
+  addInvestigationNote(id: string, req: NoteRequest): Promise<InvestigationNoteResponse>;
   // Endpoint #5
   listRuleFirings(params?: ListParams): Promise<RuleFiringListResponse>;
   // Endpoint #6
@@ -649,10 +680,10 @@ export interface ReclaimRxClient extends BaseClient {
   triggerGraphRun(): Promise<GraphRunTriggerResponse>;
   // Endpoint #11
   listGraphRuns(params?: ListParams): Promise<GraphRunListResponse>;
-  // Endpoint #12
-  getGraphRun(runId: string): Promise<GraphRun>;
-  // Endpoint #13
-  getFraudRing(id: string): Promise<FraudRing>;
+  // Endpoint #12 — same alias as #11's row but detail schema (forward-compat)
+  getGraphRun(runId: string): Promise<GraphRunDetailResponse>;
+  // Endpoint #13 — detail schema alias
+  getFraudRing(id: string): Promise<FraudRingDetailResponse>;
   // Endpoint #14
   getRecoveryAggregations(params?: RecoveryParams): Promise<RecoveryAggregationResponse>;
   // Endpoint #15
@@ -1071,8 +1102,14 @@ import type {
 } from "./types.js";
 
 // ── Fixtures (no real PHI; invented UUIDs; Luhn-valid NPIs per spec §9.4) ─
+//
+// R3 NEW-6 fix — all timestamps come from MOCK_FIXED_TIMESTAMP so mock
+// returns are byte-stable across runs. Earlier draft used
+// `new Date().toISOString()` which made replay tests non-deterministic.
 
 const TENANT_ID = "00000000-0000-0000-0000-000000000001";
+const MOCK_FIXED_TIMESTAMP = "2026-05-18T00:00:00.000Z";
+const MOCK_NOTE_ID = "33333333-0000-0000-0000-000000000099";
 
 const MOCK_INVESTIGATIONS: Investigation[] = [
   {
@@ -1190,19 +1227,43 @@ export function createMockReclaimRxClient(): ReclaimRxClient {
     },
 
     async getInvestigation(id) {
+      // R3 NEW-5 fix: return the extended detail shape, not the bare base.
       const inv = MOCK_INVESTIGATIONS.find((i) => i.id === id);
       if (!inv) throw new Error(`Investigation ${id} not found`);
-      return inv;
+      return {
+        ...inv,
+        threshold_snapshot: null,
+        status_transitions: [],
+        notes: [],
+      };
     },
 
     async transitionInvestigation(id, req) {
+      // R3 NEW-5 fix: return InvestigationTransitionResponse-shaped row.
       const inv = MOCK_INVESTIGATIONS.find((i) => i.id === id);
       if (!inv) throw new Error(`Investigation ${id} not found`);
-      return { ...inv, status: req.to_status };
+      return {
+        investigation_id: inv.id,
+        from_status: inv.status,
+        to_status: req.to_status,
+        reason: req.reason,
+        transitioned_by: "mock-user",
+        transitioned_at: MOCK_FIXED_TIMESTAMP,
+        outcome_label: req.outcome_label ?? null,
+        recovered_amount: req.recovered_amount ?? null,
+      };
     },
 
-    async addInvestigationNote(_id, _req) {
-      return { created: true };
+    async addInvestigationNote(id, req) {
+      // R3 NEW-5 + NEW-6 fix: typed InvestigationNoteResponse + fixed
+      // timestamp so the mock is deterministic in CI replays.
+      return {
+        id: MOCK_NOTE_ID,
+        investigation_id: id,
+        text: req.text,
+        created_by: "mock-user",
+        created_at: MOCK_FIXED_TIMESTAMP,
+      };
     },
 
     async listRuleFirings(params) {
@@ -1222,10 +1283,13 @@ export function createMockReclaimRxClient(): ReclaimRxClient {
     },
 
     async releaseHold(holdId, req) {
+      // R3 NEW-6 fix: deterministic timestamp so test replays are stable.
+      // `new Date().toISOString()` was non-deterministic and caused
+      // CI/local divergence on snapshot tests.
       return {
         hold_id: holdId,
         status: "released",
-        released_at: new Date().toISOString(),
+        released_at: MOCK_FIXED_TIMESTAMP,
         released_by: "mock-user",
         reason: req.reason,
       };
@@ -1868,7 +1932,7 @@ export default config;
 - `portal/operator/app/reclaimrx/graph-runs/page.tsx`
 - `portal/operator/app/reclaimrx/thresholds/page.tsx`
 - `portal/operator/app/reclaimrx/accumulator-anomalies/page.tsx`
-- `docs/api-contracts/events/payment.hold_released.md (R1 BLOCK 8 fix — `fwa.*` prefix per event-bus.md, not `payment.*`)`
+- `docs/api-contracts/events/payment.hold_released.md`
 - `docs/api-contracts/events/fwa.graph_run_completed.md`
 
 **Empty-state page pattern** (R1 BLOCK 10 fix — verified against existing portal-local component):
@@ -1907,7 +1971,7 @@ No `lucide-react` icon imports needed — `ComingSoonPage` already renders the `
 
 **Event contract docs** (full content — spec §11.5 instantiated verbatim):
 
-`docs/api-contracts/events/payment.hold_released.md (R1 BLOCK 8 fix — `fwa.*` prefix per event-bus.md, not `payment.*`)`:
+`docs/api-contracts/events/payment.hold_released.md`:
 ```markdown
 # Event Contract: payment.hold_released
 

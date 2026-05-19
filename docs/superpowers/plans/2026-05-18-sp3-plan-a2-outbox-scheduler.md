@@ -278,7 +278,12 @@ class OutboxService:
             tenant_id=tenant_uuid,
             idempotency_key=f"hold:release:{hold_id}",
             ordering_key=str(hold_id),
-            payload={...},
+            payload={
+                "hold_id": str(hold_id),
+                "amount": str(amount),       # Decimal as str per financial-precision.md
+                "released_by": str(user_id),
+                "reason": reason,
+            },
             source_module="reclaimrx",
         )
         db.commit()   # both domain row and outbox row commit atomically
@@ -725,23 +730,21 @@ class OutboxDispatcher:
         SELECT-then-flip pattern under SAVEPOINT isolation, which is
         deterministic in single-process test mode.
         """
+        # R3 BLOCK 12 fix: dropped the prior `try/finally: return` wrapper
+        # that silently swallowed dispatch exceptions. Session is
+        # caller-managed (the OutboxDispatcher's session_factory owns
+        # the lifecycle, so test fixtures can retain the connection for
+        # SAVEPOINT rollback and the production runtime can reuse a
+        # single connection across poll cycles). Exceptions propagate
+        # naturally so the OutboxDispatcher's outer loop can log + back off.
         session = self._session_factory()
         dialect = session.bind.dialect.name if session.bind else ""
-        try:
-            if dialect == "postgresql":
-                rows = self._claim_postgres(session)
-            else:
-                rows = self._claim_generic(session)
-            for row in rows:
-                await self._dispatch_row(session, row)
-        finally:
-            # Session is caller-managed: the OutboxDispatcher's session_factory
-            # owns the session lifecycle. We deliberately do NOT close here so
-            # test fixtures can retain the connection for SAVEPOINT rollback,
-            # and so the production runtime can reuse a single connection
-            # across poll cycles. No-op finally is intentional and structural,
-            # not a placeholder — return is implicit when control falls off.
-            return
+        if dialect == "postgresql":
+            rows = self._claim_postgres(session)
+        else:
+            rows = self._claim_generic(session)
+        for row in rows:
+            await self._dispatch_row(session, row)
 
     def _claim_postgres(self, session: Session) -> list[OutboxEvent]:
         """Atomically transition the next batch from 'pending' to 'publishing'
@@ -1135,11 +1138,8 @@ class ReclaimRxDLQRepository:
     ) -> EventDLQEntry | None:
         """Fetch one DLQ entry, scoped to a specific tenant.
 
-        R2 BLOCK 9 fix: tenant_id is REQUIRED. The router must pass
-        `current_tenant_id()` from the request context. Cross-tenant DLQ
-        enumeration is forbidden by .claude/rules/tenant-isolation.md.
-        Replay and drop callers MUST go through `get()` first so the same
-        tenant predicate flows transitively.
+        R2 BLOCK 9 fix + R3 BLOCK 9 / 13 follow-up: tenant_id is REQUIRED.
+        Router MUST pass `current_tenant_id()` from request context.
         """
         async with self._engine.connect() as conn:
             from sqlalchemy.ext.asyncio import AsyncSession  # noqa: PLC0415
@@ -1152,31 +1152,48 @@ class ReclaimRxDLQRepository:
             )
             return result.scalar_one_or_none()
 
-    async def replay(self, entry_id: uuid.UUID, *, tenant_id: uuid.UUID) -> None:
-        """Re-enqueue a DLQ entry. Tenant-scoped via `get()`."""
-        entry = await self.get(entry_id, tenant_id=tenant_id)
-        if entry is None:
-            return  # 404 surfaced by router
-        async with self._engine.begin() as conn:
-            from sqlalchemy.ext.asyncio import AsyncSession  # noqa: PLC0415
-            async_session = AsyncSession(bind=conn)
-            entry.status = "queued"
-            entry.replayed_at = datetime.now(UTC)
-            async_session.add(entry)
-            await async_session.commit()
+    async def replay(self, entry_id: uuid.UUID, *, tenant_id: uuid.UUID) -> int:
+        """Re-enqueue a DLQ entry. Returns row-count (0 = not-found / wrong tenant).
 
-    async def drop(self, entry_id: uuid.UUID, *, tenant_id: uuid.UUID) -> None:
-        """Permanently discard a DLQ entry. Tenant-scoped via `get()`."""
-        entry = await self.get(entry_id, tenant_id=tenant_id)
-        if entry is None:
-            return
+        R3 BLOCK 9 + 13 fix: execute a single-session, tenant-scoped UPDATE
+        instead of `get()` + ORM-mutation on a separate already-closed session.
+        The previous pattern mutated a detached object and was never flushed
+        through a new session correctly.
+        """
+        from sqlalchemy import update  # noqa: PLC0415
         async with self._engine.begin() as conn:
-            from sqlalchemy.ext.asyncio import AsyncSession  # noqa: PLC0415
-            async_session = AsyncSession(bind=conn)
-            entry.status = "dropped"
-            entry.dropped_at = datetime.now(UTC)
-            async_session.add(entry)
-            await async_session.commit()
+            result = await conn.execute(
+                update(EventDLQEntry)
+                .where(
+                    EventDLQEntry.id == entry_id,
+                    EventDLQEntry.tenant_id == tenant_id,
+                    EventDLQEntry.status == "queued",
+                )
+                .values(status="replayed", replayed_at=datetime.now(UTC))
+            )
+            return int(result.rowcount or 0)
+
+    async def drop(self, entry_id: uuid.UUID, *, tenant_id: uuid.UUID) -> int:
+        """Permanently discard a DLQ entry. Returns row-count.
+
+        R3 BLOCK 10 fix: EventDLQEntry has NO `dropped_at` column (verified
+        against `shared/db/models/events.py:28-73`). We track the drop event
+        via `status='dropped'` only (CHECK constraint allows the value);
+        timestamping is the audit chain's job.
+
+        R3 BLOCK 9 + 13 fix: tenant-scoped single-session UPDATE.
+        """
+        from sqlalchemy import update  # noqa: PLC0415
+        async with self._engine.begin() as conn:
+            result = await conn.execute(
+                update(EventDLQEntry)
+                .where(
+                    EventDLQEntry.id == entry_id,
+                    EventDLQEntry.tenant_id == tenant_id,
+                )
+                .values(status="dropped")
+            )
+            return int(result.rowcount or 0)
 
     async def save(self, entry: EventDLQEntry) -> None:
         from sqlalchemy.ext.asyncio import AsyncSession  # noqa: PLC0415
@@ -1297,11 +1314,9 @@ def get_async_engine_for_idempotency() -> AsyncEngine:
     """Return the module's async engine, built lazily from the SAME URL
     the existing sync engine was configured with.
 
-    R2 BLOCK 7 fix: the prior draft called a nonexistent `_resolve_db_url()`.
-    `_shim/db.py` does NOT expose that name; the canonical accessor is
-    `get_engine().url`. This preserves single-source-of-truth — `configure_engine(url)`
-    remains the only place the URL is set, and the async engine inherits
-    the same URL by construction.
+    Single source of truth: `configure_engine(url)` (in this same module)
+    remains the only place the URL is set; the async engine inherits the
+    same URL by reading `get_engine().url`. No parallel URL resolver.
 
     Used by PostgresIdempotencyStore and the DLQ repository. One instance
     per process.
@@ -2128,9 +2143,12 @@ dispatcher = OutboxDispatcher(
 dispatcher_task = asyncio.create_task(dispatcher.start())
 app.state.dispatcher = dispatcher
 
-#   2. Scheduler with 3 required D14 jobs
-# Build closed-over callables using the async engine
-async_engine = ...  # from shared or module-level engine
+#   2. Scheduler with 3 required D14 jobs.
+# Resolve the async engine via the get_async_engine_for_idempotency() factory
+# added to _shim/db.py per A2 §6c (R2 BLOCK 7 fix). No ellipsis placeholder —
+# the function above is the SINGLE concrete entry point for the async engine.
+from src._shim.db import get_async_engine_for_idempotency  # noqa: PLC0415
+async_engine = get_async_engine_for_idempotency()
 
 async def _cleanup_job() -> None:
     await run_cleanup(async_engine, retention_days=7)
