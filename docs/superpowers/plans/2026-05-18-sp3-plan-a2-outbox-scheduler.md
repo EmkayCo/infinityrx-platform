@@ -922,15 +922,23 @@ class OutboxDispatcher:
         except Exception as exc:  # noqa: BLE001
             # R4 NEW-2 fix: never serialize exception args — they can carry
             # PHI from the original envelope payload (event-bus.md + phi-compliance.md).
-            # Log exception class name and Python module only. Stack trace is
-            # captured separately by logger.exception() at OutboxDispatcher level.
+            # last_error stores exception class label only.
+            #
+            # R7 WARN-5 fix: the prior comment claimed `logger.exception()`
+            # at the outer OutboxDispatcher loop captured a stack trace,
+            # but this except branch swallows the exception (the row is
+            # transitioned back to 'pending' and the loop continues), so
+            # the outer loop never sees it. We now call `logger.exception()`
+            # HERE so the stack trace IS persisted. Stack traces only
+            # contain code locations + filenames — no envelope payload
+            # data — so they do not leak PHI per phi-compliance.md.
             error_label = f"{exc.__class__.__module__}.{exc.__class__.__name__}"
             row.attempt_count += 1
             row.last_error = error_label
             # Revert claim → pending so another dispatcher can retry on next poll.
             row.status = "pending"
             session.commit()
-            logger.warning(
+            logger.exception(
                 "reclaimrx.outbox_dispatcher.publish_failed",
                 extra={
                     "svc_outbox_id": row.id,
@@ -1234,7 +1242,9 @@ Satisfies shared.events.dlq.DLQRepository Protocol.
 """
 from __future__ import annotations
 
+import logging
 import uuid
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
@@ -1243,6 +1253,12 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
 from shared.db.models.events import EventDLQEntry
+
+# R7 BLOCK-21 fix: logger + datetime/UTC are referenced in the get()
+# tenant-fallback path (warning log) and in replay()/drop()
+# (replayed_at = datetime.now(UTC)). Missing imports would NameError
+# at first runtime use.
+logger = logging.getLogger("reclaimrx.events.dlq_repository")
 
 
 class ReclaimRxDLQRepository:
@@ -1546,14 +1562,32 @@ def test_idempotency_store_is_postgres_not_in_memory():
     assert not isinstance(store, InMemoryIdempotencyStore)
 
 
-def test_module_source_does_not_import_inmemory_store():
-    """Static check: events/__init__.py must not import InMemoryIdempotencyStore."""
+def test_module_does_not_import_inmemory_store():
+    """events/__init__.py must not IMPORT InMemoryIdempotencyStore at module load.
+
+    R7 BLOCK-24 fix: prior version did a substring match on the file source,
+    which false-positives on any comment that mentions the class name (e.g.,
+    "# replaced InMemoryIdempotencyStore with PostgresIdempotencyStore in
+    A2 §6c"). We now do an AST parse and inspect ONLY the import nodes,
+    so explanatory comments — which we WANT to keep — are ignored.
+    """
+    import ast
     import src.events as events_module
-    source = open(events_module.__file__).read()
-    # The OLD wiring was: from shared.events.idempotency import InMemoryIdempotencyStore
-    assert "InMemoryIdempotencyStore" not in source, (
-        "events/__init__.py still imports InMemoryIdempotencyStore — "
-        "replace with PostgresIdempotencyStore per A2 BLOCK 6."
+
+    tree = ast.parse(open(events_module.__file__).read())
+    imported_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                imported_names.add(alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                imported_names.add(alias.name.rsplit(".", 1)[-1])
+
+    assert "InMemoryIdempotencyStore" not in imported_names, (
+        "events/__init__.py still IMPORTS InMemoryIdempotencyStore — "
+        "replace with PostgresIdempotencyStore per A2 BLOCK 6. "
+        f"(Imported names: {sorted(imported_names)})"
     )
 ```
 
@@ -1641,18 +1675,22 @@ class TestReclaimRxScheduler:
 
 
 class TestAuditHashChainJob:
-    """Audit hash-chain verification job walks audit table, detects breaks."""
+    """Audit hash-chain verification job walks audit table, detects breaks.
 
-    @pytest.mark.asyncio
-    async def test_clean_chain_returns_ok(self, db_session):
+    R7 BLOCK-22 fix: verify_audit_hash_chain is plain `def` (WARN-2 from
+    R6). Tests call it synchronously — no `@pytest.mark.asyncio` decorator,
+    no `await`. The scheduler wrapper in main.py lifespan is what runs it
+    in a worker thread via asyncio.to_thread().
+    """
+
+    def test_clean_chain_returns_ok(self, db_session):
         """An intact hash chain returns result with status='ok', breaks=0."""
         from src.jobs.audit_chain_job import verify_audit_hash_chain  # FAILS until Task 8
-        result = await verify_audit_hash_chain(db_session, tenant_id=None)
+        result = verify_audit_hash_chain(db_session, tenant_id=None)
         assert result["status"] in ("ok", "no_entries")
         assert result["breaks"] == 0
 
-    @pytest.mark.asyncio
-    async def test_broken_chain_returns_alert(self, db_session, mocker):
+    def test_broken_chain_returns_alert(self, db_session, mocker):
         """A tampered prev_entry_hash triggers status='alert' with breaks > 0."""
         from src.jobs.audit_chain_job import verify_audit_hash_chain
 
@@ -1694,7 +1732,7 @@ class TestAuditHashChainJob:
         db_session.add(e2)
         db_session.commit()
 
-        result = await verify_audit_hash_chain(db_session, tenant_id=tenant_id)
+        result = verify_audit_hash_chain(db_session, tenant_id=tenant_id)
         assert result["status"] == "alert"
         assert result["breaks"] >= 1
 
@@ -2387,9 +2425,17 @@ scheduler_task.cancel()
 await asyncio.gather(dispatcher_task, scheduler_task, return_exceptions=True)
 
 # In create_app(): replace _get_dlq_service to use real repo
+# R7 BLOCK-23 fix: the prior version referenced `async_engine` which was a
+# lifespan-local binding (visible only inside the `async def lifespan` body).
+# `_get_dlq_service` is wired as the FastAPI `Depends(...)` provider for the
+# DLQ router, called per-request — at request time the lifespan-local
+# variable is out of scope and the function would NameError. Resolve the
+# engine fresh on each call via `get_async_engine_for_idempotency()` — that
+# accessor is module-level + idempotent (returns the same singleton), so
+# there is no startup ordering or extra connection cost.
 async def _get_dlq_service() -> DLQService:
-    # async_engine injected from module-level engine
-    return DLQService(repository=ReclaimRxDLQRepository(async_engine))
+    from src._shim.db import get_async_engine_for_idempotency  # noqa: PLC0415
+    return DLQService(repository=ReclaimRxDLQRepository(get_async_engine_for_idempotency()))
 ```
 
 **IMPORTANT:** The actual async engine reference must be resolved from the existing module's DB setup. Grep `modules/reclaimrx/src/_shim/db.py` to find the engine factory. Do not invent a name. If no async engine exists (the module uses sync SQLAlchemy), use `create_async_engine` wrapping the existing sync URL, initialized once at module level.
