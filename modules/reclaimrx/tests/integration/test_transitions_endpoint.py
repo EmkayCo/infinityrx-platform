@@ -1,4 +1,4 @@
-﻿"""Integration tests for POST /investigations/{id}/transitions.
+"""Integration tests for POST /investigations/{id}/transitions.
 
 Uses TestClient with FastAPI dependency_overrides for auth/db.
 """
@@ -8,12 +8,16 @@ import uuid
 from decimal import Decimal
 
 import pytest
+from fastapi import FastAPI, Request
+from fastapi.exceptions import HTTPException as _HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from src._shim.auth import CurrentUser, set_current_user
-from src.api.dependencies import get_db
+from shared.auth.dependencies import CurrentUser, get_current_user
+from src.api.dependencies import get_db, require_mfa_elevated, require_tenant_match
+from src.api.router import router as _router
 from src.models.tables import Base, Investigation
 
 
@@ -39,19 +43,16 @@ def db(engine):
     conn.close()
 
 
-def _make_client(db: Session, roles: list[str], tenant_id: str | None = None) -> tuple:
+def _make_client(db: Session, roles: tuple[str, ...], tenant_id: str | None = None) -> tuple:
     """Create TestClient with dependency_overrides for db + current user."""
-    from fastapi import FastAPI, Request
-    from fastapi.exceptions import HTTPException as _HTTPException
-    from fastapi.responses import JSONResponse
-    from src.api.router import router as _router
-
     tid_uuid = uuid.UUID(tenant_id) if tenant_id else uuid.uuid4()
     user = CurrentUser(
         id=uuid.uuid4(),
         tenant_id=tid_uuid,
         email="test@example.com",
+        status="active",
         roles=roles,
+        permissions=(),
     )
 
     app = FastAPI()
@@ -67,8 +68,10 @@ def _make_client(db: Session, roles: list[str], tenant_id: str | None = None) ->
     def _db_override():
         yield db
 
-    set_current_user(user)
     app.dependency_overrides[get_db] = _db_override
+    app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[require_tenant_match] = lambda: user
+    app.dependency_overrides[require_mfa_elevated] = lambda: user
 
     return TestClient(app, raise_server_exceptions=False), user, tid_uuid
 
@@ -91,7 +94,7 @@ def _seed_investigation(db: Session, status: str = "open", tenant_id: str | None
 class TestTransitionsEndpoint:
     def test_viewer_cannot_transition(self, db):
         inv_id, tid = _seed_investigation(db)
-        client, user, _ = _make_client(db, ["reclaimrx.viewer"], tid)
+        client, user, _ = _make_client(db, ("reclaimrx.viewer",), tid)
         resp = client.post(
             f"/api/v1/reclaimrx/investigations/{inv_id}/transitions",
             json={"to_state": "in_progress", "reason": "start"},
@@ -100,7 +103,7 @@ class TestTransitionsEndpoint:
 
     def test_investigator_can_transition_open_to_in_progress(self, db):
         inv_id, tid = _seed_investigation(db)
-        client, user, _ = _make_client(db, ["reclaimrx.investigator"], tid)
+        client, user, _ = _make_client(db, ("reclaimrx.investigator",), tid)
         resp = client.post(
             f"/api/v1/reclaimrx/investigations/{inv_id}/transitions",
             json={"to_state": "in_progress", "reason": "Starting"},
@@ -111,7 +114,7 @@ class TestTransitionsEndpoint:
 
     def test_invalid_transition_returns_422(self, db):
         inv_id, tid = _seed_investigation(db)
-        client, user, _ = _make_client(db, ["reclaimrx.investigator"], tid)
+        client, user, _ = _make_client(db, ("reclaimrx.investigator",), tid)
         resp = client.post(
             f"/api/v1/reclaimrx/investigations/{inv_id}/transitions",
             json={"to_state": "closed_confirmed", "reason": "skip"},
@@ -123,7 +126,7 @@ class TestTransitionsEndpoint:
 
     def test_missing_reason_returns_422(self, db):
         inv_id, tid = _seed_investigation(db)
-        client, user, _ = _make_client(db, ["reclaimrx.investigator"], tid)
+        client, user, _ = _make_client(db, ("reclaimrx.investigator",), tid)
         resp = client.post(
             f"/api/v1/reclaimrx/investigations/{inv_id}/transitions",
             json={"to_state": "in_progress", "reason": ""},
@@ -132,7 +135,7 @@ class TestTransitionsEndpoint:
         assert resp.json()["error"]["code"] == "MISSING_REQUIRED_FIELD"
 
     def test_unknown_investigation_returns_404(self, db):
-        client, user, _ = _make_client(db, ["reclaimrx.investigator"])
+        client, user, _ = _make_client(db, ("reclaimrx.investigator",))
         resp = client.post(
             "/api/v1/reclaimrx/investigations/does-not-exist/transitions",
             json={"to_state": "in_progress", "reason": "x"},
@@ -142,7 +145,7 @@ class TestTransitionsEndpoint:
 
     def test_cross_tenant_returns_404(self, db):
         inv_id, _tid = _seed_investigation(db)
-        client, user, _ = _make_client(db, ["reclaimrx.investigator"])  # different tenant
+        client, user, _ = _make_client(db, ("reclaimrx.investigator",))  # different tenant
         resp = client.post(
             f"/api/v1/reclaimrx/investigations/{inv_id}/transitions",
             json={"to_state": "in_progress", "reason": "x"},
@@ -151,7 +154,7 @@ class TestTransitionsEndpoint:
 
     def test_escalated_to_in_progress_422_for_investigator(self, db):
         inv_id, tid = _seed_investigation(db, "escalated")
-        client, user, _ = _make_client(db, ["reclaimrx.investigator"], tid)
+        client, user, _ = _make_client(db, ("reclaimrx.investigator",), tid)
         resp = client.post(
             f"/api/v1/reclaimrx/investigations/{inv_id}/transitions",
             json={"to_state": "in_progress", "reason": "override"},
@@ -161,7 +164,7 @@ class TestTransitionsEndpoint:
 
     def test_admin_can_move_escalated_to_in_progress(self, db):
         inv_id, tid = _seed_investigation(db, "escalated")
-        client, user, _ = _make_client(db, ["reclaimrx.admin"], tid)
+        client, user, _ = _make_client(db, ("reclaimrx.admin",), tid)
         resp = client.post(
             f"/api/v1/reclaimrx/investigations/{inv_id}/transitions",
             json={"to_state": "in_progress", "reason": "admin override"},
@@ -170,19 +173,21 @@ class TestTransitionsEndpoint:
 
     def test_closed_confirmed_to_in_progress_invalid_even_for_admin(self, db):
         inv_id, tid = _seed_investigation(db, "closed_confirmed")
-        client, user, _ = _make_client(db, ["reclaimrx.admin"], tid)
+        client, user, _ = _make_client(db, ("reclaimrx.admin",), tid)
         resp = client.post(
             f"/api/v1/reclaimrx/investigations/{inv_id}/transitions",
             json={"to_state": "in_progress", "reason": "skip"},
         )
         assert resp.status_code == 422
 
-    def test_transition_correlation_id_in_response(self, db):
+    def test_transition_status_in_response(self, db):
         inv_id, tid = _seed_investigation(db)
-        client, user, _ = _make_client(db, ["reclaimrx.investigator"], tid)
+        client, user, _ = _make_client(db, ("reclaimrx.investigator",), tid)
         resp = client.post(
             f"/api/v1/reclaimrx/investigations/{inv_id}/transitions",
             json={"to_state": "in_progress", "reason": "start"},
         )
         assert resp.status_code == 200
-        assert "correlation_id" in resp.json()
+        body = resp.json()
+        assert body["status"] == "in_progress"
+        assert "id" in body

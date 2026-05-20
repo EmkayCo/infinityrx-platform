@@ -1,4 +1,4 @@
-﻿"""Integration tests for POST /holds/{id}/release.
+"""Integration tests for POST /holds/{id}/release.
 
 Tests all three §7.2 idempotency cases:
   Case A: same actor + reason + investigation_id (already released) -> 200
@@ -18,10 +18,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from src._shim.auth import CurrentUser, set_current_user
-from src.api.dependencies import get_db
+from shared.auth.dependencies import CurrentUser, get_current_user
+from src.api.dependencies import get_db, require_mfa_elevated, require_tenant_match
 from src.api.router import router
-from src.models.tables import Base, Investigation, PaymentHold, OutboxEvent
+from src.models.tables import Base, Investigation, OutboxEvent, PaymentHold
 
 
 @pytest.fixture(scope="session")
@@ -59,9 +59,24 @@ def _make_client(db: Session, user: CurrentUser) -> TestClient:
     def _db_override():
         yield db
 
-    set_current_user(user)
     app.dependency_overrides[get_db] = _db_override
+    app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[require_tenant_match] = lambda: user
+    app.dependency_overrides[require_mfa_elevated] = lambda: user
     return TestClient(app, raise_server_exceptions=False)
+
+
+def _make_user(tenant_id: str | uuid.UUID, roles: tuple[str, ...]) -> CurrentUser:
+    if isinstance(tenant_id, str):
+        tenant_id = uuid.UUID(tenant_id)
+    return CurrentUser(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        email="test@example.com",
+        status="active",
+        roles=roles,
+        permissions=(),
+    )
 
 
 def _seed(db: Session):
@@ -100,61 +115,56 @@ def _idem(hold_id: str, actor=None) -> dict:
 class TestHoldRelease:
     def test_old_delete_route_is_gone(self, db):
         tid, inv_id, hold_id, _ = _seed(db)
-        uid = uuid.uuid4()
-        user = CurrentUser(id=uid, tenant_id=uuid.UUID(tid), roles=["reclaimrx.investigator"])
+        user = _make_user(tid, ("reclaimrx.investigator",))
         client = _make_client(db, user)
         resp = client.delete(f"/api/v1/reclaimrx/holds/{hold_id}?reason=done")
         assert resp.status_code == 404  # DELETE path not registered
 
     def test_viewer_cannot_release(self, db):
         tid, inv_id, hold_id, _ = _seed(db)
-        uid = uuid.uuid4()
-        user = CurrentUser(id=uid, tenant_id=uuid.UUID(tid), roles=["reclaimrx.viewer"])
+        user = _make_user(tid, ("reclaimrx.viewer",))
         client = _make_client(db, user)
         resp = client.post(
             f"/api/v1/reclaimrx/holds/{hold_id}/release",
             json={"reason": "releasing", "investigation_id": inv_id},
-            headers=_idem(hold_id, uid),
+            headers=_idem(hold_id, user.id),
         )
         assert resp.status_code == 403
 
     def test_normal_release_returns_200(self, db):
         tid, inv_id, hold_id, _ = _seed(db)
-        uid = uuid.uuid4()
-        user = CurrentUser(id=uid, tenant_id=uuid.UUID(tid), roles=["reclaimrx.investigator"])
+        user = _make_user(tid, ("reclaimrx.investigator",))
         client = _make_client(db, user)
         resp = client.post(
             f"/api/v1/reclaimrx/holds/{hold_id}/release",
             json={"reason": "Resolved -- no fraud", "investigation_id": inv_id},
-            headers=_idem(hold_id, uid),
+            headers=_idem(hold_id, user.id),
         )
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "released"
-        assert body["released_by"] == str(uid)
+        assert body["released_by"] == str(user.id)
 
     def test_missing_reason_returns_422(self, db):
         tid, inv_id, hold_id, _ = _seed(db)
-        uid = uuid.uuid4()
-        user = CurrentUser(id=uid, tenant_id=uuid.UUID(tid), roles=["reclaimrx.investigator"])
+        user = _make_user(tid, ("reclaimrx.investigator",))
         client = _make_client(db, user)
         resp = client.post(
             f"/api/v1/reclaimrx/holds/{hold_id}/release",
             json={"reason": "", "investigation_id": inv_id},
-            headers=_idem(hold_id, uid),
+            headers=_idem(hold_id, user.id),
         )
         assert resp.status_code == 422
         assert resp.json()["error"]["code"] == "REASON_REQUIRED"
 
     def test_investigation_mismatch_returns_403(self, db):
         tid, inv_id, hold_id, _ = _seed(db)
-        uid = uuid.uuid4()
-        user = CurrentUser(id=uid, tenant_id=uuid.UUID(tid), roles=["reclaimrx.investigator"])
+        user = _make_user(tid, ("reclaimrx.investigator",))
         client = _make_client(db, user)
         resp = client.post(
             f"/api/v1/reclaimrx/holds/{hold_id}/release",
             json={"reason": "done", "investigation_id": str(uuid.uuid4())},  # wrong inv
-            headers=_idem(hold_id, uid),
+            headers=_idem(hold_id, user.id),
         )
         assert resp.status_code == 403
         assert resp.json()["error"]["code"] == "HOLD_INVESTIGATION_MISMATCH"
@@ -163,11 +173,10 @@ class TestHoldRelease:
 
     def test_idempotency_case_a_same_actor_and_reason_returns_200(self, db):
         tid, inv_id, hold_id, _ = _seed(db)
-        uid = uuid.uuid4()
-        user = CurrentUser(id=uid, tenant_id=uuid.UUID(tid), roles=["reclaimrx.investigator"])
+        user = _make_user(tid, ("reclaimrx.investigator",))
         client = _make_client(db, user)
         payload = {"reason": "Same reason", "investigation_id": inv_id}
-        idem = _idem(hold_id, uid)
+        idem = _idem(hold_id, user.id)
 
         resp1 = client.post(f"/api/v1/reclaimrx/holds/{hold_id}/release",
                             json=payload, headers=idem)
@@ -183,20 +192,18 @@ class TestHoldRelease:
     def test_idempotency_case_b_different_actor_returns_409(self, db):
         tid, inv_id, hold_id, _ = _seed(db)
 
-        uid_a = uuid.uuid4()
-        user_a = CurrentUser(id=uid_a, tenant_id=uuid.UUID(tid), roles=["reclaimrx.investigator"])
+        user_a = _make_user(tid, ("reclaimrx.investigator",))
         client_a = _make_client(db, user_a)
         resp1 = client_a.post(f"/api/v1/reclaimrx/holds/{hold_id}/release",
                               json={"reason": "Reason A", "investigation_id": inv_id},
-                              headers=_idem(hold_id, uid_a))
+                              headers=_idem(hold_id, user_a.id))
         assert resp1.status_code == 200
 
-        uid_b = uuid.uuid4()
-        user_b = CurrentUser(id=uid_b, tenant_id=uuid.UUID(tid), roles=["reclaimrx.investigator"])
+        user_b = _make_user(tid, ("reclaimrx.investigator",))
         client_b = _make_client(db, user_b)
         resp2 = client_b.post(f"/api/v1/reclaimrx/holds/{hold_id}/release",
                               json={"reason": "Reason A", "investigation_id": inv_id},
-                              headers=_idem(hold_id, uid_b))
+                              headers=_idem(hold_id, user_b.id))
         assert resp2.status_code == 409
         body = resp2.json()
         assert body["error"]["code"] == "ALREADY_RELEASED"
@@ -204,18 +211,17 @@ class TestHoldRelease:
 
     def test_idempotency_case_b_different_reason_same_actor_returns_409(self, db):
         tid, inv_id, hold_id, _ = _seed(db)
-        uid = uuid.uuid4()
-        user = CurrentUser(id=uid, tenant_id=uuid.UUID(tid), roles=["reclaimrx.investigator"])
+        user = _make_user(tid, ("reclaimrx.investigator",))
         client = _make_client(db, user)
 
         resp1 = client.post(f"/api/v1/reclaimrx/holds/{hold_id}/release",
                             json={"reason": "First reason", "investigation_id": inv_id},
-                            headers=_idem(hold_id, uid))
+                            headers=_idem(hold_id, user.id))
         assert resp1.status_code == 200
 
         resp2 = client.post(f"/api/v1/reclaimrx/holds/{hold_id}/release",
                             json={"reason": "Different reason", "investigation_id": inv_id},
-                            headers={"Idempotency-Key": f"hold:release:{hold_id}:{uid}:retry"})
+                            headers={"Idempotency-Key": f"hold:release:{hold_id}:{user.id}:retry"})
         assert resp2.status_code == 409
 
     # ── Idempotency Case C: hold in non-active non-released state -> 422 ───────
@@ -236,12 +242,11 @@ class TestHoldRelease:
         db.add_all([inv, hold])
         db.flush()
 
-        uid = uuid.uuid4()
-        user = CurrentUser(id=uid, tenant_id=uuid.UUID(tid), roles=["reclaimrx.investigator"])
+        user = _make_user(tid, ("reclaimrx.investigator",))
         client = _make_client(db, user)
         resp = client.post(f"/api/v1/reclaimrx/holds/{hold_id}/release",
                            json={"reason": "try to release expired", "investigation_id": inv_id},
-                           headers=_idem(hold_id, uid))
+                           headers=_idem(hold_id, user.id))
         assert resp.status_code == 422
         body = resp.json()
         assert body["error"]["code"] == "HOLD_NOT_ACTIVE"
@@ -250,14 +255,13 @@ class TestHoldRelease:
     def test_outbox_row_written_on_release(self, db):
         """Verify outbox event row is inserted atomically with hold update."""
         tid, inv_id, hold_id, _ = _seed(db)
-        uid = uuid.uuid4()
-        user = CurrentUser(id=uid, tenant_id=uuid.UUID(tid), roles=["reclaimrx.investigator"])
+        user = _make_user(tid, ("reclaimrx.investigator",))
         client = _make_client(db, user)
 
         before_count = db.query(OutboxEvent).count()
         client.post(f"/api/v1/reclaimrx/holds/{hold_id}/release",
                     json={"reason": "Resolved", "investigation_id": inv_id},
-                    headers=_idem(hold_id, uid))
+                    headers=_idem(hold_id, user.id))
         after_count = db.query(OutboxEvent).count()
         assert after_count == before_count + 1
 

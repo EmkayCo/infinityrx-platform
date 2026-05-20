@@ -7,30 +7,38 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from src._shim.auth import CurrentUser, set_current_user
-from src.api.dependencies import get_current_user, get_db
+from shared.auth.dependencies import CurrentUser, get_current_user
+from src.api.dependencies import get_db, require_mfa_elevated, require_tenant_match
 from src.api.router import router
 from src.services.detection_rule_seeder import seed_detection_rules
 
 from tests.conftest import TEST_TENANT_ID, TEST_USER_ID
 
 
+def _make_user() -> CurrentUser:
+    return CurrentUser(
+        id=TEST_USER_ID,
+        tenant_id=TEST_TENANT_ID,
+        email="test@example.com",
+        status="active",
+        roles=("reclaimrx.investigator", "reclaimrx.admin"),
+        permissions=(),
+    )
+
+
 def build_app(db: Session) -> FastAPI:
     app = FastAPI()
     app.include_router(router)
 
-    _user = CurrentUser(
-        id=TEST_USER_ID,
-        tenant_id=TEST_TENANT_ID,
-        roles=["investigator", "tenant_admin", "reclaimrx.investigator", "reclaimrx.admin"],
-    )
-    set_current_user(_user)
+    _user = _make_user()
 
     def _db_override():
         yield db
 
     app.dependency_overrides[get_db] = _db_override
     app.dependency_overrides[get_current_user] = lambda: _user
+    app.dependency_overrides[require_tenant_match] = lambda: _user
+    app.dependency_overrides[require_mfa_elevated] = lambda: _user
     return app
 
 
@@ -74,10 +82,9 @@ class TestEvaluateEndpoint:
         from fastapi.testclient import TestClient
         app = FastAPI()
         app.include_router(router)
-        # No override — should raise RuntimeError (no current user) or OperationalError (no DB)
-        import sqlalchemy.exc
-        with pytest.raises((RuntimeError, sqlalchemy.exc.OperationalError)), TestClient(app, raise_server_exceptions=True) as c:
-            c.post("/api/v1/reclaimrx/evaluate", json={
+        # No override — get_current_user will raise 401 (no bearer token)
+        with TestClient(app, raise_server_exceptions=False) as c:
+            resp = c.post("/api/v1/reclaimrx/evaluate", json={
                 "auth_number": "AUTH001",
                 "date_of_service": "2026-01-15",
                 "pharmacy_npi": "1234567890",
@@ -88,6 +95,7 @@ class TestEvaluateEndpoint:
                 "program_type": "manufacturer",
                 "client_type": "manufacturer",
             })
+        assert resp.status_code in (401, 422)
 
     def test_evaluate_nq_inflated_claim_flags_mfr001(self, client: TestClient) -> None:
         resp = client.post("/api/v1/reclaimrx/evaluate", json={
@@ -151,12 +159,11 @@ class TestInvestigationEndpoints:
         assert create_resp.status_code == 201
         inv_id = create_resp.json()["id"]
 
-        update_resp = client.put(f"/api/v1/reclaimrx/investigations/{inv_id}", json={
-            "status": "in_progress",
-            "notes": "Starting detailed review",
+        update_resp = client.patch(f"/api/v1/reclaimrx/investigations/{inv_id}", json={
+            "priority": "high",
         })
         assert update_resp.status_code == 200
-        assert update_resp.json()["status"] == "in_progress"
+        assert update_resp.json()["priority"] == "high"
 
 
 class TestPaymentHoldEndpoints:
@@ -214,7 +221,7 @@ class TestTipEndpoints:
         })
         assert resp.status_code == 201
         data = resp.json()
-        assert data["status"] == "new"
+        assert data["status"] == "received"
         assert data["is_anonymous"] is True
 
     def test_list_tips_returns_only_tenant(self, client: TestClient) -> None:

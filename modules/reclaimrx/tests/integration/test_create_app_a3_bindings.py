@@ -10,8 +10,8 @@ from fastapi.exceptions import HTTPException as _HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from src._shim.auth import CurrentUser, set_current_user
-from src.api.dependencies import get_current_user, get_db
+from shared.auth.dependencies import CurrentUser, get_current_user
+from src.api.dependencies import get_db, require_mfa_elevated, require_tenant_match
 from src.api.router import router
 
 from tests.conftest import TEST_TENANT_ID, TEST_USER_ID
@@ -27,13 +27,14 @@ def _make_app(db: Session, user: CurrentUser) -> FastAPI:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
     app.include_router(router)
-    set_current_user(user)
 
     def _db():
         yield db
 
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[require_tenant_match] = lambda: user
+    app.dependency_overrides[require_mfa_elevated] = lambda: user
     return app
 
 
@@ -42,7 +43,10 @@ def investigator_client(db: Session) -> TestClient:
     user = CurrentUser(
         id=TEST_USER_ID,
         tenant_id=TEST_TENANT_ID,
-        roles=["reclaimrx.investigator", "reclaimrx.admin"],
+        email="test@example.com",
+        status="active",
+        roles=("reclaimrx.investigator", "reclaimrx.admin"),
+        permissions=(),
     )
     return TestClient(_make_app(db, user), raise_server_exceptions=False)
 
@@ -52,7 +56,10 @@ def viewer_client(db: Session) -> TestClient:
     user = CurrentUser(
         id=TEST_USER_ID,
         tenant_id=TEST_TENANT_ID,
-        roles=["reclaimrx.viewer"],
+        email="test@example.com",
+        status="active",
+        roles=("reclaimrx.viewer",),
+        permissions=(),
     )
     return TestClient(_make_app(db, user), raise_server_exceptions=False)
 

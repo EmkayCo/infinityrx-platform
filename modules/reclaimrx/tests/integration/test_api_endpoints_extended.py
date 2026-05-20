@@ -7,8 +7,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from src._shim.auth import CurrentUser
-from src.api.dependencies import get_current_user, get_db
+from shared.auth.dependencies import CurrentUser, get_current_user
+from src.api.dependencies import get_db, require_mfa_elevated, require_tenant_match
 from src.api.router import router
 from src.models.tables import (
     PharmacyProfile,
@@ -18,19 +18,30 @@ from src.services.detection_rule_seeder import seed_detection_rules
 from tests.conftest import TEST_TENANT_ID, TEST_USER_ID
 
 
+def _make_user() -> CurrentUser:
+    return CurrentUser(
+        id=TEST_USER_ID,
+        tenant_id=TEST_TENANT_ID,
+        email="test@example.com",
+        status="active",
+        roles=("reclaimrx.investigator", "reclaimrx.admin"),
+        permissions=(),
+    )
+
+
 def build_app(db: Session) -> FastAPI:
     app = FastAPI()
     app.include_router(router)
+
+    _user = _make_user()
 
     def _db_override():
         yield db
 
     app.dependency_overrides[get_db] = _db_override
-    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
-        id=TEST_USER_ID,
-        tenant_id=TEST_TENANT_ID,
-        roles=["investigator", "tenant_admin"],
-    )
+    app.dependency_overrides[get_current_user] = lambda: _user
+    app.dependency_overrides[require_tenant_match] = lambda: _user
+    app.dependency_overrides[require_mfa_elevated] = lambda: _user
     return app
 
 
@@ -114,7 +125,7 @@ class TestInvestigationExtended:
         assert len(activities) >= 1
 
     def test_add_activity_to_investigation(self, client: TestClient, inv_id: str) -> None:
-        resp = client.post(f"/api/v1/reclaimrx/investigations/{inv_id}/activity", json={
+        resp = client.post(f"/api/v1/reclaimrx/investigations/{inv_id}/activities", json={
             "activity_type": "document_reviewed",
             "description": "Reviewed dispensing logs",
         })
@@ -130,41 +141,43 @@ class TestInvestigationExtended:
         assert resp.status_code == 200
 
     def test_update_investigation_not_found(self, client: TestClient) -> None:
-        resp = client.put(f"/api/v1/reclaimrx/investigations/{uuid.uuid4()}", json={"status": "in_progress"})
+        resp = client.patch(f"/api/v1/reclaimrx/investigations/{uuid.uuid4()}", json={"status": "in_progress"})
         assert resp.status_code == 404
 
     def test_update_investigation_no_status_not_found(self, client: TestClient) -> None:
-        # No status field — skips update_status call, goes straight to get() which returns None
-        resp = client.put(f"/api/v1/reclaimrx/investigations/{uuid.uuid4()}", json={"notes": "Some note"})
+        # No status field — goes straight to get() which returns None
+        resp = client.patch(f"/api/v1/reclaimrx/investigations/{uuid.uuid4()}", json={"notes": "Some note"})
         assert resp.status_code == 404
 
     def test_update_investigation_no_status(self, client: TestClient, inv_id: str) -> None:
-        resp = client.put(f"/api/v1/reclaimrx/investigations/{inv_id}", json={"notes": "Some notes"})
+        resp = client.patch(f"/api/v1/reclaimrx/investigations/{inv_id}", json={"notes": "Some notes"})
         assert resp.status_code == 200
 
 
 class TestRecoveryEndpoints:
     def test_create_and_list_recovery(self, client: TestClient, inv_id: str) -> None:
         resp = client.post(
-            "/api/v1/reclaimrx/recoveries",
+            f"/api/v1/reclaimrx/investigations/{inv_id}/recoveries",
             json={
                 "recovery_method": "offset_from_payment",
                 "amount": "1500.00",
                 "confidence_tier": "high",
                 "methodology_tag": "NQ excess",
             },
-            params={"investigation_id": inv_id},
         )
         assert resp.status_code == 201
         data = resp.json()
         assert data["status"] == "estimated"
 
-        list_resp = client.get("/api/v1/reclaimrx/recoveries", params={"investigation_id": inv_id})
+        list_resp = client.get(f"/api/v1/reclaimrx/investigations/{inv_id}/recoveries")
         assert list_resp.status_code == 200
         assert len(list_resp.json()) >= 1
 
-    def test_list_recoveries_no_filter(self, client: TestClient) -> None:
-        resp = client.get("/api/v1/reclaimrx/recoveries")
+    def test_list_recoveries_with_methodology_filter(self, client: TestClient, inv_id: str) -> None:
+        resp = client.get(
+            f"/api/v1/reclaimrx/investigations/{inv_id}/recoveries",
+            params={"methodology_tag": "NQ excess"},
+        )
         assert resp.status_code == 200
 
 
@@ -203,7 +216,7 @@ class TestProfileEndpoints:
 
 class TestAccumulatorEndpoints:
     def test_list_accumulator_detections_empty(self, client: TestClient) -> None:
-        resp = client.get("/api/v1/reclaimrx/accumulator/detections")
+        resp = client.get("/api/v1/reclaimrx/accumulator-detections")
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
 
@@ -316,23 +329,10 @@ class TestTipsWithStatusFilter:
             "detail_text": "Details here",
             "is_anonymous": True,
         })
-        resp = client.get("/api/v1/reclaimrx/tips", params={"status": "new"})
+        resp = client.get("/api/v1/reclaimrx/tips", params={"status": "received"})
         assert resp.status_code == 200
         tips = resp.json()
-        assert all(t["status"] == "new" for t in tips)
-
-
-class TestDependencyCoverage:
-    def test_require_admin_returns_current_user(self) -> None:
-        from src._shim.auth import CurrentUser, set_current_user
-        from src.api.dependencies import require_admin
-
-        from tests.conftest import TEST_TENANT_ID, TEST_USER_ID
-        user = CurrentUser(id=TEST_USER_ID, tenant_id=TEST_TENANT_ID, roles=["tenant_admin"])
-        set_current_user(user)
-        result = require_admin()
-        assert result.id == TEST_USER_ID
-        set_current_user(None)
+        assert all(t["status"] == "received" for t in tips)
 
 
 class TestHoldEndpointFilters:
