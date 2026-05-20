@@ -12,7 +12,10 @@ const repoRoot = path.resolve(__dirname, "..", "..");
 // <QueryClientProvider> -> "No QueryClient set" on a chunk-graph-dependent
 // subset of pages. One resolve alias shares the context. react/react-dom are
 // not aliased (no Invalid hook call); only react-query is dual-instanced.
-const reactQueryDir = path.resolve(repoRoot, "node_modules/@tanstack/react-query");
+// webpack wants an OS-native path; Turbopack on Windows needs a POSIX
+// (forward-slash) path or it errors "windows imports are not implemented yet".
+const reactQueryDirNative = path.resolve(repoRoot, "node_modules/@tanstack/react-query");
+const reactQueryDirPosix = reactQueryDirNative.split(path.sep).join("/");
 
 // Plan D SP-0: Pre-build hook — run build-manifest.ts to emit _generated/ artifacts.
 // The generator validates the manifest schema and fails the build if validation errors exist.
@@ -62,7 +65,7 @@ const nextConfig: NextConfig = {
     root: path.resolve(__dirname, "..", ".."),
     resolveAlias: {
       "@shared": sharedDir,
-      "@tanstack/react-query": reactQueryDir,
+      "@tanstack/react-query": reactQueryDirPosix,
     },
   },
   webpack: (config) => {
@@ -74,7 +77,7 @@ const nextConfig: NextConfig = {
     // Node finds via the standard up-walk from portal/{operator,shared}/.
     // Keep only the @shared alias for the path-based imports.
     config.resolve.alias["@shared"] = sharedDir;
-    config.resolve.alias["@tanstack/react-query"] = reactQueryDir;
+    config.resolve.alias["@tanstack/react-query"] = reactQueryDirNative;
     return config;
   },
   typedRoutes: false,
