@@ -3,19 +3,6 @@ import path from "path";
 import { execSync } from "node:child_process";
 
 const sharedDir = path.resolve(__dirname, "../shared");
-const repoRoot = path.resolve(__dirname, "..", "..");
-
-// Wave B12 (2026-05-20): force @tanstack/react-query to the SINGLE root copy.
-// transpilePackages (module-directories, paysync, shell, ui) otherwise lets
-// Turbopack resolve react-query to a 2nd instance for some transpiled chunks,
-// so useQuery inside a transpiled package can't see the portal's
-// <QueryClientProvider> -> "No QueryClient set" on a chunk-graph-dependent
-// subset of pages. One resolve alias shares the context. react/react-dom are
-// not aliased (no Invalid hook call); only react-query is dual-instanced.
-// webpack wants an OS-native path; Turbopack on Windows needs a POSIX
-// (forward-slash) path or it errors "windows imports are not implemented yet".
-const reactQueryDirNative = path.resolve(repoRoot, "node_modules/@tanstack/react-query");
-const reactQueryDirPosix = reactQueryDirNative.split(path.sep).join("/");
 
 // Plan D SP-0: Pre-build hook — run build-manifest.ts to emit _generated/ artifacts.
 // The generator validates the manifest schema and fails the build if validation errors exist.
@@ -59,13 +46,9 @@ const nextConfig: NextConfig = {
   // https://nextjs.org/docs/app/api-reference/config/next-config-js/transpilePackages
   transpilePackages: ["@infinityrx/portal-shared", "@infinityrx/module-directories", "@infinityrx/module-paysync", "@infinityrx/shell", "@infinityrx/ui"],
   turbopack: {
-    // Repo root: @infinityrx/* workspace symlinks live at <repo>/node_modules/@infinityrx/,
-    // not at portal/node_modules/. Turbopack scoped to portal/ cannot traverse
-    // up to find them, causing "Module not found: @infinityrx/module-directories".
-    root: path.resolve(__dirname, "..", ".."),
+    root: path.resolve(__dirname, ".."),
     resolveAlias: {
       "@shared": sharedDir,
-      "@tanstack/react-query": reactQueryDirPosix,
     },
   },
   webpack: (config) => {
@@ -77,7 +60,6 @@ const nextConfig: NextConfig = {
     // Node finds via the standard up-walk from portal/{operator,shared}/.
     // Keep only the @shared alias for the path-based imports.
     config.resolve.alias["@shared"] = sharedDir;
-    config.resolve.alias["@tanstack/react-query"] = reactQueryDirNative;
     return config;
   },
   typedRoutes: false,
