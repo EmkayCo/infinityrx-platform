@@ -1,4 +1,4 @@
-"""Integration tests filling remaining coverage gaps.
+﻿"""Integration tests filling remaining coverage gaps.
 
 Targets: router search filters, rate limiter 429, pricing invalid NDC,
 mac list success delete, schema validator error paths.
@@ -22,10 +22,15 @@ from sqlalchemy.orm import sessionmaker
 from src.api.dependencies import get_db
 from src.infrastructure.rate_limiter import InMemoryBucketStore, RateLimitConfig, RateLimitMiddleware
 from src.main import create_app
-from src.models.tables import DrugBase, DrugProduct, TenantPricingOverride
+from src.models.ndc_tables import Drug, NDCBase
+from src.models.pricing_tables import PricingBase
+from src.models.tables import DrugBase, TenantPricingOverride
 
 TENANT_A = "11111111-1111-1111-1111-111111111111"
 _NOW = datetime.now(timezone.utc)
+
+# Unique product_id for this test module to avoid SQLite shared-memory conflicts
+_COV_ID = "00093-3149-gaps"
 
 
 @pytest.fixture(scope="module")
@@ -36,8 +41,17 @@ def _engine():
     )
     for table in DrugBase.metadata.tables.values():
         table.schema = None
+    for table in NDCBase.metadata.tables.values():
+        table.schema = None
+    for table in PricingBase.metadata.tables.values():
+        table.schema = None
+
     DrugBase.metadata.create_all(engine)
+    NDCBase.metadata.create_all(engine)
+    PricingBase.metadata.create_all(engine)
     yield engine
+    PricingBase.metadata.drop_all(engine)
+    NDCBase.metadata.drop_all(engine)
     DrugBase.metadata.drop_all(engine)
     engine.dispose()
 
@@ -63,24 +77,15 @@ def seed_db(_engine):
     Factory = sessionmaker(bind=_engine, autocommit=False, autoflush=False)
     session = Factory()
 
-    d1 = DrugProduct(
-        ndc_11="00093314905",
-        ndc_formatted="00093-3149-05",
-        labeler_code="00093",
-        product_code="3149",
-        package_code="05",
-        drug_name_display="Metformin",
-        nonproprietary_name="metformin",
-        drug_type="generic",
-        marketing_status="active",
-        is_active=True,
-        is_specialty=False,
-        is_biosimilar=False,
-        is_glp1=False,
-        unit_dose=False,
-        is_limited_distribution=False,
-        data_source="fda_ndc",
-        last_updated_at=_NOW,
+    # Use Drug (seeded schema) — marketing_category_name is the drug_type equivalent
+    d1 = Drug(
+        product_id=_COV_ID,
+        product_ndc="00093-3149",
+        ndc_11="00093314906",
+        non_proprietary_name="metformin hydrochloride",
+        labeler_name="Teva Pharmaceuticals",
+        marketing_category_name="ANDA",  # maps to drug_type in response
+        ndc_exclude_flag=None,
         created_at=_NOW,
         updated_at=_NOW,
     )
@@ -90,7 +95,7 @@ def seed_db(_engine):
     override_for_delete = TenantPricingOverride(
         id=uuid.UUID("dddddddd-dddd-dddd-dddd-dddddddddddd"),
         tenant_id=uuid.UUID(TENANT_A),
-        ndc_11="00093314905",
+        ndc_11="00093314906",
         price_type="MAC",
         price_per_unit=Decimal("0.020000"),
         effective_date=datetime.now(timezone.utc).date(),
@@ -105,17 +110,20 @@ def seed_db(_engine):
 
 
 class TestSearchFilters:
-    def test_search_with_drug_type_filter(self, client, seed_db) -> None:
+    def test_search_with_drug_type_filter_anda(self, client, seed_db) -> None:
+        """drug_type filter now maps to marketing_category_name (ANDA/NDA/OTC)."""
         resp = client.get(
-            "/api/v1/drugs/search?q=metformin&drug_type=generic",
+            "/api/v1/drugs/search?q=metformin&drug_type=ANDA",
             headers={"X-Tenant-Id": TENANT_A},
         )
         assert resp.status_code == 200
         data = resp.json()
         for r in data["results"]:
-            assert r["drug_type"] == "generic"
+            # drug_type field in response reflects marketing_category_name
+            assert r["drug_type"] == "ANDA"
 
-    def test_search_with_marketing_status_filter(self, client, seed_db) -> None:
+    def test_search_marketing_status_filter_ignored(self, client, seed_db) -> None:
+        """marketing_status has no seeded column — filter is silently skipped, returns results."""
         resp = client.get(
             "/api/v1/drugs/search?q=metformin&marketing_status=active",
             headers={"X-Tenant-Id": TENANT_A},

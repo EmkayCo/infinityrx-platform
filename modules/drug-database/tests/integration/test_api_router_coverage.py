@@ -1,4 +1,4 @@
-"""Additional router coverage tests — batch lookup, overrides delete, FDB stub."""
+﻿"""Additional router coverage tests — batch lookup, overrides delete, FDB stub."""
 from __future__ import annotations
 
 import sys
@@ -17,10 +17,11 @@ from sqlalchemy.orm import sessionmaker
 
 from src.api.dependencies import get_db
 from src.main import create_app
+from src.models.ndc_tables import Drug, NDCBase
+from src.models.pricing_tables import PricingBase
 from src.models.tables import (
     DrugBase,
     DrugPricingHistory,
-    DrugProduct,
     TenantPricingOverride,
 )
 from src.services.fdb_adapter import FDBAdapterStub
@@ -28,6 +29,9 @@ from src.services.fdb_adapter import FDBAdapterStub
 TENANT_A = "11111111-1111-1111-1111-111111111111"
 TENANT_B = "22222222-2222-2222-2222-222222222222"
 _NOW = datetime.now(timezone.utc)
+
+_METFORMIN_ID = "00093-3149-cov"
+_HUMALOG_ID = "00002-1436-cov"
 
 
 @pytest.fixture(scope="module")
@@ -38,8 +42,17 @@ def _engine():
     )
     for table in DrugBase.metadata.tables.values():
         table.schema = None
+    for table in NDCBase.metadata.tables.values():
+        table.schema = None
+    for table in PricingBase.metadata.tables.values():
+        table.schema = None
+
     DrugBase.metadata.create_all(engine)
+    NDCBase.metadata.create_all(engine)
+    PricingBase.metadata.create_all(engine)
     yield engine
+    PricingBase.metadata.drop_all(engine)
+    NDCBase.metadata.drop_all(engine)
     DrugBase.metadata.drop_all(engine)
     engine.dispose()
 
@@ -65,39 +78,26 @@ def seed_db(_engine):
     Factory = sessionmaker(bind=_engine, autocommit=False, autoflush=False)
     session = Factory()
 
-    d1 = DrugProduct(
+    d1 = Drug(
+        product_id=_METFORMIN_ID,
+        product_ndc="00093-3149",
         ndc_11="00093314905",
-        ndc_formatted="00093-3149-05",
-        labeler_code="00093",
-        product_code="3149",
-        package_code="05",
-        drug_name_display="Metformin",
-        data_source="fda_ndc",
-        is_active=True,
-        is_specialty=False,
-        is_biosimilar=False,
-        is_glp1=False,
-        unit_dose=False,
-        is_limited_distribution=False,
-        last_updated_at=_NOW,
+        non_proprietary_name="metformin hydrochloride",
+        labeler_name="Teva Pharmaceuticals",
+        marketing_category_name="ANDA",
+        ndc_exclude_flag=None,
         created_at=_NOW,
         updated_at=_NOW,
     )
-    d2 = DrugProduct(
+    d2 = Drug(
+        product_id=_HUMALOG_ID,
+        product_ndc="00002-1436",
         ndc_11="00002143601",
-        ndc_formatted="00002-1436-01",
-        labeler_code="00002",
-        product_code="1436",
-        package_code="01",
-        drug_name_display="Humalog",
-        data_source="fda_ndc",
-        is_active=True,
-        is_specialty=True,
-        is_biosimilar=False,
-        is_glp1=False,
-        unit_dose=False,
-        is_limited_distribution=False,
-        last_updated_at=_NOW,
+        proprietary_name="Humalog",
+        non_proprietary_name="insulin lispro",
+        labeler_name="Eli Lilly",
+        marketing_category_name="NDA",
+        ndc_exclude_flag=None,
         created_at=_NOW,
         updated_at=_NOW,
     )
@@ -158,7 +158,6 @@ class TestBatchLookup:
             headers={"X-Tenant-Id": TENANT_A},
         )
         assert resp.status_code == 200
-        # Only valid NDC returned
         assert len(resp.json()) >= 1
 
 
@@ -191,7 +190,6 @@ class TestDeleteOverride:
         assert resp.status_code == 404
 
     def test_delete_other_tenant_override_returns_404(self, client, seed_db) -> None:
-        # TENANT_B tries to delete TENANT_A's override
         resp = client.delete(
             "/api/v1/drugs/overrides/ffffffff-ffff-ffff-ffff-ffffffffffff",
             headers={"X-Tenant-Id": TENANT_B},

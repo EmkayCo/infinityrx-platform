@@ -1,4 +1,4 @@
-"""Pydantic schemas for drug database API."""
+﻿"""Pydantic schemas for drug database API."""
 from __future__ import annotations
 
 import uuid
@@ -12,7 +12,7 @@ from src.utils.ndc import InvalidNDCError, normalize_ndc
 
 
 class DrugProductResponse(BaseModel):
-    id: uuid.UUID
+    id: str  # product_id from FDA NDC data (string, e.g. "0069-4200")
     ndc_11: str
     ndc_formatted: str | None
     proprietary_name: str | None

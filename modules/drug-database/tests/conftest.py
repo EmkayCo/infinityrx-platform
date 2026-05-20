@@ -1,6 +1,11 @@
-"""Shared test fixtures for drug-database module.
+﻿"""Shared test fixtures for drug-database module.
 
 LESSON-001: Uses SAVEPOINT-based isolation for tests that call db.commit().
+
+Creates tables for all three ORM bases used by the module:
+  DrugBase     (tables.py)      — clinical, pricing overrides, REMS, etc.
+  NDCBase      (ndc_tables.py)  — seeded FDA NDC drugs/packages tables
+  PricingBase  (pricing_tables.py) — seeded NADAC/ASP pricing tables
 """
 from __future__ import annotations
 
@@ -17,6 +22,8 @@ import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
+from src.models.ndc_tables import NDCBase
+from src.models.pricing_tables import PricingBase
 from src.models.tables import DrugBase
 
 
@@ -37,9 +44,17 @@ def _engine():
     # SQLite doesn't support schemas — strip schema prefix for tests
     for table in DrugBase.metadata.tables.values():
         table.schema = None
+    for table in NDCBase.metadata.tables.values():
+        table.schema = None
+    for table in PricingBase.metadata.tables.values():
+        table.schema = None
 
     DrugBase.metadata.create_all(engine)
+    NDCBase.metadata.create_all(engine)
+    PricingBase.metadata.create_all(engine)
     yield engine
+    PricingBase.metadata.drop_all(engine)
+    NDCBase.metadata.drop_all(engine)
     DrugBase.metadata.drop_all(engine)
     engine.dispose()
 
@@ -79,6 +94,51 @@ def other_tenant_id() -> uuid.UUID:
     return TENANT_B
 
 
+def make_drug_row(
+    product_id: str = "00093-3149",
+    product_ndc: str = "00093-3149",
+    ndc_11: str = "00093314900",
+    non_proprietary_name: str = "metformin hydrochloride",
+    proprietary_name: str | None = None,
+    labeler_name: str = "Teva Pharmaceuticals",
+    marketing_category_name: str = "ANDA",
+) -> dict:
+    """Factory for Drug (seeded FDA NDC schema) test rows."""
+    now = datetime.now(timezone.utc)
+    return {
+        "product_id": product_id,
+        "product_ndc": product_ndc,
+        "ndc_11": ndc_11,
+        "non_proprietary_name": non_proprietary_name,
+        "proprietary_name": proprietary_name,
+        "labeler_name": labeler_name,
+        "marketing_category_name": marketing_category_name,
+        "ndc_exclude_flag": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def make_nadac_pricing(
+    ndc_11: str = "00093314900",
+    nadac_per_unit: Decimal = Decimal("0.045000"),
+    effective_date: date = date(2026, 1, 1),
+    pricing_unit: str = "EA",
+) -> dict:
+    """Factory for DrugNADACPricing test rows."""
+    now = datetime.now(timezone.utc)
+    return {
+        "ndc_11": ndc_11,
+        "nadac_per_unit": nadac_per_unit,
+        "effective_date": effective_date,
+        "pricing_unit": pricing_unit,
+        "as_of_date": effective_date,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+# Legacy helpers kept for tests that still import them
 def make_drug(
     ndc_11: str = "00093314905",
     drug_name_display: str = "Metformin 500mg",
@@ -89,27 +149,10 @@ def make_drug(
     is_specialty: bool = False,
     nonproprietary_name: str = "metformin hydrochloride",
 ) -> dict:
-    return {
-        "ndc_11": ndc_11,
-        "ndc_formatted": f"{ndc_11[:5]}-{ndc_11[5:9]}-{ndc_11[9:]}",
-        "labeler_code": ndc_11[:5],
-        "product_code": ndc_11[5:9],
-        "package_code": ndc_11[9:],
-        "drug_name_display": drug_name_display,
-        "nonproprietary_name": nonproprietary_name,
-        "data_source": data_source,
-        "drug_type": drug_type,
-        "marketing_status": marketing_status,
-        "is_active": is_active,
-        "is_specialty": is_specialty,
-        "is_biosimilar": False,
-        "is_glp1": False,
-        "unit_dose": False,
-        "is_limited_distribution": False,
-        "last_updated_at": datetime.now(timezone.utc),
-        "created_at": datetime.now(timezone.utc),
-        "updated_at": datetime.now(timezone.utc),
-    }
+    """Legacy factory — kept for unit tests that still reference it."""
+    return make_drug_row(
+        non_proprietary_name=nonproprietary_name,
+    )
 
 
 def make_pricing(
@@ -120,13 +163,9 @@ def make_pricing(
     data_source: str = "cms_nadac",
     termination_date: date | None = None,
 ) -> dict:
-    return {
-        "ndc_11": ndc_11,
-        "price_type": price_type,
-        "price_per_unit": price_per_unit,
-        "unit_type": "EA",
-        "effective_date": effective_date,
-        "termination_date": termination_date,
-        "data_source": data_source,
-        "created_at": datetime.now(timezone.utc),
-    }
+    """Legacy factory — kept for unit tests that still reference it."""
+    return make_nadac_pricing(
+        ndc_11=ndc_11,
+        nadac_per_unit=price_per_unit,
+        effective_date=effective_date,
+    )
