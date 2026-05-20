@@ -77,6 +77,7 @@ export const Users = iconStub("Users");
 export const Wallet = iconStub("Wallet");
 export const X = iconStub("X");
 export const XCircle = iconStub("XCircle");
+export const Construction = iconStub("Construction");
 // lucide-react renamed AlertTriangle → TriangleAlert; provide the alias.
 export const TriangleAlert = AlertTriangle;
 

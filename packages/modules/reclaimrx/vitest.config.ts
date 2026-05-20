@@ -1,0 +1,38 @@
+import { defineConfig } from "vitest/config";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
+const here = dirname(fileURLToPath(import.meta.url));
+
+export default defineConfig({
+  resolve: {
+    alias: {
+      "@infinityrx/contract": resolve(here, "../../contract/src/index.ts"),
+      "@infinityrx/auth": resolve(here, "../../auth/src/index.ts"),
+      "@infinityrx/ui": resolve(here, "../../ui/src/index.ts"),
+      "@infinityrx/shell": resolve(here, "../../shell/src/index.ts"),
+      "@infinityrx/qa-harness": resolve(here, "../../qa-harness/src/index.ts"),
+    },
+  },
+  test: {
+    include: ["tests/**/*.test.{ts,tsx}", "src/**/*.test.{ts,tsx}"],
+    environment: "happy-dom",
+    passWithNoTests: true,
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,tsx}"],
+      // Stub directories have no logic — excluded until Plan B-E ships real code.
+      exclude: [
+        "src/investigations/**",
+        "src/rules/**",
+        "src/ml/**",
+        "src/holds/**",
+        "src/recovery/**",
+        "src/graph/**",
+        "src/bff/**",
+        "src/components/**",
+        "src/rbac/**",
+      ],
+    },
+  },
+});

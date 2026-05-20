@@ -1,11 +1,60 @@
 {
-  "instance_name": "placeholder",
-  "modules": [],
+  "instance_name": "operator-dev",
   "audience": "operator",
-  "_generated": {
-    "input_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-    "inputs": [],
-    "generated_at": "1970-01-01T00:00:00.000Z",
-    "generator": "placeholder"
+  "auth_profile": "development",
+  "branding": {
+    "primary_color": "#1f2937"
+  },
+  "modules": [
+    "prescriber-directory",
+    "directories",
+    "reclaimrx"
+  ],
+  "required_backends": [
+    "prescriber-directory",
+    "pharmacy-directory",
+    "drug-database",
+    "core-platform",
+    "reclaimrx"
+  ],
+  "required_shared_services": [
+    "postgres",
+    "redis"
+  ],
+  "required_schemas": [],
+  "required_migrations": [],
+  "required_env": [
+    "JWT_SECRET",
+    "NEXTAUTH_SECRET",
+    "INFINITYRX_ENV",
+    "PRESCRIBER_DIRECTORY_URL",
+    "PHARMACY_DIRECTORY_URL",
+    "DRUG_DATABASE_URL",
+    "CORE_PLATFORM_URL",
+    "RECLAIMRX_URL"
+  ],
+  "required_health": [
+    "http://prescriber-directory:8010/health",
+    "http://pharmacy-directory:8009/health",
+    "http://drug-database:8011/health",
+    "http://reclaimrx:8007/health"
+  ],
+  "required_seed_data": [
+    "directories/fixtures"
+  ],
+  "required_queues": [],
+  "required_jobs": [],
+  "required_buckets": [],
+  "required_integrations": [
+    "shared-ingestion-api"
+  ],
+  "required_secrets": [
+    "secret://jwt/signing-key",
+    "secret://nextauth/secret"
+  ],
+  "migration_policy": {
+    "ordering": "explicit",
+    "rollback": "none",
+    "pre_check": "dry_run_required"
   }
 }
