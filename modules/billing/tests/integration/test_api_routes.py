@@ -6,6 +6,7 @@ import uuid
 from collections.abc import Iterator
 
 import pytest
+from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
@@ -17,6 +18,16 @@ CLIENT = str(uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
 PROGRAM = str(uuid.UUID("dddddddd-dddd-dddd-dddd-dddddddddddd"))
 
 HEADERS = {"X-Tenant-Id": TENANT}
+
+# B2 fix: TenantId dependency now requires a valid JWT. Inject a mock user
+# whose tenant_id matches TENANT so validate_tenant_id does not raise 403.
+_MOCK_USER = MagicMock(
+    id=uuid.UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+    tenant_id=uuid.UUID(TENANT),
+    roles=("operator", "approver"),
+    has_role=lambda r: r in ("operator", "approver"),
+    mfa_verified=True,
+)
 
 
 @pytest.fixture(scope="module")
@@ -59,7 +70,9 @@ def client() -> TestClient:
         finally:
             session.close()
 
+    from shared.auth.dependencies import get_current_user
     app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = lambda: _MOCK_USER
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()

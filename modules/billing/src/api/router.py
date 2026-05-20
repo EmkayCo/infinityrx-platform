@@ -8,9 +8,10 @@ from datetime import UTC, date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
+from shared.auth.dependencies import CurrentUser, get_current_user
 from src.api.dependencies import DBSession, TenantId
 from src.api.schemas.ap import (
     BatchGenerateRequest,
@@ -82,6 +83,9 @@ from src.utils.constants import (
 
 logger = logging.getLogger(__name__)
 
+_WRITE_ROLES = frozenset({"operator", "approver"})
+_APPROVER_ONLY = frozenset({"approver"})
+
 router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
 
 
@@ -95,8 +99,13 @@ def submit_claim(
     body: ClaimSubmitRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Submit a single claim via API."""
+    if not any(current_user.has_role(r) for r in _WRITE_ROLES):
+        raise HTTPException(status_code=403, detail="Operator or Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     return {
         "id": str(uuid.uuid4()),
         "tenant_id": str(tenant_id),
@@ -282,8 +291,13 @@ def create_routing_rule(
     body: RoutingRuleCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Create a new routing rule."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     return {"id": str(uuid.uuid4()), "tenant_id": str(tenant_id), **body.model_dump()}
 
 
@@ -293,8 +307,13 @@ def update_routing_rule(
     body: RoutingRuleUpdateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Update an existing routing rule."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
 
 
@@ -535,8 +554,13 @@ def generate_payment_batch(
     body: BatchGenerateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Generate a payment batch for a given route."""
+    if not any(current_user.has_role(r) for r in _WRITE_ROLES):
+        raise HTTPException(status_code=403, detail="Operator or Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     return {"id": str(uuid.uuid4()), "status": "generated", "batch_number": body.batch_number}
 
 
@@ -594,8 +618,13 @@ def validate_payment_batch(
     batch_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> BatchValidateResponse:
     """Validate a payment batch before submission."""
+    if not any(current_user.has_role(r) for r in _WRITE_ROLES):
+        raise HTTPException(status_code=403, detail="Operator or Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     return BatchValidateResponse(valid=True, errors=[])
 
 
@@ -604,8 +633,13 @@ def approve_payment_batch(
     batch_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Approve a payment batch."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found")
 
 
@@ -614,8 +648,13 @@ def submit_payment_batch(
     batch_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Submit a payment batch to vendor."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found")
 
 
@@ -624,8 +663,13 @@ def void_payment_batch(
     batch_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Void a payment batch."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found")
 
 
@@ -688,8 +732,13 @@ def record_settlement(
     body: SettlementRecordRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Manually record a settlement."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     return {"payment_id": str(body.payment_id), "status": "settled"}
 
 
@@ -788,8 +837,13 @@ def create_invoicing_config(
     body: InvoicingConfigCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Create invoicing configuration for a client."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     return {"id": str(uuid.uuid4()), "tenant_id": str(tenant_id), **body.model_dump()}
 
 
@@ -799,8 +853,13 @@ def update_invoicing_config(
     body: InvoicingConfigCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Update invoicing configuration."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Config not found")
 
 
@@ -873,8 +932,13 @@ def generate_invoice(
     body: InvoiceGenerateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Generate a new invoice for a client and period."""
+    if not any(current_user.has_role(r) for r in _WRITE_ROLES):
+        raise HTTPException(status_code=403, detail="Operator or Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     return {"id": str(uuid.uuid4()), "status": "draft", "invoice_number": body.invoice_number}
 
 
@@ -953,8 +1017,13 @@ def approve_invoice(
     invoice_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Approve a draft invoice."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
 
 
@@ -963,8 +1032,13 @@ def send_invoice(
     invoice_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Send invoice to client."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
 
 
@@ -974,8 +1048,13 @@ def void_invoice(
     body: dict,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Void an invoice."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail="MFA verification required")
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
 
 
@@ -1146,9 +1225,14 @@ def record_ar_payment(
     body: ARPaymentRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Record a payment against an AR record."""
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AR record not found")
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"error": {"code": "NOT_FOUND", "message": "AR record not found", "correlation_id": str(uuid.uuid4())}})
 
 
 @router.post("/ar/{ar_id}/dispute", status_code=status.HTTP_200_OK, response_model=dict)
@@ -1157,9 +1241,14 @@ def dispute_ar_record(
     body: ARDisputeRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Open a dispute on an AR record."""
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AR record not found")
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"error": {"code": "NOT_FOUND", "message": "AR record not found", "correlation_id": str(uuid.uuid4())}})
 
 
 @router.post("/ar/{ar_id}/write-off", status_code=status.HTTP_200_OK, response_model=dict)
@@ -1168,90 +1257,19 @@ def write_off_ar_record(
     body: ARWriteOffRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Write off an AR record (admin only)."""
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AR record not found")
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"error": {"code": "NOT_FOUND", "message": "AR record not found", "correlation_id": str(uuid.uuid4())}})
 
 
 # ---------------------------------------------------------------------------
 # Journal
 # ---------------------------------------------------------------------------
-
-
-@router.get("/journal", response_model=list[dict])
-def query_journal(
-    tenant_id: TenantId,
-    db: DBSession,
-    client_id: uuid.UUID | None = Query(default=None),
-    program_id: uuid.UUID | None = Query(default=None),
-    category: str | None = Query(default=None),
-    entry_type: str | None = Query(default=None),
-    date_from: date | None = Query(default=None),
-    date_to: date | None = Query(default=None),
-    unexported_only: bool = Query(default=False),
-    limit: int = Query(default=500, ge=1, le=5000),
-    offset: int = Query(default=0, ge=0),
-) -> list[dict]:
-    """Query journal entries with filters. READ ONLY — journal is append-only."""
-    correlation_id = str(uuid.uuid4())
-    try:
-        stmt = (
-            select(JournalEntry)
-            .where(JournalEntry.tenant_id == tenant_id)
-            .order_by(JournalEntry.entry_date.desc(), JournalEntry.entry_timestamp.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-        if client_id is not None:
-            stmt = stmt.where(JournalEntry.client_id == client_id)
-        if program_id is not None:
-            stmt = stmt.where(JournalEntry.program_id == program_id)
-        if category is not None:
-            stmt = stmt.where(JournalEntry.category == category)
-        if entry_type is not None:
-            stmt = stmt.where(JournalEntry.entry_type == entry_type)
-        if date_from is not None:
-            stmt = stmt.where(JournalEntry.entry_date >= date_from)
-        if date_to is not None:
-            stmt = stmt.where(JournalEntry.entry_date <= date_to)
-        if unexported_only:
-            stmt = stmt.where(JournalEntry.exported_to_accounting.is_(False))
-        rows = db.execute(stmt).scalars().all()
-        return [
-            {
-                "id": str(r.id),
-                "tenant_id": str(r.tenant_id),
-                "entry_date": r.entry_date.isoformat() if r.entry_date else None,
-                "entry_timestamp": r.entry_timestamp.isoformat() if r.entry_timestamp else None,
-                "entry_type": r.entry_type,
-                "amount": str(r.amount),
-                "category": r.category,
-                "description": r.description,
-                "client_id": str(r.client_id) if r.client_id else None,
-                "client_name": r.client_name,
-                "program_id": str(r.program_id) if r.program_id else None,
-                "program_name": r.program_name,
-                "gl_account_code": r.gl_account_code,
-                "gl_class": r.gl_class,
-                "reference_type": r.reference_type,
-                "reference_id": str(r.reference_id) if r.reference_id else None,
-                "exported_to_accounting": r.exported_to_accounting,
-                "exported_at": r.exported_at.isoformat() if r.exported_at else None,
-                "export_reference": r.export_reference,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-            }
-            for r in rows
-        ]
-    except Exception as exc:
-        logger.error(
-            "query_journal failed",
-            extra={"billing_correlation_id": correlation_id, "billing_tenant_id": str(tenant_id)},
-            exc_info=exc,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": {"code": "QUERY_JOURNAL_ERROR", "message": "Failed to query journal", "correlation_id": correlation_id}},
-        ) from exc
 
 
 @router.get("/journal/summary", response_model=dict)
@@ -1326,8 +1344,13 @@ def close_period(
     body: PeriodCloseRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Close an accounting period."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
     return {"period_end": str(body.period_end), "status": "closed"}
 
 
@@ -1385,8 +1408,13 @@ def create_fee_config(
     body: FeeConfigCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Create a fee configuration."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
     return {"id": str(uuid.uuid4()), **body.model_dump()}
 
 
@@ -1396,9 +1424,14 @@ def update_fee_config(
     body: FeeConfigUpdateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Update a fee configuration."""
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fee config not found")
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"error": {"code": "NOT_FOUND", "message": "Fee config not found", "correlation_id": str(uuid.uuid4())}})
 
 
 # ---------------------------------------------------------------------------
@@ -1463,8 +1496,13 @@ def create_program_budget(
     body: ProgramBudgetCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Create a program budget."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
     return {"id": str(uuid.uuid4()), "tenant_id": str(tenant_id), **body.model_dump()}
 
 
@@ -1474,9 +1512,14 @@ def update_program_budget(
     body: ProgramBudgetUpdateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Update a program budget."""
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found")
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"error": {"code": "NOT_FOUND", "message": "Budget not found", "correlation_id": str(uuid.uuid4())}})
 
 
 @router.get("/program-budgets/{budget_id}/dashboard", response_model=dict)
@@ -1632,9 +1675,14 @@ def acknowledge_budget_alert(
     alert_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Acknowledge a budget alert."""
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"error": {"code": "NOT_FOUND", "message": "Alert not found", "correlation_id": str(uuid.uuid4())}})
 
 
 # ---------------------------------------------------------------------------
@@ -1689,8 +1737,13 @@ def create_payment_vendor(
     body: PaymentVendorCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Create a payment vendor configuration."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
     return {"id": str(uuid.uuid4()), **body.model_dump()}
 
 
@@ -1700,9 +1753,14 @@ def update_payment_vendor(
     body: PaymentVendorCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Update a payment vendor configuration."""
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor not found")
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"error": {"code": "NOT_FOUND", "message": "Vendor not found", "correlation_id": str(uuid.uuid4())}})
 
 
 # ---------------------------------------------------------------------------
@@ -1756,8 +1814,13 @@ def create_bank_account(
     body: BankAccountCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Create a bank account."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
     return {"id": str(uuid.uuid4()), "account_number_last4": body.account_number[-4:]}
 
 
@@ -1767,9 +1830,14 @@ def update_bank_account(
     body: BankAccountCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Update a bank account."""
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"error": {"code": "NOT_FOUND", "message": "Account not found", "correlation_id": str(uuid.uuid4())}})
 
 
 # ---------------------------------------------------------------------------
@@ -1791,8 +1859,13 @@ def update_accounting_config(
     body: AccountingConfigUpdateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Update accounting system configuration."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
     return body.model_dump(exclude_none=True)
 
 
@@ -1847,8 +1920,13 @@ def create_remittance_config(
     body: RemittanceConfigCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Create a remittance configuration."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
     return {"id": str(uuid.uuid4()), **body.model_dump()}
 
 
@@ -1905,8 +1983,13 @@ def create_sftp_config(
     body: SFTPConfigCreateRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Create an SFTP configuration."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
     return {"id": str(uuid.uuid4()), "host": body.host, "config_name": body.config_name}
 
 
@@ -1915,8 +1998,13 @@ def test_sftp_config(
     config_id: uuid.UUID,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> SFTPTestResponse:
     """Test SFTP connection."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
     return SFTPTestResponse(success=False, message="Config not found")
 
 
@@ -1972,9 +2060,14 @@ def update_funding_config(
     body: dict,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Update funding configuration."""
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Config not found")
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"error": {"code": "NOT_FOUND", "message": "Config not found", "correlation_id": str(uuid.uuid4())}})
 
 
 @router.get("/funding/{config_id}/ledger", response_model=list[dict])
@@ -2028,8 +2121,13 @@ def record_funding_deposit(
     body: FundingDepositRequest,
     tenant_id: TenantId,
     db: DBSession,
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Record a prefund deposit."""
+    if not any(current_user.has_role(r) for r in _APPROVER_ONLY):
+        raise HTTPException(status_code=403, detail={"error": {"code": "FORBIDDEN", "message": "Approver role required", "correlation_id": str(uuid.uuid4())}})
+    if not getattr(current_user, "mfa_verified", True):
+        raise HTTPException(status_code=403, detail={"error": {"code": "MFA_REQUIRED", "message": "MFA verification required", "correlation_id": str(uuid.uuid4())}})
     return {"config_id": str(config_id), "amount": str(body.amount), "status": "recorded"}
 
 

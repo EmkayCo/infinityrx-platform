@@ -85,3 +85,55 @@ def run_budget_snapshot(*, db: Any) -> dict[str, int]:
     # rows with current spent_to_date, burn_rate_30day_avg, budget_remaining, etc.
 
     return {"snapshots_created": created}
+
+
+def cleanup_old_uploads(
+    *, db: Any, upload_dir: str, retention_days: int = 90
+) -> dict[str, int]:
+    """Nightly job (paysync.cleanup_old_uploads): delete orphaned .tmp files and
+    optionally archive completed upload files older than retention_days.
+
+    Storage layout: {PAYSYNC_UPLOAD_DIR}/{tenant_id}/{upload_id}/{filename}
+    Orphaned .tmp files are mid-write crash artifacts safe to remove immediately.
+    Completed upload files are retained for the full retention_days period even
+    if the upload has been superseded (provenance immutability per spec §5.2).
+
+    Args:
+        db:              SQLAlchemy session for querying Upload rows.
+        upload_dir:      Root path of the paysync upload directory.
+        retention_days:  Files older than this are eligible for archival/deletion.
+                         Default 90 days per §10.2.
+
+    Returns:
+        dict with counts: tmp_removed, files_archived, errors.
+    """
+    import os
+    import pathlib
+    import logging
+
+    logger = logging.getLogger(__name__)
+    tmp_removed = 0
+    files_archived = 0
+    errors = 0
+
+    root = pathlib.Path(upload_dir)
+    if not root.exists():
+        logger.info("paysync upload_dir does not exist yet: %s", upload_dir)
+        return {"tmp_removed": tmp_removed, "files_archived": files_archived, "errors": errors}
+
+    cutoff = date.today().toordinal() - retention_days
+
+    for tmp_file in root.rglob("*.tmp"):
+        try:
+            # Orphaned .tmp = mid-write crash artifact; safe to remove.
+            os.remove(tmp_file)
+            tmp_removed += 1
+        except OSError as exc:
+            logger.warning("cleanup_old_uploads: failed to remove tmp %s: %s", tmp_file, exc)
+            errors += 1
+
+    # Production implementation: query Upload rows with uploaded_at < cutoff,
+    # verify the file exists on disk, move to archive storage or delete per
+    # tenant retention policy. Stub returns zero archived for now.
+
+    return {"tmp_removed": tmp_removed, "files_archived": files_archived, "errors": errors}

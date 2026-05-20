@@ -10,7 +10,6 @@
     { "path": "../../auth" },
     { "path": "../../contract" },
     { "path": "../../qa-harness" },
-    { "path": "../../shell" },
     { "path": "../../ui" }
   ],
   "include": ["src/**/*.ts", "src/**/*.tsx", "module.config.ts"],

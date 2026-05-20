@@ -1,6 +1,6 @@
 # Dev / reference full-composition manifest.
 # Used by `npm run operator:dev` and by Plan A's manifest-validator test.
-# SP-2 Plan A adds the directories module (federated search spine).
+# SP-2 Plan A adds directories module; SP-1 Plans A-E add paysync module.
 instance_name: operator-dev
 audience: operator
 auth_profile: development
@@ -9,16 +9,26 @@ branding:
 modules:
   - prescriber-directory
   - directories
+  - paysync
 required_backends:
   - prescriber-directory
   - pharmacy-directory
   - drug-database
+  - billing
+  - payment-processing
+  - edi-compliance
   - core-platform
 required_shared_services:
   - postgres
   - redis
-required_schemas: []
-required_migrations: []
+required_schemas:
+  - billing_v1
+  - payment_processing_v1
+  - core_v1
+required_migrations:
+  - core
+  - billing
+  - payment-processing
 required_env:
   - JWT_SECRET
   - NEXTAUTH_SECRET
@@ -27,20 +37,35 @@ required_env:
   - PHARMACY_DIRECTORY_URL
   - DRUG_DATABASE_URL
   - CORE_PLATFORM_URL
+  - PAYSYNC_UPLOAD_DIR
+  - PAYSYNC_HASH_CHAIN_SYNC_LIMIT
+  - DATABASE_URL_BILLING
+  - DATABASE_URL_PAYMENT_PROCESSING
 required_health:
   - http://prescriber-directory:8010/health
   - http://pharmacy-directory:8009/health
   - http://drug-database:8011/health
+  - http://billing:8040/health
+  - http://payment-processing:8050/health
+  - http://core-platform:8010/health
 required_seed_data:
   - directories/fixtures
-required_queues: []
-required_jobs: []
+required_queues:
+  - paysync.upload.parsed
+required_jobs:
+  - paysync.cleanup_old_uploads
+  - paysync.uploads.retention
+  - paysync.audit.hash-chain.verify
+  - core.audit_chain_verify
+  - core.session_reaper
 required_buckets: []
 required_integrations:
   - shared-ingestion-api
 required_secrets:
   - secret://jwt/signing-key
   - secret://nextauth/secret
+  - secret://db/billing
+  - secret://db/payment-processing
 migration_policy:
   ordering: explicit
   rollback: none
