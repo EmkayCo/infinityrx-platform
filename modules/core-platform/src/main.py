@@ -41,6 +41,7 @@ from shared.observability.slow_query import install_slow_query_logger
 
 from ._shim import db as db_shim
 from .api import router as api_router
+from .api.e2e_auth import router as test_auth_router
 from .jobs.seed import ensure_audit_chain_job
 from .audit.middleware import AuditContext, AuditMiddleware
 from .auth import auth_api_router, configure_core_auth
@@ -315,14 +316,20 @@ def create_app() -> FastAPI:
     # (that's the whole point); health probes come from Kubernetes which
     # never carries an auth header. Everything else still requires a valid
     # JWT. Paths must match `scope["path"]` exactly.
-    _UNAUTH_PATHS: frozenset[str] = frozenset(
-        {
-            "/api/v1/auth/login",
-            "/api/v1/auth/token/refresh",
-            "/api/v1/auth/mfa/verify",
-            "/health",
-        }
-    )
+    import os as _os  # noqa: PLC0415
+    _base_unauth_paths = {
+        "/api/v1/auth/login",
+        "/api/v1/auth/token/refresh",
+        "/api/v1/auth/mfa/verify",
+        "/health",
+    }
+    # B6: test-auth bypass must NOT exist in production — middleware would let
+    # unauthenticated requests through to the endpoint's own guard, but that
+    # endpoint guard is the only thing standing between an unauthenticated
+    # caller and a signed JWT.  Gate the allowlist entry on non-production env.
+    if _os.getenv("INFINITYRX_ENV", "development").lower() != "production":
+        _base_unauth_paths.add("/api/v1/core/test-auth/token")
+    _UNAUTH_PATHS: frozenset[str] = frozenset(_base_unauth_paths)
     app.add_middleware(
         TenantIsolationMiddleware,
         resolver=_TenantResolver(),
@@ -331,8 +338,56 @@ def create_app() -> FastAPI:
     app.add_middleware(RateLimitMiddleware, config=RateLimitConfig())
     app.add_middleware(SecurityHeadersMiddleware)
 
+    # B7: canonical error envelope per .claude/rules/error-handling.md.
+    # Maps every HTTPException to {"error": {"code", "message", "correlation_id"}}
+    # so all modules (and the Playwright E2E spec) can parse errors consistently.
+    from fastapi import HTTPException as _HTTPException, Request as _Request  # noqa: PLC0415
+    from fastapi.responses import JSONResponse as _JSONResponse  # noqa: PLC0415
+    import uuid as _uuid  # noqa: PLC0415
+
+    _STATUS_CODE_MAP = {
+        400: "BAD_REQUEST",
+        401: "UNAUTHORIZED",
+        403: "FORBIDDEN",
+        404: "NOT_FOUND",
+        409: "CONFLICT",
+        422: "VALIDATION_ERROR",
+        429: "RATE_LIMITED",
+    }
+
+    @app.exception_handler(_HTTPException)
+    async def _canonical_http_exception_handler(request: _Request, exc: _HTTPException):
+        _no_store_headers = {"Cache-Control": "no-store"}
+        _err = exc.detail.get("error") if isinstance(exc.detail, dict) else None
+        if (
+            isinstance(_err, dict)
+            and "code" in _err
+            and "message" in _err
+            and "correlation_id" in _err
+        ):
+            return _JSONResponse(
+                status_code=exc.status_code,
+                content=exc.detail,
+                headers=_no_store_headers,
+            )
+        code = _STATUS_CODE_MAP.get(exc.status_code, "ERROR")
+        message = exc.detail if isinstance(exc.detail, str) else "Request failed"
+        body = {
+            "error": {
+                "code": code,
+                "message": message,
+                "correlation_id": str(_uuid.uuid4()),
+            }
+        }
+        return _JSONResponse(
+            status_code=exc.status_code,
+            content=body,
+            headers=_no_store_headers,
+        )
+
     app.include_router(api_router)
     app.include_router(auth_api_router)
+    app.include_router(test_auth_router)
     app.include_router(
         build_dlq_router(
             get_service=_get_dlq_service,

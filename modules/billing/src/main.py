@@ -19,6 +19,16 @@ from shared.events.dlq import DLQService, build_dlq_router
 from shared.middleware import RateLimitConfig, RateLimitMiddleware, SecurityHeadersMiddleware
 
 from .api.router import router
+from .api.uploads import router as uploads_router
+from .api.inbox import router as inbox_router
+from .api.cycles import router as cycles_router
+from .api.carryovers import router as carryovers_router
+from .api.journal import router as journal_router
+from .api.payment_runs import router as payment_runs_router
+from .api.bank_settlements import router as bank_settlements_router
+from .api.files import router as files_router
+from .api.reconciliations import router as reconciliations_router
+from .api.seed import router as seed_router
 
 logger = logging.getLogger("billing.main")
 
@@ -50,7 +60,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         from shared.observability.slow_query import install_slow_query_logger  # noqa: PLC0415
         threshold = int(os.getenv("SLOW_QUERY_THRESHOLD_MS", "1000"))
         install_slow_query_logger(_get_engine(), threshold_ms=threshold)
-    except Exception:  # pragma: no cover — best-effort; missing DB is fine in tests
+    except Exception:  # pragma: no cover - best-effort; missing DB is fine in tests
         pass
 
     # CR-01/CR-11: subscribe consumers to the event bus with idempotency wrappers.
@@ -61,7 +71,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await bus.start()
         await wire_consumers(bus)
         app.state.event_bus = bus
-    except Exception:  # pragma: no cover — best-effort; missing broker is fine in tests
+    except Exception:  # pragma: no cover - best-effort; missing broker is fine in tests
         logger.exception("billing.consumer_wiring_failed")
 
     yield
@@ -76,7 +86,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     """Application factory. Tests use this to build a fresh app per case."""
-    from shared.config import get_settings  # noqa: PLC0415 — deferred to allow test override
+    from shared.config import get_settings  # noqa: PLC0415 - deferred to allow test override
+
+    # P1-auth: billing now uses get_current_user on all SP-1 Plan B endpoints.
+    # configure_auth_trust_jwt() must be called before the app handles requests
+    # so shared.auth.dependencies.get_current_user has a loader registered.
+    # Mirrors the pattern in drug-database and prescriber-directory main.py.
+    try:
+        from shared.auth.dev_trust_jwt import configure_auth_trust_jwt  # noqa: PLC0415
+        configure_auth_trust_jwt()
+    except Exception:  # pragma: no cover - best-effort; test overrides bypass this
+        pass
 
     settings = get_settings()
     environment = getattr(settings, "ENVIRONMENT", "development")
@@ -86,7 +106,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
         title="InfinityRx Billing",
         version="1.0.0",
-        description="Billing module — claims, AP, AR, invoicing, journal, program monitoring",
+        description="Billing module - claims, AP, AR, invoicing, journal, program monitoring",
         openapi_url="/openapi.json" if environment != "production" else None,
         docs_url="/docs" if environment != "production" else None,
         redoc_url="/redoc" if environment != "production" else None,
@@ -106,7 +126,76 @@ def create_app() -> FastAPI:
     app.add_middleware(RateLimitMiddleware, config=RateLimitConfig())
     app.add_middleware(SecurityHeadersMiddleware)
 
+    # C1: canonical error envelope per .claude/rules/error-handling.md.
+    # FastAPI's default HTTPException response is {"detail": "..."} which the
+    # paysync clients cannot parse. Map every HTTPException to the canonical
+    # {"error": {"code", "message", "correlation_id"}} envelope.
+    from fastapi import HTTPException, Request  # noqa: PLC0415
+    from fastapi.responses import JSONResponse  # noqa: PLC0415
+    import uuid as _uuid  # noqa: PLC0415
+
+    _STATUS_CODE_MAP = {
+        400: "BAD_REQUEST",
+        401: "UNAUTHORIZED",
+        403: "FORBIDDEN",
+        404: "NOT_FOUND",
+        409: "CONFLICT",
+        422: "VALIDATION_ERROR",
+        429: "RATE_LIMITED",
+    }
+
+    @app.exception_handler(HTTPException)
+    async def _canonical_http_exception_handler(request: Request, exc: HTTPException):
+        # If the route already returned a fully-canonical envelope (dict where
+        # "error" is itself a dict with code+message+correlation_id), passthrough
+        # unchanged. Detail shapes that merely contain a string-valued "error"
+        # key fall through to the canonical wrapper below.
+        # Every HTTPException response gets Cache-Control: no-store.
+        # Errors often surface PHI surrogates (filenames, ids) and authn/authz
+        # state; caching them violates phi-compliance + security rules.
+        _no_store_headers = {"Cache-Control": "no-store"}
+
+        # Require a FULL canonical envelope (code + message + correlation_id)
+        # to passthrough. Anything less goes through the wrapper so the rule
+        # in .claude/rules/error-handling.md is enforced consistently.
+        _err = exc.detail.get("error") if isinstance(exc.detail, dict) else None
+        if (
+            isinstance(_err, dict)
+            and "code" in _err
+            and "message" in _err
+            and "correlation_id" in _err
+        ):
+            return JSONResponse(
+                status_code=exc.status_code,
+                content=exc.detail,
+                headers=_no_store_headers,
+            )
+        code = _STATUS_CODE_MAP.get(exc.status_code, "ERROR")
+        message = exc.detail if isinstance(exc.detail, str) else "Request failed"
+        body = {
+            "error": {
+                "code": code,
+                "message": message,
+                "correlation_id": str(_uuid.uuid4()),
+            }
+        }
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=body,
+            headers=_no_store_headers,
+        )
+
     app.include_router(router)
+    app.include_router(uploads_router)
+    app.include_router(inbox_router)
+    app.include_router(cycles_router)
+    app.include_router(carryovers_router)
+    app.include_router(journal_router)
+    app.include_router(files_router)
+    app.include_router(payment_runs_router)
+    app.include_router(bank_settlements_router)
+    app.include_router(reconciliations_router)
+    app.include_router(seed_router)
     app.include_router(
         build_dlq_router(
             get_service=_get_dlq_service,
@@ -153,3 +242,4 @@ def create_app() -> FastAPI:
 app = create_app()
 
 __all__ = ["app", "create_app"]
+

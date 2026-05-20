@@ -1,0 +1,47 @@
+[
+  {
+    "id": "co000000-0000-0000-0000-000000000001",
+    "tenant_id": "00000000-0000-0000-0000-000000000001",
+    "source_cycle_id": "c1000000-0000-0000-0000-000000000005",
+    "target_cycle_id": "c1000000-0000-0000-0000-000000000004",
+    "carryover_type": "ap_carryforward",
+    "claim_count": 8,
+    "amount": "1842.00",
+    "status": "applied",
+    "applied_by": "usr-00000000-0000-0000-0000-000000000002",
+    "applied_at": "2026-02-03T09:00:00.000+00:00",
+    "notes": "January error cycle AP entries carried to February per billing ops policy",
+    "created_at": "2026-02-01T00:00:00.000+00:00",
+    "updated_at": "2026-02-03T09:00:00.000+00:00"
+  },
+  {
+    "id": "co000000-0000-0000-0000-000000000002",
+    "tenant_id": "00000000-0000-0000-0000-000000000001",
+    "source_cycle_id": "c1000000-0000-0000-0000-000000000004",
+    "target_cycle_id": "c1000000-0000-0000-0000-000000000003",
+    "carryover_type": "ap_carryforward",
+    "claim_count": 5,
+    "amount": "975.25",
+    "status": "applied",
+    "applied_by": "usr-00000000-0000-0000-0000-000000000002",
+    "applied_at": "2026-03-02T10:30:00.000+00:00",
+    "notes": "Late-received pharmacy remits from Feb, moved to March cycle",
+    "created_at": "2026-03-01T00:00:00.000+00:00",
+    "updated_at": "2026-03-02T10:30:00.000+00:00"
+  },
+  {
+    "id": "co000000-0000-0000-0000-000000000003",
+    "tenant_id": "00000000-0000-0000-0000-000000000001",
+    "source_cycle_id": "c1000000-0000-0000-0000-000000000003",
+    "target_cycle_id": "c1000000-0000-0000-0000-000000000002",
+    "carryover_type": "ap_carryforward",
+    "claim_count": 3,
+    "amount": "462.75",
+    "status": "open",
+    "applied_by": null,
+    "applied_at": null,
+    "notes": "3 disputed claims pending approver review before carryover can be applied",
+    "created_at": "2026-04-01T00:00:00.000+00:00",
+    "updated_at": "2026-04-01T00:00:00.000+00:00"
+  }
+]

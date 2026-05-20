@@ -34,7 +34,7 @@ _idempotency_store = InMemoryIdempotencyStore()
 
 @contextmanager
 def _default_session_cm() -> Iterator[Any]:
-    """Default session provider — deferred import so test code that never
+    """Default session provider - deferred import so test code that never
     sets BILLING_DATABASE_URL doesn't blow up at module import time.
     """
     from ..db.session import get_db_session  # noqa: PLC0415
@@ -91,9 +91,19 @@ async def wire_consumers(
         "member.enrolled",
         _make_wrapper("handle_member_enrolled", "billing.member_enrolled"),
     )
+
+    # Task 3b / B5: paysync.upload.parsed cache-invalidation consumer.
+    # Wired via _make_wrapper (not hand-rolled) so idempotency is handled
+    # uniformly across all billing consumers per event-bus rules.
+    await bus.subscribe(
+        "paysync.upload.parsed",
+        _make_wrapper("handle_upload_parsed_cache", "billing.upload_parsed"),
+    )
+
     logger.info(
         "billing.consumers_wired",
         extra={
-            "svc_topics": "claim.adjudicated,claim.reversed,payment.auto_posted,member.enrolled"
+            "svc_topics": "claim.adjudicated,claim.reversed,payment.auto_posted,member.enrolled,paysync.upload.parsed"
         },
     )
+

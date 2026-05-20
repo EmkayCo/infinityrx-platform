@@ -24,6 +24,13 @@ export interface ClientConfig {
   baseUrl?: string;
   /** Function that produces a fresh access token Bearer string. */
   getAuthToken: () => Promise<string>;
+  /**
+   * Function that returns the active tenant UUID string.
+   * Required for backends that enforce X-Tenant-Id (e.g. billing/paysync).
+   * Optional so clients that do not need it (e.g. prescriber-directory) are
+   * not forced to provide it.
+   */
+  getTenantId?: () => Promise<string>;
   /** Correlation-id propagation header (default `x-correlation-id`). */
   correlationHeader?: string;
   /** Fetch implementation override (Node uses undici; tests inject msw). */

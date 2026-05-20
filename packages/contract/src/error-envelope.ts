@@ -2,10 +2,12 @@ import { z } from "zod";
 
 /**
  * Canonical error envelope per `.claude/rules/error-handling.md`:
- *   { error: { code: string, message: string, field?: string, correlation_id: string } }
+ *   { error: { code, message, field?, correlation_id, details? } }
  *
- * Every backend returns errors in this shape. Every BFF wraps thrown errors in this shape.
- * The zod schema is the authority — runtime validation at every boundary.
+ * `details` carries code-specific recovery context (e.g. DUPLICATE_UPLOAD ships
+ * existing_upload_id under details). Every backend returns errors in this shape.
+ * Every BFF wraps thrown errors in this shape. The zod schema is the authority
+ * -- runtime validation at every boundary.
  */
 export const ErrorEnvelopeSchema = z.object({
   error: z.object({
@@ -13,6 +15,7 @@ export const ErrorEnvelopeSchema = z.object({
     message: z.string(),
     field: z.string().optional(),
     correlation_id: z.string().uuid(),
+    details: z.record(z.unknown()).optional(),
   }),
 });
 

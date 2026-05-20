@@ -16,6 +16,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 
 import pytest
+from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
@@ -52,6 +53,22 @@ PROGRAM_A = uuid.UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
 
 HEADERS_A = {"X-Tenant-Id": str(TENANT_A)}
 HEADERS_B = {"X-Tenant-Id": str(TENANT_B)}
+
+# B2 fix: TenantId now validates header against JWT tenant. wired_client sends
+# HEADERS_A by default; tests that use HEADERS_B must override get_current_user
+# themselves. We wire a TENANT_A mock user for the module-scoped client.
+_MOCK_USER_A = MagicMock(
+    id=uuid.UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+    tenant_id=TENANT_A,
+    roles=("operator",),
+    has_role=lambda r: r in ("operator",),
+)
+_MOCK_USER_B = MagicMock(
+    id=uuid.UUID("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+    tenant_id=TENANT_B,
+    roles=("operator",),
+    has_role=lambda r: r in ("operator",),
+)
 
 
 def _now() -> datetime:
@@ -104,7 +121,38 @@ def wired_client(_wired_engine) -> TestClient:
         finally:
             session.close()
 
+    from src.api.dependencies import validate_tenant_id
+    import uuid as _uuid
+
+    # B2 fix: override validate_tenant_id (not get_current_user) so isolation
+    # tests that send HEADERS_B still get data-level 404/empty rather than 403.
+    # These tests verify DB-level tenant isolation; auth isolation is covered by
+    # TestTenantHeaderAuthorizationB2 in test_uploads_router.py.
+    def _bypass_tenant_auth(x_tenant_id: str = __import__("fastapi").Header(...)):
+        try:
+            return _uuid.UUID(x_tenant_id)
+        except ValueError:
+            raise __import__("fastapi").HTTPException(status_code=400, detail="Invalid X-Tenant-Id")
+
+    # Plan D journal_router (and other Plan B+/C+/D routers) require
+    # current_user via Depends(get_current_user). The wired_routes tests
+    # focus on DB-level wiring and don't carry JWTs; inject a no-op user
+    # so those routes pass auth and surface DB behavior. Tenant isolation
+    # is still verified via the validate_tenant_id bypass above.
+    from shared.auth.dependencies import get_current_user
+    from unittest.mock import MagicMock as _MagicMock
+
+    def _bypass_current_user():
+        return _MagicMock(
+            id=_uuid.UUID("11111111-1111-1111-1111-111111111111"),
+            tenant_id=TENANT_A,
+            roles=("operator", "approver", "auditor"),
+            has_role=lambda r: True,
+        )
+
     app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[validate_tenant_id] = _bypass_tenant_auth
+    app.dependency_overrides[get_current_user] = _bypass_current_user
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
@@ -861,6 +909,8 @@ class TestWiredARRoutes:
 
 class TestWiredJournalRoutes:
     def test_query_journal_tenant_isolation(self, wired_client, populated_db):
+        # Plan D journal_router returns a bare array (paysync list schemas
+        # accept both bare-array and envelope shapes per B4 fix).
         resp_a = wired_client.get("/api/v1/billing/journal", headers=HEADERS_A)
         resp_b = wired_client.get("/api/v1/billing/journal", headers=HEADERS_B)
         ids_a = {r["id"] for r in resp_a.json()}
@@ -898,13 +948,14 @@ class TestWiredJournalRoutes:
         resp = wired_client.put(f"/api/v1/billing/journal/{je_id}", json={}, headers=HEADERS_A)
         assert resp.status_code in (404, 405)
 
-    def test_journal_filter_by_unexported_only(self, wired_client, populated_db):
-        resp = wired_client.get(
-            "/api/v1/billing/journal?unexported_only=true", headers=HEADERS_A
-        )
+    def test_journal_list_returns_array(self, wired_client, populated_db):
+        # Plan D journal_router replaces the legacy unexported_only filter
+        # (which now lives only on /journal/summary). Verify the bare-array
+        # response shape — paysync contract schemas accept either shape per B4.
+        resp = wired_client.get("/api/v1/billing/journal", headers=HEADERS_A)
         assert resp.status_code == 200
-        for entry in resp.json():
-            assert entry["exported_to_accounting"] is False
+        body = resp.json()
+        assert isinstance(body, list)
 
 
 # ---------------------------------------------------------------------------

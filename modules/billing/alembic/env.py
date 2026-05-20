@@ -48,6 +48,8 @@ from src.models.tables import (  # noqa: F401
     PaymentVendorConfig,
     PaytoWaterfall,
     PrefundLedger,
+    Upload,
+    UploadStatus,
     ProgramBudget,
     ProgramBudgetAlert,
     ProgramBudgetSnapshot,

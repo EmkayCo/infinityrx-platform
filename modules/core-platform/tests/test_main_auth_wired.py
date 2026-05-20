@@ -165,10 +165,14 @@ def test_login_endpoint_reachable_without_auth_header() -> None:
 
     assert resp.status_code == 401, resp.text
     body = resp.json()
-    detail = body.get("detail")
-    assert isinstance(detail, dict) and detail.get("error") == "invalid_credentials", (
-        f"login endpoint must be reached (not blocked by middleware). "
-        f"body: {body}"
+    # Plan E B7: core-platform now wraps every HTTPException in the canonical
+    # envelope {"error": {"code", "message", "correlation_id"}}. Reaching the
+    # handler returns the canonical envelope; the middleware bypass would
+    # return a different shape with `error` as a STRING. We distinguish by
+    # asserting body.error is a dict with the canonical "code" key.
+    err = body.get("error")
+    assert isinstance(err, dict) and err.get("code") == "UNAUTHORIZED", (
+        f"login endpoint must be reached (not blocked by middleware). body: {body}"
     )
 
 
