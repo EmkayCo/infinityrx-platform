@@ -2,39 +2,41 @@
  * Unit tests for GET + POST /api/paysync/uploads route handler.
  *
  * Security-sensitive paths per CLAUDE.md INVARIANTS:
- *   - Auth-before-parse: unauthenticated -> 401 BEFORE body is consumed
+ *   - Auth-before-body: unauthenticated -> 401 BEFORE body is touched
  *   - Cache-Control: no-store on all authenticated responses (PHI-adjacent)
  *   - No PHI in error responses: filename/file size never echoed back
+ *
+ * POST streaming passthrough design:
+ *   The route forwards request.body (ReadableStream) directly to billing via
+ *   fetch with duplex:"half". It does NOT call request.formData() -- no
+ *   buffering, no Next.js body-size cap. globalThis.fetch is mocked to
+ *   intercept the billing call and assert headers + body are forwarded.
  *
  * Test matrix:
  *   GET  -- unauthenticated -> 401, handler not called
  *   GET  -- authenticated   -> delegates to handleListUploads, no-store header
  *   GET  -- handler throws  -> 502 UPSTREAM_ERROR
- *   POST -- unauthenticated -> 401 BEFORE body parse (multipart DoS guard)
- *   POST -- missing file    -> 400 MISSING_FILE, handler not called
- *   POST -- valid file      -> 201 no-store, delegates to handleCreateUpload
- *   POST -- 409 dedup       -> 409 no-store, existing_upload_id forwarded
- *   POST -- handler throws  -> 502 UPLOAD_FAILED, filename not in response
- *
- * NOTE: jsdom cannot parse multipart FormData from a NextRequest body.
- * POST tests stub request.formData() directly so the route handler receives
- * a controlled FormData — this is the same pattern used across the portal
- * test suite for multipart routes.
+ *   POST -- unauthenticated -> 401 BEFORE body is touched (multipart DoS guard)
+ *   POST -- wrong content-type -> 400 INVALID_BODY, fetch not called
+ *   POST -- valid stream -> 201 no-store, fetch called with duplex:"half"
+ *   POST -- billing 409 dedup -> 409 no-store forwarded verbatim
+ *   POST -- fetch throws (network) -> 502 UPLOAD_FAILED, no PHI in response
+ *   POST -- billing returns non-JSON -> 502 UPLOAD_FAILED
+ *   POST -- billing 422 validation failure -> 422 forwarded verbatim
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 // hoist mocks before any imports
 const { authMock } = vi.hoisted(() => ({ authMock: vi.fn() }));
 vi.mock("@shared/lib/auth", () => ({ auth: authMock }));
 
-const { mockHandleListUploads, mockHandleCreateUpload } = vi.hoisted(() => ({
+const { mockHandleListUploads } = vi.hoisted(() => ({
   mockHandleListUploads: vi.fn(),
-  mockHandleCreateUpload: vi.fn(),
 }));
 vi.mock("@infinityrx/module-paysync/bff", () => ({
   handleListUploads: mockHandleListUploads,
-  handleCreateUpload: mockHandleCreateUpload,
+  handleCreateUpload: vi.fn(),
   handleGetUpload: vi.fn(),
   handleGetUploadClaims: vi.fn(),
 }));
@@ -48,7 +50,8 @@ vi.mock("@infinityrx/contract", () => ({
 
 import { GET, POST, runtime } from "@/app/api/paysync/uploads/route";
 
-// helpers
+// ── helpers ──────────────────────────────────────────────────────────────────
+
 function makeJwt(claims: Record<string, unknown>): string {
   const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
   const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
@@ -67,35 +70,48 @@ function makeGetRequest(qs = "") {
 }
 
 /**
- * Build a NextRequest whose formData() resolves to the given map.
- * jsdom cannot parse multipart bodies from FormData objects, so we stub
- * request.formData directly — the route only calls request.formData(), never
- * request.body directly.
+ * Build a NextRequest for POST with a streaming body.
+ * The route reads request.body (ReadableStream) directly -- it never calls
+ * request.formData(). A ReadableStream body is set so request.body is non-null.
  */
-function makePostRequestWithFormData(fields: Record<string, Blob | File | string | null>) {
-  const req = new NextRequest("http://localhost:3000/api/paysync/uploads", {
+function makeStreamingPostRequest(
+  contentType = "multipart/form-data; boundary=----boundary123",
+  bodyData: Uint8Array | null = new TextEncoder().encode("--boundary\r\nContent-Disposition: form-data; name=\"file\"\r\n\r\nCSV data\r\n--boundary--"),
+) {
+  const bodyStream = bodyData
+    ? new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bodyData);
+          controller.close();
+        },
+      })
+    : undefined;
+
+  return new NextRequest("http://localhost:3000/api/paysync/uploads", {
     method: "POST",
-    // Body content doesn't matter — formData() is stubbed below.
-    body: "stub",
-    headers: { "Content-Type": "multipart/form-data; boundary=stub" },
+    headers: { "content-type": contentType },
+    body: bodyStream,
+    // @ts-expect-error -- duplex needed for Node fetch with streaming body
+    duplex: "half",
   });
-  const fd = new FormData();
-  for (const [key, val] of Object.entries(fields)) {
-    if (val !== null) {
-      if (val instanceof File) {
-        fd.append(key, val, val.name);
-      } else if (val instanceof Blob) {
-        fd.append(key, val, "upload.csv");
-      } else {
-        fd.append(key, val);
-      }
-    }
-  }
-  req.formData = () => Promise.resolve(fd);
-  return req;
 }
 
-// GET tests
+/** Mock globalThis.fetch to return a fake billing response. */
+function mockBillingFetch(status: number, body: unknown) {
+  globalThis.fetch = vi.fn().mockResolvedValue({
+    ok: status >= 200 && status < 300,
+    status,
+    json: () => Promise.resolve(body),
+  } as Response);
+}
+
+// Save and restore globalThis.fetch around each test
+let savedFetch: typeof globalThis.fetch;
+beforeEach(() => { savedFetch = globalThis.fetch; });
+afterEach(() => { globalThis.fetch = savedFetch; });
+
+// ── GET tests ─────────────────────────────────────────────────────────────────
+
 describe("GET /api/paysync/uploads", () => {
   beforeEach(() => {
     authMock.mockReset();
@@ -153,107 +169,138 @@ describe("GET /api/paysync/uploads", () => {
   });
 });
 
-// POST tests
-describe("POST /api/paysync/uploads", () => {
+// ── POST streaming passthrough tests ─────────────────────────────────────────
+
+describe("POST /api/paysync/uploads (streaming passthrough)", () => {
   beforeEach(() => {
     authMock.mockReset();
-    mockHandleCreateUpload.mockReset();
     mockCreateRealUploadsClient.mockReset();
   });
 
-  it("returns 401 before body parse when no session (multipart DoS guard)", async () => {
+  it("returns 401 before body is touched when no session (multipart DoS guard)", async () => {
     authMock.mockResolvedValue(null);
-    // Even with a file field present, auth fires first — formData() is never called.
-    const req = makePostRequestWithFormData({
-      file: new Blob(["data"], { type: "text/csv" }),
-    });
-    const formDataSpy = vi.spyOn(req, "formData");
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy;
+    const req = makeStreamingPostRequest();
     const resp = await POST(req);
     expect(resp.status).toBe(401);
-    expect(formDataSpy).not.toHaveBeenCalled();
-    expect(mockHandleCreateUpload).not.toHaveBeenCalled();
+    // fetch must never be called -- body must be untouched before auth resolves
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("returns 400 MISSING_FILE when form field file is absent", async () => {
+  it("returns 400 INVALID_BODY when content-type is not multipart/form-data", async () => {
     authedSession();
-    mockCreateRealUploadsClient.mockReturnValue({});
-    const req = makePostRequestWithFormData({ other_field: "value" });
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy;
+    const req = makeStreamingPostRequest("application/json");
     const resp = await POST(req);
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("MISSING_FILE");
-    expect(mockHandleCreateUpload).not.toHaveBeenCalled();
+    expect(body.error.code).toBe("INVALID_BODY");
+    // fetch must not be called -- content-type guard fires before streaming
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("delegates to handleCreateUpload and returns 201 no-store on success", async () => {
+  it("forwards request.body to billing with duplex:half and correct auth headers", async () => {
     authedSession();
-    const fakeUpload = { id: "upl-1", filename: "claims.csv", status: "received" };
-    mockCreateRealUploadsClient.mockReturnValue({});
-    mockHandleCreateUpload.mockResolvedValue({
-      data: fakeUpload,
-      status: 201,
-      headers: { "Cache-Control": "no-store" },
-    });
-    const req = makePostRequestWithFormData({
-      file: new Blob(["col1,col2\nval1,val2"], { type: "text/csv" }),
-    });
+    const fakeUpload = { id: "upl-stream-1", filename: "claims.csv", status: "received" };
+    mockBillingFetch(201, fakeUpload);
+
+    const req = makeStreamingPostRequest();
     const resp = await POST(req);
+
     expect(resp.status).toBe(201);
     expect(resp.headers.get("Cache-Control")).toBe("no-store");
-    expect(mockHandleCreateUpload).toHaveBeenCalledOnce();
     const body = (await resp.json()) as typeof fakeUpload;
-    expect(body.id).toBe("upl-1");
+    expect(body.id).toBe("upl-stream-1");
+
+    // Verify billing was called with streaming options
+    type FetchCall = [string, RequestInit & { duplex?: string }];
+    const [url, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as FetchCall;
+    expect(url).toContain("/api/v1/billing/uploads");
+    expect(init.method).toBe("POST");
+    const hdrs = init.headers as Record<string, string>;
+    expect(hdrs["content-type"]).toContain("multipart/form-data");
+    expect(hdrs["Authorization"]).toMatch(/^Bearer /);
+    expect(hdrs["x-tenant-id"]).toBe("tenant-alpha");
+    // duplex:"half" is the key that enables streaming without buffering
+    expect(init.duplex).toBe("half");
+    // body is the ReadableStream from request.body -- not a Blob or Buffer
+    expect(init.body).toBeInstanceOf(ReadableStream);
   });
 
-  it("returns 409 no-store on sha256 dedup conflict with existing_upload_id", async () => {
+  it("forwards billing 409 dedup conflict verbatim with no-store", async () => {
     authedSession();
-    mockCreateRealUploadsClient.mockReturnValue({});
-    mockHandleCreateUpload.mockResolvedValue({
-      data: { conflict: true, existing_upload_id: "upl-existing" },
-      status: 409,
-      headers: { "Cache-Control": "no-store" },
+    mockBillingFetch(409, {
+      error: {
+        code: "DUPLICATE_UPLOAD",
+        message: "File already uploaded",
+        correlation_id: "corr-123",
+        details: { existing_upload_id: "upl-existing" },
+      },
     });
-    const req = makePostRequestWithFormData({
-      file: new Blob(["dup data"], { type: "text/csv" }),
-    });
+
+    const req = makeStreamingPostRequest();
     const resp = await POST(req);
     expect(resp.status).toBe(409);
     expect(resp.headers.get("Cache-Control")).toBe("no-store");
-    const body = (await resp.json()) as { conflict: boolean; existing_upload_id: string };
-    expect(body.conflict).toBe(true);
-    expect(body.existing_upload_id).toBe("upl-existing");
+    const body = (await resp.json()) as { error: { details: { existing_upload_id: string } } };
+    expect(body.error.details.existing_upload_id).toBe("upl-existing");
   });
 
-  it("returns 502 UPLOAD_FAILED when handleCreateUpload throws, no filename in response", async () => {
+  it("returns 502 UPLOAD_FAILED when billing fetch throws (network/ECONNREFUSED)", async () => {
     authedSession();
-    mockCreateRealUploadsClient.mockReturnValue({});
-    mockHandleCreateUpload.mockRejectedValue(new Error("billing backend down"));
-    const req = makePostRequestWithFormData({
-      file: new Blob(["data"], { type: "text/csv" }),
-    });
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
+
+    const req = makeStreamingPostRequest();
+    const resp = await POST(req);
+    expect(resp.status).toBe(502);
+    const body = (await resp.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("UPLOAD_FAILED");
+    // No filename or body content in error response (PHI-adjacent no-log rule)
+    expect(JSON.stringify(body)).not.toContain("claims.csv");
+    expect(JSON.stringify(body)).not.toContain("ECONNREFUSED");
+  });
+
+  it("returns 502 UPLOAD_FAILED when billing returns non-JSON body", async () => {
+    authedSession();
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: () => Promise.reject(new SyntaxError("Unexpected token")),
+    } as unknown as Response);
+
+    const req = makeStreamingPostRequest();
     const resp = await POST(req);
     expect(resp.status).toBe(502);
     const body = (await resp.json()) as { error: { code: string } };
     expect(body.error.code).toBe("UPLOAD_FAILED");
-    // Filename must not appear in error response (PHI-adjacent, no-log rule)
-    expect(JSON.stringify(body)).not.toContain("claims.csv");
+  });
+
+  it("forwards billing 422 validation failure verbatim with no-store", async () => {
+    authedSession();
+    mockBillingFetch(422, {
+      error: {
+        code: "VALIDATION_FAILED",
+        message: "File failed validation -- all rows rejected.",
+        correlation_id: "corr-422",
+        details: { row_error_count: 5, row_errors: [] },
+      },
+    });
+
+    const req = makeStreamingPostRequest();
+    const resp = await POST(req);
+    expect(resp.status).toBe(422);
+    expect(resp.headers.get("Cache-Control")).toBe("no-store");
+    const body = (await resp.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("VALIDATION_FAILED");
   });
 });
 
-// WS3-C2: Edge-deployment guard — route must declare nodejs runtime so it is
-// never deployed to the Edge runtime where the hard 4MB body cap would silently
-// fail large CSV uploads. maxDuration is NOT added here (it controls timeout,
-// not body size — adding it would be misleading and incorrect).
-describe("route runtime export (WS3-C2 Edge-deployment guard)", () => {
+// ── Route metadata ────────────────────────────────────────────────────────────
+
+describe("route runtime export (Edge-deployment guard)", () => {
   it('exports runtime = "nodejs"', () => {
     expect(runtime).toBe("nodejs");
-  });
-
-  it("does not export maxDuration (not a body-size fix, belongs in F1 streaming refactor)", () => {
-    // maxDuration is a serverless timeout setting, not a body-size limit.
-    // The F0 plan explicitly forbids adding it here. This test will fail
-    // if someone incorrectly adds it in the future.
-    const routeModule = { runtime } as Record<string, unknown>;
-    expect(routeModule["maxDuration"]).toBeUndefined();
   });
 });
