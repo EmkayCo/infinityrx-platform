@@ -10,6 +10,14 @@
  * No PHI logged on any error path -- filename and file size are never included
  * in log output or error response bodies.
  */
+
+// Edge-deployment guard: Edge runtime hard-caps request bodies at 4MB.
+// Large CSV uploads would silently fail at the Edge boundary before reaching
+// this handler. nodejs runtime has no framework-level body cap.
+// NOTE: this does NOT add maxDuration -- that controls timeout, not body size.
+// The real fix (streaming passthrough eliminating double-buffering) is F1 work.
+export const runtime = "nodejs";
+
 import { NextResponse, type NextRequest } from "next/server";
 import { resolveSession, BACKENDS } from "@/lib/bff";
 import { createRealUploadsClient } from "@infinityrx/contract";

@@ -46,7 +46,7 @@ vi.mock("@infinityrx/contract", () => ({
   createRealUploadsClient: mockCreateRealUploadsClient,
 }));
 
-import { GET, POST } from "@/app/api/paysync/uploads/route";
+import { GET, POST, runtime } from "@/app/api/paysync/uploads/route";
 
 // helpers
 function makeJwt(claims: Record<string, unknown>): string {
@@ -237,5 +237,23 @@ describe("POST /api/paysync/uploads", () => {
     expect(body.error.code).toBe("UPLOAD_FAILED");
     // Filename must not appear in error response (PHI-adjacent, no-log rule)
     expect(JSON.stringify(body)).not.toContain("claims.csv");
+  });
+});
+
+// WS3-C2: Edge-deployment guard — route must declare nodejs runtime so it is
+// never deployed to the Edge runtime where the hard 4MB body cap would silently
+// fail large CSV uploads. maxDuration is NOT added here (it controls timeout,
+// not body size — adding it would be misleading and incorrect).
+describe("route runtime export (WS3-C2 Edge-deployment guard)", () => {
+  it('exports runtime = "nodejs"', () => {
+    expect(runtime).toBe("nodejs");
+  });
+
+  it("does not export maxDuration (not a body-size fix, belongs in F1 streaming refactor)", () => {
+    // maxDuration is a serverless timeout setting, not a body-size limit.
+    // The F0 plan explicitly forbids adding it here. This test will fail
+    // if someone incorrectly adds it in the future.
+    const routeModule = { runtime } as Record<string, unknown>;
+    expect(routeModule["maxDuration"]).toBeUndefined();
   });
 });
