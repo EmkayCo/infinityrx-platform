@@ -44,7 +44,7 @@ const nextConfig: NextConfig = {
   // it (otherwise it tries to load .ts from node_modules as if compiled
   // and fails at runtime). Per Next docs:
   // https://nextjs.org/docs/app/api-reference/config/next-config-js/transpilePackages
-  transpilePackages: ["@infinityrx/portal-shared", "@infinityrx/module-directories", "@infinityrx/module-paysync", "@infinityrx/shell", "@infinityrx/ui"],
+  transpilePackages: ["@infinityrx/portal-shared", "@infinityrx/shell", "@infinityrx/ui"], // module-directories + module-paysync removed: transpile source-mode created a 2nd react-query module-graph context -> "No QueryClient set"; resolved via their compiled dist instead (docs/audit/queryclient-turbopack-fix-plan.md)
   turbopack: {
     root: path.resolve(__dirname, ".."),
     resolveAlias: {
