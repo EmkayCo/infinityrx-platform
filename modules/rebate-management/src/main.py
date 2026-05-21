@@ -82,7 +82,7 @@ def create_app() -> FastAPI:
     # Rate limiting
     app.add_middleware(
         RateLimitMiddleware,
-        config=RateLimitConfig(requests_per_minute=120),
+        config=RateLimitConfig(),
     )
 
     # CORS
@@ -96,7 +96,7 @@ def create_app() -> FastAPI:
 
     # DLQ router (MUST be mounted — security.md)
     dlq_router = build_dlq_router(
-        get_dlq_service=_get_dlq_service,
+        get_service=_get_dlq_service,
         get_permissions=_get_dlq_permissions,
     )
     app.include_router(dlq_router)
@@ -105,3 +105,7 @@ def create_app() -> FastAPI:
     app.include_router(router)
 
     return app
+
+
+# Module-level app instance for uvicorn (src.main:app)
+app = create_app()
