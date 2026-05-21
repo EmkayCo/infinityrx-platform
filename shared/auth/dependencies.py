@@ -23,6 +23,7 @@ executed further down the stack automatically scopes to the caller.
 from __future__ import annotations
 
 import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Callable, Protocol
 
@@ -41,6 +42,15 @@ from shared.auth.jwt_tokens import (
     verify_token_type,
 )
 from shared.auth.tokens_repo import RevokedTokenRepo
+
+# Request-scoped contextvar populated by get_current_user() with the JWT's
+# ``tid`` claim BEFORE the UserLoader is called.  The dev trust-JWT loader
+# reads this to construct a CurrentUser with the correct tenant_id instead
+# of falling back to a placeholder.  Production loaders that load from a
+# users table should ignore it — they derive tenant_id from the DB row.
+_current_request_tenant_id: ContextVar[uuid.UUID | None] = ContextVar(
+    "_current_request_tenant_id", default=None
+)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
@@ -143,6 +153,11 @@ def get_current_user(
 
     Rejects missing/expired/invalid tokens (401), revoked tokens (401),
     unknown users (401), and non-active accounts (401).
+
+    Sets ``_current_request_tenant_id`` contextvar from the JWT ``tid``
+    claim BEFORE calling the UserLoader so that dev/test loaders that do
+    not perform a DB lookup can return a CurrentUser with the correct
+    tenant_id (fix for billing validate_tenant_id 403 on dev bypass).
     """
     claims = _resolve_claims(token)
     repo = _get_revoked_repo()
@@ -152,6 +167,10 @@ def get_current_user(
     assert claims.tenant_id is not None
     if repo.is_revoked(claims.jti, claims.tenant_id):
         raise _unauthorized("token revoked")
+
+    # Publish the JWT tid claim to the request-scoped contextvar BEFORE
+    # calling the loader so the dev trust-JWT loader can read it.
+    _current_request_tenant_id.set(claims.tenant_id)
 
     loader = _get_user_loader()
     user = loader(claims.user_id)

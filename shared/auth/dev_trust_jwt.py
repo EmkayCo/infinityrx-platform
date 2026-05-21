@@ -11,9 +11,14 @@ in ``sub`` and the ``tenant_id`` in ``tid`` are trusted.
 ``loader(claims.user_id)`` and only uses the returned ``CurrentUser`` to
 check ``status == "active"`` and to attach the user to the request.
 Tenant scoping happens via ``_set_tenant_context(claims.tenant_id)``
-which reads the JWT directly — independent of the loader output. So a
-synthetic ``CurrentUser`` that always returns ``status="active"`` is
-safe.
+which reads the JWT directly — independent of the loader output.
+
+**tenant_id threading fix (B10-w5):** get_current_user() now sets
+``_current_request_tenant_id`` from the JWT ``tid`` claim BEFORE calling
+the loader.  This loader reads that contextvar so CurrentUser.tenant_id
+matches the real tenant.  Without this, billing's validate_tenant_id()
+compared x-tenant-id (correct) against CurrentUser.tenant_id=user_id
+(wrong) → HTTP 403.
 
 Production refuses to enable this path: ``configure_auth_trust_jwt``
 raises ``RuntimeError`` if ``INFINITYRX_ENV`` is ``production``. Every
@@ -27,7 +32,11 @@ from __future__ import annotations
 import os
 import uuid
 
-from shared.auth.dependencies import CurrentUser, configure_auth
+from shared.auth.dependencies import (
+    CurrentUser,
+    _current_request_tenant_id,
+    configure_auth,
+)
 from shared.auth.tokens_repo import InMemoryRevokedTokenRepo
 
 
@@ -44,16 +53,21 @@ def configure_auth_trust_jwt(default_email: str = "dev@infinityrx.local") -> Non
         )
 
     def loader(user_id: uuid.UUID) -> CurrentUser:
-        # tenant_id here is a placeholder; the actual request-scoped tenant
-        # is set from claims.tenant_id in get_current_user() AFTER the loader
-        # returns, and downstream handlers read tenant from the
-        # ``x-tenant-id`` header dep, not from user.tenant_id.
+        # Read the JWT tid claim from the request-scoped contextvar set by
+        # get_current_user() before calling this loader.  Falls back to
+        # user_id only when the contextvar is unset (e.g. direct unit-test
+        # calls that don't go through get_current_user).
+        tid = _current_request_tenant_id.get()
+        tenant_id = tid if tid is not None else user_id
+
+        # Include operator + approver roles so the dev platform_admin user
+        # passes billing's upload RBAC gate (only operator/approver may write).
         return CurrentUser(
             id=user_id,
-            tenant_id=user_id,
+            tenant_id=tenant_id,
             email=default_email,
             status="active",
-            roles=("platform_admin",),
+            roles=("platform_admin", "operator", "approver"),
             permissions=("*",),
         )
 
