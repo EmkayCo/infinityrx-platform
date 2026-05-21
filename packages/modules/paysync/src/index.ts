@@ -61,6 +61,45 @@ export { ReportsSurface } from "./surfaces/reports/index.js";
 export { SetupSurface } from "./surfaces/setup/index.js";
 export { EchoSurface } from "./surfaces/echo/index.js";
 
+// Cycles surface page components (mounted by portal/operator App Router)
+export { CyclesListPage, type CyclesListPageProps } from "./surfaces/cycles/CyclesListPage.js";
+export { CycleDetailPage, type CycleDetailPageProps } from "./surfaces/cycles/CycleDetailPage.js";
+
+// Batches surface page components (mounted by portal/operator App Router)
+export { BatchesListPage, type BatchesListPageProps } from "./surfaces/batches/BatchesListPage.js";
+export { BatchDetailPage, type BatchDetailPageProps } from "./surfaces/batches/BatchDetailPage.js";
+
+// Carryovers surface page components (mounted by portal/operator App Router)
+export { CarryoversListPage, type CarryoversListPageProps } from "./surfaces/carryovers/CarryoversListPage.js";
+export { CarryoverDetailPage, type CarryoverDetailPageProps } from "./surfaces/carryovers/CarryoverDetailPage.js";
+
+// Invoices surface page components (mounted by portal/operator App Router)
+export { InvoicesListPage, type InvoicesListPageProps } from "./surfaces/invoices/InvoicesListPage.js";
+export { InvoiceDetailPage, type InvoiceDetailPageProps } from "./surfaces/invoices/InvoiceDetailPage.js";
+
+// Payment-runs surface page components (mounted by portal/operator App Router)
+export { PaymentRunsListPage, type PaymentRunsListPageProps } from "./surfaces/payment-runs/PaymentRunsListPage.js";
+export { PaymentRunDetailPage, type PaymentRunDetailPageProps } from "./surfaces/payment-runs/PaymentRunDetailPage.js";
+export { ManualApForm, type ManualApFormProps, type ManualApEntry } from "./surfaces/payment-runs/ManualApForm.js";
+
+// Files surface page components (mounted by portal/operator App Router)
+export { FilesListPage, type FilesListPageProps } from "./surfaces/files/FilesListPage.js";
+export { FileDetailPage, type FileDetailPageProps } from "./surfaces/files/FileDetailPage.js";
+export { FileGenerateForm, type FileGenerateFormProps } from "./surfaces/files/FileGenerateForm.js";
+
+// Bank-settlements surface page components (mounted by portal/operator App Router)
+export { BankSettlementsListPage, type BankSettlementsListPageProps } from "./surfaces/bank-settlements/BankSettlementsListPage.js";
+export { BankSettlementDetailPage, type BankSettlementDetailPageProps } from "./surfaces/bank-settlements/BankSettlementDetailPage.js";
+
+// Reconciliations surface page components (mounted by portal/operator App Router)
+export { ReconciliationsListPage, type ReconciliationsListPageProps } from "./surfaces/reconciliations/ReconciliationsListPage.js";
+export { ReconciliationDetailPage, type ReconciliationDetailPageProps } from "./surfaces/reconciliations/ReconciliationDetailPage.js";
+
+// Journal surface page components (mounted by portal/operator App Router)
+export { JournalListPage, type JournalListPageProps } from "./surfaces/journal/JournalListPage.js";
+export { JournalDetailPage, type JournalDetailPageProps } from "./surfaces/journal/JournalDetailPage.js";
+export { HashChainVerifyButton, type HashChainVerifyButtonProps } from "./surfaces/journal/HashChainVerifyButton.js";
+
 // Uploads surface page components (mounted by portal/operator App Router)
 export {
   UploadsListPage,
