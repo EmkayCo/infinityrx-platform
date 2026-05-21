@@ -16,7 +16,11 @@ export interface UploadDropzoneProps {
   readonly progress?: number;
 }
 
-const ACCEPTED_TYPES = ".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const ACCEPTED_TYPES =
+  ".csv,.xlsx,.txt,.psv," +
+  "text/csv," +
+  "text/plain," +
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 export function UploadDropzone({
   onUpload,
@@ -79,13 +83,13 @@ export function UploadDropzone({
           accept={ACCEPTED_TYPES}
           disabled={disabled}
           onChange={handleChange}
-          aria-label="Select a CSV or XLSX file to upload"
+          aria-label="Select a CSV, XLSX, or pipe-delimited (.txt/.psv) file to upload"
           style={{ display: "none" }}
         />
         <p>
           {disabled
             ? (disabledReason ?? "Upload is not available for your role")
-            : "Click or drag a CSV / XLSX file here to upload"}
+            : "Click or drag a CSV, XLSX, or pipe-delimited (.txt/.psv) file here to upload"}
         </p>
       </div>
 
