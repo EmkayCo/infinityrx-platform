@@ -30,6 +30,7 @@ from src.api.schemas import (
 )
 from src.models.tables import (
     CredentialingApplication,
+    DataqMaster,
     Network,
     NetworkMembership,
     Pharmacy,
@@ -442,8 +443,10 @@ async def directory_stats(
     tenant_id: Annotated[uuid.UUID, Query(alias="x-tenant-id")],
     db: AsyncSession = Depends(get_session),
 ) -> Any:
-    total_stmt = select(func.count(Pharmacy.id))
-    active_stmt = select(func.count(Pharmacy.id)).where(Pharmacy.status == "active")
+    total_stmt = select(func.count(DataqMaster.ncpdp_provider_id))
+    active_stmt = select(func.count(DataqMaster.ncpdp_provider_id)).where(
+        DataqMaster.deactivation_code.is_(None)
+    )
     networks_stmt = select(func.count(Network.id)).where(Network.tenant_id == tenant_id)
     pending_stmt = select(func.count(CredentialingApplication.id)).where(
         CredentialingApplication.tenant_id == tenant_id,

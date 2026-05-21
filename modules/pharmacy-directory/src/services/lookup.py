@@ -1,31 +1,23 @@
-"""Pharmacy lookup service — NPI, NABP, name (full-text), geographic."""
+"""Pharmacy lookup service — NPI, name search backed by dataq_master.
+
+Repointed from the unmigrated pharmacy_dir.pharmacies to pharmacy_dir.dataq_master
+(82,643 seeded rows) as Option A per docs/audit/pharmacy-drug-dataflow-fix-plan.md
+(2026-05-20). Nearby search is not supported from dataq_master (no lat/lon columns)
+and returns an empty list until geocoding data is available.
+"""
 from __future__ import annotations
 
 import logging
-import math
-from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.tables import Pharmacy
+from src.models.tables import DataqMaster
 from src.services.cache import PharmacyCache
 
 logger = logging.getLogger("pharmacy-directory.lookup")
-
-_EARTH_RADIUS_MILES = 3958.8
-
-
-def _haversine_miles(lat1: Decimal, lng1: Decimal, lat2: Decimal, lng2: Decimal) -> float:
-    """Fallback haversine distance in miles when PostGIS is unavailable."""
-    r = _EARTH_RADIUS_MILES
-    phi1, phi2 = math.radians(float(lat1)), math.radians(float(lat2))
-    dphi = math.radians(float(lat2 - lat1))
-    dlambda = math.radians(float(lng2 - lng1))
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    return 2 * r * math.asin(math.sqrt(a))
 
 
 class PharmacyLookupService:
@@ -39,135 +31,115 @@ class PharmacyLookupService:
             if cached is not None:
                 return cached
 
-        stmt = select(Pharmacy).where(Pharmacy.npi == npi)
+        stmt = select(DataqMaster).where(DataqMaster.npi == npi)
         result = await self._db.execute(stmt)
         pharmacy = result.scalar_one_or_none()
         if pharmacy is None:
             return None
 
-        data = _pharmacy_to_dict(pharmacy)
+        data = _dataq_to_dict(pharmacy)
         if self._cache:
             await self._cache.set_by_npi(tenant_id, npi, data)
         return data
 
     async def get_by_nabp(self, tenant_id: UUID, nabp: str) -> dict[str, Any] | None:
+        """NABP lookup is not available in dataq_master; always returns None."""
         if self._cache:
             cached = await self._cache.get_by_nabp(tenant_id, nabp)
             if cached is not None:
                 return cached
-
-        stmt = select(Pharmacy).where(Pharmacy.nabp_number == nabp)
-        result = await self._db.execute(stmt)
-        pharmacy = result.scalar_one_or_none()
-        if pharmacy is None:
-            return None
-
-        data = _pharmacy_to_dict(pharmacy)
-        if self._cache:
-            await self._cache.set_by_nabp(tenant_id, nabp, data)
-        return data
+        # dataq_master has no nabp_number column — return None (caller raises 404)
+        return None
 
     async def search_by_name(
         self, query: str, limit: int = 20, offset: int = 0
     ) -> list[dict[str, Any]]:
         stmt = (
-            select(Pharmacy)
+            select(DataqMaster)
             .where(
-                Pharmacy.display_name.ilike(f"%{query}%")
+                DataqMaster.deactivation_code.is_(None),
+                or_(
+                    DataqMaster.name.ilike(f"%{query}%"),
+                    DataqMaster.legal_business_name.ilike(f"%{query}%"),
+                ),
             )
-            .where(Pharmacy.status == "active")
-            .order_by(Pharmacy.display_name)
+            .order_by(DataqMaster.name, DataqMaster.legal_business_name)
             .limit(limit)
             .offset(offset)
         )
         result = await self._db.execute(stmt)
-        return [_pharmacy_to_dict(p) for p in result.scalars().all()]
+        return [_dataq_to_dict(p) for p in result.scalars().all()]
 
     async def search_nearby(
         self,
-        lat: Decimal,
-        lng: Decimal,
+        lat: Any,
+        lng: Any,
         radius_miles: float,
         pharmacy_type: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        """Geographic search using haversine distance (PostGIS fallback)."""
-        # Bounding box pre-filter to reduce scan
-        lat_delta = Decimal(str(radius_miles / _EARTH_RADIUS_MILES * 57.2958))
-        lng_delta = lat_delta / Decimal(str(max(math.cos(math.radians(float(lat))), 0.001)))
+        """Geographic search — not supported from dataq_master (no lat/lon).
 
-        stmt = select(Pharmacy).where(
-            Pharmacy.latitude.is_not(None),
-            Pharmacy.longitude.is_not(None),
-            Pharmacy.latitude.between(lat - lat_delta, lat + lat_delta),
-            Pharmacy.longitude.between(lng - lng_delta, lng + lng_delta),
-            Pharmacy.status == "active",
+        Returns empty list. Callers handle this gracefully via PharmacyListResponse.
+        """
+        logger.warning(
+            "search_nearby called but dataq_master has no lat/lon columns — returning empty list",
+            extra={"svc_name": "pharmacy-directory"},
         )
-        if pharmacy_type:
-            stmt = stmt.where(Pharmacy.pharmacy_type == pharmacy_type)
-
-        result = await self._db.execute(stmt)
-        candidates = result.scalars().all()
-
-        # Exact haversine filter (bounding box above already excludes null coords)
-        matches: list[tuple[float, dict[str, Any]]] = []
-        for p in candidates:
-            dist = _haversine_miles(lat, lng, p.latitude, p.longitude)
-            if dist <= radius_miles:
-                data = _pharmacy_to_dict(p)
-                data["distance_miles"] = round(dist, 2)
-                matches.append((dist, data))
-
-        matches.sort(key=lambda x: x[0])
-        return [m[1] for m in matches[:limit]]
+        return []
 
     async def batch_lookup(
         self, tenant_id: UUID, npis: list[str]
     ) -> dict[str, dict[str, Any] | None]:
         if not npis:
             return {}
-        stmt = select(Pharmacy).where(Pharmacy.npi.in_(npis))
+        stmt = select(DataqMaster).where(DataqMaster.npi.in_(npis))
         result = await self._db.execute(stmt)
-        found = {p.npi: _pharmacy_to_dict(p) for p in result.scalars().all()}
+        found = {p.npi: _dataq_to_dict(p) for p in result.scalars().all()}
         return {npi: found.get(npi) for npi in npis}
 
 
-def _pharmacy_to_dict(p: Pharmacy) -> dict[str, Any]:
+def _dataq_to_dict(p: DataqMaster) -> dict[str, Any]:
+    """Serialize a DataqMaster row to the PharmacyResponse-compatible dict.
+
+    Fields absent from dataq_master are nulled. The surrogate id is the
+    7-char ncpdp_provider_id (satisfies the str type in PharmacyResponse).
+    """
     return {
-        "id": str(p.id),
-        "npi": p.npi,
-        "nabp_number": p.nabp_number,
-        "ncpdp_id": p.ncpdp_id,
-        "legal_name": p.legal_name,
-        "dba_name": p.dba_name,
-        "display_name": p.display_name,
-        "pharmacy_type": p.pharmacy_type,
-        "chain_name": p.chain_name,
-        "chain_code": p.chain_code,
+        "id": p.ncpdp_provider_id,
+        "npi": p.npi or "",
+        "nabp_number": None,                        # not in dataq_master
+        "ncpdp_id": p.ncpdp_provider_id,
+        "legal_name": p.legal_business_name or "",
+        "dba_name": p.name,
+        "display_name": p.name or p.legal_business_name or "",
+        "pharmacy_type": p.primary_provider_type_code or "01",
+        "chain_name": None,
+        "chain_code": None,
         "store_number": p.store_number,
-        "address_line_1": p.address_line_1,
-        "address_line_2": p.address_line_2,
-        "city": p.city,
-        "state": p.state,
-        "zip_code": p.zip_code,
-        "county": p.county,
-        "country": p.country,
-        "latitude": str(p.latitude) if p.latitude is not None else None,
-        "longitude": str(p.longitude) if p.longitude is not None else None,
-        "phone": p.phone,
-        "fax": p.fax,
-        "email": p.email,
-        "website": p.website,
-        "is_24_hour": p.is_24_hour,
-        "accepts_electronic_rx": p.accepts_electronic_rx,
-        "dispenses_controlled": p.dispenses_controlled,
-        "offers_delivery": p.offers_delivery,
-        "offers_compounding": p.offers_compounding,
-        "offers_specialty": p.offers_specialty,
-        "offers_340b": p.offers_340b,
-        "offers_immunizations": p.offers_immunizations,
-        "offers_mtm": p.offers_mtm,
-        "status": p.status,
+        "address_line_1": p.physical_location_address_1 or "",
+        "address_line_2": p.physical_location_address_2,
+        "city": p.physical_location_city or "",
+        "state": p.physical_location_state_code or "",
+        "zip_code": p.physical_location_zip_code or "",
+        "county": p.physical_location_county_parish,
+        "country": "US",
+        "latitude": None,                           # not in dataq_master
+        "longitude": None,                          # not in dataq_master
+        "phone": p.physical_location_phone_number,
+        "fax": p.physical_location_fax,
+        "email": p.physical_location_email_address,
+        "website": None,
+        "is_24_hour": p.physical_location_24_hour_operation_flag or False,
+        "accepts_electronic_rx": None,
+        "dispenses_controlled": None,
+        "offers_delivery": None,
+        "offers_compounding": None,
+        "offers_specialty": None,
+        "offers_340b": None,
+        "offers_immunizations": None,
+        "offers_mtm": None,
+        "status": "inactive" if p.deactivation_code else "active",
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }

@@ -38,6 +38,55 @@ _JSONB = JSON
 SCHEMA = "pharmacy_dir"
 
 
+# ---------------------------------------------------------------------------
+# DataqMaster — seeded NCPDP DataQ reference table (82,643 rows)
+# PK: ncpdp_provider_id (7-char string). No UUID — use ncpdp_provider_id as
+# the surrogate id in PharmacyResponse until pharmacies table is migrated.
+# ---------------------------------------------------------------------------
+
+
+class DataqMaster(Base):
+    """Read-only ORM view of pharmacy_dir.dataq_master.
+
+    The planned pharmacy_dir.pharmacies table (Pharmacy class below) was never
+    migrated. All search/lookup endpoints are repointed here until Option B
+    (ETL migration) is executed. Column names confirmed against DB 2026-05-20.
+    """
+
+    __tablename__ = "dataq_master"
+    __table_args__ = ({"schema": SCHEMA},)
+
+    # PK — 7-char NCPDP provider ID (natural key in the seeded data)
+    ncpdp_provider_id: Mapped[str] = mapped_column(String(7), primary_key=True)
+
+    legal_business_name: Mapped[str | None] = mapped_column(String(60))
+    name: Mapped[str | None] = mapped_column(String(60))  # DBA / doing-business-as
+    store_number: Mapped[str | None] = mapped_column(String(10))
+    npi: Mapped[str | None] = mapped_column(String(10))
+
+    primary_provider_type_code: Mapped[str | None] = mapped_column(String(2))
+
+    physical_location_address_1: Mapped[str | None] = mapped_column(String(55))
+    physical_location_address_2: Mapped[str | None] = mapped_column(String(55))
+    physical_location_city: Mapped[str | None] = mapped_column(String(30))
+    physical_location_state_code: Mapped[str | None] = mapped_column(String(2))
+    physical_location_zip_code: Mapped[str | None] = mapped_column(String(9))
+    physical_location_county_parish: Mapped[str | None] = mapped_column(String(5))
+    physical_location_phone_number: Mapped[str | None] = mapped_column(String(10))
+    physical_location_fax: Mapped[str | None] = mapped_column(String(10))
+    physical_location_email_address: Mapped[str | None] = mapped_column(String(50))
+    physical_location_24_hour_operation_flag: Mapped[bool | None] = mapped_column(Boolean)
+
+    deactivation_code: Mapped[str | None] = mapped_column(String(2))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 def _uuid_pk() -> Mapped[UUID]:
     return mapped_column(
         Uuid(),
@@ -473,6 +522,7 @@ class PharmacyPerformanceSnapshot(Base):
 
 
 __all__ = [
+    "DataqMaster",
     "Pharmacy",
     "Network",
     "NetworkMembership",
