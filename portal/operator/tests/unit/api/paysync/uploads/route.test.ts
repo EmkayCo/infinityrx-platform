@@ -91,7 +91,7 @@ function makeStreamingPostRequest(
     method: "POST",
     headers: { "content-type": contentType },
     body: bodyStream,
-    // @ts-expect-error -- duplex needed for Node fetch with streaming body
+    // duplex:"half" required by Node fetch for streaming request bodies
     duplex: "half",
   });
 }
