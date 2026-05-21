@@ -9,7 +9,7 @@
  *  - SHELL_MIDDLEWARE_MATCHER: recommended route matcher (all routes except static assets)
  */
 export { applyQaModeMiddleware, QA_MODE_HEADER } from "./qa/qa-mode-middleware.js";
-export { QA_MODE_COOKIE, parseQaMode, type QaMode } from "./qa/qa-mode-cookie.js";
+export { QA_MODE_COOKIE, parseQaMode, buildQaModeCookieValue, type QaMode } from "./qa/qa-mode-cookie.js";
 
 /**
  * Recommended Next.js middleware matcher for the shell middleware.

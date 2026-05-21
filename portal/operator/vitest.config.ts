@@ -65,12 +65,23 @@ export default defineConfig({
     },
     alias: {
       "lucide-react": path.resolve(__dirname, "__mocks__/lucide-react.ts"),
+      // Next.js "server-only" is a runtime guard that throws when imported
+      // outside an RSC/edge context. Vitest runs in jsdom -- stub it to a
+      // no-op so shell modules with the guard (e.g. qa-mode-middleware.ts)
+      // can be imported in unit tests.
+      "server-only": path.resolve(__dirname, "__mocks__/server-only.ts"),
     },
   },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "."),
       "@shared": path.resolve(__dirname, "../shared"),
+      // In tests, @infinityrx/shell/middleware resolves to the middleware.js barrel
+      // which re-exports from qa-mode-middleware.js (imports next/server). Vitest
+      // cannot resolve next/server for files in packages/shell/dist/ because that
+      // path is outside the portal workspace. Point tests directly at the cookie
+      // dist file which has no Next.js dependencies.
+      "@infinityrx/shell/middleware": path.resolve(__dirname, "../../packages/shell/dist/qa/qa-mode-cookie.js"),
       // Wave B10 (2026-05-12): under npm workspaces, react/react-dom are
       // hoisted to portal/node_modules/ (not portal/operator/node_modules/).
       // Pre-B10 these aliases pointed to the operator-nested copy, which
