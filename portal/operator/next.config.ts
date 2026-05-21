@@ -78,8 +78,16 @@ const nextConfig: NextConfig = {
     return [
       { source: "/billing/claims", destination: "/claims", permanent: false },
       { source: "/billing/cycles", destination: "/accounting/cycles", permanent: false },
+      // Regex constraint: negative lookbehind (?<!new) prevents this rule from
+      // catching /billing/cycles/new -- the BillingCycleWizard must stay reachable.
+      // A bare :id segment would redirect /billing/cycles/new to /accounting/cycles/new
+      // (no page exists there), permanently blocking the wizard.
+      { source: "/billing/cycles/:slug([^/]+(?<!new))", destination: "/accounting/cycles/:slug", permanent: false },
       { source: "/billing", destination: "/accounting/cycles", permanent: false },
-      { source: "/billing/invoices", destination: "/accounting/invoices", permanent: false },
+      // ATOMIC edit: remove broken /billing/invoices->/accounting/invoices (destination
+      // had no page.tsx) and add reverse in same commit. Adding the reverse alone creates
+      // a redirect loop: /billing/invoices->/accounting/invoices->/billing/invoices (508).
+      { source: "/accounting/invoices", destination: "/billing/invoices", permanent: false },
       { source: "/payments", destination: "/accounting/payments", permanent: false },
       { source: "/payments/batches/new", destination: "/accounting/payments", permanent: false },
       { source: "/payments/nacha", destination: "/accounting/nacha", permanent: false },
