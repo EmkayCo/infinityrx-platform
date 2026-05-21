@@ -11,9 +11,7 @@ import {
   MapPin,
   FileBarChart,
   Settings,
-  Wallet,
   Building2,
-  SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
 import { Permission } from "@shared/types/auth";
@@ -67,7 +65,7 @@ export const NAV_MODULES: NavModule[] = [
     ],
   },
   {
-    label: "Billing",
+    label: "Billing & PaySync",
     icon: DollarSign,
     href: "/accounting/cycles",
     permission: Permission.BillingView,
@@ -76,6 +74,16 @@ export const NAV_MODULES: NavModule[] = [
       { label: "Payments & Batches", href: "/accounting/payments" },
       { label: "NACHA", href: "/accounting/nacha" },
       { label: "Journal Entries", href: "/accounting/journal-entries" },
+      { label: "PaySync Dashboard", href: "/admin/paysync", permission: Permission.AdminFull },
+      { label: "Uploads", href: "/admin/paysync/uploads", permission: Permission.AdminFull },
+      { label: "Echo Spec 400", href: "/admin/paysync/echo", permission: Permission.AdminFull },
+      { label: "Setup", href: "/admin/paysync/setup", permission: Permission.AdminFull },
+      { label: "Cycle Schedules", href: "/admin/paysync/setup/cycle-schedules", permission: Permission.AdminFull },
+      { label: "Export Templates", href: "/admin/paysync/setup/export-templates", permission: Permission.AdminFull },
+      { label: "Email Templates", href: "/admin/paysync/setup/email-templates", permission: Permission.AdminFull },
+      { label: "Email Recipients", href: "/admin/paysync/setup/email-recipients", permission: Permission.AdminFull },
+      { label: "GL Mappings", href: "/admin/paysync/setup/gl-account-mappings", permission: Permission.AdminFull },
+      { label: "Invoice Sequences", href: "/admin/paysync/setup/invoice-sequences", permission: Permission.AdminFull },
     ],
   },
   {
@@ -173,17 +181,6 @@ export const NAV_MODULES: NavModule[] = [
     ],
   },
   {
-    label: "PaySync",
-    icon: Wallet,
-    href: "/admin/paysync",
-    permission: Permission.AdminFull,
-    children: [
-      { label: "Dashboard", href: "/admin/paysync" },
-      { label: "Uploads", href: "/admin/paysync/uploads" },
-      { label: "Echo Spec 400", href: "/admin/paysync/echo" },
-    ],
-  },
-  {
     // Renamed from "Network" to avoid duplicate React key with the operator
     // "Network" group above (Sidebar keys ModuleRow by mod.label).
     label: "Network Admin",
@@ -195,21 +192,6 @@ export const NAV_MODULES: NavModule[] = [
       { label: "Chain Membership", href: "/admin/network/chain-membership" },
       { label: "Banking Discrepancies", href: "/admin/network/banking-discrepancies" },
       { label: "Tenant ACH Origination", href: "/admin/network/tenant-ach-origination" },
-    ],
-  },
-  {
-    label: "PaySync Config",
-    icon: SlidersHorizontal,
-    href: "/admin/paysync/setup",
-    permission: Permission.AdminFull,
-    children: [
-      { label: "Setup", href: "/admin/paysync/setup" },
-      { label: "Cycle Schedules", href: "/admin/paysync/setup/cycle-schedules" },
-      { label: "Export Templates", href: "/admin/paysync/setup/export-templates" },
-      { label: "Email Templates", href: "/admin/paysync/setup/email-templates" },
-      { label: "Email Recipients", href: "/admin/paysync/setup/email-recipients" },
-      { label: "GL Mappings", href: "/admin/paysync/setup/gl-account-mappings" },
-      { label: "Invoice Sequences", href: "/admin/paysync/setup/invoice-sequences" },
     ],
   },
   {

@@ -15,7 +15,7 @@ import {
 import type { Upload } from "@infinityrx/contract";
 
 interface UploadListResponse {
-  readonly items: Upload[];
+  readonly results: Upload[];
   readonly total: number;
   readonly next_cursor?: string;
 }
@@ -85,7 +85,7 @@ export default function UploadsPage() {
         <p className="text-sm text-red-600" role="alert">{uploadError}</p>
       )}
       <UploadsListPage
-        uploads={data?.items ?? []}
+        uploads={data?.results ?? []}
         isLoading={isLoading}
         error={error?.message ?? null}
         dedupBanner={dedupBanner}
