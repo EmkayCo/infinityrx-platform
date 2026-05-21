@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
-    ".": "./dist/src/index.js"
+    ".": "./dist/src/index.js",
+    "./bff": "./dist/src/bff/index.js"
   },
   "scripts": {
     "build": "tsc -b",

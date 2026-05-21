@@ -61,6 +61,26 @@ export { ReportsSurface } from "./surfaces/reports/index.js";
 export { SetupSurface } from "./surfaces/setup/index.js";
 export { EchoSurface } from "./surfaces/echo/index.js";
 
+// Uploads surface page components (mounted by portal/operator App Router)
+export {
+  UploadsListPage,
+  type UploadsListPageProps,
+  type DedupBanner,
+} from "./surfaces/uploads/UploadsListPage.js";
+export {
+  UploadDropzone,
+  type UploadDropzoneProps,
+} from "./surfaces/uploads/UploadDropzone.js";
+export {
+  UploadDetailPage,
+  type UploadDetailPageProps,
+  type RowError,
+} from "./surfaces/uploads/UploadDetailPage.js";
+export {
+  UploadClaimViewer,
+  type UploadClaimViewerProps,
+} from "./surfaces/uploads/UploadClaimViewer.js";
+
 // Reports surface page components (mounted by portal/operator App Router)
 export { ReportsListPage } from "./surfaces/reports/ReportsListPage.js";
 export { CycleReportsPage, type CycleReportsPageProps } from "./surfaces/reports/CycleReportsPage.js";
