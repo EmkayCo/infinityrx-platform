@@ -48,9 +48,9 @@ async def create_network(
 
 @router.get("", response_model=list[NetworkResponse])
 async def list_networks(
+    db: DBSession,
+    tenant_id: TenantId,
     status_filter: str | None = None,
-    db: DBSession = Depends(),
-    tenant_id: TenantId = Depends(),
 ) -> Any:
     svc = NetworkService(db, tenant_id)
     return svc.list_networks(status=status_filter)
@@ -105,9 +105,9 @@ async def add_pharmacy(
 @router.get("/{network_id}/pharmacies", response_model=list[NetworkPharmacyResponse])
 async def list_pharmacies(
     network_id: uuid.UUID,
+    db: DBSession,
+    tenant_id: TenantId,
     pharmacy_type: str | None = None,
-    db: DBSession = Depends(),
-    tenant_id: TenantId = Depends(),
 ) -> Any:
     svc = NetworkService(db, tenant_id)
     return svc.list_pharmacies(network_id, pharmacy_type=pharmacy_type)
@@ -163,9 +163,9 @@ async def submit_awp_application(
 @router.get("/{network_id}/awp-applications", response_model=list[AWPApplicationResponse])
 async def list_awp_applications(
     network_id: uuid.UUID,
+    db: DBSession,
+    tenant_id: TenantId,
     status_filter: str | None = None,
-    db: DBSession = Depends(),
-    tenant_id: TenantId = Depends(),
 ) -> Any:
     svc = NetworkService(db, tenant_id)
     return svc.list_awp_applications(network_id, status=status_filter)

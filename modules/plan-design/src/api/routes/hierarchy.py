@@ -60,9 +60,9 @@ async def create_organization(
 
 @router.get("/organizations", response_model=list[OrganizationResponse])
 async def list_organizations(
+    db: DBSession,
+    tenant_id: TenantId,
     status_filter: str | None = None,
-    db: DBSession = Depends(),
-    tenant_id: TenantId = Depends(),
 ) -> Any:
     svc = HierarchyService(db, tenant_id)
     return svc.list_organizations(status=status_filter)
@@ -115,10 +115,10 @@ async def create_group(
 
 @router.get("/groups", response_model=list[GroupResponse])
 async def list_groups(
+    db: DBSession,
+    tenant_id: TenantId,
     organization_id: uuid.UUID | None = None,
     status_filter: str | None = None,
-    db: DBSession = Depends(),
-    tenant_id: TenantId = Depends(),
 ) -> Any:
     svc = HierarchyService(db, tenant_id)
     return svc.list_groups(organization_id=organization_id, status=status_filter)
@@ -171,10 +171,10 @@ async def create_plan(
 
 @router.get("/plans", response_model=list[PlanResponse])
 async def list_plans(
+    db: DBSession,
+    tenant_id: TenantId,
     group_id: uuid.UUID | None = None,
     status_filter: str | None = None,
-    db: DBSession = Depends(),
-    tenant_id: TenantId = Depends(),
 ) -> Any:
     svc = HierarchyService(db, tenant_id)
     return svc.list_plans(group_id=group_id, status=status_filter)

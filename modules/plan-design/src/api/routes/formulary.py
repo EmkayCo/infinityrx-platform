@@ -55,9 +55,9 @@ async def create_formulary(
 
 @router.get("", response_model=list[FormularyResponse])
 async def list_formularies(
+    db: DBSession,
+    tenant_id: TenantId,
     status_filter: str | None = None,
-    db: DBSession = Depends(),
-    tenant_id: TenantId = Depends(),
 ) -> Any:
     svc = FormularyService(db, tenant_id)
     return svc.list_formularies(status=status_filter)
@@ -112,10 +112,10 @@ async def add_drug(
 @router.get("/{formulary_id}/drugs", response_model=list[FormularyDrugResponse])
 async def list_drugs(
     formulary_id: uuid.UUID,
+    db: DBSession,
+    tenant_id: TenantId,
     ndc: str | None = None,
     tier: str | None = None,
-    db: DBSession = Depends(),
-    tenant_id: TenantId = Depends(),
 ) -> Any:
     svc = FormularyService(db, tenant_id)
     return svc.list_drugs(formulary_id, ndc=ndc, tier=tier)
