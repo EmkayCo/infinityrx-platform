@@ -24,10 +24,11 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings.sources.types import NoDecode
 
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -115,7 +116,10 @@ class Settings(BaseSettings):
     # ── CORS (M-06/M-16) ────────────────────────────────────────────────────
     # Explicit allow-list; empty list = no CORS headers (for APIs behind a
     # gateway) or set to ["*"] only in development. Never wildcard in prod.
-    CORS_ALLOW_ORIGINS: list[str] = []
+    # NoDecode tells pydantic-settings to skip JSON-decode for this field,
+    # letting the _parse_cors_origins field_validator handle comma-separated
+    # strings from env vars (pydantic-settings 2.13+ breaks list[str] without it).
+    CORS_ALLOW_ORIGINS: Annotated[list[str], NoDecode] = []
 
     # ── Azure Key Vault (H-05) ───────────────────────────────────────────────
     # When set, the Key Vault stub can resolve secrets from AKV at startup.

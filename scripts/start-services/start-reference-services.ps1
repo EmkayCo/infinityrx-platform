@@ -35,7 +35,7 @@ $COMMON_ENV = @"
 `$env:ENCRYPTION_KEY_ACTIVE = "ifx-dev-encryption-key-32chars!!"
 `$env:REDIS_URL = "redis://localhost:6379/1"
 `$env:RABBITMQ_URL = "amqp://infinityrx:infinityrx_bootstrap@localhost:5672/"
-`$env:CORS_ORIGINS = "http://localhost:3000"
+`$env:CORS_ALLOW_ORIGINS = "http://localhost:3000,http://localhost:3001"
 "@
 
 # =============================================================
