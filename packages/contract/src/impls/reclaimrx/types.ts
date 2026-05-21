@@ -427,5 +427,5 @@ export const SPEC_55_ENDPOINT_COVERAGE = [
 
 // Type-level invariant: matrix is exactly 18 rows.
 type _Assert18Endpoints = typeof SPEC_55_ENDPOINT_COVERAGE extends { length: 18 } ? true : never;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const _spec55_count_check: _Assert18Endpoints = true;
+// Suppress TS6133 — compile-time invariant check, not runtime code.
+declare const _spec55_count_check: _Assert18Endpoints;
