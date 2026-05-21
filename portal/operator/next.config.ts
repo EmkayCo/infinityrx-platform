@@ -4,6 +4,17 @@ import { execSync } from "node:child_process";
 
 const sharedDir = path.resolve(__dirname, "../shared");
 
+// React Query-bearing module packages: alias the bare specifier directly to the
+// compiled dist entry on disk. Bypasses the npm-workspace symlink in the shared
+// root node_modules (unstable when concurrent worktree agents mutate it) AND keeps
+// these packages OUT of transpilePackages so Turbopack does not compile their
+// source in a separate module-graph context (which spawned a 2nd
+// @tanstack/react-query instance -> "No QueryClient set").
+const repoRootDir = path.resolve(__dirname, "..", "..");
+const moduleDirectoriesEntry = path.join(repoRootDir, "packages", "modules", "directories", "dist", "src", "index.js");
+const moduleDirectoriesBffEntry = path.join(repoRootDir, "packages", "modules", "directories", "dist", "src", "bff", "index.js");
+const modulePaysyncEntry = path.join(repoRootDir, "packages", "modules", "paysync", "dist", "src", "index.js");
+
 // Plan D SP-0: Pre-build hook — run build-manifest.ts to emit _generated/ artifacts.
 // The generator validates the manifest schema and fails the build if validation errors exist.
 // Runs synchronously before Next.js starts (intentionally blocking).
@@ -49,6 +60,9 @@ const nextConfig: NextConfig = {
     root: path.resolve(__dirname, ".."),
     resolveAlias: {
       "@shared": sharedDir,
+      "@infinityrx/module-directories": moduleDirectoriesEntry,
+      "@infinityrx/module-directories/bff": moduleDirectoriesBffEntry,
+      "@infinityrx/module-paysync": modulePaysyncEntry,
     },
   },
   webpack: (config) => {
@@ -60,6 +74,10 @@ const nextConfig: NextConfig = {
     // Node finds via the standard up-walk from portal/{operator,shared}/.
     // Keep only the @shared alias for the path-based imports.
     config.resolve.alias["@shared"] = sharedDir;
+    // $ = webpack exact-match: bare alias to a file must NOT clobber the /bff subpath.
+    config.resolve.alias["@infinityrx/module-directories$"] = moduleDirectoriesEntry;
+    config.resolve.alias["@infinityrx/module-directories/bff$"] = moduleDirectoriesBffEntry;
+    config.resolve.alias["@infinityrx/module-paysync$"] = modulePaysyncEntry;
     return config;
   },
   typedRoutes: false,
