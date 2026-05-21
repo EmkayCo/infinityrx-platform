@@ -4,16 +4,11 @@ import { execSync } from "node:child_process";
 
 const sharedDir = path.resolve(__dirname, "../shared");
 
-// React Query-bearing module packages: alias the bare specifier directly to the
-// compiled dist entry on disk. Bypasses the npm-workspace symlink in the shared
-// root node_modules (unstable when concurrent worktree agents mutate it) AND keeps
-// these packages OUT of transpilePackages so Turbopack does not compile their
-// source in a separate module-graph context (which spawned a 2nd
-// @tanstack/react-query instance -> "No QueryClient set").
+// Turbopack root must span the whole monorepo (not just portal/) so that
+// workspace packages under packages/ are resolvable. npm workspace junctions
+// + each package's package.json "exports" field handle module resolution;
+// no explicit drive-letter aliases needed (Turbopack rejects them on Windows).
 const repoRootDir = path.resolve(__dirname, "..", "..");
-const moduleDirectoriesEntry = path.join(repoRootDir, "packages", "modules", "directories", "dist", "src", "index.js");
-const moduleDirectoriesBffEntry = path.join(repoRootDir, "packages", "modules", "directories", "dist", "src", "bff", "index.js");
-const modulePaysyncEntry = path.join(repoRootDir, "packages", "modules", "paysync", "dist", "src", "index.js");
 
 // Plan D SP-0: Pre-build hook — run build-manifest.ts to emit _generated/ artifacts.
 // The generator validates the manifest schema and fails the build if validation errors exist.
@@ -57,12 +52,12 @@ const nextConfig: NextConfig = {
   // https://nextjs.org/docs/app/api-reference/config/next-config-js/transpilePackages
   transpilePackages: ["@infinityrx/portal-shared", "@infinityrx/shell", "@infinityrx/ui"], // module-directories + module-paysync removed: transpile source-mode created a 2nd react-query module-graph context -> "No QueryClient set"; resolved via their compiled dist instead (docs/audit/queryclient-turbopack-fix-plan.md)
   turbopack: {
-    root: path.resolve(__dirname, ".."),
+    // Monorepo root (NOT portal/): the module dist aliases below resolve to
+    // repoRoot/packages/modules/**, which sit OUTSIDE portal/. Turbopack refuses
+    // to resolve modules outside turbopack.root, so root must span the whole repo.
+    root: repoRootDir,
     resolveAlias: {
       "@shared": sharedDir,
-      "@infinityrx/module-directories": moduleDirectoriesEntry,
-      "@infinityrx/module-directories/bff": moduleDirectoriesBffEntry,
-      "@infinityrx/module-paysync": modulePaysyncEntry,
     },
   },
   webpack: (config) => {
@@ -74,10 +69,6 @@ const nextConfig: NextConfig = {
     // Node finds via the standard up-walk from portal/{operator,shared}/.
     // Keep only the @shared alias for the path-based imports.
     config.resolve.alias["@shared"] = sharedDir;
-    // $ = webpack exact-match: bare alias to a file must NOT clobber the /bff subpath.
-    config.resolve.alias["@infinityrx/module-directories$"] = moduleDirectoriesEntry;
-    config.resolve.alias["@infinityrx/module-directories/bff$"] = moduleDirectoriesBffEntry;
-    config.resolve.alias["@infinityrx/module-paysync$"] = modulePaysyncEntry;
     return config;
   },
   typedRoutes: false,
