@@ -36,6 +36,8 @@
   "overrides": {
     "ajv-formats": {
       "ajv": "8.17.1"
-    }
+    },
+    "@tanstack/react-query": "5.100.11",
+    "@tanstack/query-core": "5.100.11"
   }
 }

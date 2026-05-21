@@ -14,5 +14,9 @@
     "operator:test": "npm --workspace ifx-operator-portal run test",
     "operator:test:e2e": "npm --workspace ifx-operator-portal run test:e2e",
     "operator:qa": "npm --workspace ifx-operator-portal run qa"
+  },
+  "overrides": {
+    "@tanstack/react-query": "5.100.11",
+    "@tanstack/query-core": "5.100.11"
   }
 }
