@@ -53,11 +53,13 @@ def get_db(tenant_id: TenantId) -> Session:
     satisfied for INSERT/UPDATE/DELETE on tenant-scoped tables.
     """
     with get_db_session() as session:
-        # SET SESSION persists for the connection lifetime (including across
-        # transaction boundaries), so that lazy-loads after session.commit()
-        # can still satisfy the RLS policy. SET LOCAL would reset on commit.
+        # SET LOCAL scopes the variable to the current transaction and is
+        # automatically cleared on commit/rollback — preventing pool leakage
+        # across requests. The after_begin event in session.py re-applies SET
+        # LOCAL at the start of every new transaction (including lazy-load
+        # transactions opened after commit), so RLS is satisfied throughout.
         session.execute(
-            text("SET SESSION app.current_tenant_id = :tid"),
+            text("SET LOCAL app.current_tenant_id = :tid"),
             {"tid": str(tenant_id)},
         )
         yield session

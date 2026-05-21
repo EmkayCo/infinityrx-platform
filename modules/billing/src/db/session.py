@@ -47,9 +47,9 @@ def _set_postgres_tenant(session: Session, transaction, connection) -> None:  # 
     """
     tid = current_tenant_id.get()
     if tid is not None:
-        connection.execute(text("SET SESSION app.current_tenant_id = :tid"), {"tid": str(tid)})
+        connection.execute(text("SET LOCAL app.current_tenant_id = :tid"), {"tid": str(tid)})
     else:
-        connection.execute(text("SET SESSION app.current_tenant_id = ''"))
+        connection.execute(text("SET LOCAL app.current_tenant_id = ''"))
 
 
 def _get_engine():

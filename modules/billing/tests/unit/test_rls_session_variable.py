@@ -77,7 +77,7 @@ def test_set_postgres_tenant_with_active_context():
         # execute(text(...), {"tid": ...}) — params are positional arg[1]
         pos_args = call_args.args
         sql_str = str(pos_args[0])
-        assert "SET SESSION" in sql_str
+        assert "SET LOCAL" in sql_str
         assert "app.current_tenant_id" in sql_str
         # Second positional arg is the params dict
         assert len(pos_args) == 2, f"expected (sql, params) got {pos_args}"
@@ -100,7 +100,7 @@ def test_set_postgres_tenant_clears_when_no_context():
         assert mock_conn.execute.call_count == 1
         args, kwargs = mock_conn.execute.call_args
         sql_str = str(args[0])
-        assert "SET SESSION" in sql_str
+        assert "SET LOCAL" in sql_str
         assert "app.current_tenant_id" in sql_str
         # No :tid param — empty string is embedded in the SET LOCAL statement
     finally:
