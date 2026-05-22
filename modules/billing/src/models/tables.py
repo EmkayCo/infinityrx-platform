@@ -1039,3 +1039,46 @@ class ClaimUploadRawRow(BillingBase):
 
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
+
+# ---------------------------------------------------------------------------
+# UPLOAD FIELD CONFIG (Stage 2)
+# ---------------------------------------------------------------------------
+
+
+class UploadFieldConfig(BillingBase):
+    """Per-tenant field dictionary: one row per position.
+
+    The operator assigns a semantic name, data type, mandatory flag, and PHI
+    flag to each positional field captured in claim_upload_raw_rows.
+
+    Stage 3 will use this config to enforce mandatory checks and coerce field
+    values to the declared data type before ETL into claim_records.
+
+    PHI note: sample_value MUST remain null when is_phi=True. The service
+    layer enforces this -- the UI masks PHI fields with '***'.
+    """
+
+    __tablename__ = "upload_field_config"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "position", name="uq_field_config_tenant_pos"),
+        Index("idx_field_config_tenant_pos", "tenant_id", "position"),
+        {"schema": "billing"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    # 1-based position in the source pipe-delimited row
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Operator-assigned semantic name (e.g. "pharmacy_npi", "date_of_birth")
+    field_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    # One of: string, date, decimal, npi, ndc, integer
+    data_type: Mapped[str] = mapped_column(String(32), nullable=False, default="string")
+    # True = must be non-empty on every row (Stage 3 enforcement)
+    is_mandatory: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # True = PHI field; sample_value must be null; UI masks with '***'
+    is_phi: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Non-PHI sample value cached from one raw row. Null when is_phi=True.
+    sample_value: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+
