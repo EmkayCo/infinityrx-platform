@@ -15,6 +15,8 @@ export interface TriggerRefreshButtonProps {
   /** Set true while a run is already in-flight for this source */
   disabled?: boolean;
   ingestBaseUrl?: string;
+  /** Optional fetch override — supply to inject auth headers */
+  fetchFn?: typeof fetch;
 }
 
 export function TriggerRefreshButton({
@@ -22,6 +24,7 @@ export function TriggerRefreshButton({
   onRunStarted,
   disabled = false,
   ingestBaseUrl = "/api/directories/ingest",
+  fetchFn = fetch,
 }: TriggerRefreshButtonProps) {
   const [loading, setLoading] = useState(false);
 
@@ -29,7 +32,7 @@ export function TriggerRefreshButton({
     if (disabled || loading) return;
     setLoading(true);
     try {
-      const resp = await fetch(`${ingestBaseUrl}/${source}/trigger`, {
+      const resp = await fetchFn(`${ingestBaseUrl}/${source}/trigger`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ run_type: "manual_trigger" }),

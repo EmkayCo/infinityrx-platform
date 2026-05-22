@@ -7,7 +7,7 @@
 // relay-health is NOT shown (not a loader, not in scope per spec §6.4).
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TriggerRefreshButton } from "./TriggerRefreshButton.js";
 import { RunHistoryDrawer } from "./RunHistoryDrawer.js";
@@ -87,22 +87,37 @@ interface SourceStatus {
 
 export interface IngestionConsolePageProps {
   ingestBaseUrl?: string;
+  /** Optional fetch override — supply to inject auth headers (e.g. Bearer token) */
+  fetchFn?: typeof fetch;
+  /**
+   * Set to false to delay the initial status fetch until auth is ready.
+   * Defaults to true so standalone usage (tests, Storybook) works without a session.
+   */
+  authReady?: boolean;
 }
 
 export function IngestionConsolePage({
   ingestBaseUrl = "/api/directories/ingest",
+  fetchFn = fetch,
+  authReady = true,
 }: IngestionConsolePageProps) {
   const [drawerSource, setDrawerSource] = useState<string | null>(null);
   const [inFlightRuns, setInFlightRuns] = useState<Record<string, string>>({}); // source → run_id
   const [completedDeltas, setCompletedDeltas] = useState<Record<string, number>>({}); // source → records_processed
 
+  // Keep a ref to the latest fetchFn so the queryFn closure always reads the
+  // current token even if the memo updates after the query was first enabled.
+  const fetchFnRef = useRef(fetchFn);
+  fetchFnRef.current = fetchFn;
+
   const { data: statuses = [], isLoading } = useQuery<SourceStatus[]>({
     queryKey: ["ingestion-status"],
     queryFn: async () => {
-      const resp = await fetch(`${ingestBaseUrl}/status`);
+      const resp = await fetchFnRef.current(`${ingestBaseUrl}/status`);
       if (!resp.ok) return [];
       return resp.json();
     },
+    enabled: authReady,
     refetchInterval: 30_000,
   });
 
@@ -202,6 +217,7 @@ export function IngestionConsolePage({
                         source={row.source}
                         onComplete={(result) => handleRunComplete(row.source, result)}
                         ingestBaseUrl={ingestBaseUrl}
+                        fetchFn={fetchFn}
                       />
                     ) : (
                       <span
@@ -265,6 +281,7 @@ export function IngestionConsolePage({
                             }
                             disabled={isRunning}
                             ingestBaseUrl={ingestBaseUrl}
+                            fetchFn={fetchFn}
                           />
                           <button
                             type="button"
@@ -294,6 +311,7 @@ export function IngestionConsolePage({
             if (!open) setDrawerSource(null);
           }}
           ingestBaseUrl={ingestBaseUrl}
+          fetchFn={fetchFn}
         />
       )}
     </div>

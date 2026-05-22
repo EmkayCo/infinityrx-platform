@@ -24,6 +24,8 @@ export interface RunHistoryDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   ingestBaseUrl?: string;
+  /** Optional fetch override — supply to inject auth headers */
+  fetchFn?: typeof fetch;
 }
 
 export function RunHistoryDrawer({
@@ -31,6 +33,7 @@ export function RunHistoryDrawer({
   open,
   onOpenChange,
   ingestBaseUrl = "/api/directories/ingest",
+  fetchFn = fetch,
 }: RunHistoryDrawerProps) {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -41,7 +44,7 @@ export function RunHistoryDrawer({
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(`${ingestBaseUrl}/${source}/history?limit=50`)
+    fetchFn(`${ingestBaseUrl}/${source}/history?limit=50`)
       .then((r) => r.json())
       .then((data: RunSummary[]) => {
         if (!cancelled) setRuns(data);
@@ -56,7 +59,7 @@ export function RunHistoryDrawer({
     return () => {
       cancelled = true;
     };
-  }, [open, source, ingestBaseUrl]);
+  }, [open, source, ingestBaseUrl, fetchFn]);
 
   if (!open) return null;
 

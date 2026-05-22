@@ -23,6 +23,8 @@ export interface RunProgressBarProps {
   ingestBaseUrl?: string;
   /** Poll interval in ms — defaults to 5000 */
   pollIntervalMs?: number;
+  /** Optional fetch override — supply to inject auth headers */
+  fetchFn?: typeof fetch;
 }
 
 export function RunProgressBar({
@@ -31,6 +33,7 @@ export function RunProgressBar({
   onComplete,
   ingestBaseUrl = "/api/directories/ingest",
   pollIntervalMs = 5000,
+  fetchFn = fetch,
 }: RunProgressBarProps) {
   const [processed, setProcessed] = useState(0);
   const [total, setTotal] = useState<number | null>(null);
@@ -42,7 +45,7 @@ export function RunProgressBar({
 
     async function poll() {
       try {
-        const resp = await fetch(`${ingestBaseUrl}/runs/${runId}`);
+        const resp = await fetchFn(`${ingestBaseUrl}/runs/${runId}`);
         if (!resp.ok) return;
         const data: RunDetail = await resp.json();
         if (cancelled) return;
@@ -72,7 +75,7 @@ export function RunProgressBar({
       cancelled = true;
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [runId, source, ingestBaseUrl, pollIntervalMs, onComplete]);
+  }, [runId, source, ingestBaseUrl, pollIntervalMs, onComplete, fetchFn]);
 
   const pct =
     total && total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : null;
