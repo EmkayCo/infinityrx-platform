@@ -24,14 +24,18 @@ async function mintDevJwt(roles: string[]): Promise<string> {
     );
   }
   const secret = new TextEncoder().encode(secretStr);
+  const env = process.env.INFINITYRX_ENV ?? "development";
   return await new SignJWT({
     sub: DEV_ADMIN_ID,
     tid: DEV_TENANT_ID,
     roles,
     typ: "access",
+    env,
     jti: crypto.randomUUID(),
   })
     .setProtectedHeader({ alg: "HS256" })
+    .setIssuer("infinityrx")
+    .setAudience("infinityrx-backend")
     .setIssuedAt()
     .setExpirationTime("8h")
     .sign(secret);
