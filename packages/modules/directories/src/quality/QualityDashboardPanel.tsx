@@ -106,7 +106,7 @@ export function QualityDashboardPanel({
       <IngestionAlertList
         datasets={data.datasets}
         qualityBaseUrl={qualityBaseUrl}
-        onAlertDismiss={onAlertDismiss}
+        {...(onAlertDismiss !== undefined ? { onAlertDismiss } : {})}
       />
     </div>
   );
