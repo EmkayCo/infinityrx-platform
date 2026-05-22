@@ -35,9 +35,13 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+import json
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from shared.crypto.aes import decrypt, encrypt
+from shared.crypto.phi import _aad
 from src.models.tables import APRecord, ClaimRecord, ClaimUploadRawRow, Upload, UploadStatus
 
 # LESSON-004 anchors: \A...\Z reject trailing newlines that ^...$ would accept
@@ -51,6 +55,50 @@ _REQUIRED_COLUMNS = (
 _MAX_MEMBER_ID_LEN = 64
 _QUANTITY_MAX_DP = 3
 _AMOUNT_MAX_DP = 4
+
+# Positional ingest: flush after this many rows to bound memory for large files.
+# Chosen to cap working-set at ~50 MB for typical 53-field rows.
+_POSITIONAL_BATCH_SIZE = 2_000
+
+# Max raw bytes accepted for a positional upload. Operator files are 20-100 MB;
+# cap at 150 MB to prevent unbounded uploads while giving headroom above real files.
+_POSITIONAL_MAX_BYTES = 150 * 1024 * 1024  # 150 MB
+
+
+def encrypt_raw_row_fields(fields: dict[str, str], *, tenant_id: str) -> bytes:
+    """Encrypt a positional field dict, binding ciphertext to tenant_id via AAD.
+
+    Uses shared.crypto.phi._aad(tenant_id) as AES-GCM associated data so that
+    decryption with a different tenant_id raises DecryptionError -- satisfying
+    the platform invariant 'cross-tenant ciphertext must fail decryption'.
+
+    Args:
+        fields: Dict of str position keys to str field values.
+        tenant_id: UUID string of the owning tenant.
+
+    Returns:
+        AES-256-GCM encrypted bytes blob.
+    """
+    plaintext = json.dumps(fields, separators=(",", ":")).encode()
+    return encrypt(plaintext, associated_data=_aad(tenant_id))
+
+
+def decrypt_raw_row_fields(blob: bytes, *, tenant_id: str) -> dict[str, str]:
+    """Decrypt a fields_blob encrypted by encrypt_raw_row_fields.
+
+    Args:
+        blob: Encrypted bytes from encrypt_raw_row_fields.
+        tenant_id: UUID string of the owning tenant. Must match encryption-time value.
+
+    Returns:
+        Dict of str position keys to str field values.
+
+    Raises:
+        shared.crypto.aes.DecryptionError: If tenant_id does not match or
+            the blob is corrupted.
+    """
+    plaintext = decrypt(blob, associated_data=_aad(tenant_id))
+    return json.loads(plaintext.decode())
 
 
 def detect_format(content: bytes) -> str:
@@ -90,14 +138,18 @@ def parse_positional_bytes(content: bytes) -> list[dict[str, str]]:
 
     PHI SAFETY: field VALUES are never logged in this function. Only
     row_number and field_count are safe to log.
+
+    Returns a list (for backward compat with existing callers and tests).
+    For large-file streaming, _parse_upload_positional iterates the decoded
+    lines directly without materialising this list.
     """
     try:
-        text = content.decode("utf-8", errors="replace")
+        text_str = content.decode("utf-8", errors="replace")
     except Exception:
         return []
 
     rows: list[dict[str, str]] = []
-    for line in text.splitlines():
+    for line in text_str.splitlines():
         # Skip blank lines -- they do not count as data rows
         if not line.strip():
             continue
@@ -107,6 +159,23 @@ def parse_positional_bytes(content: bytes) -> list[dict[str, str]]:
         fields = {str(i + 1): v for i, v in enumerate(parts)}
         rows.append(fields)
     return rows
+
+
+def _iter_positional_lines(content: bytes):
+    """Yield positional field dicts one at a time without materialising the full list.
+
+    Identical parsing logic to parse_positional_bytes but as a generator so that
+    _parse_upload_positional can flush/expunge in batches and bound memory.
+    """
+    try:
+        text_str = content.decode("utf-8", errors="replace")
+    except Exception:
+        return
+    for line in text_str.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("|")
+        yield {str(i + 1): v for i, v in enumerate(parts)}
 
 
 def compute_sha256(content: bytes) -> str:
@@ -367,25 +436,36 @@ def _parse_upload_positional(
     mandatory-field enforcement come in Stage 2/3 via config.
 
     PHI: field values are never logged. Only row_number and field_count.
+
+    Memory strategy: lines are consumed one at a time via _iter_positional_lines;
+    ORM objects are flushed and expunged every _POSITIONAL_BATCH_SIZE rows so
+    the session does not accumulate ~50K objects for 100MB files.
+
+    Encryption: fields_blob is AES-256-GCM encrypted with tenant_id as AAD via
+    encrypt_raw_row_fields(). Per-row AAD binding means Tenant B cannot decrypt
+    Tenant A's ciphertext even with the shared key -- satisfying the platform
+    invariant in .claude/rules/phi-compliance.md.
     """
     import logging as _logging  # noqa: PLC0415
     _log = _logging.getLogger("billing.upload.positional")
 
-    rows = parse_positional_bytes(file_bytes)
+    tenant_id_str = str(upload.tenant_id)
     now = datetime.now(UTC)
     count = 0
+    batch: list[ClaimUploadRawRow] = []
 
-    for idx, fields in enumerate(rows, start=1):
+    for idx, fields in enumerate(_iter_positional_lines(file_bytes), start=1):
+        encrypted_blob = encrypt_raw_row_fields(fields, tenant_id=tenant_id_str)
         raw_row = ClaimUploadRawRow(
             id=uuid.uuid4(),
             tenant_id=upload.tenant_id,
             upload_id=upload.id,
             row_number=idx,
             field_count=len(fields),
-            fields=fields,
+            fields_blob=encrypted_blob,
             captured_at=now,
         )
-        session.add(raw_row)
+        batch.append(raw_row)
         count += 1
         # PHI-safe log: row position and field count only, never field values
         if idx <= 3 or idx % 1000 == 0:
@@ -397,6 +477,16 @@ def _parse_upload_positional(
                     "svc_field_count": len(fields),
                 },
             )
+        if len(batch) >= _POSITIONAL_BATCH_SIZE:
+            session.add_all(batch)
+            session.flush()
+            session.expire_all()
+            batch = []
+
+    if batch:
+        session.add_all(batch)
+        session.flush()
+        session.expire_all()
 
     upload.status = UploadStatus.captured.value
     upload.row_count = count

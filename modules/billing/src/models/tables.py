@@ -30,7 +30,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from shared.crypto.sqlalchemy_types import EncryptedJSON
 
 
 class BillingBase(DeclarativeBase):
@@ -994,7 +993,8 @@ class ClaimUploadRawRow(BillingBase):
       - Avoids prematurely naming columns before the operator confirms mapping
 
     PHI compliance (.claude/rules/phi-compliance.md):
-      - fields column is EncryptedJSON (AES-256-GCM, shared crypto key provider)
+      - fields_blob column stores AES-256-GCM ciphertext with tenant_id AAD
+      - Per-row AAD binding prevents cross-tenant ciphertext confusion attacks
       - PHI fields (DOB pos11, member_id pos08, etc.) are encrypted at rest
       - Never log field values -- the parser enforces this by logging only
         row_number and field_count, never field content
@@ -1026,11 +1026,16 @@ class ClaimUploadRawRow(BillingBase):
     # Number of pipe-delimited fields captured in this row
     field_count: Mapped[int] = mapped_column(Integer, nullable=False)
 
-    # Encrypted positional field dict: {"1": "val", "2": "val", ..., "N": "val"}
-    # EncryptedJSON serializes to JSON bytes then AES-256-GCM encrypts before
-    # storing as LargeBinary. Decrypts transparently on ORM read.
+    # Encrypted positional field dict stored as raw AES-256-GCM bytes.
+    # JSON-encoded, then encrypted with tenant_id as AAD via shared.crypto.phi._aad().
+    # Encryption/decryption is explicit in the service layer (not a TypeDecorator)
+    # so that each row is bound to its own tenant's AAD, preventing cross-tenant
+    # ciphertext confusion attacks.
     # PHI REMINDER: never log or expose the decrypted value of this column.
-    fields: Mapped[Any] = mapped_column(EncryptedJSON(), nullable=False)
+    # Use upload.decrypt_raw_row_fields(row.fields_blob, tenant_id=str(tenant_id))
+    # to read; use upload.encrypt_raw_row_fields(fields_dict, tenant_id=str(tenant_id))
+    # to write.
+    fields_blob: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
 
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

@@ -84,10 +84,14 @@ def test_claim_upload_raw_row_has_field_count():
     assert not col.nullable
 
 
-def test_claim_upload_raw_row_has_fields():
-    """fields column present (encrypted JSON storage for PHI)."""
+def test_claim_upload_raw_row_has_fields_blob():
+    """fields_blob column present (tenant-AAD-encrypted LargeBinary for PHI).
+
+    Renamed from 'fields' (EncryptedJSON) to 'fields_blob' (LargeBinary with
+    per-row tenant AAD) so that cross-tenant ciphertext attacks are prevented.
+    """
     from src.models.tables import ClaimUploadRawRow
-    col = ClaimUploadRawRow.__table__.c["fields"]
+    col = ClaimUploadRawRow.__table__.c["fields_blob"]
     assert col is not None
 
 

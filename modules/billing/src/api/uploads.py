@@ -32,6 +32,7 @@ from src.api.dependencies import DBSession, TenantId
 from src.events.upload_events import publish_upload_parsed
 from src.models.tables import ClaimRecord, Upload, UploadStatus
 from src.services.upload import (
+    _POSITIONAL_MAX_BYTES,
     compute_sha256,
     find_existing_upload,
     parse_upload,
@@ -306,6 +307,25 @@ async def create_upload(
     column_mapping = _parse_column_mapping_header(request)
 
     content = await file.read()
+
+    # Size guard for positional uploads: 150 MB cap prevents unbounded memory use
+    # during the streaming batch-insert path. Operator files are 20-100 MB; this
+    # gives headroom while rejecting runaway uploads before any DB work starts.
+    if len(content) > _POSITIONAL_MAX_BYTES:
+        return _no_store(
+            {
+                "error": {
+                    "code": "FILE_TOO_LARGE",
+                    "message": (
+                        f"Upload exceeds maximum allowed size of "
+                        f"{_POSITIONAL_MAX_BYTES // (1024 * 1024)} MB"
+                    ),
+                    "correlation_id": str(uuid.uuid4()),
+                }
+            },
+            status_code=413,
+        )
+
     sha256 = compute_sha256(content)
     existing = find_existing_upload(db, tenant_id=tenant_id, sha256=sha256)
     if existing is not None:
@@ -500,6 +520,23 @@ async def supersede_upload_endpoint(
     column_mapping = _parse_column_mapping_header(request)
 
     content = await file.read()
+
+    # Size guard mirrors create_upload: reject before DB work.
+    if len(content) > _POSITIONAL_MAX_BYTES:
+        return _no_store(
+            {
+                "error": {
+                    "code": "FILE_TOO_LARGE",
+                    "message": (
+                        f"Upload exceeds maximum allowed size of "
+                        f"{_POSITIONAL_MAX_BYTES // (1024 * 1024)} MB"
+                    ),
+                    "correlation_id": str(uuid.uuid4()),
+                }
+            },
+            status_code=413,
+        )
+
     sha256 = compute_sha256(content)
     existing = find_existing_upload(db, tenant_id=tenant_id, sha256=sha256)
     if existing is not None:

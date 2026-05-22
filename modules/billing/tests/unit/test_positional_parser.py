@@ -1,4 +1,4 @@
-"""Unit tests for positional (pipe-delimited headerless) upload parser.
+﻿"""Unit tests for positional (pipe-delimited headerless) upload parser.
 
 Stage 1 requirements:
   - All fields captured including trailing empties (position fidelity)
@@ -35,6 +35,7 @@ from sqlalchemy.pool import StaticPool
 
 from src.models.tables import BillingBase, ClaimUploadRawRow, Upload, UploadStatus
 from src.services.upload import (
+    decrypt_raw_row_fields,
     detect_format,
     parse_positional_bytes,
     parse_upload,
@@ -340,7 +341,8 @@ def test_parse_upload_positional_phi_encrypted_round_trip(db):
         )
     ).scalar_one()
 
-    fields = stored.fields  # decrypted dict
+    # Decrypt with the owning tenant's AAD
+    fields = decrypt_raw_row_fields(stored.fields_blob, tenant_id=str(TENANT_A))
     assert isinstance(fields, dict)
     # pos01 = claim id
     assert fields["1"] == "CLM001"
@@ -351,17 +353,16 @@ def test_parse_upload_positional_phi_encrypted_round_trip(db):
 
 
 def test_parse_upload_positional_ciphertext_not_plaintext():
-    """Raw DB bytes for fields column do NOT contain plaintext DOB or NDC.
+    """Raw DB bytes for fields_blob column do NOT contain plaintext DOB or NDC.
 
-    Encryption is verified by inspecting the raw bind-param bytes that
-    EncryptedJSON produces at write time. We use the TypeDecorator's
-    process_bind_param directly -- this is exactly what SQLAlchemy sends to
-    the DB, so it faithfully represents what is stored at rest.
+    Encryption is verified using encrypt_raw_row_fields (the service-layer
+    helper that _parse_upload_positional calls). This is exactly the blob stored
+    in the fields_blob LargeBinary column, so it faithfully represents what is
+    stored at rest.
 
-    No DB fixture needed: this tests the crypto layer directly, which is the
-    authoritative source of what is stored in the LargeBinary column.
+    No DB fixture needed: this tests the crypto layer directly.
     """
-    from shared.crypto.sqlalchemy_types import EncryptedJSON  # noqa: PLC0415
+    from src.services.upload import encrypt_raw_row_fields, decrypt_raw_row_fields  # noqa: PLC0415
 
     row_line = (
         "CLM_PHI|P|025706|IFX|03/15/2026|06/12/2025|IC47103004|IC47103004"
@@ -377,19 +378,18 @@ def test_parse_upload_positional_ciphertext_not_plaintext():
     assert fields["11"] == "01/01/1980"
     assert fields["14"] == "78206018701"
 
-    # Encrypt via the type decorator (same path as ORM flush)
-    enc_type = EncryptedJSON()
-    raw_bytes = enc_type.process_bind_param(fields, dialect=None)
+    # Encrypt via the service helper with Tenant A's AAD (same path as ORM flush)
+    raw_bytes = encrypt_raw_row_fields(fields, tenant_id=str(TENANT_A))
 
-    assert raw_bytes is not None, "EncryptedJSON.process_bind_param returned None"
-    assert isinstance(raw_bytes, bytes), "Expected bytes from process_bind_param"
+    assert raw_bytes is not None, "encrypt_raw_row_fields returned None"
+    assert isinstance(raw_bytes, bytes), "Expected bytes from encrypt_raw_row_fields"
 
     # Ciphertext must not contain plaintext PHI
     assert b"01/01/1980" not in raw_bytes, "DOB found in plaintext ciphertext -- NOT ENCRYPTED"
     assert b"78206018701" not in raw_bytes, "NDC found in plaintext ciphertext -- NOT ENCRYPTED"
 
     # Round-trip: decrypt must recover original dict
-    recovered = enc_type.process_result_value(raw_bytes, dialect=None)
+    recovered = decrypt_raw_row_fields(raw_bytes, tenant_id=str(TENANT_A))
     assert recovered["11"] == "01/01/1980"
     assert recovered["14"] == "78206018701"
 
@@ -422,9 +422,10 @@ def test_parse_upload_positional_decimal_stored_as_string(db):
         select(ClaimUploadRawRow).where(ClaimUploadRawRow.upload_id == upload.id)
     ).scalar_one()
 
-    # fields["20"] must be a string, not Decimal or float
-    assert isinstance(row.fields["20"], str)
-    assert row.fields["20"] == "4359.6"
+    # Decrypt and check that the value is a string, not Decimal or float
+    fields = decrypt_raw_row_fields(row.fields_blob, tenant_id=str(TENANT_A))
+    assert isinstance(fields["20"], str)
+    assert fields["20"] == "4359.6"
 
 
 def test_parse_upload_cross_tenant_isolation(db):
@@ -477,3 +478,134 @@ def test_detect_format_txt_extension_with_pipe_content():
     """A .txt file with pipe content is detected as positional."""
     content = b"1|2|3|4|5\n6|7|8|9|10\n"
     assert detect_format(content) == "positional"
+
+
+# ---------------------------------------------------------------------------
+# FIX 1: Tenant-scoped AAD — cross-tenant decrypt must fail
+# ---------------------------------------------------------------------------
+
+
+def test_cross_tenant_aad_decrypt_fails():
+    """Row encrypted under Tenant A MUST fail to decrypt under Tenant B's AAD.
+
+    This is the hard invariant from .claude/rules/phi-compliance.md:
+    'cross-tenant ciphertext must fail decryption'.
+
+    The service layer encrypts raw-row fields with tenant_id as AAD via
+    shared.crypto.phi._aad(). Attempting to decrypt with a different tenant_id
+    must raise DecryptionError, not silently return garbage or another tenant's
+    data.
+    """
+    import json as _json
+    from shared.crypto.aes import encrypt, decrypt, DecryptionError
+    from shared.crypto.phi import _aad
+
+    tenant_a_id = str(TENANT_A)
+    tenant_b_id = str(TENANT_B)
+
+    fields = {"1": "CLM001", "11": "01/01/1980", "14": "78206018701"}
+    plaintext = _json.dumps(fields, separators=(",", ":")).encode()
+
+    # Encrypt bound to Tenant A
+    ciphertext = encrypt(plaintext, associated_data=_aad(tenant_a_id))
+
+    # Tenant A can decrypt correctly
+    recovered = _json.loads(decrypt(ciphertext, associated_data=_aad(tenant_a_id)))
+    assert recovered["11"] == "01/01/1980"
+
+    # Tenant B MUST NOT be able to decrypt Tenant A's ciphertext
+    with pytest.raises(DecryptionError):
+        decrypt(ciphertext, associated_data=_aad(tenant_b_id))
+
+
+def test_parse_upload_positional_aad_round_trip(db):
+    """Fields stored by parse_upload round-trip correctly for the owning tenant.
+
+    Verifies that the per-row AAD encryption used in _parse_upload_positional
+    produces data that is readable via the service decrypt helper for Tenant A.
+    """
+    from src.services.upload import decrypt_raw_row_fields
+
+    upload = _make_upload(TENANT_A, filename="aad_test.txt")
+    db.add(upload)
+    db.flush()
+
+    row_line = (
+        "CLM_AAD|P|025706|IFX|03/15/2026|06/12/2025|IC47103004|IC47103004"
+        "|HISTORY|CLAIM|01/01/1980|01|1013998913|78206018701|16474215"
+        "|1.60|28|1|0|4359.6|5.0|4364.6|4364.6|0.0|1427113760|0.0|0.0"
+        "|||591.91|2167.34|0.0|0.0|2167.34|0.0|0.0|591.91|2"
+        "|03/15/2026 23:24:25|14||||0||||||||PHXCOM30|"
+    )
+    parse_upload(db, upload=upload, file_bytes=row_line.encode())
+
+    stored = db.execute(
+        select(ClaimUploadRawRow).where(ClaimUploadRawRow.upload_id == upload.id)
+    ).scalar_one()
+
+    # fields_blob is raw bytes in DB; decrypt with tenant_a_id
+    fields = decrypt_raw_row_fields(stored.fields_blob, tenant_id=str(TENANT_A))
+    assert fields["1"] == "CLM_AAD"
+    assert fields["11"] == "01/01/1980"
+    assert fields["14"] == "78206018701"
+
+
+def test_parse_upload_positional_aad_cross_tenant_decrypt_fails(db):
+    """Raw row written for Tenant A cannot be decrypted using Tenant B's AAD.
+
+    This is the test demanded by the task: write under Tenant A, attempt decrypt
+    under Tenant B, assert DecryptionError is raised.
+    """
+    from shared.crypto.aes import DecryptionError
+    from src.services.upload import decrypt_raw_row_fields
+
+    upload = _make_upload(TENANT_A, filename="cross_tenant.txt")
+    db.add(upload)
+    db.flush()
+
+    content = _pipe_content(n_rows=1)
+    parse_upload(db, upload=upload, file_bytes=content)
+
+    stored = db.execute(
+        select(ClaimUploadRawRow).where(ClaimUploadRawRow.upload_id == upload.id)
+    ).scalar_one()
+
+    # Must fail when using Tenant B's tenant_id as AAD
+    with pytest.raises(DecryptionError):
+        decrypt_raw_row_fields(stored.fields_blob, tenant_id=str(TENANT_B))
+
+
+# ---------------------------------------------------------------------------
+# FIX 2: Batched inserts — memory-bounded large file ingestion
+# ---------------------------------------------------------------------------
+
+
+def test_parse_upload_positional_batch_large_row_count(db):
+    """parse_upload handles >BATCH_SIZE rows in a single call without error.
+
+    Regression guard for the batched-flush path: if BATCH_SIZE is 2000,
+    this exercises at least 2 full batches plus a remainder.
+    """
+    upload = _make_upload(TENANT_A, filename="large_batch.txt")
+    db.add(upload)
+    db.flush()
+
+    # Generate 4500 rows to cross 2 full batches of 2000 + 500 remainder
+    lines = []
+    for i in range(4500):
+        lines.append(f"CLM{i:06d}|P|025706|IFX|03/15/2026|06/12/2025|IC47103004|IC47103004"
+                     "|HISTORY|CLAIM|01/01/1980|01|1013998913|78206018701|16474215"
+                     "|1.60|28|1|0|100.0|5.0|105.0|105.0|0.0|9999999999|0.0|0.0"
+                     "|||50.0|100.0|0.0|0.0|100.0|0.0|0.0|50.0|1"
+                     "|03/15/2026 23:24:25|14||||0||||||||PHXCOM30|")
+    content = "\n".join(lines).encode()
+
+    result = parse_upload(db, upload=upload, file_bytes=content)
+
+    assert result.raw_rows_written == 4500
+    assert upload.row_count == 4500
+
+    count = db.execute(
+        select(ClaimUploadRawRow).where(ClaimUploadRawRow.upload_id == upload.id)
+    ).scalars().all()
+    assert len(count) == 4500
