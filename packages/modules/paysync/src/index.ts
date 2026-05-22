@@ -111,6 +111,11 @@ export {
   type UploadDropzoneProps,
 } from "./surfaces/uploads/UploadDropzone.js";
 export {
+  ColumnMappingStep,
+  REQUIRED_FIELDS,
+  type ColumnMappingStepProps,
+} from "./surfaces/uploads/ColumnMappingStep.js";
+export {
   UploadDetailPage,
   type UploadDetailPageProps,
   type RowError,
