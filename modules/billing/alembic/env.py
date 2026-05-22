@@ -36,6 +36,7 @@ from src.models.tables import (  # noqa: F401
     BillingBase,
     BillingSequence,
     ClaimRecord,
+    ClaimUploadRawRow,
     FeeConfig,
     FileFormatMapping,
     FundingConfig,

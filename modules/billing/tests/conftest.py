@@ -2,12 +2,27 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
+
+# Minimal crypto env for EncryptedJSON/EncryptedString in SQLite tests.
+# Same 32-byte test key used by member-management, edi-compliance, medical-claims.
+# Must be set before any model import that uses EncryptedJSON.
+os.environ.setdefault(
+    "ENCRYPTION_KEY_ACTIVE", "dGVzdC1rZXktMzItYnl0ZXMtZm9yLXVuaXQtdGVzdHM="
+)
+# Reset the key-provider singleton so it re-reads the env var we just set.
+# Without this, a previous import with no key set would cache a broken provider.
+try:
+    import shared.crypto.keys as _ck
+    _ck._provider_instance = None  # type: ignore[attr-defined]
+except Exception:
+    pass
 
 _MODULE_ROOT = Path(__file__).resolve().parent.parent
 if str(_MODULE_ROOT) not in sys.path:

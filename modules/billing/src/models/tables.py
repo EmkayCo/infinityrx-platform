@@ -22,12 +22,15 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+from shared.crypto.sqlalchemy_types import EncryptedJSON
 
 
 class BillingBase(DeclarativeBase):
@@ -931,6 +934,9 @@ class UploadStatus(str, enum.Enum):
     validation_failed = "validation_failed"
     validated = "validated"
     superseded = "superseded"
+    # Positional-capture mode: all rows stored as raw encrypted fields;
+    # no column-name validation applied. Named mapping comes in Stage 2.
+    captured = "captured"
 
 
 class Upload(BillingBase):
@@ -966,4 +972,65 @@ class Upload(BillingBase):
     # row_errors must NEVER contain raw member_id values; only the failure
     # category. Reading via the router emits a phi_access audit entry.
     row_errors: Mapped[Any | None] = mapped_column(JSON, nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# POSITIONAL RAW CAPTURE (Stage 1)
+# ---------------------------------------------------------------------------
+
+
+class ClaimUploadRawRow(BillingBase):
+    """One raw source row from a pipe-delimited headerless claim export.
+
+    Design choice (Stage 1): store all fields as AES-256-GCM encrypted JSON
+    keyed by 1-based position string ("1", "2", ... "N") so Stage 2 can attach
+    column names per position without any schema migration. This approach:
+
+      - Achieves full fidelity (no data loss, trailing empties preserved)
+      - Is PHI-safe at rest: the whole dict is opaque ciphertext in the DB
+        (LargeBinary column via EncryptedJSON)
+      - Is tenant-scoped: every row carries tenant_id, enforced by RLS
+      - Is format-agnostic: field_count tells Stage 2 the source row width
+      - Avoids prematurely naming columns before the operator confirms mapping
+
+    PHI compliance (.claude/rules/phi-compliance.md):
+      - fields column is EncryptedJSON (AES-256-GCM, shared crypto key provider)
+      - PHI fields (DOB pos11, member_id pos08, etc.) are encrypted at rest
+      - Never log field values -- the parser enforces this by logging only
+        row_number and field_count, never field content
+
+    Tenant isolation (.claude/rules/tenant-isolation.md):
+      - tenant_id on every row, NOT NULL
+      - RLS policy (added in migration 0009) mirrors billing.uploads pattern
+      - (upload_id, row_number) unique constraint prevents duplicate ingest
+
+    Stage 2 will add a column-mapping config table linking position numbers
+    to semantic names. Stage 3 will apply mandatory-field enforcement.
+    """
+
+    __tablename__ = "claim_upload_raw_rows"
+    __table_args__ = (
+        UniqueConstraint("upload_id", "row_number", name="uq_raw_row_upload_rownum"),
+        Index("idx_raw_rows_tenant_upload", "tenant_id", "upload_id"),
+        {"schema": "billing"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    upload_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("billing.uploads.id", ondelete="CASCADE"), nullable=False
+    )
+
+    # 1-based line number in the source file (blank lines excluded from count)
+    row_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Number of pipe-delimited fields captured in this row
+    field_count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Encrypted positional field dict: {"1": "val", "2": "val", ..., "N": "val"}
+    # EncryptedJSON serializes to JSON bytes then AES-256-GCM encrypts before
+    # storing as LargeBinary. Decrypts transparently on ORM read.
+    # PHI REMINDER: never log or expose the decrypted value of this column.
+    fields: Mapped[Any] = mapped_column(EncryptedJSON(), nullable=False)
+
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

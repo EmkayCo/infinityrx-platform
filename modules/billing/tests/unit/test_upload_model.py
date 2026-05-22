@@ -76,8 +76,9 @@ def test_upload_has_all_required_columns():
 
 
 def test_upload_status_enum_values_match_spec():
-    # 4 states from spec §5.2 + plan: parsing, validation_failed, validated, superseded
-    expected_states = {"parsing", "validation_failed", "validated", "superseded"}
+    # 5 states: original 4 (spec §5.2) + "captured" (Stage 1 positional capture)
+    # "captured" = pipe-delimited headerless file ingested, named mapping pending Stage 2
+    expected_states = {"parsing", "validation_failed", "validated", "superseded", "captured"}
     actual_states = {s.value for s in UploadStatus}
     assert actual_states == expected_states
 
