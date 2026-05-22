@@ -196,11 +196,13 @@ def _upload_to_dict(
     # content_sha256 (not sha256), uploaded_by_user_id (not uploaded_by),
     # claim_count (not row_count), row_error_count (not error_count),
     # total_billed_amount (Decimal string or null).
-    # UploadStatus enum values: received/parsing/validated/rejected/applied.
+    # UploadStatus enum values: received/parsing/validated/rejected/applied/captured.
     # validation_failed maps to "rejected" for the TS contract.
+    # captured = Stage 1 positional capture complete; named mapping pending Stage 2.
     _STATUS_MAP = {
         "validation_failed": "rejected",
         "superseded": "applied",
+        "captured": "captured",
     }
     contract_status = _STATUS_MAP.get(upload.status, upload.status)
     # Compute total_billed_amount from ClaimRecord rows when a db session is available.

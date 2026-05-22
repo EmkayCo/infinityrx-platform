@@ -963,3 +963,92 @@ class TestListPaginationAndTotalBilledAmount:
         assert resp.status_code == 422, (
             f"Malformed CSV must return 422, got {resp.status_code}: {resp.text}"
         )
+
+
+# -- Stage 1: pipe-delimited positional upload --------------------------------
+
+
+def _pipe_txt(n_rows: int = 3) -> bytes:
+    """Minimal pipe-delimited export rows for router integration tests."""
+    base = (
+        "20260315{n:012d}|P|025706|IFX|03/15/2026|06/12/2025|IC47103004|IC47103004"
+        "|HISTORY|CLAIM|01/01/1980|01|1013998913|78206018701|16474215|1.60|28|1|0"
+        "|4359.6|5.0|4364.6|4364.6|0.0|1427113760|0.0|0.0|||591.91|2167.34|0.0|0.0"
+        "|2167.34|0.0|0.0|591.91|2|03/15/2026 23:24:25|14||||0||||||||PHXCOM30|"
+    )
+    lines = [base.format(n=i) for i in range(n_rows)]
+    return "\n".join(lines).encode()
+
+
+class TestPositionalUpload:
+    """Stage 1: pipe-delimited TXT file routes to positional capture path."""
+
+    def test_pipe_upload_returns_201_with_captured_status(self, _client):
+        """POST a pipe-delimited .txt file -> 201, status='captured'."""
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+
+        content = _pipe_txt(n_rows=5)
+        resp = _client.post(
+            "/api/v1/billing/uploads",
+            headers={"X-Tenant-Id": TENANT_A},
+            files={"file": ("InfinityRX_20260316_0815.txt", io.BytesIO(content), "text/plain")},
+        )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["status"] == "captured", f"expected 'captured', got {body['status']}"
+
+    def test_pipe_upload_row_count_matches_lines(self, _client):
+        """claim_count in response equals lines in the pipe file."""
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+
+        n = 7
+        content = _pipe_txt(n_rows=n)
+        resp = _client.post(
+            "/api/v1/billing/uploads",
+            headers={"X-Tenant-Id": TENANT_A},
+            files={"file": (f"export_{n}.txt", io.BytesIO(content), "text/plain")},
+        )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["claim_count"] == n, (
+            f"expected claim_count={n}, got {body['claim_count']}"
+        )
+
+    def test_pipe_upload_no_validation_errors_returned(self, _client):
+        """Positional capture mode does not validate columns, so row_error_count=0."""
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+
+        content = _pipe_txt(n_rows=3)
+        resp = _client.post(
+            "/api/v1/billing/uploads",
+            headers={"X-Tenant-Id": TENANT_A},
+            files={"file": ("capture.txt", io.BytesIO(content), "text/plain")},
+        )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["row_error_count"] == 0
+
+    def test_existing_csv_upload_still_works_after_stage1(self, _client):
+        """CSV path is unaffected by positional addition (regression guard)."""
+        from shared.auth.dependencies import get_current_user
+        from src.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: OPERATOR_USER
+
+        resp = _client.post(
+            "/api/v1/billing/uploads",
+            headers={"X-Tenant-Id": TENANT_A},
+            files=_multipart_file(_csv("CLM-STAGE1-CSV-GUARD")),
+        )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["status"] == "validated"

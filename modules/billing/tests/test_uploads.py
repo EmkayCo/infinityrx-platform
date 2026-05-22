@@ -266,3 +266,39 @@ def test_financial_precision_mapped_amount_billed_4dp_preserved(db_session):
     assert stored == Decimal(amount), (
         f"Financial precision loss: expected {amount}, got {stored}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Stage 1: _upload_to_dict 'captured' status mapping
+# ---------------------------------------------------------------------------
+
+
+def test_upload_to_dict_captured_status_passes_through():
+    """_upload_to_dict must surface 'captured' for positional uploads.
+
+    Stage 1 pipe-delimited positional uploads set Upload.status = 'captured'.
+    The TS contract uses 'captured' as-is (no remapping needed).
+    """
+    import uuid as _uuid
+    from datetime import UTC, datetime as _datetime
+    from unittest.mock import MagicMock
+    from src.api.uploads import _upload_to_dict
+    from src.models.tables import Upload, UploadStatus
+
+    upload = MagicMock(spec=Upload)
+    upload.id = _uuid.uuid4()
+    upload.tenant_id = _uuid.uuid4()
+    upload.filename = "InfinityRX_20260316_0815.txt"
+    upload.sha256 = "a" * 64
+    upload.status = UploadStatus.captured.value
+    upload.row_count = 15563
+    upload.error_count = 0
+    upload.row_errors = None
+    upload.uploaded_by = _uuid.uuid4()
+    upload.uploaded_at = _datetime.now(UTC)
+
+    result = _upload_to_dict(upload)
+    assert result["status"] == "captured", (
+        f"Expected 'captured', got {result['status']!r}"
+    )
+    assert result["claim_count"] == 15563
