@@ -3,6 +3,10 @@
  * /admin/paysync/uploads -- Paysync uploads list + two-step upload wizard.
  *
  * Step 1: User picks a file via UploadDropzone.
+ *         - Pipe-delimited / headerless files (.psv, or first non-blank line
+ *           contains '|') bypass the mapping step and upload directly to the
+ *           positional-capture path. Mirrors backend detect_format() exactly.
+ *         - CSV / XLSX files with named headers proceed to Step 2.
  * Step 2: ColumnMappingStep reads the first 8KB (header only -- no full-file
  *         load) to detect column names, auto-matches to the 8 required billing
  *         fields, lets the user correct any mismatches, then confirms.
@@ -24,6 +28,29 @@ import {
   type DedupBanner,
 } from "@infinityrx/module-paysync";
 import type { Upload } from "@infinityrx/contract";
+
+/**
+ * Mirror of backend billing.services.upload.detect_format().
+ * Reads the first 512 bytes (no full-file load) and returns true when the
+ * first non-blank line contains '|' — i.e. a headerless pipe-delimited export
+ * that should bypass the CSV column-mapping step entirely.
+ */
+async function isPipeDelimited(file: File): Promise<boolean> {
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  // .psv is always pipe-delimited by convention.
+  if (ext === "psv") return true;
+  const slice = file.slice(0, 512);
+  try {
+    const text = await slice.text();
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (line) return line.includes("|");
+    }
+  } catch {
+    // Can't read — fall through to the mapping step (safe default).
+  }
+  return false;
+}
 
 interface UploadListResponse {
   readonly results: Upload[];
@@ -69,7 +96,13 @@ async function postUpload({ file, columnMapping }: PostUploadArgs): Promise<Uplo
   return body;
 }
 
-/** Upload flow state machine. */
+/**
+ * Upload flow state machine.
+ *   idle      → user picks file → format detection (async, first 512 bytes)
+ *   uploading → pipe-delimited detected, bypass mapping, POST to billing
+ *   mapping   → CSV/XLSX, show ColumnMappingStep
+ *   done      → unused sentinel (success lands back in idle after invalidation)
+ */
 type UploadPhase =
   | { kind: "idle" }
   | { kind: "mapping"; file: File }
@@ -109,12 +142,21 @@ export default function UploadsPage() {
     },
   });
 
-  // Step 1: file picked -> enter mapping step.
+  // Step 1: file picked -> detect format, then either upload directly (pipe)
+  // or enter the column-mapping step (CSV/XLSX with named headers).
   const handleFilePicked = useCallback((file: File) => {
     setUploadError(null);
     setDedupBanner(undefined);
-    setPhase({ kind: "mapping", file });
-  }, []);
+    void isPipeDelimited(file).then((pipe) => {
+      if (pipe) {
+        // Positional path: skip mapping, upload straight to billing.
+        setPhase({ kind: "uploading" });
+        mutation.mutate({ file });
+      } else {
+        setPhase({ kind: "mapping", file });
+      }
+    });
+  }, [mutation]);
 
   // Step 2: mapping confirmed -> submit.
   const handleMappingConfirm = useCallback((mapping: Record<string, string>, file: File) => {

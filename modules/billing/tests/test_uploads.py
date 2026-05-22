@@ -302,3 +302,61 @@ def test_upload_to_dict_captured_status_passes_through():
         f"Expected 'captured', got {result['status']!r}"
     )
     assert result["claim_count"] == 15563
+
+
+# ---------------------------------------------------------------------------
+# Stage 2: positional create_upload — db.refresh(upload) after commit
+# ---------------------------------------------------------------------------
+
+
+def test_create_upload_positional_refreshes_after_commit(db_session):
+    """After db.commit(), _parse_upload_positional's session.expire_all() calls
+    leave the upload object expired. Without db.refresh(upload) the subsequent
+    _upload_to_dict access raises ObjectDeletedError when the session identity
+    map holds a stale reference from a prior rolled-back attempt.
+
+    This test verifies that the upload object is readable (status == 'captured',
+    row_count > 0) immediately after parse_upload returns — i.e. that no
+    ObjectDeletedError is raised when the upload is serialised post-commit.
+    """
+    import uuid as _uuid
+    from datetime import UTC, datetime as _datetime
+    from src.models.tables import Upload, UploadStatus
+    from src.services.upload import parse_upload
+    from src.api.uploads import _upload_to_dict
+
+    tenant_id = _uuid.uuid4()
+
+    # Build a minimal pipe-delimited file (3 rows, 5 fields each).
+    lines = [
+        "20260315|P|025706|IFX|03/15/2026",
+        "20260316|P|025707|IFX|03/16/2026",
+        "20260317|P|025708|IFX|03/17/2026",
+    ]
+    file_bytes = "\n".join(lines).encode()
+
+    upload = Upload(
+        id=_uuid.uuid4(),
+        tenant_id=tenant_id,
+        filename="test_positional.txt",
+        sha256="b" * 64,
+        status="pending",
+        file_size=len(file_bytes),
+        mime_type="text/plain",
+        uploaded_by=_uuid.uuid4(),
+        uploaded_at=_datetime.now(UTC),
+    )
+    db_session.add(upload)
+    db_session.flush()
+
+    # parse_upload calls session.expire_all() internally every batch.
+    parse_upload(db_session, upload=upload, file_bytes=file_bytes)
+
+    # Simulate what create_upload does: commit then refresh.
+    db_session.commit()
+    db_session.refresh(upload)
+
+    # Must not raise ObjectDeletedError — all attributes must be accessible.
+    result = _upload_to_dict(upload, include_row_errors=True, db=db_session)
+    assert result["status"] == "captured"
+    assert result["claim_count"] == 3

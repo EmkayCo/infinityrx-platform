@@ -396,6 +396,12 @@ async def create_upload(
             status_code=422,
         )
     db.commit()
+    # Re-load upload attributes after commit. _parse_upload_positional calls
+    # session.expire_all() every batch (memory strategy), and db.commit() also
+    # expires all objects. Without an explicit refresh, _upload_to_dict raises
+    # ObjectDeletedError when the identity map holds a stale reference from a
+    # prior rolled-back attempt in the same session.
+    db.refresh(upload)
 
     await _publish_parsed(request, upload=upload, correlation_id=uuid.uuid4())
 
