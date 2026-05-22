@@ -597,3 +597,129 @@ def test_supersede_upload_raises_if_claims_have_ap_references(db_session: Sessio
 
     with pytest.raises(ValueError, match="CLAIMS_IN_AP_PROCESSING"):
         supersede_upload(db_session, old_upload=old, new_upload=new)
+
+
+# ── apply_column_mapping + parse_csv_bytes with mapping ──────────────────
+
+
+from src.services.upload import apply_column_mapping  # noqa: E402
+
+
+_MAPPING = {
+    "ndc": "Drug Code",
+    "npi": "Provider NPI",
+    "claim_id": "Claim Number",
+    "date_of_service": "Date of Service",
+    "quantity": "Qty",
+    "days_supply": "Days Supply",
+    "amount_billed": "Billed Amount",
+    "member_id": "Member ID",
+}
+
+_NONSTANDARD_HEADER = (
+    "Drug Code,Provider NPI,Claim Number,Date of Service,"
+    "Qty,Days Supply,Billed Amount,Member ID"
+)
+
+
+def _nonstandard_row(
+    ndc=_VALID_NDC,
+    npi=_VALID_NPI,
+    claim_id="C-1",
+    dos="2026-05-01",
+    qty="30",
+    days="30",
+    amt="99.9900",
+    member="M-1",
+):
+    return f"{ndc},{npi},{claim_id},{dos},{qty},{days},{amt},{member}"
+
+
+def _nonstandard_csv(*rows: str) -> bytes:
+    body = "\n".join([_NONSTANDARD_HEADER, *rows])
+    return body.encode("utf-8")
+
+
+def test_apply_column_mapping_remaps_keys():
+    row = {"Drug Code": "00093015005", "Provider NPI": "1234567893", "Extra": "x"}
+    mapping = {"ndc": "Drug Code", "npi": "Provider NPI"}
+    result = apply_column_mapping(row, mapping)
+    assert result["ndc"] == "00093015005"
+    assert result["npi"] == "1234567893"
+    # Original user keys preserved alongside canonical keys
+    assert result["Drug Code"] == "00093015005"
+    assert result["Extra"] == "x"
+
+
+def test_apply_column_mapping_ignores_missing_user_columns():
+    """If a user column listed in mapping is absent, the canonical key is not added."""
+    row = {"ndc": "00093015005"}
+    mapping = {"ndc": "Drug Code", "npi": "Provider NPI"}
+    result = apply_column_mapping(row, mapping)
+    # "Drug Code" not in row so mapping npi -> Provider NPI is a no-op.
+    assert "npi" not in result
+
+
+def test_parse_csv_bytes_with_mapping_accepts_nonstandard_headers():
+    csv_bytes = _nonstandard_csv(_nonstandard_row(claim_id="C-MAP-1"))
+    rows = parse_csv_bytes(csv_bytes, column_mapping=_MAPPING)
+    assert len(rows) == 1
+    assert rows[0]["ndc"] == _VALID_NDC
+    assert rows[0]["npi"] == _VALID_NPI
+    assert rows[0]["claim_id"] == "C-MAP-1"
+    assert rows[0]["date_of_service"] == "2026-05-01"
+    assert rows[0]["amount_billed"] == "99.9900"
+
+
+def test_parse_csv_bytes_with_mapping_still_validates_required_columns():
+    """Mapping that does not cover all 8 required fields must still raise."""
+    incomplete_mapping = {"ndc": "Drug Code"}  # only covers ndc
+    bad_csv = b"Drug Code,Some Other Col\n00093015005,foo\n"
+    with pytest.raises(ValueError, match="required"):
+        parse_csv_bytes(bad_csv, column_mapping=incomplete_mapping)
+
+
+def test_parse_csv_bytes_no_mapping_unchanged():
+    """parse_csv_bytes without mapping works exactly as before (regression guard)."""
+    csv_bytes = _csv(_row(claim_id="ORIG-1"))
+    rows = parse_csv_bytes(csv_bytes)
+    assert rows[0]["claim_id"] == "ORIG-1"
+
+
+def test_parse_upload_with_column_mapping_validates_nonstandard_csv(db_session: Session):
+    """parse_upload accepts a column_mapping kwarg and maps before validation."""
+    upload = _new_upload()
+    db_session.add(upload)
+    db_session.flush()
+    csv_bytes = _nonstandard_csv(
+        _nonstandard_row(claim_id="MAP-1"),
+        _nonstandard_row(claim_id="MAP-2"),
+    )
+    result = parse_upload(
+        db_session, upload=upload, file_bytes=csv_bytes,
+        column_mapping=_MAPPING,
+    )
+    assert result.upload.status == UploadStatus.validated.value
+    assert result.upload.row_count == 2
+    claims = db_session.query(ClaimRecord).filter_by(upload_id=upload.id).all()
+    assert len(claims) == 2
+    assert {c.auth_number for c in claims} == {"MAP-1", "MAP-2"}
+
+
+def test_parse_xlsx_bytes_with_mapping_accepts_nonstandard_headers():
+    openpyxl = pytest.importorskip("openpyxl")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append([
+        "Drug Code", "Provider NPI", "Claim Number", "Date of Service",
+        "Qty", "Days Supply", "Billed Amount", "Member ID",
+    ])
+    ws.append([_VALID_NDC, _VALID_NPI, "XL-1", "2026-05-01", "30", "30", "55.00", "M-XL"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    rows = parse_xlsx_bytes(buf.read(), column_mapping=_MAPPING)
+    assert len(rows) == 1
+    assert rows[0]["ndc"] == _VALID_NDC
+    assert rows[0]["claim_id"] == "XL-1"
+    assert rows[0]["amount_billed"] == "55.00"

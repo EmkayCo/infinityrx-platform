@@ -94,6 +94,16 @@ export async function POST(request: NextRequest) {
   // Content-Type is forwarded verbatim to preserve the multipart boundary that
   // python-multipart on the billing side requires to parse the file field.
   // No body bytes are buffered in this BFF process.
+  //
+  // Column mapping: portal sends X-Column-Mapping: JSON({canonical->userCol})
+  // when the user has mapped non-standard column names. Forwarded as-is to
+  // billing, which applies the rename before CSV/XLSX validation. Safe to
+  // forward verbatim -- billing ignores malformed values gracefully.
+  const columnMappingHeader = request.headers.get("x-column-mapping");
+  const extraMappingHeaders: Record<string, string> = columnMappingHeader
+    ? { "x-column-mapping": columnMappingHeader }
+    : {};
+
   let billingResp: Response;
   try {
     billingResp = await fetch(BILLING_UPLOADS_URL, {
@@ -101,6 +111,7 @@ export async function POST(request: NextRequest) {
       headers: {
         ...backendHeaders(session),
         "content-type": contentType,
+        ...extraMappingHeaders,
       },
       body: request.body,
       // @ts-expect-error -- duplex is required by Node/undici for streaming

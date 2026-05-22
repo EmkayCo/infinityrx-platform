@@ -15,6 +15,7 @@ Eventing: paysync.upload.parsed published after db.commit() via app.state.event_
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import uuid
@@ -178,6 +179,21 @@ async def create_upload(
     if not any(current_user.has_role(r) for r in _WRITE_ROLES):
         raise HTTPException(status_code=403, detail="Only operators and approvers can upload files")
 
+    # Field mapping: read optional X-Column-Mapping header (JSON string).
+    # The header carries {canonical_field -> user_column_name} so the CSV/XLSX
+    # parser can rename non-standard column headers before validation.
+    # This keeps the large-file streaming passthrough unchanged in the BFF --
+    # the BFF forwards the mapping as a header rather than a body field.
+    column_mapping: dict[str, str] | None = None
+    raw_mapping = request.headers.get("x-column-mapping")
+    if raw_mapping:
+        try:
+            parsed_mapping = json.loads(raw_mapping)
+            if isinstance(parsed_mapping, dict):
+                column_mapping = {str(k): str(v) for k, v in parsed_mapping.items()}
+        except (json.JSONDecodeError, ValueError):
+            pass  # malformed header -- ignore and let parser catch missing columns
+
     content = await file.read()
     sha256 = compute_sha256(content)
     existing = find_existing_upload(db, tenant_id=tenant_id, sha256=sha256)
@@ -219,7 +235,7 @@ async def create_upload(
     # P2-create-parse: wrap parse_upload so malformed files return 422 (not 500).
     # Mirrors the supersede path pattern.
     try:
-        parse_upload(db, upload=upload, file_bytes=content)
+        parse_upload(db, upload=upload, file_bytes=content, column_mapping=column_mapping)
     except ValueError as exc:
         db.rollback()
         return _no_store(

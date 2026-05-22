@@ -297,6 +297,59 @@ describe("POST /api/paysync/uploads (streaming passthrough)", () => {
   });
 });
 
+// ── Column mapping header forwarding ─────────────────────────────────────────
+
+describe("POST /api/paysync/uploads -- X-Column-Mapping header forwarding", () => {
+  beforeEach(() => {
+    authMock.mockReset();
+    mockCreateRealUploadsClient.mockReset();
+  });
+
+  it("forwards X-Column-Mapping header to billing when present", async () => {
+    authedSession();
+    const fakeUpload = { id: "upl-mapped-1", filename: "claims.csv", status: "validated" };
+    mockBillingFetch(201, fakeUpload);
+
+    const mapping = JSON.stringify({ ndc: "Drug Code", npi: "Provider NPI" });
+    const bodyStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("--b\r\nContent-Disposition: form-data; name=\"file\"\r\n\r\ndata\r\n--b--"));
+        controller.close();
+      },
+    });
+    const req = new NextRequest("http://localhost:3000/api/paysync/uploads", {
+      method: "POST",
+      headers: {
+        "content-type": "multipart/form-data; boundary=b",
+        "x-column-mapping": mapping,
+      },
+      body: bodyStream,
+      duplex: "half",
+    });
+
+    const resp = await POST(req);
+    expect(resp.status).toBe(201);
+
+    type FetchCall = [string, RequestInit & { duplex?: string }];
+    const [, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as FetchCall;
+    const hdrs = init.headers as Record<string, string>;
+    expect(hdrs["x-column-mapping"]).toBe(mapping);
+  });
+
+  it("omits X-Column-Mapping header when not present in request", async () => {
+    authedSession();
+    mockBillingFetch(201, { id: "upl-no-map", status: "validated" });
+
+    const req = makeStreamingPostRequest();
+    await POST(req);
+
+    type FetchCall = [string, RequestInit & { duplex?: string }];
+    const [, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as FetchCall;
+    const hdrs = init.headers as Record<string, string>;
+    expect(hdrs["x-column-mapping"]).toBeUndefined();
+  });
+});
+
 // ── Route metadata ────────────────────────────────────────────────────────────
 
 describe("route runtime export (Edge-deployment guard)", () => {

@@ -182,6 +182,33 @@ def validate_row(row: dict[str, str]) -> tuple[dict[str, Any] | None, str | None
     }, None
 
 
+def apply_column_mapping(
+    row: dict[str, str], mapping: dict[str, str]
+) -> dict[str, str]:
+    """Rename user column names to the canonical required column names.
+
+    mapping: {canonical_field -> user_column_name}
+    e.g. {"ndc": "Drug Code", "npi": "Provider NPI", ...}
+
+    Rows keep all original keys; mapped keys are added/overwritten so that
+    the required canonical names are present for validation. Extra user
+    columns are preserved (billing ignores them).
+    """
+    result = dict(row)
+    for canonical, user_col in mapping.items():
+        if user_col in row:
+            result[canonical] = row[user_col]
+    return result
+
+
+def _apply_mapping_to_headers(
+    headers: list[str], mapping: dict[str, str]
+) -> list[str]:
+    """Return header list with user column names replaced by canonical names."""
+    reverse: dict[str, str] = {v: k for k, v in mapping.items()}
+    return [reverse.get(h, h) for h in headers]
+
+
 def _check_required_columns(headers: list[str]) -> None:
     headers_set = {h.strip().lower() for h in headers}
     missing = set(_REQUIRED_COLUMNS) - headers_set
@@ -189,16 +216,41 @@ def _check_required_columns(headers: list[str]) -> None:
         raise ValueError(f"CSV missing required columns: {sorted(missing)}")
 
 
-def parse_csv_bytes(content: bytes) -> list[dict[str, str]]:
+def parse_csv_bytes(
+    content: bytes,
+    column_mapping: dict[str, str] | None = None,
+) -> list[dict[str, str]]:
+    """Parse CSV bytes into a list of row dicts.
+
+    column_mapping: optional {canonical_field -> user_column_name}.
+    When supplied, user column names in the header are renamed to their
+    canonical equivalents before required-column validation and row parsing.
+    Extra (unmapped) columns are passed through unchanged.
+    """
     text = content.decode("utf-8")
     reader = csv.DictReader(io.StringIO(text))
     if reader.fieldnames is None:
         raise ValueError("CSV missing header row")
-    _check_required_columns(list(reader.fieldnames))
+    raw_headers = list(reader.fieldnames)
+    if column_mapping:
+        mapped_headers = _apply_mapping_to_headers(raw_headers, column_mapping)
+        _check_required_columns(mapped_headers)
+        rows: list[dict[str, str]] = []
+        for raw_row in reader:
+            rows.append(apply_column_mapping(dict(raw_row), column_mapping))
+        return rows
+    _check_required_columns(raw_headers)
     return [dict(r) for r in reader]
 
 
-def parse_xlsx_bytes(content: bytes) -> list[dict[str, str]]:
+def parse_xlsx_bytes(
+    content: bytes,
+    column_mapping: dict[str, str] | None = None,
+) -> list[dict[str, str]]:
+    """Parse XLSX bytes into a list of row dicts.
+
+    column_mapping: optional {canonical_field -> user_column_name}.
+    """
     try:
         import openpyxl  # type: ignore[import-not-found]
     except ImportError as exc:
@@ -206,14 +258,30 @@ def parse_xlsx_bytes(content: bytes) -> list[dict[str, str]]:
     wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
     ws = wb.active
     rows = ws.iter_rows(values_only=True)
-    headers = [str(h) if h is not None else "" for h in next(rows, [])]
-    _check_required_columns(headers)
-    out: list[dict[str, str]] = []
+    raw_headers = [str(h) if h is not None else "" for h in next(rows, [])]
+    if column_mapping:
+        mapped_headers = _apply_mapping_to_headers(raw_headers, column_mapping)
+        _check_required_columns(mapped_headers)
+        out: list[dict[str, str]] = []
+        for row in rows:
+            if all(c is None for c in row):
+                continue
+            raw_dict = {
+                h: ("" if v is None else str(v))
+                for h, v in zip(raw_headers, row, strict=False)
+            }
+            out.append(apply_column_mapping(raw_dict, column_mapping))
+        return out
+    _check_required_columns(raw_headers)
+    out2: list[dict[str, str]] = []
     for row in rows:
         if all(c is None for c in row):
             continue
-        out.append({h: ("" if v is None else str(v)) for h, v in zip(headers, row, strict=False)})
-    return out
+        out2.append({
+            h: ("" if v is None else str(v))
+            for h, v in zip(raw_headers, row, strict=False)
+        })
+    return out2
 
 
 @dataclass(frozen=True)
@@ -223,8 +291,18 @@ class UploadParseResult:
 
 
 def parse_upload(
-    session: Session, *, upload: Upload, file_bytes: bytes
+    session: Session,
+    *,
+    upload: Upload,
+    file_bytes: bytes,
+    column_mapping: dict[str, str] | None = None,
 ) -> UploadParseResult:
+    """Parse and validate an upload file, writing valid claim rows to the DB.
+
+    column_mapping: optional {canonical_field -> user_column_name}.
+    When supplied, the parser renames user-supplied column headers to the
+    canonical names required by validate_row before validation.
+    """
     # P2-xlsx: dispatch to the correct parser based on mime_type/filename.
     # Callers that pass raw bytes from an xlsx file must set upload.mime_type
     # to "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -233,7 +311,10 @@ def parse_upload(
     _is_xlsx = (upload.mime_type or "").startswith(_xlsx_mime) or (
         upload.filename or ""
     ).lower().endswith(".xlsx")
-    rows = parse_xlsx_bytes(file_bytes) if _is_xlsx else parse_csv_bytes(file_bytes)
+    if _is_xlsx:
+        rows = parse_xlsx_bytes(file_bytes, column_mapping=column_mapping)
+    else:
+        rows = parse_csv_bytes(file_bytes, column_mapping=column_mapping)
     row_count = len(rows)
     errors: list[dict[str, Any]] = []
     valid_rows: list[dict[str, Any]] = []
