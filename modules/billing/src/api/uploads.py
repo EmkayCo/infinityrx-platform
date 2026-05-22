@@ -47,6 +47,124 @@ _AUDITOR_ROLE = "auditor"
 _WRITE_ROLES = frozenset({"operator", "approver"})
 _DEFAULT_UPLOAD_DIR = "./data/uploads"
 
+# Hardening limits for x-column-mapping header (FIX 2).
+_MAPPING_MAX_BYTES = 8 * 1024  # 8 KB
+_MAPPING_MAX_KEYS = 64
+
+
+def _parse_column_mapping_header(request: Request) -> dict[str, str] | None:
+    """Parse and validate the optional x-column-mapping JSON header.
+
+    Returns {canonical_field: user_column_name} or None when header absent.
+    Raises HTTPException 400 on:
+      - header > 8 KB
+      - malformed JSON
+      - value is not a JSON object
+      - more than 64 mapping keys
+      - same user column mapped to multiple canonical fields (ambiguous)
+      - user column name is itself a canonical field name (canonical-overwrite collision)
+    """
+    from src.services.upload import _REQUIRED_COLUMNS  # noqa: PLC0415
+
+    raw = request.headers.get("x-column-mapping")
+    if raw is None:
+        return None
+
+    # Size cap before JSON parsing to prevent memory DoS.
+    if len(raw.encode("utf-8")) > _MAPPING_MAX_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "INVALID_COLUMN_MAPPING",
+                    "message": (
+                        f"x-column-mapping header exceeds "
+                        f"{_MAPPING_MAX_BYTES // 1024} KB limit"
+                    ),
+                }
+            },
+        )
+
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "INVALID_COLUMN_MAPPING",
+                    "message": "x-column-mapping header is not valid JSON",
+                }
+            },
+        )
+
+    if not isinstance(parsed, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "INVALID_COLUMN_MAPPING",
+                    "message": "x-column-mapping must be a JSON object",
+                }
+            },
+        )
+
+    if len(parsed) > _MAPPING_MAX_KEYS:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "INVALID_COLUMN_MAPPING",
+                    "message": (
+                        f"x-column-mapping exceeds {_MAPPING_MAX_KEYS} key limit"
+                    ),
+                }
+            },
+        )
+
+    mapping: dict[str, str] = {str(k): str(v) for k, v in parsed.items()}
+
+    # Ambiguity: same user column mapped to multiple canonical fields.
+    seen_user_cols: dict[str, str] = {}
+    for canonical, user_col in mapping.items():
+        if user_col in seen_user_cols:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "INVALID_COLUMN_MAPPING",
+                        "message": (
+                            f"Ambiguous mapping: user column '{user_col}' "
+                            f"is mapped to both "
+                            f"'{seen_user_cols[user_col]}' and '{canonical}'"
+                        ),
+                    }
+                },
+            )
+        seen_user_cols[user_col] = canonical
+
+    # Collision: a user column whose name is itself a canonical field name would
+    # silently overwrite a real money/identity column.  Reject explicitly.
+    canonical_set = set(_REQUIRED_COLUMNS)
+    for canonical, user_col in mapping.items():
+        if user_col != canonical and user_col in canonical_set:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "INVALID_COLUMN_MAPPING",
+                        "message": (
+                            f"Mapping collision: user column '{user_col}' is a "
+                            f"canonical field name. This would silently overwrite "
+                            f"the real '{user_col}' column. Rename your column or "
+                            f"remove the mapping entry."
+                        ),
+                    }
+                },
+            )
+
+    return mapping
+
 
 def _emit_phi_audit(
     *, tenant_id: uuid.UUID, user_id: uuid.UUID, entity_id: uuid.UUID
@@ -179,20 +297,11 @@ async def create_upload(
     if not any(current_user.has_role(r) for r in _WRITE_ROLES):
         raise HTTPException(status_code=403, detail="Only operators and approvers can upload files")
 
-    # Field mapping: read optional X-Column-Mapping header (JSON string).
-    # The header carries {canonical_field -> user_column_name} so the CSV/XLSX
-    # parser can rename non-standard column headers before validation.
-    # This keeps the large-file streaming passthrough unchanged in the BFF --
-    # the BFF forwards the mapping as a header rather than a body field.
-    column_mapping: dict[str, str] | None = None
-    raw_mapping = request.headers.get("x-column-mapping")
-    if raw_mapping:
-        try:
-            parsed_mapping = json.loads(raw_mapping)
-            if isinstance(parsed_mapping, dict):
-                column_mapping = {str(k): str(v) for k, v in parsed_mapping.items()}
-        except (json.JSONDecodeError, ValueError):
-            pass  # malformed header -- ignore and let parser catch missing columns
+    # FIX 2: centralised header parser enforces 8 KB size cap, 64-key limit,
+    # ambiguity check (same user col -> two canonicals), and canonical-overwrite
+    # collision check.  Raises 400 on violation; returns None when header absent.
+    # Replaces old inline parse that silently swallowed malformed JSON.
+    column_mapping = _parse_column_mapping_header(request)
 
     content = await file.read()
     sha256 = compute_sha256(content)
@@ -287,7 +396,6 @@ async def list_uploads(
     if db_status:
         stmt = stmt.where(Upload.status == db_status)
     # P1-cursor: apply cursor as a keyset filter (uploaded_at < cursor ISO string).
-    # Cursor is the ISO timestamp of the last item on the previous page.
     if cursor:
         from datetime import datetime  # noqa: PLC0415
         try:
@@ -297,8 +405,6 @@ async def list_uploads(
             pass  # malformed cursor -- ignore and return from the start
     stmt = stmt.order_by(Upload.uploaded_at.desc()).limit(limit + 1)
     uploads = list(db.execute(stmt).scalars().all())
-    # P1-schema: UploadListResponseSchema uses z.string().optional() -- Zod rejects null.
-    # Omit next_cursor key entirely when there is no next page.
     body: dict[str, object] = {"results": [_upload_to_dict(u) for u in uploads[:limit]], "total": len(uploads[:limit])}
     if len(uploads) > limit:
         body["next_cursor"] = str(uploads[limit - 1].uploaded_at.isoformat())
@@ -345,9 +451,6 @@ async def get_upload_claims(
         ClaimRecord.tenant_id == tenant_id,
     )
     claims = db.execute(claims_stmt).scalars().all()
-    # P2-claims-shape: getClaims contract expects { results, next_cursor, total }
-    # and field name "claim_id" (contract alias for auth_number — the business
-    # identifier stored in ClaimRecord.auth_number per Plan B data model).
     results = [
         {
             "id": str(c.id),
@@ -389,11 +492,13 @@ async def supersede_upload_endpoint(
     if old_upload is None:
         raise HTTPException(status_code=404, detail="Upload not found")
 
+    # FIX 1: read x-column-mapping so a supersede with non-standard headers
+    # goes through the same mapping pipeline as create_upload.  Without this,
+    # the replacement file's parse_upload call misses the mapping and 422s.
+    column_mapping = _parse_column_mapping_header(request)
+
     content = await file.read()
     sha256 = compute_sha256(content)
-    # uq_uploads_tenant_sha256 forbids reusing identical content for ANY upload
-    # on this tenant, including the one being superseded.  Return 409 rather
-    # than attempting an insert that the DB will reject anyway.
     existing = find_existing_upload(db, tenant_id=tenant_id, sha256=sha256)
     if existing is not None:
         return _no_store(
@@ -430,12 +535,6 @@ async def supersede_upload_endpoint(
     )
     db.add(new_upload)
     db.flush()
-    # P2-supersede: void old claim rows before parsing so the unique constraint
-    # (tenant_id, auth_number) doesn't fire when the replacement file reuses
-    # the same claim_id values.  supersede_upload deletes old ClaimRecord rows
-    # and marks the old upload superseded; parse_upload then inserts fresh rows.
-    # C1: supersede_upload raises ValueError if any claims are in AP processing
-    # (RESTRICT FK prevents deletion); surface as 409 with canonical envelope.
     try:
         supersede_upload(db, old_upload=old_upload, new_upload=new_upload)
     except ValueError as exc:
@@ -456,11 +555,9 @@ async def supersede_upload_endpoint(
                 status_code=409,
             )
         raise
-    # B10: parse the replacement file; if it fails validation (all rows invalid
-    # or malformed headers), rollback the entire transaction so old claims are
-    # preserved and return 422. Never commit a supersede where replacement parse fails.
+    # FIX 1: forward column_mapping so non-standard-header replacement files succeed.
     try:
-        parse_upload(db, upload=new_upload, file_bytes=content)
+        parse_upload(db, upload=new_upload, file_bytes=content, column_mapping=column_mapping)
     except ValueError as exc:
         db.rollback()
         return _no_store(
@@ -480,7 +577,7 @@ async def supersede_upload_endpoint(
                 "error": {
                     "code": "VALIDATION_FAILED",
                     "message": (
-                        "Replacement file failed validation — all rows rejected. "
+                        "Replacement file failed validation -- all rows rejected. "
                         "Original upload and claims are preserved."
                     ),
                     "correlation_id": str(uuid.uuid4()),
