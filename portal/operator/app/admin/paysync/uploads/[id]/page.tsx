@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 /**
  * /admin/paysync/uploads/[id] -- Single upload detail + claim viewer.
  * Fetches upload detail + claims via TanStack Query from BFF.
