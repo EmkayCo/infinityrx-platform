@@ -8,6 +8,12 @@ import { useRef, type ReactElement, type ChangeEvent } from "react";
 
 export interface UploadDropzoneProps {
   readonly onUpload: (file: File) => void;
+  /**
+   * Optional: called when the user picks a file, BEFORE onUpload.
+   * When provided the parent can show a mapping step and call onUpload itself.
+   * When absent, onUpload is called directly (original behaviour, no regression).
+   */
+  readonly onFilePicked?: (file: File) => void;
   readonly disabled: boolean;
   readonly disabledReason?: string;
   /** Set when a previous POST returned 409 (sha256 dedup). */
@@ -24,6 +30,7 @@ const ACCEPTED_TYPES =
 
 export function UploadDropzone({
   onUpload,
+  onFilePicked,
   disabled,
   disabledReason,
   dupUploadId,
@@ -35,9 +42,15 @@ export function UploadDropzone({
     if (disabled) return;
     const file = e.target.files?.[0];
     if (file) {
-      onUpload(file);
-      // Reset the input so the same file can be re-selected after fixing issues.
+      // Reset the input so the same file can be re-selected after mapping/errors.
       e.target.value = "";
+      if (onFilePicked) {
+        // Parent intercepts: shows mapping step, calls onUpload itself.
+        onFilePicked(file);
+      } else {
+        // Original behaviour: go straight to upload.
+        onUpload(file);
+      }
     }
   }
 

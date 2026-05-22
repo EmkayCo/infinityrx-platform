@@ -12,6 +12,7 @@ export const UploadsSurface: SurfaceConfig = {
 
 export { UploadsListPage, type UploadsListPageProps, type DedupBanner } from "./UploadsListPage.js";
 export { UploadDropzone, type UploadDropzoneProps } from "./UploadDropzone.js";
+export { ColumnMappingStep, REQUIRED_FIELDS, type ColumnMappingStepProps } from "./ColumnMappingStep.js";
 export { UploadDetailPage, type UploadDetailPageProps, type RowError } from "./UploadDetailPage.js";
 export { UploadClaimViewer, type UploadClaimViewerProps } from "./UploadClaimViewer.js";
 export {
