@@ -1,19 +1,24 @@
-"""SP-1 Plan B Task 2 — Upload service.
+"""SP-1 Plan B Task 2 -- Upload service.
 
 Sub-functions:
   - compute_sha256, write_upload_file (atomic via .tmp -> os.replace)
   - find_existing_upload (sha256 dedup, tenant-scoped)
+  - detect_format (csv vs positional)
+  - parse_positional_bytes (Stage 1: pipe-delimited headerless capture)
   - parse_csv_bytes, parse_xlsx_bytes (parsers)
   - validate_row (per-row business rules; PHI-safe error messages)
-  - parse_upload (orchestrator)
+  - parse_upload (orchestrator -- routes to positional or CSV path)
   - supersede_upload (immutable provenance)
 
 Financial precision (.claude/rules/financial-precision.md):
   - Decimal(str(value)) at parse; never Decimal(float)
   - amount_billed max 4dp, quantity max 3dp (matches HEAD claim_records)
+  - Positional capture: financial fields stored as captured strings (no
+    coercion), named mapping + Decimal coercion happen in Stage 3.
 
 PHI controls (.claude/rules/phi-compliance.md):
   - row_errors NEVER echo member_id values; only describe failure category
+  - Positional capture: field VALUES never logged; only row_number + field_count
 """
 
 from __future__ import annotations
@@ -33,7 +38,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.models.tables import APRecord, ClaimRecord, Upload, UploadStatus
+from src.models.tables import APRecord, ClaimRecord, ClaimUploadRawRow, Upload, UploadStatus
 
 # LESSON-004 anchors: \A...\Z reject trailing newlines that ^...$ would accept
 _NDC_RE = re.compile(r"\A\d{11}\Z")
@@ -46,6 +51,62 @@ _REQUIRED_COLUMNS = (
 _MAX_MEMBER_ID_LEN = 64
 _QUANTITY_MAX_DP = 3
 _AMOUNT_MAX_DP = 4
+
+
+def detect_format(content: bytes) -> str:
+    """Detect whether file content is pipe-delimited positional or comma CSV.
+
+    Returns "positional" if the first non-empty line contains a pipe character
+    (indicating a headerless pipe-delimited export), otherwise "csv".
+
+    Detection rule: if the first non-blank decoded line contains "|", the file
+    is treated as a positional pipe-delimited export regardless of file extension
+    or MIME type. CSV files with headers never have "|" in the header row for
+    this codebase's expected inputs.
+    """
+    try:
+        text = content.decode("utf-8", errors="replace")
+    except Exception:
+        return "positional"
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return "positional" if "|" in stripped else "csv"
+    return "csv"
+
+
+def parse_positional_bytes(content: bytes) -> list[dict[str, str]]:
+    """Parse pipe-delimited headerless bytes into a list of positional field dicts.
+
+    Each non-blank line is split on "|" and captured as:
+      {"1": field0, "2": field1, ..., "N": fieldN}
+
+    Position keys are 1-based string integers. Trailing empty fields are
+    preserved -- position fidelity is the whole point.
+
+    Financial/decimal fields are NOT coerced; stored as captured strings.
+    Named mapping and Decimal coercion happen in Stage 3 (validation).
+
+    PHI SAFETY: field VALUES are never logged in this function. Only
+    row_number and field_count are safe to log.
+    """
+    try:
+        text = content.decode("utf-8", errors="replace")
+    except Exception:
+        return []
+
+    rows: list[dict[str, str]] = []
+    for line in text.splitlines():
+        # Skip blank lines -- they do not count as data rows
+        if not line.strip():
+            continue
+        # Split on pipe; trailing empty string from trailing "|" is preserved
+        # (e.g. "A|B|" -> ["A", "B", ""] -> 3 fields)
+        parts = line.split("|")
+        fields = {str(i + 1): v for i, v in enumerate(parts)}
+        rows.append(fields)
+    return rows
 
 
 def compute_sha256(content: bytes) -> str:
@@ -288,6 +349,69 @@ def parse_xlsx_bytes(
 class UploadParseResult:
     upload: Upload
     claims_written: int
+    # Count of ClaimUploadRawRow rows written (positional capture path only).
+    # Zero for the CSV/XLSX path.
+    raw_rows_written: int = 0
+
+
+def _parse_upload_positional(
+    session: Session,
+    *,
+    upload: Upload,
+    file_bytes: bytes,
+) -> UploadParseResult:
+    """Positional capture path: pipe-delimited headerless file.
+
+    Stores one ClaimUploadRawRow per data line. No column-name validation
+    is applied -- capture mode accepts everything. Named mapping and
+    mandatory-field enforcement come in Stage 2/3 via config.
+
+    PHI: field values are never logged. Only row_number and field_count.
+    """
+    import logging as _logging  # noqa: PLC0415
+    _log = _logging.getLogger("billing.upload.positional")
+
+    rows = parse_positional_bytes(file_bytes)
+    now = datetime.now(UTC)
+    count = 0
+
+    for idx, fields in enumerate(rows, start=1):
+        raw_row = ClaimUploadRawRow(
+            id=uuid.uuid4(),
+            tenant_id=upload.tenant_id,
+            upload_id=upload.id,
+            row_number=idx,
+            field_count=len(fields),
+            fields=fields,
+            captured_at=now,
+        )
+        session.add(raw_row)
+        count += 1
+        # PHI-safe log: row position and field count only, never field values
+        if idx <= 3 or idx % 1000 == 0:
+            _log.debug(
+                "billing.upload.positional.row",
+                extra={
+                    "svc_upload_id": str(upload.id),
+                    "svc_row_number": idx,
+                    "svc_field_count": len(fields),
+                },
+            )
+
+    upload.status = UploadStatus.captured.value
+    upload.row_count = count
+    upload.error_count = 0
+    upload.row_errors = None
+    session.flush()
+
+    _log.info(
+        "billing.upload.positional.complete",
+        extra={
+            "svc_upload_id": str(upload.id),
+            "svc_row_count": count,
+        },
+    )
+    return UploadParseResult(upload=upload, claims_written=0, raw_rows_written=count)
 
 
 def parse_upload(
@@ -297,12 +421,24 @@ def parse_upload(
     file_bytes: bytes,
     column_mapping: dict[str, str] | None = None,
 ) -> UploadParseResult:
-    """Parse and validate an upload file, writing valid claim rows to the DB.
+    """Parse and validate an upload file, writing rows to the DB.
 
-    column_mapping: optional {canonical_field -> user_column_name}.
-    When supplied, the parser renames user-supplied column headers to the
-    canonical names required by validate_row before validation.
+    Routing:
+      - Pipe-delimited headerless (.txt / IFX export) -> positional capture
+        path (_parse_upload_positional). No column-mapping applied; no
+        required-column enforcement. Status set to "captured".
+      - XLSX -> parse_xlsx_bytes then validate_row per row. Status "validated".
+      - CSV with header -> parse_csv_bytes then validate_row per row. Status
+        "validated" or "validation_failed".
+
+    column_mapping: only used on the CSV/XLSX path. Ignored for positional.
     """
+    # Stage 1: detect pipe-delimited headerless format -> positional capture
+    fmt = detect_format(file_bytes)
+    if fmt == "positional":
+        return _parse_upload_positional(session, upload=upload, file_bytes=file_bytes)
+
+    # --- CSV / XLSX path (unchanged from SP-1) ---
     # P2-xlsx: dispatch to the correct parser based on mime_type/filename.
     # Callers that pass raw bytes from an xlsx file must set upload.mime_type
     # to "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
