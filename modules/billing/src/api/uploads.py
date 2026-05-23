@@ -395,13 +395,26 @@ async def create_upload(
             },
             status_code=422,
         )
+    upload_id = upload.id
+    upload_tenant = str(upload.tenant_id)
     db.commit()
-    # Re-load upload attributes after commit. _parse_upload_positional calls
-    # session.expire_all() every batch (memory strategy), and db.commit() also
-    # expires all objects. Without an explicit refresh, _upload_to_dict raises
-    # ObjectDeletedError when the identity map holds a stale reference from a
-    # prior rolled-back attempt in the same session.
-    db.refresh(upload)
+    # After commit a new transaction begins for the re-query. SET LOCAL
+    # app.current_tenant_id is transaction-scoped, so the RLS var is unset
+    # in the new transaction -- RLS would filter the just-committed row out
+    # and db.get() would return None even though the row exists. Re-apply
+    # the tenant context explicitly so the re-query sees its own data.
+    from sqlalchemy import text as _sa_text
+    db.execute(_sa_text("SET LOCAL app.current_tenant_id = :t"),
+               {"t": upload_tenant})
+    refreshed = db.get(Upload, upload_id)
+    if refreshed is None:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "UPLOAD_VANISHED",
+                              "message": "Upload row missing after commit",
+                              "correlation_id": str(uuid.uuid4())}},
+        )
+    upload = refreshed
 
     await _publish_parsed(request, upload=upload, correlation_id=uuid.uuid4())
 
