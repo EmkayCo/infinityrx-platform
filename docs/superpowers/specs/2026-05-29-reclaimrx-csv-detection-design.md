@@ -174,7 +174,9 @@ from the repo (repo has `0006_ml_detector_registry` + head `0008_sp3_extensions`
   available columns OR `deferred_data_feed=true` → record one **run-wide skip** in
   `detection_rule_evaluation_log` with `evaluation_result='skipped_inapplicable'`,
   `source_table=NULL`, `source_row_id=NULL` (matches live CHECK; the existing value, not a
-  new one). Expected on this CSV: **14 rules run (Buckets A+B), ~33 deferred (Bucket C)**.
+  new one). Expected on this CSV: **~14 rules run (Buckets A+B), ~31–33 deferred (Bucket C)** —
+  exact split finalized in Phase 1 when each type's `required_data_columns` is authored
+  (catalog is 46–47 rules incl. operational ALL-009; the run/defer count is approximate here).
 - **Pass 1 — baselines** (`baseline_cache`, with population separation per D13/codex L1 #4):
   SQL aggregations over `csv_upload_rows` for the statistical rules:
   - `pharmacy_ndc_volume` (MFR-004), `pharmacy_price_history` (MFR-003),
