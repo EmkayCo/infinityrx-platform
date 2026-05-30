@@ -80,18 +80,23 @@ modules/reclaimrx/
 > Feature migrations are applied to dev via the scratch-verified `alembic upgrade` against the
 > **World-A head explicitly** (not `head`, which is ambiguous with two heads).
 
-### Task 0.0: Add a reclaimrx alembic env
+### Task 0.0: Add a reclaimrx alembic env — WITHOUT triggering the global runner
 
-**Files:** Create `modules/reclaimrx/alembic.ini`, `modules/reclaimrx/alembic/env.py`, `modules/reclaimrx/alembic/script.py.mako`
+> **Critical (codex L2 HIGH-002/008):** `infrastructure/scripts/run_migrations.sh` discovers a
+> module by checking **`$module_dir/alembic.ini`** (i.e. `modules/reclaimrx/alembic.ini`) and runs
+> `alembic upgrade head`. With the intentional two-head fork, `upgrade head` is ambiguous and
+> would **break the all-modules migration run**. So we must NOT place the config at the module
+> root. Put it **inside the alembic dir** (`modules/reclaimrx/alembic/alembic.ini`) where the
+> runner's glob does NOT match → reclaimrx stays skipped (status quo, zero regression). The env
+> is invoked **explicitly** with `-c modules/reclaimrx/alembic/alembic.ini` for tests + manual
+> feature-migration apply, always targeting a **named revision** (never `head`).
 
-- [ ] **Step 1:** Copy the env pattern from a module that has one (e.g. `modules/billing/alembic/env.py`) — same `engine_from_config`/offline-online structure. Set `version_table_schema="reclaimrx"`, `version_table="alembic_version"`, `script_location = alembic`, and target metadata = the World-A models (Task 1.1) once they exist (until then, `target_metadata=None` is fine for upgrade-only).
-- [ ] **Step 2: Verify it loads** — Run: `cd modules/reclaimrx && python -m alembic history` → prints the chain without error.
-- [ ] **Step 3: Commit** — `git commit -m "chore(reclaimrx): add alembic env (module was previously skipped by run_migrations)"`
+**Files:** Create `modules/reclaimrx/alembic/alembic.ini` (NOT module root), `modules/reclaimrx/alembic/env.py`, `modules/reclaimrx/alembic/script.py.mako`
 
-> ⚠ Adding the ini makes `run_migrations.sh` discover reclaimrx. Because two heads exist, a bare
-> `alembic upgrade head` is ambiguous. Until the fork is merged (deferred tech-debt), the runner
-> must target the World-A head explicitly. Document this in the env header and the tech-debt note;
-> do not rely on the global runner for reclaimrx in v1.
+- [ ] **Step 1:** Confirm the runner check: `grep -n 'alembic.ini' infrastructure/scripts/run_migrations.sh` shows `ini="$module_dir/alembic.ini"` (module-root). Our config at `alembic/alembic.ini` is deliberately not discovered.
+- [ ] **Step 2:** Copy the env pattern from `modules/billing/alembic/env.py` (same `engine_from_config` offline/online). Set `version_table_schema="reclaimrx"`, `version_table="alembic_version"`, `script_location` = the alembic dir, `target_metadata=None` (upgrade-only for now). Env header documents: "reclaimrx is intentionally excluded from run_migrations.sh until the two-head fork is merged (tech-debt); invoke explicitly with -c and a named revision."
+- [ ] **Step 3: Verify it loads** — Run: `python -m alembic -c modules/reclaimrx/alembic/alembic.ini history` → prints the chain without error.
+- [ ] **Step 4: Commit** — `git commit -m "chore(reclaimrx): add non-discovered alembic env (runner still skips module; fork deferred)"`
 
 ### Task 0.1: Restore migration `0005` (fresh-chain-safe)
 
@@ -207,7 +212,7 @@ def downgrade() -> None:
         )
 ```
 
-- [ ] **Step 2: Verify two-head reality** — Run: `cd modules/reclaimrx && python -m alembic heads`
+- [ ] **Step 2: Verify two-head reality** — Run: `python -m alembic -c modules/reclaimrx/alembic/alembic.ini heads`
 Expected: **TWO heads** — `0008_ml_detector_seed` (World-A, dev's branch) and `0008_sp3_extensions` (World-B, do-not-apply-to-dev). This is the documented fork.
 
 - [ ] **Step 3: Commit** — `git commit -m "fix(reclaimrx): restore missing migration 0008_ml_detector_seed (5 placeholder detectors)"`
@@ -220,8 +225,8 @@ Expected: **TWO heads** — `0008_ml_detector_seed` (World-A, dev's branch) and 
 
 ```bash
 docker exec infinityrx-postgres psql -U infinityrx -c "CREATE DATABASE reclaimrx_scratch;"
-cd modules/reclaimrx && DATABASE_URL_SYNC="postgresql://infinityrx:infinityrx_bootstrap@localhost:5432/reclaimrx_scratch" \
-  python -m alembic upgrade 0008_ml_detector_seed   # NOT `head` (two heads); World-A branch only
+DATABASE_URL_SYNC="postgresql://infinityrx:infinityrx_bootstrap@localhost:5432/reclaimrx_scratch" \
+  python -m alembic -c modules/reclaimrx/alembic/alembic.ini upgrade 0008_ml_detector_seed   # NOT `head` (two heads); World-A branch only
 ```
 Expected: green upgrade; `reclaimrx` schema present incl. the 5 seeded `ml_detector_registry` rows.
 
@@ -372,7 +377,7 @@ def test_resolve_row_declared_and_unmapped():
 
 - [ ] **Step 1: Failing test** — two `create_or_resume_run` calls with same `(tenant, sha256)` for a completed run → second aborts; a non-terminal run blocks unless `resume=True`; advisory lock serializes concurrent creators. The insert succeeds with required NOT NULL `run_label` + `created_by` populated.
 - [ ] **Step 2: Run fail.**
-- [ ] **Step 3a: Migration** (chains off the World-A head; apply to dev via `alembic upgrade 0009_detection_run_sha_unique`)
+- [ ] **Step 3a: Migration** (chains off the World-A head; apply to dev via `python -m alembic -c modules/reclaimrx/alembic/alembic.ini upgrade 0009_detection_run_sha_unique`)
 
 ```python
 revision = "0009_detection_run_sha_unique"
@@ -398,7 +403,7 @@ def upgrade() -> None:
 ```python
 def test_load_csv_full_coverage(db, tmp_tenant):
     from src.detection.csv_ingest import create_or_resume_run, load_csv
-    run = create_or_resume_run(db, tmp_tenant, "tests/detection/fixtures/sample_claims.csv")
+    run = create_or_resume_run(db, tenant_id=tmp_tenant, path="tests/detection/fixtures/sample_claims.csv", created_by=SYS_UID)
     n = load_csv(db, run, chunk_size=10)
     assert n == run.resolution_stats["expected_count"]      # coverage == expected
     assert db.query(CsvUploadRow).filter_by(detection_run_id=run.id).count() == n
@@ -539,7 +544,7 @@ def test_cli_tenant_isolation(app_role_engine):  # app_role_engine = ifx_dev_app
 
 ### Task 4.3: Full-file dry-run validation (manual gate, not a unit test)
 
-- [ ] **Step 1:** Run `set PYTHONPATH=modules\reclaimrx && python -m src.cli.detect --file "data/ReclaimRx/allDataMinusPHI 1.csv" --tenant a0000000-0000-0000-0000-000000000001 --created-by <system-uuid>` against dev DB (apply the `0009` migration first: `alembic upgrade 0009_detection_run_sha_unique`).
+- [ ] **Step 1:** Apply the `0009` migration to dev first: `python -m alembic -c modules/reclaimrx/alembic/alembic.ini upgrade 0009_detection_run_sha_unique`. Then run `set PYTHONPATH=modules\reclaimrx && python -m src.cli.detect --file "data/ReclaimRx/allDataMinusPHI 1.csv" --tenant a0000000-0000-0000-0000-000000000001 --created-by <system-uuid>` against dev DB.
 - [ ] **Step 2:** Confirm: run completes, ~2.6M `csv_upload_rows`, anomalies populated, summary sane (duplicates/reversals/inflation counts plausible vs the 209k Duplicate / 448k Reversed profile), wall-time recorded. Document results in `docs/audit/reclaimrx-first-run-2026-05-29.md`.
 - [ ] **Step 3: Commit** the run report.
 

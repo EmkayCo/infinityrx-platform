@@ -80,37 +80,38 @@ multi-tenant ingest (single tenant this round).
 
 **`0005` recovered** (from `.pyc`, exact content): `revision='0005_eval_log_runwide_skips'`,
 `down_revision='0004_baseline_cache'`, Create Date 2026-04-27 (Wave 43). **upgrade:** make
-`detection_rule_evaluation_log.source_table` + `source_row_id` nullable; drop the prior
-per-claim check; add `ck_reclaimrx_eval_log_per_claim_columns` =
-`(evaluation_result = 'skipped_inapplicable') OR (source_table IS NOT NULL AND source_row_id IS NOT NULL)`.
-**downgrade:** reverse. The live dev schema already reflects this — confirming `0005` is the
-missing bridge, not a phantom.
+`detection_rule_evaluation_log.source_table` + `source_row_id` nullable; `DROP CONSTRAINT IF
+EXISTS` then add `ck_reclaimrx_eval_log_per_claim_columns` =
+`(evaluation_result = 'skipped_inapplicable') OR (source_table IS NOT NULL AND source_row_id IS NOT NULL)`
+(`0003` never created this CHECK, so the guard makes it safe on a fresh chain). **downgrade:**
+reverse. The live dev schema already reflects this — confirming `0005` is the missing bridge.
 
-**Phantom stamp:** dev `alembic_version='0008_ml_detector_seed'` is a revision name absent
-from the repo (repo has `0006_ml_detector_registry` + head `0008_sp3_extensions`). This is a
-**lineage fork**, not just a stamp typo — must be bridged explicitly, never blind-stamped
-(codex L1 #1).
+**Two-head branch fork (codex L2 HIGH-002/003/008 — SUPERSEDES any single-head assumption):**
+There is **no alembic env** for reclaimrx, so `run_migrations.sh` SKIPS the module and migrations
+were applied ad-hoc. History **forks at `0007`**: dev = `0008_ml_detector_seed` (DATA: 5 placeholder
+detectors; dev's actual head), repo = `0008_sp3_extensions` (STRUCTURAL; ALTERs World-B public
+tables `reclaimrx_investigations`/`reclaimrx_payment_holds` that **do not exist in dev** → cannot
+apply to dev). Two pyc-only missing sources: `0005` and `0008_seed_ml_detector_placeholders`
+(rev `0008_ml_detector_seed`). The full fork reconciliation (merge heads, make sp3 portable,
+include reclaimrx in the runner) is **out of scope for v1** and tracked as tech-debt.
 
-**Steps:**
-1. Restore `0005_eval_log_runwide_skips.py` to `alembic/versions/` with the exact recovered
-   content above (revision/down_revision/upgrade/downgrade). Verify `alembic history` is
-   linear and `alembic heads` returns a single head.
-2. Stand up a **scratch DB**, run `alembic upgrade head` from clean. Must be green.
-3. **Full schema-diff** scratch vs live `reclaimrx` schema — not just columns: tables,
-   columns, types, **CHECK constraints (by definition), partial/unique indexes, RLS policies
-   + FORCE RLS, GRANTs/role privileges, ownership, sequences, seed/data rows**. Document every delta.
-4. **Reconcile the fork:** map `0008_ml_detector_seed` → the repo revision(s) that produced
-   the equivalent live schema. If the live schema == scratch schema, author a one-line
-   **reconciliation/bridge migration** (or an explicit `alembic stamp` *only after* the diff
-   proves byte-equivalence of constraints/policies/grants) so future `upgrade`/`downgrade`
-   from the current dev stamp is valid. If a real delta exists, author a corrective migration.
-5. **Verify live-path upgrade:** simulate `upgrade` from the current dev stamp (not just from
-   clean) on a copy, and verify `downgrade` one step works.
-6. **Blast-radius check:** confirm the alembic env is reclaimrx-scoped and the stamp/bridge
-   does not touch other modules' `alembic_version` tables (each module owns its schema +
-   version table — verify, codex L1 #1).
-7. Exit criteria: single head; green `upgrade head` from clean AND from the dev stamp; zero
-   undocumented schema-diff deltas; ORM (Phase 1) reflects-clean against the result.
+**Surgical Phase 0 (matches PLAN; no stamp, no single-head requirement):**
+1. Restore `0005` (fresh-chain-safe: `DROP CONSTRAINT IF EXISTS` then create — `0003` never
+   created the per-claim CHECK) and `0008_ml_detector_seed` (the 5 detectors, `ON CONFLICT DO NOTHING`).
+2. Add a reclaimrx alembic env **inside `alembic/`** (`modules/reclaimrx/alembic/alembic.ini`),
+   **NOT at the module root** — the runner globs `$module_dir/alembic.ini`, so this keeps
+   reclaimrx skipped (zero regression). Invoke explicitly with `-c` and a **named revision**.
+3. On a **scratch DB**, `alembic ... upgrade 0008_ml_detector_seed` (the World-A head — NOT
+   `head`, which is ambiguous with two heads). Diff scratch vs dev: structure (tables, columns,
+   types, CHECK defs, partial/unique indexes, RLS policies + FORCE RLS, grants) **AND catalog
+   data** (`ml_detector_registry` 5 rows, `detection_rule_types` 0 rows). Document deltas.
+4. **No `alembic stamp` on dev** — dev is already correctly at `0008_ml_detector_seed`.
+5. Feature migrations chain off `0008_ml_detector_seed`; applied to dev via explicit
+   `-c ... upgrade <named-rev>`.
+6. **Blast-radius:** verify run_migrations.sh still skips reclaimrx; document the two-head fork +
+   runner-exclusion + World-B sp3 incompatibility in `docs/audit/reclaimrx-migration-fork-2026-05-29.md`.
+7. Exit criteria: green `upgrade 0008_ml_detector_seed` + feature rev on scratch; zero
+   undocumented schema/data deltas vs dev; runner unaffected; fork documented as tech-debt.
 
 ### Phase 1 — ORM models + rule-type catalog
 
