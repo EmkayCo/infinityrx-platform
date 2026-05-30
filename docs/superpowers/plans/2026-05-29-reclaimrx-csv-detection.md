@@ -63,13 +63,41 @@ modules/reclaimrx/
 
 ---
 
-## Phase 0 — Migration drift reconcile
+## Phase 0 — Migration drift reconcile (SURGICAL — World-A branch only)
 
-### Task 0.1: Restore migration `0005`
+> **Decision (codex L2 HIGH-001/002/003):** reclaimrx has **no alembic env** → `run_migrations.sh`
+> SKIPS it → migrations were applied ad-hoc → dev sits on the **World-A branch** head
+> `0008_ml_detector_seed`. The repo head `0008_sp3_extensions` is a **divergent sibling** off
+> `0007` that ALTERs World-B public tables (`reclaimrx_investigations` etc.) which **do not exist
+> in dev** — so it CANNOT apply to dev. Two missing sources exist as `.pyc` only: `0005` and
+> `0008_seed_ml_detector_placeholders` (revision `0008_ml_detector_seed`).
+>
+> **Surgical scope:** make the repo faithfully represent dev's World-A branch (recover both
+> sources), add a reclaimrx alembic env so the World-A chain is runnable/testable on a scratch
+> DB, and chain the feature migration off `0008_ml_detector_seed`. **Do NOT stamp dev** (already
+> at the correct head). **Do NOT touch `0008_sp3_extensions`** — record the two-head fork + the
+> ad-hoc-migration gap as separate tracked tech-debt (`docs/audit/reclaimrx-migration-fork-2026-05-29.md`).
+> Feature migrations are applied to dev via the scratch-verified `alembic upgrade` against the
+> **World-A head explicitly** (not `head`, which is ambiguous with two heads).
+
+### Task 0.0: Add a reclaimrx alembic env
+
+**Files:** Create `modules/reclaimrx/alembic.ini`, `modules/reclaimrx/alembic/env.py`, `modules/reclaimrx/alembic/script.py.mako`
+
+- [ ] **Step 1:** Copy the env pattern from a module that has one (e.g. `modules/billing/alembic/env.py`) — same `engine_from_config`/offline-online structure. Set `version_table_schema="reclaimrx"`, `version_table="alembic_version"`, `script_location = alembic`, and target metadata = the World-A models (Task 1.1) once they exist (until then, `target_metadata=None` is fine for upgrade-only).
+- [ ] **Step 2: Verify it loads** — Run: `cd modules/reclaimrx && python -m alembic history` → prints the chain without error.
+- [ ] **Step 3: Commit** — `git commit -m "chore(reclaimrx): add alembic env (module was previously skipped by run_migrations)"`
+
+> ⚠ Adding the ini makes `run_migrations.sh` discover reclaimrx. Because two heads exist, a bare
+> `alembic upgrade head` is ambiguous. Until the fork is merged (deferred tech-debt), the runner
+> must target the World-A head explicitly. Document this in the env header and the tech-debt note;
+> do not rely on the global runner for reclaimrx in v1.
+
+### Task 0.1: Restore migration `0005` (fresh-chain-safe)
 
 **Files:** Create `modules/reclaimrx/alembic/versions/0005_eval_log_runwide_skips.py`
 
-- [ ] **Step 1: Write the migration (exact recovered content)**
+- [ ] **Step 1: Write the migration** (recovered from `.pyc`; `0003` does NOT create the CHECK, so use `DROP ... IF EXISTS` so it is safe on both a fresh chain and the already-migrated dev DB)
 
 ```python
 """reclaimrx eval log: allow run-wide rows for skipped_inapplicable.
@@ -84,6 +112,8 @@ Create Date: 2026-04-27
 """
 from __future__ import annotations
 
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision = "0005_eval_log_runwide_skips"
@@ -91,19 +121,20 @@ down_revision = "0004_baseline_cache"
 branch_labels = None
 depends_on = None
 
+_TBL = "detection_rule_evaluation_log"
 _CK = "ck_reclaimrx_eval_log_per_claim_columns"
 
 
 def upgrade() -> None:
-    op.alter_column("detection_rule_evaluation_log", "source_table",
-                    existing_type=__import__("sqlalchemy").String(64),
+    op.alter_column(_TBL, "source_table", existing_type=sa.String(64),
                     nullable=True, schema="reclaimrx")
-    op.alter_column("detection_rule_evaluation_log", "source_row_id",
-                    existing_type=__import__("sqlalchemy").dialects.postgresql.UUID(as_uuid=True),
+    op.alter_column(_TBL, "source_row_id", existing_type=postgresql.UUID(as_uuid=True),
                     nullable=True, schema="reclaimrx")
-    op.drop_constraint(_CK, "detection_rule_evaluation_log", schema="reclaimrx", type_="check")
+    # 0003 did not create this CHECK; IF EXISTS keeps the migration safe on a
+    # fresh chain AND idempotent on the already-migrated dev DB.
+    op.execute(f"ALTER TABLE reclaimrx.{_TBL} DROP CONSTRAINT IF EXISTS {_CK}")
     op.create_check_constraint(
-        _CK, "detection_rule_evaluation_log",
+        _CK, _TBL,
         "(evaluation_result = 'skipped_inapplicable') OR "
         "(source_table IS NOT NULL AND source_row_id IS NOT NULL)",
         schema="reclaimrx",
@@ -111,69 +142,95 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint(_CK, "detection_rule_evaluation_log", schema="reclaimrx", type_="check")
-    op.create_check_constraint(
-        _CK, "detection_rule_evaluation_log",
-        "source_table IS NOT NULL AND source_row_id IS NOT NULL",
-        schema="reclaimrx",
-    )
-    op.alter_column("detection_rule_evaluation_log", "source_row_id",
-                    existing_type=__import__("sqlalchemy").dialects.postgresql.UUID(as_uuid=True),
+    op.execute(f"ALTER TABLE reclaimrx.{_TBL} DROP CONSTRAINT IF EXISTS {_CK}")
+    op.alter_column(_TBL, "source_row_id", existing_type=postgresql.UUID(as_uuid=True),
                     nullable=False, schema="reclaimrx")
-    op.alter_column("detection_rule_evaluation_log", "source_table",
-                    existing_type=__import__("sqlalchemy").String(64),
+    op.alter_column(_TBL, "source_table", existing_type=sa.String(64),
                     nullable=False, schema="reclaimrx")
 ```
-*(Clean up the inline `__import__` to top-level `import sqlalchemy as sa` / `from sqlalchemy.dialects import postgresql` imports — shown inline only to keep the constraint definitions unambiguous.)*
 
-- [ ] **Step 2: Verify chain integrity**
+- [ ] **Step 2: Commit** — `git commit -m "fix(reclaimrx): restore missing migration 0005 (eval-log run-wide skips)"`
 
-Run: `cd modules/reclaimrx && python -m alembic history` and `python -m alembic heads`
-Expected: linear history through `0008_sp3_extensions`; **single head**; `0006` `down_revision` resolves to `0005`.
+### Task 0.1b: Restore migration `0008_ml_detector_seed`
 
-- [ ] **Step 3: Commit**
+**Files:** Create `modules/reclaimrx/alembic/versions/0008_seed_ml_detector_placeholders.py`
 
-```bash
-git add modules/reclaimrx/alembic/versions/0005_eval_log_runwide_skips.py
-git commit -m "fix(reclaimrx): restore missing migration 0005 (eval-log run-wide skips)"
+- [ ] **Step 1: Write the migration** (recovered from `.pyc`; seeds the 5 Wave-44b placeholder detectors that dev already has — needed so a fresh World-A chain reproduces dev exactly)
+
+```python
+"""Seed ML detector placeholder rows for Wave 44b detectors.
+
+Revision ID: 0008_ml_detector_seed
+Revises: 0007_flagged_npis
+Create Date: 2026-04-30
+"""
+from __future__ import annotations
+from alembic import op
+
+revision = "0008_ml_detector_seed"
+down_revision = "0007_flagged_npis"
+branch_labels = None
+depends_on = None
+
+# (detector_name, feature_schema_class, notes) — exact values from dev.
+_DETECTORS = [
+    ("pharmacy_behavioral_baseline", "reclaimrx.detection.ml.sklearn_detector.PharmacyFeatures",
+     "Pharmacy behavioral drift detector (Wave 44b BEHAV-001). Isolation Forest on pharmacy fill-volume, reversal-rate, NDC-mix metrics. Train via POST /admin/reclaimrx/ml/train."),
+    ("member_cohort_outlier", "reclaimrx.detection.ml.sklearn_detector.MemberFeatures",
+     "Member cohort outlier detector (Wave 44b BEHAV-002). Isolation Forest on member doctor-shopping, quantity-trajectory and drug-mix within cohort. Train via POST /admin/reclaimrx/ml/train."),
+    ("prescriber_baseline", "reclaimrx.detection.ml.sklearn_detector.PrescriberFeatures",
+     "Prescriber behavioral baseline detector (Wave 44b BEHAV-003). Isolation Forest on prescriber volume, drug-mix and member-count relative to specialty baseline. Train via POST /admin/reclaimrx/ml/train."),
+    ("nq_target_clustering", "reclaimrx.detection.ml.sklearn_detector.NqClusterFeatures",
+     "NQ target-cluster ML detector (Wave 44b NQ-008). XGBoost classifier identifying claims whose NQ pattern matches a learned maximizer cluster signature. Train via POST /admin/reclaimrx/ml/train."),
+    ("reject_resubmit_pattern", "reclaimrx.detection.ml.sklearn_detector.RejectResubmitFeatures",
+     "Reject-resubmit pattern ML detector (Wave 44b REJ-003). XGBoost classifier on pharmacy reject-code cycling sequences to identify artificial override attempts. Train via POST /admin/reclaimrx/ml/train."),
+]
+
+
+def upgrade() -> None:
+    for name, fclass, notes in _DETECTORS:
+        op.execute(
+            "INSERT INTO reclaimrx.ml_detector_registry "
+            "(detector_name, detector_version, model_artifact_path, feature_schema_class, "
+            " is_placeholder, training_metadata, registered_at, updated_at, notes) "
+            f"VALUES ('{name}', '0', NULL, '{fclass}', TRUE, '{{}}', now(), now(), "
+            f"'{notes.replace(chr(39), chr(39)+chr(39))}') "
+            "ON CONFLICT (detector_name) DO NOTHING"
+        )
+
+
+def downgrade() -> None:
+    for name, _f, _n in _DETECTORS:
+        op.execute(
+            f"DELETE FROM reclaimrx.ml_detector_registry WHERE detector_name = '{name}' "
+            "AND is_placeholder = TRUE AND model_artifact_path IS NULL"
+        )
 ```
 
-### Task 0.2: Schema-diff scratch vs live + reconcile fork
+- [ ] **Step 2: Verify two-head reality** — Run: `cd modules/reclaimrx && python -m alembic heads`
+Expected: **TWO heads** — `0008_ml_detector_seed` (World-A, dev's branch) and `0008_sp3_extensions` (World-B, do-not-apply-to-dev). This is the documented fork.
 
-**Files:** Create `modules/reclaimrx/scripts/verify_schema_parity.sql` (diff queries) + a short report `docs/audit/reclaimrx-schema-parity-2026-05-29.md`
+- [ ] **Step 3: Commit** — `git commit -m "fix(reclaimrx): restore missing migration 0008_ml_detector_seed (5 placeholder detectors)"`
 
-- [ ] **Step 1: Build a clean scratch DB and upgrade**
+### Task 0.2: Verify World-A chain on scratch + data/schema parity vs dev (NO stamp)
 
-Run:
+**Files:** Create `modules/reclaimrx/scripts/verify_schema_parity.sql`; reports `docs/audit/reclaimrx-schema-parity-2026-05-29.md` + `docs/audit/reclaimrx-migration-fork-2026-05-29.md`
+
+- [ ] **Step 1: Build a clean scratch DB, upgrade to the World-A head explicitly**
+
 ```bash
 docker exec infinityrx-postgres psql -U infinityrx -c "CREATE DATABASE reclaimrx_scratch;"
-cd modules/reclaimrx && DATABASE_URL_SYNC="postgresql://infinityrx:infinityrx_bootstrap@localhost:5432/reclaimrx_scratch" python -m alembic upgrade head
+cd modules/reclaimrx && DATABASE_URL_SYNC="postgresql://infinityrx:infinityrx_bootstrap@localhost:5432/reclaimrx_scratch" \
+  python -m alembic upgrade 0008_ml_detector_seed   # NOT `head` (two heads); World-A branch only
 ```
-Expected: green `upgrade head`.
+Expected: green upgrade; `reclaimrx` schema present incl. the 5 seeded `ml_detector_registry` rows.
 
-- [ ] **Step 2: Diff tables/columns/constraints/indexes/RLS/grants**
+- [ ] **Step 2: Diff scratch vs dev — structure AND catalog data** — over `information_schema.columns`, `pg_constraint` (CHECK defs), `pg_indexes`, `pg_policies`, role grants, AND data rows of `reclaimrx.ml_detector_registry` (expect the same 5) + `reclaimrx.detection_rule_types` (expect 0 in both). Capture deltas in the parity report.
+Expected: **zero undocumented deltas**; both at revision `0008_ml_detector_seed`.
 
-Run a diff over `information_schema.columns`, `pg_constraint` (CHECK defs), `pg_indexes`, `pg_policies`, and role grants between `reclaimrx_scratch.reclaimrx` and `infinityrx_dev.reclaimrx`. Capture deltas in the report.
-Expected: **zero undocumented deltas** (the only known intentional difference is the `alembic_version` stamp).
+- [ ] **Step 3: Document the fork as tech-debt** in `reclaimrx-migration-fork-2026-05-29.md`: the two divergent `0008` heads, the missing alembic env (module skipped by `run_migrations.sh`), the World-B SP-3 branch's incompatibility with dev, and the deferred merge/linearization + runner-inclusion work. **No `alembic stamp` on dev** — it is already at `0008_ml_detector_seed`.
 
-- [ ] **Step 3: Reconcile the stamp fork**
-
-If schema parity holds, stamp dev to repo head (the dev stamp `0008_ml_detector_seed` is a renamed lineage):
-```bash
-DATABASE_URL_SYNC="postgresql://ifx_dev_app:dev_password@localhost:5432/infinityrx_dev" python -m alembic -c modules/reclaimrx/alembic.ini stamp 0008_sp3_extensions
-```
-Only run this AFTER Step 2 shows parity. If a real delta exists, author a corrective migration instead and document it.
-
-- [ ] **Step 4: Verify upgrade from the dev stamp + one-step downgrade on a copy**
-
-Clone dev schema to a scratch, confirm `upgrade head` is a no-op and `downgrade -1`/`upgrade +1` round-trips cleanly.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add modules/reclaimrx/scripts/verify_schema_parity.sql docs/audit/reclaimrx-schema-parity-2026-05-29.md
-git commit -m "chore(reclaimrx): verify World-A schema parity + reconcile alembic stamp"
-```
+- [ ] **Step 4: Commit** — `git commit -m "chore(reclaimrx): verify World-A schema/data parity; document migration fork as tech-debt"`
 
 ---
 
@@ -196,7 +253,10 @@ def test_detection_run_models_match_db(reclaimrx_engine):
                   DetectionRuleInstance, DetectionRuleEvaluationLog, BaselineCache):
         cols = {c["name"] for c in insp.get_columns(model.__tablename__, schema="reclaimrx")}
         orm_cols = {c.name for c in model.__table__.columns}
-        assert orm_cols <= cols, f"{model.__tablename__}: ORM has columns not in DB: {orm_cols - cols}"
+        # Equality (MED-001): catch BOTH ORM-extra columns AND missing-from-ORM columns
+        # for owned tables we fully model. (If a server-managed col is intentionally
+        # omitted, add it to an explicit per-model allowlist — not a blanket <=.)
+        assert orm_cols == cols, f"{model.__tablename__}: ORM≠DB. missing={cols-orm_cols} extra={orm_cols-cols}"
 ```
 
 - [ ] **Step 2: Run, verify it fails** — Run: `pytest modules/reclaimrx/tests/detection/test_models_reflect.py -v` → FAIL (import error).
@@ -240,15 +300,20 @@ def test_catalog_seeds_all_rules_with_gating(db):
 
 - [ ] **Step 5: Commit** — `git commit -m "feat(reclaimrx): rule-type registry + 46-rule catalog with required_data_columns gating"`
 
-### Task 1.3: Instantiate applicable rule instances + ML placeholders
+### Task 1.3: Instantiate applicable rule instances
 
-**Files:** Modify `rule_type_registry.py` (add `register_rule_instances`, `register_ml_placeholders`); Test extend `test_rule_type_registry.py`
+**Files:** Modify `rule_type_registry.py` (add `register_rule_instances`); Test extend `test_rule_type_registry.py`
 
-- [ ] **Step 1: Failing test** — given a tenant + available-columns set, instances created only for rules whose `required_data_columns ⊆ available` and not deferred; ML placeholders have `is_placeholder=True`.
+> **ML placeholders are NOT created here (codex L2 HIGH-005):** the 5 detector rows already
+> exist in dev (seeded by `0008_ml_detector_seed`, Task 0.1b), and `ml_detector_registry` grants
+> the app role `ifx_dev_app` **SELECT only** — an app-role INSERT would fail. No app-role mutation
+> of the global detector registry. v1 reads placeholders; it never writes them.
+
+- [ ] **Step 1: Failing test** — given a tenant + available-columns set, `register_rule_instances` creates one `detection_rule_instance` only for rules whose `required_data_columns ⊆ available` AND not `deferred_data_feed`; idempotent on re-run; deferred/inapplicable rules get NO instance.
 - [ ] **Step 2: Run fail.**
-- [ ] **Step 3: Implement** `register_rule_instances(db, tenant_id, available_columns)` and `register_ml_placeholders(db)` (rows `pharmacy_behavioral_baseline`, `claim_risk_xgb` with `is_placeholder=True`, no artifact).
+- [ ] **Step 3: Implement** `register_rule_instances(db, tenant_id, available_columns)` only. (Confirm the 5 ML placeholders are present via a read-only assertion, but do not insert.)
 - [ ] **Step 4: Run pass.**
-- [ ] **Step 5: Commit** — `git commit -m "feat(reclaimrx): create applicable rule instances + ML placeholder registry"`
+- [ ] **Step 5: Commit** — `git commit -m "feat(reclaimrx): create applicable rule instances (ML placeholders pre-seeded via migration)"`
 
 ---
 
@@ -303,20 +368,23 @@ def test_resolve_row_declared_and_unmapped():
 
 ### Task 2.3: Idempotent run creation (advisory lock + partial unique index)
 
-**Files:** Create migration `modules/reclaimrx/alembic/versions/0009_detection_run_sha_unique.py`; add `create_or_resume_run` to `csv_ingest.py`; Test `tests/detection/test_run_idempotency.py`
+**Files:** Create migration `modules/reclaimrx/alembic/versions/0009_detection_run_sha_unique.py` (**`down_revision = "0008_ml_detector_seed"`** — the World-A head, NOT sp3); add `create_or_resume_run` to `csv_ingest.py`; Test `tests/detection/test_run_idempotency.py`
 
-- [ ] **Step 1: Failing test** — two `create_or_resume_run` calls with same `(tenant, sha256)` for a completed run → second aborts; a non-terminal run blocks unless `resume=True`; advisory lock serializes concurrent creators.
+- [ ] **Step 1: Failing test** — two `create_or_resume_run` calls with same `(tenant, sha256)` for a completed run → second aborts; a non-terminal run blocks unless `resume=True`; advisory lock serializes concurrent creators. The insert succeeds with required NOT NULL `run_label` + `created_by` populated.
 - [ ] **Step 2: Run fail.**
-- [ ] **Step 3a: Migration** — partial unique index:
+- [ ] **Step 3a: Migration** (chains off the World-A head; apply to dev via `alembic upgrade 0009_detection_run_sha_unique`)
 
 ```python
+revision = "0009_detection_run_sha_unique"
+down_revision = "0008_ml_detector_seed"   # World-A branch head (NOT 0008_sp3_extensions)
+
 def upgrade() -> None:
     op.create_index("uq_detection_runs_tenant_sha_active", "detection_runs",
         ["tenant_id", "source_sha256"], unique=True, schema="reclaimrx",
         postgresql_where=sa.text("status IN ('in_progress','completed') AND source_sha256 IS NOT NULL"))
 ```
 
-- [ ] **Step 3b: Implement** `create_or_resume_run(db, tenant_id, path)`: `pg_advisory_xact_lock(hashtext(tenant||sha))`, then query existing run, branch on status, insert `detection_run` with `expected_record_count` stored in `resolution_stats`.
+- [ ] **Step 3b: Implement** `create_or_resume_run(db, *, tenant_id, path, created_by, resume=False, force=False)` — **signature includes `created_by` (HIGH-004:** `detection_runs.run_label` and `created_by` are NOT NULL): compute `source_sha256` + `expected_record_count` (hashing pass); `pg_advisory_xact_lock(hashtext(str(tenant_id)||sha))`; query existing run by `(tenant_id, source_sha256)`; branch on status (completed→abort unless force; in_progress→block unless resume; failed→purge rows then reuse); insert `DetectionRun` with **`run_label`** (deterministic, e.g. `f"{Path(path).name}:{sha[:12]}"`) and **`created_by`** (caller-supplied system/admin UUID); store `expected_record_count` in `resolution_stats`.
 - [ ] **Step 4: Run pass.**
 - [ ] **Step 5: Commit** — `git commit -m "feat(reclaimrx): idempotent detection-run creation (advisory lock + partial unique index)"`
 
@@ -385,10 +453,16 @@ def test_zero_basis_is_none():
 
 **Files:** Create `modules/reclaimrx/src/detection/baselines.py`; Test `tests/detection/test_baselines.py`
 
-- [ ] **Step 1: Failing test** — `compute_baseline(db, run, kind="prescriber_peer_volume")` writes `baseline_cache` rows where each entity's mean/stddev **excludes its own rows** (peer-group), enforces `min_sample_count` (no row / no-fire below it), and records provenance in `extra` (`exclusion="leave_entity_out"`, `peer_count`, `included_current_run=True`).
+**Two distinct separation modes (codex L2 HIGH-007):**
+- **Peer-exclusion** (entity vs its peers, excluding itself): `prescriber_peer_volume` (HP-005), `member_cost` percentile (HP-008), `pharmacy_ndc_volume` (MFR-004 — pharmacy vs other pharmacies for that NDC), `pharmacy_weekday_volume` (ALL-006).
+- **Own prior-period** (entity vs its OWN history, excluding the current claim/window): **`pharmacy_own_rate_history` (MFR-003** — "pharmacy rate deviates from *their own* historical baseline", NOT a peer comparison).
+
+- [ ] **Step 1: Failing tests** —
+  - `compute_baseline(db, run, kind="prescriber_peer_volume")` → each entity's mean/stddev **excludes its own rows**; `extra.exclusion=="leave_entity_out"`, `peer_count`, `min_sample_count` enforced (below it → no baseline row → rule does not fire).
+  - `compute_baseline(db, run, kind="pharmacy_own_rate_history")` → MFR-003 baseline is the pharmacy's OWN historical rate **excluding the scored claim/current window** (`extra.exclusion=="own_prior_period"`), NOT peer stats.
 - [ ] **Step 2: Run fail.**
-- [ ] **Step 3: Implement** SQL window aggregations over `csv_upload_rows` per `baseline_kind` (pharmacy_ndc_volume, pharmacy_price_history, prescriber_peer_volume, member_cost, pharmacy_weekday_volume) with entity-excluded peer stats; upsert `baseline_cache` keyed `(tenant, kind, scope_key, window_days, data_source)`.
-- [ ] **Step 4: Run pass; Commit** — `git commit -m "feat(reclaimrx): population-separated baseline_cache (peer-exclusion + min sample count)"`
+- [ ] **Step 3: Implement** baselines via **aggregate-subtraction, never O(n²) correlated subqueries (MED-003):** first compute per-group totals (`SUM`, `SUM(x^2)`, `COUNT`) with a single GROUP BY; derive each entity's leave-one-out peer mean/stddev by **subtracting the entity's own aggregates from the group totals** (peer_mean = (group_sum − entity_sum)/(group_n − entity_n); peer_var via the sum-of-squares identity). For `pharmacy_own_rate_history`, window by prior period per `(pharmacy_npi, ndc)`. Require indexes on `(detection_run_id, resolved_pharmacy_npi, resolved_ndc)` and DOS. Upsert `baseline_cache` keyed `(tenant, kind, scope_key, window_days, data_source)` with provenance in `extra`.
+- [ ] **Step 4: Run pass; Commit** — `git commit -m "feat(reclaimrx): population-separated baselines (peer-exclusion + own-prior-period, aggregate-subtraction)"`
 
 ### Task 3.4: Applicability gate + run-wide skip logging
 
@@ -405,7 +479,12 @@ def test_zero_basis_is_none():
 
 - [ ] **Step 1: Failing tests** (use the fixture): ALL-001 flags the 3 planted duplicates but **not** the legitimate reversal pair; MFR-002 flags the higher-NQ rebill only; MFR-001 flags the inflation row; deferred rules produce zero anomalies; `anomaly_count` updated. Lifecycle filter: exclude `transaction_status='Reversed'`/`'Duplicate'` rows from being counted as the *primary* anomaly except where the rule targets them.
 - [ ] **Step 2: Run fail.**
-- [ ] **Step 3: Implement** `run_detection(db, run)`: Pass 1 baselines (Task 3.3) for applicable baseline rules; Pass 2 — single-row rules via batched scan computing `derive_fields`, grouping rules via GROUP BY (explicit status/code/sign/ordering filters), statistical rules vs `baseline_cache`. Insert `anomalies` (Reference B columns: `finding_code`, `finding_summary`, `finding_details`, snapshot fields, `detection_kind='rule'`, `detection_id`=instance). Log `finding_raised`+`error` per row only; aggregate `no_finding` counts. Update `detection_runs.anomaly_count`/`record_count`.
+**Exact grouping keys + lifecycle filters (codex L2 MED-002):**
+- **ALL-001 Duplicate:** group key = `(resolved_client_id_raw, patient_unique_hash, resolved_ndc, date_of_service)`; consider only **paid billing** rows (`transaction_code='B1'` AND `transaction_status='Paid'`); flag when ≥2 **distinct `auth_no_hash`** in a group. Do NOT count rows already tagged `transaction_status='Duplicate'` or `'Reversed'` as the primary anomaly (they are lifecycle artifacts, not the finding).
+- **MFR-002 Bill-Reverse-Rebill:** group key = `(patient_unique_hash, resolved_pharmacy_npi, resolved_ndc)`; order rows by `date_added_timestamp`; detect a `B1`(paid) → `B2`(reversal, `reversed_check='Yes'`) → `B1`(paid) sequence within 14 days where the rebill `nq` (abs) > the original `nq` (abs). Sign-normalize B2 amounts with `abs()`. Flag only the higher-NQ **rebill** row.
+- General: amounts compared on the locked `nq`/`extended_wac` basis (Reference A); reversed rows use `abs()`.
+
+- [ ] **Step 3: Implement** `run_detection(db, run)`: Pass 1 baselines (Task 3.3) for applicable baseline rules; Pass 2 — single-row rules via batched scan computing `derive_fields`; grouping rules via the GROUP BY/window queries with the **exact keys + lifecycle filters above**; statistical rules vs `baseline_cache`. Insert `anomalies` (Reference B columns: `finding_code`, `finding_summary`, `finding_details`, snapshot fields, `detection_kind='rule'`, `detection_id`=instance, `data_source_run_id`=run). Log `finding_raised`+`error` per row only; aggregate `no_finding` counts. Update `detection_runs.anomaly_count`/`record_count`.
 - [ ] **Step 4: Run pass; Commit** — `git commit -m "feat(reclaimrx): two-pass detection + lifecycle-aware grouping + anomaly persistence"`
 
 ---
@@ -421,30 +500,46 @@ def test_zero_basis_is_none():
 - [ ] **Step 3: Implement** aggregation queries; finalize run `status='completed'`, `completed_at`, `resolution_stats`.
 - [ ] **Step 4: Run pass; Commit** — `git commit -m "feat(reclaimrx): detection-run summary report"`
 
-### Task 4.2: CLI entrypoint with RLS-enforced session
+### Task 4.2: CLI entrypoint with its own RLS-enforced sync session
 
-**Files:** Create `modules/reclaimrx/src/cli/detect.py`; Test `tests/detection/test_cli_and_isolation.py`
+**Files:** Create `modules/reclaimrx/src/cli/__init__.py` + `modules/reclaimrx/src/cli/detect.py`; Test `tests/detection/test_cli_and_isolation.py`
+
+> **Package + invocation (codex L2 HIGH-006):** the module's package root is `src` (no
+> `reclaimrx/` package). Invoke as **`python -m src.cli.detect`** with
+> `PYTHONPATH=modules/reclaimrx` (the same pattern `start-all-services.ps1` uses). NOT
+> `python -m reclaimrx.detect`.
+>
+> **Session (codex L2 #8 / L1 #5):** shared `shared/db/session.py` is **async-only** and its
+> `install_tenant_loader` filters at the **ORM layer via the `infinityrx_current_tenant_id`
+> ContextVar** — it does NOT set the Postgres GUC, and it does NOT cover the raw SQL this batch
+> job uses. So the CLI builds its **own sync `create_engine`** on the `ifx_dev_app` role and is
+> responsible for ALL of:
+>   1. `SET LOCAL app.current_tenant_id = '<tenant>'` at the start of **every transaction** (the
+>      GUC the `0002` RLS policy reads: `tenant_id = NULLIF(current_setting('app.current_tenant_id', true),'')::uuid`). Without it, RLS returns/permits **zero rows** for the non-BYPASSRLS role.
+>   2. set the `current_tenant_id` ContextVar (belt-and-suspenders for any ORM op).
+>   3. set `tenant_id` **explicitly on every INSERT** (no ORM loader auto-fills it on the sync path).
 
 - [ ] **Step 1: Failing tests** —
-  - **End-to-end:** `run_detect(file, tenant)` on the fixture → run completed, expected anomaly counts, summary printed.
-  - **Isolation (codex L1 #5):** session connects as `ifx_dev_app` (non-BYPASSRLS), executes `SET LOCAL app.current_tenant_id`; seed tenant A, run as A, assert tenant B + unset-context see zero `anomalies`/`csv_upload_rows`.
+  - **End-to-end:** `run_detect(file, tenant, created_by)` on the fixture → run completed, expected anomaly counts, summary printed.
+  - **Isolation:** a sync engine on `ifx_dev_app` (non-BYPASSRLS). Seed tenant A via the CLI, then with `SET LOCAL app.current_tenant_id = TENANT_B` assert zero rows; with the GUC unset assert zero rows (RLS denies).
 
 ```python
-def test_cli_tenant_isolation(app_role_engine):
-    # app_role_engine connects as ifx_dev_app, NOT infinityrx
-    run_detect("tests/detection/fixtures/sample_claims.csv", TENANT_A, engine=app_role_engine)
-    with app_role_engine.connect() as c:
+def test_cli_tenant_isolation(app_role_engine):  # app_role_engine = ifx_dev_app, NOT infinityrx
+    run_detect("tests/detection/fixtures/sample_claims.csv", tenant=TENANT_A, created_by=SYS_UID, engine=app_role_engine)
+    with app_role_engine.begin() as c:
         c.execute(text("SET LOCAL app.current_tenant_id = :t"), {"t": str(TENANT_B)})
+        assert c.execute(text("SELECT count(*) FROM reclaimrx.anomalies")).scalar() == 0
+    with app_role_engine.begin() as c:  # GUC unset → RLS denies
         assert c.execute(text("SELECT count(*) FROM reclaimrx.anomalies")).scalar() == 0
 ```
 
 - [ ] **Step 2: Run fail.**
-- [ ] **Step 3: Implement** `detect.py`: argparse `--file --tenant [--resume] [--force]`; build a sync session on the app role; wrap each transaction with `SET LOCAL app.current_tenant_id` + `current_tenant_id` contextvar; orchestrate Phase 1 register → Phase 2 load → Phase 3 detect → Phase 4 summary; structured errors, mark `failed` on exception.
-- [ ] **Step 4: Run pass; Commit** — `git commit -m "feat(reclaimrx): detect CLI with RLS-enforced app-role session + isolation test"`
+- [ ] **Step 3: Implement** `detect.py`: argparse `--file --tenant [--created-by] [--resume] [--force]`; build the sync `create_engine` on `ifx_dev_app`; a `tenant_txn(engine, tenant_id)` context manager that opens a transaction, runs `SET LOCAL app.current_tenant_id`, sets the ContextVar; orchestrate Phase 1 `register_rule_types`+`register_rule_instances` → Phase 2 `create_or_resume_run`+`load_csv` (full-coverage gate) → Phase 3 `gate_rules`+`run_detection` → Phase 4 `build_summary`; structured errors; mark run `failed` (separate txn) on exception.
+- [ ] **Step 4: Run pass; Commit** — `git commit -m "feat(reclaimrx): detect CLI (own sync RLS session) + isolation test"`
 
 ### Task 4.3: Full-file dry-run validation (manual gate, not a unit test)
 
-- [ ] **Step 1:** Run `python -m reclaimrx.detect --file "data/ReclaimRx/allDataMinusPHI 1.csv" --tenant a0000000-0000-0000-0000-000000000001` against dev DB.
+- [ ] **Step 1:** Run `set PYTHONPATH=modules\reclaimrx && python -m src.cli.detect --file "data/ReclaimRx/allDataMinusPHI 1.csv" --tenant a0000000-0000-0000-0000-000000000001 --created-by <system-uuid>` against dev DB (apply the `0009` migration first: `alembic upgrade 0009_detection_run_sha_unique`).
 - [ ] **Step 2:** Confirm: run completes, ~2.6M `csv_upload_rows`, anomalies populated, summary sane (duplicates/reversals/inflation counts plausible vs the 209k Duplicate / 448k Reversed profile), wall-time recorded. Document results in `docs/audit/reclaimrx-first-run-2026-05-29.md`.
 - [ ] **Step 3: Commit** the run report.
 
@@ -452,7 +547,9 @@ def test_cli_tenant_isolation(app_role_engine):
 
 ## Self-Review
 
-**Spec coverage:** D1 (Phase 1), D2 (Phase 0), D3 (4.2), D4 (2.2), D5 (1.2/3.4), D6 (3.3/3.5), D7 (1.3), D8 (4.1), D9 (2.4/3.5), D10 (4.2), D11 (0.1/3.4), D12 (2.3), D13 (3.3) — all mapped. §7 financial gate → resolved in Reference A + Task 3.1 golden tests. Codex L1 #1–9 → Tasks 0.1/0.2, 2.2, 3.1, 3.3, 4.2, 3.4, 2.3, 3.5, 2.4.
+**Spec coverage:** D1 (Phase 1), D2 (Phase 0.0–0.2), D3 (4.2), D4 (2.2), D5 (1.2/3.4), D6 (3.3/3.5), D7 (ML pre-seeded via 0.1b; not app-written), D8 (4.1), D9 (2.4/3.5), D10 (4.2), D11 (0.1/3.4), D12 (2.3), D13 (3.3) — all mapped. §7 financial gate → resolved in Reference A + Task 3.1 golden tests. Codex L1 #1–9 → Tasks 0.1/0.2, 2.2, 3.1, 3.3, 4.2, 3.4, 2.3, 3.5, 2.4.
+
+**Codex L2 coverage:** HIGH-001 (0.1 fresh-chain-safe DROP IF EXISTS), HIGH-002 (0.0 alembic env), HIGH-003 (0.1b recover seed + 0.2 data-diff, no stamp), HIGH-004 (2.3 `created_by`+`run_label`), HIGH-005 (1.3 ML not app-written; 0.1b seeds via migration), HIGH-006 (4.2 `python -m src.cli.detect` + own sync engine), HIGH-007 (3.3 own-prior-period MFR-003 vs peer-exclusion), MED-001 (1.1 `==`), MED-002 (3.5 exact keys), MED-003 (3.3 aggregate-subtraction). LOW-001 golden ratios confirmed correct.
 
 **Placeholder scan:** financial formulas concrete (Reference A); ORM mirrors Reference B; no "TBD". The ORM column list defers to Reference B/live DDL rather than retyping 15 tables — acceptable (DDL is source of truth, reflection test enforces match).
 
