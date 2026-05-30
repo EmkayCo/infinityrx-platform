@@ -96,7 +96,15 @@ modules/reclaimrx/
 - [ ] **Step 1:** Confirm the runner check: `grep -n 'alembic.ini' infrastructure/scripts/run_migrations.sh` shows `ini="$module_dir/alembic.ini"` (module-root). Our config at `alembic/alembic.ini` is deliberately not discovered.
 - [ ] **Step 2:** Copy the env pattern from `modules/billing/alembic/env.py` (same `engine_from_config` offline/online). Set `version_table_schema="reclaimrx"`, `version_table="alembic_version"`, `script_location` = the alembic dir, `target_metadata=None` (upgrade-only for now). Env header documents: "reclaimrx is intentionally excluded from run_migrations.sh until the two-head fork is merged (tech-debt); invoke explicitly with -c and a named revision."
 - [ ] **Step 3: Verify it loads** — Run: `python -m alembic -c modules/reclaimrx/alembic/alembic.ini history` → prints the chain without error.
-- [ ] **Step 4: Commit** — `git commit -m "chore(reclaimrx): add non-discovered alembic env (runner still skips module; fork deferred)"`
+- [ ] **Step 4: Reconcile the second runner (codex L2 round-2 MED):** `tests/integration/conftest.py`
+  has its OWN `_MIGRATION_MODULES` list that includes `reclaimrx` (line ~96) and **raises** if a
+  member lacks a module-root `alembic.ini` (line ~30), then runs `alembic upgrade head`. This
+  fixture is **already non-functional for reclaimrx** (no module-root ini today) and is dormant
+  (CI `backend-ci.yml` runs per-module tests, not this root fixture). Remove `reclaimrx` from
+  `_MIGRATION_MODULES` with a comment pointing to the migration-fork tech-debt note (it cannot be
+  migrated via the standard module-root `upgrade head` pattern until the two heads are merged).
+  Do NOT add a module-root `alembic.ini`.
+- [ ] **Step 5: Commit** — `git commit -m "chore(reclaimrx): add non-discovered alembic env; exclude reclaimrx from integration migration fixture (fork deferred)"`
 
 ### Task 0.1: Restore migration `0005` (fresh-chain-safe)
 

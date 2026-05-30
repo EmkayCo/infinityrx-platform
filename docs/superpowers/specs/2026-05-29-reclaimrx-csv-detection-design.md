@@ -324,7 +324,9 @@ fire on all prescribers, not just telehealth, in v1).
   two tenants, verify zero cross-tenant rows + unset-context sees nothing.
 - **Idempotency (codex L1 #7):** concurrent-invocation race (advisory lock), failed-partial +
   `--resume`/`--force`, dedup on identical sha.
-- **Migration (codex L1 #1/#6):** fresh `upgrade head` green; restored `0005` produces the
+- **Migration (codex L1 #1/#6, L2):** fresh upgrade to the **World-A named head**
+  (`0008_ml_detector_seed`) + the feature revision is green (NOT `upgrade head` — two heads exist);
+  restored `0005` produces the
   live eval-log CHECK; upgrade from the current dev stamp valid.
 - Coverage: 100% on financial + tenant paths; 95%+ elsewhere on new code.
 
