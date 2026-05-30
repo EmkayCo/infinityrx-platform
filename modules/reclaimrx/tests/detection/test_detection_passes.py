@@ -1274,3 +1274,140 @@ class TestNoFindingAggregation:
         )
         assert isinstance(stats["no_finding_count"], int)
         assert stats["no_finding_count"] >= 0
+
+
+# ===========================================================================
+# TestStreamingBatchBoundary
+# ===========================================================================
+
+
+class TestStreamingBatchBoundary:
+    """Streaming: batch-boundary correctness for per-row and grouping rules.
+
+    Seeds ~50 rows, patches _ROW_BATCH=10, asserts identical anomaly results.
+    This proves:
+    - Per-row (MFR-001) fires correctly across batch boundaries.
+    - Grouping rules (ALL-001, MFR-002) are server-side SQL — a duplicate group
+      split across Python batches still produces the right anomalies because
+      grouping is computed by the DB, not per-batch Python accumulation.
+    """
+
+    def test_small_batch_produces_same_anomaly_count_as_default(self, db: Session):
+        """run_detection with _ROW_BATCH=10 on ~50-row fixture yields same anomaly
+        count as an equivalent run without the batch override."""
+        import src.detection.batch_engine as be
+
+        # Run 1: default batch size — load fixture and run detection.
+        run1 = _load_fixture(db)
+        count_default = run_detection(db, run1)
+
+        # Run 2: clone run1 rows into a new DetectionRun, then run with small batch.
+        # We clone rather than re-loading the CSV to avoid the SHA256-dedup guard.
+        run1_rows = db.execute(
+            select(CsvUploadRow).where(CsvUploadRow.detection_run_id == run1.id)
+        ).scalars().all()
+        row_count = len(run1_rows)
+
+        run2 = DetectionRun(
+            tenant_id=_TENANT,
+            data_source="csv_upload",
+            run_label="stream-batch-test",
+            source_path="/tmp/stream_batch.csv",
+            source_filename="stream_batch.csv",
+            source_sha256="bb" * 32,
+            created_by=_SYS_UID,
+            resolution_stats={"expected_count": row_count, "inserted_count": row_count},
+        )
+        db.add(run2)
+        db.flush()
+
+        for src_row in run1_rows:
+            db.add(CsvUploadRow(
+                tenant_id=_TENANT,
+                detection_run_id=run2.id,
+                row_number=src_row.row_number,
+                row_data=dict(src_row.row_data),
+                resolved_pharmacy_npi=src_row.resolved_pharmacy_npi,
+                resolved_ndc=src_row.resolved_ndc,
+                resolved_client_id=src_row.resolved_client_id,
+                resolved_program_id=src_row.resolved_program_id,
+                resolution_method=src_row.resolution_method,
+            ))
+        db.flush()
+
+        original_batch = be._ROW_BATCH
+        try:
+            be._ROW_BATCH = 10
+            count_small_batch = run_detection(db, run2)
+        finally:
+            be._ROW_BATCH = original_batch
+
+        assert count_small_batch == count_default, (
+            f"Streaming with _ROW_BATCH=10 produced {count_small_batch} anomalies; "
+            f"expected {count_default} (same as default batch). "
+            "Batch-boundary split must not affect grouping rules (server-side SQL)."
+        )
+
+    def test_all001_duplicate_group_detected_across_batch_boundary(self, db: Session):
+        """ALL-001: the 3-row duplicate cluster is detected even when rows are
+        spread across two batches (_ROW_BATCH=2).
+
+        Proves grouping is server-side: the SQL GROUP BY runs over the full table,
+        not row-by-row in Python accumulation.
+        """
+        import src.detection.batch_engine as be
+
+        register_rule_types(db)
+        register_rule_instances(db, _TENANT, _FULL_CSV_COLUMNS, _SYS_UID)
+
+        run = DetectionRun(
+            tenant_id=_TENANT,
+            data_source="csv_upload",
+            run_label="all001-batch-boundary",
+            source_path="/tmp/all001bb.csv",
+            source_filename="all001bb.csv",
+            source_sha256="ab" * 32,
+            created_by=_SYS_UID,
+            resolution_stats={"expected_count": 0, "inserted_count": 0},
+        )
+        db.add(run)
+        db.flush()
+
+        # Plant 3 duplicate rows (same patient/NDC/DOS, 3 distinct auths)
+        for i in range(3):
+            _seed_csv_row(
+                db, run,
+                row_number=i + 1,
+                patient_unique_hash="PT_BB_DUP",
+                auth_no_hash=f"AUTH_BB_{i}",
+                pharmacy_npi="1234567890",
+                ndc="00093015401",
+                date_of_service="2024-06-01",
+                transaction_code="B1",
+                transaction_status="Paid",
+                client_id="CLIBB",
+            )
+
+        run.resolution_stats = {"expected_count": 3, "inserted_count": 3}
+        db.flush()
+
+        original_batch = be._ROW_BATCH
+        try:
+            be._ROW_BATCH = 2  # force the 3 rows to span two batches
+            count = run_detection(db, run)
+        finally:
+            be._ROW_BATCH = original_batch
+
+        all001_count = db.execute(
+            select(func.count()).select_from(Anomaly).where(
+                Anomaly.data_source_run_id == run.id,
+                Anomaly.finding_code == "ALL-001",
+            )
+        ).scalar()
+        assert all001_count == 3, (
+            f"ALL-001 must detect all 3 duplicates even with _ROW_BATCH=2; "
+            f"got {all001_count}. Grouping must be server-side SQL, not per-batch Python."
+        )
+        assert count >= all001_count, (
+            f"run_detection return value ({count}) must include ALL-001 anomalies ({all001_count})"
+        )

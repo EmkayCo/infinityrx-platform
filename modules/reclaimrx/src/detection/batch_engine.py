@@ -15,6 +15,12 @@ MFR-008 deferred: needs statement-only-pharmacy reference data (dry-run fix).
 TH-002/TH-005 min-volume floor: skip prescribers below min_claims (default 20)
     to prevent false-positive floods on low-volume prescribers.
 
+Memory model (2.6M-row scale):
+    _ROW_BATCH controls per-row streaming batch size (MFR-001, MFR-003/HP-008).
+    Peak working set is O(_ROW_BATCH + flagged_rows), not O(total_rows).
+    Grouping rules (ALL-001, MFR-002, TH-002, TH-005) use server-side SQL to
+    return only candidate/flagged rows -- never materialize the full row set.
+
 CHECKs satisfied by skip rows:
   ck_reclaimrx_eval_log_result            - skipped_inapplicable is in the enum
   ck_reclaimrx_eval_log_per_claim_columns - skipped_inapplicable permits NULL source
@@ -29,7 +35,7 @@ from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from src.detection.baselines import compute_baseline
@@ -46,6 +52,11 @@ from src.models.detection_run_models import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Streaming batch size for per-row passes (MFR-001, MFR-003, HP-008).
+# At 2.6M rows x 75-column JSONB: 10k rows ~= 30-50 MB working set per batch.
+# Patching this module-level constant in tests exercises batch-boundary correctness.
+_ROW_BATCH: int = 10_000
 
 _BASELINE_KIND_MAP: dict[str, str] = {
     "MFR-004": "pharmacy_ndc_volume",
@@ -235,9 +246,8 @@ def _run_baselines(
 
 
 # ---------------------------------------------------------------------------
-# Pass 2 - single-row evaluation
+# Pass 2 - single-row evaluation (streaming)
 # ---------------------------------------------------------------------------
-
 
 
 def _evaluate_single_row_rules(
@@ -245,12 +255,27 @@ def _evaluate_single_row_rules(
     run: DetectionRun,
     applicable: list[DetectionRuleInstance],
     rule_type_by_code: dict[str, DetectionRuleType],
-    csv_rows: list[CsvUploadRow],
     no_finding_count: list[int],
 ) -> list[Anomaly]:
-    """Evaluate MFR-001 per csv_upload_row."""
+    """Evaluate MFR-001 per csv_upload_row, streaming in batches of _ROW_BATCH.
+
+    Rows are fetched with yield_per so at most _ROW_BATCH ORM objects reside in
+    memory at once.  Anomalies are flushed per finding, not accumulated for the run.
+    """
     anomalies: list[Anomaly] = []
     single_instances = [inst for inst in applicable if inst.rule_type_code in _SINGLE_ROW_CODES]
+    if not single_instances:
+        return anomalies
+
+    stmt = (
+        select(CsvUploadRow)
+        .where(
+            CsvUploadRow.detection_run_id == run.id,
+            CsvUploadRow.tenant_id == run.tenant_id,
+        )
+        .execution_options(yield_per=_ROW_BATCH)
+    )
+
     for instance in single_instances:
         code = instance.rule_type_code
         rtype = rule_type_by_code.get(code)
@@ -258,7 +283,8 @@ def _evaluate_single_row_rules(
             continue
         params = dict(instance.parameters)
         params["confidence_scoring"] = _build_confidence_scoring(params)
-        for csv_row in csv_rows:
+
+        for csv_row in db.execute(stmt).scalars():
             rd = csv_row.row_data
             fields: dict[str, Any] = {**rd, **derive_fields(rd)}
             try:
@@ -291,11 +317,12 @@ def _evaluate_single_row_rules(
                 logger.exception("Error evaluating rule %s on csv_row %s", code, csv_row.id)
                 _write_eval_log(db, run=run, instance=instance, csv_row=csv_row,
                                 result="error", error_message=f"Evaluation error for {code}")
+
     return anomalies
 
 
 # ---------------------------------------------------------------------------
-# Pass 2 - statistical evaluation
+# Pass 2 - statistical evaluation (streaming)
 # ---------------------------------------------------------------------------
 
 
@@ -366,13 +393,23 @@ def _evaluate_statistical_rules(
     run: DetectionRun,
     applicable: list[DetectionRuleInstance],
     rule_type_by_code: dict[str, DetectionRuleType],
-    csv_rows: list[CsvUploadRow],
     no_finding_count: list[int],
 ) -> list[Anomaly]:
+    """Evaluate statistical rules, streaming rows in batches of _ROW_BATCH."""
     anomalies: list[Anomaly] = []
     stat_instances = [inst for inst in applicable if inst.rule_type_code in _STATISTICAL_CODES]
     if not stat_instances:
         return anomalies
+
+    stmt = (
+        select(CsvUploadRow)
+        .where(
+            CsvUploadRow.detection_run_id == run.id,
+            CsvUploadRow.tenant_id == run.tenant_id,
+        )
+        .execution_options(yield_per=_ROW_BATCH)
+    )
+
     for instance in stat_instances:
         code = instance.rule_type_code
         rtype = rule_type_by_code.get(code)
@@ -387,7 +424,8 @@ def _evaluate_statistical_rules(
             continue
         params = dict(instance.parameters)
         params["confidence_scoring"] = _build_confidence_scoring(params)
-        for csv_row in csv_rows:
+
+        for csv_row in db.execute(stmt).scalars():
             rd = csv_row.row_data
             scope_key = _scope_key_for_row(code, rd, csv_row)
             if scope_key is None:
@@ -432,88 +470,175 @@ def _evaluate_statistical_rules(
                 logger.exception("Error in statistical rule %s on csv_row %s", code, csv_row.id)
                 _write_eval_log(db, run=run, instance=instance, csv_row=csv_row,
                                 result="error", error_message=f"Evaluation error for {code}")
+
     return anomalies
 
 
+# ---------------------------------------------------------------------------
+# Pass 2 -- grouping rules (server-side SQL)
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Pass 2 -- grouping rules
-# ---------------------------------------------------------------------------
+
+def _is_postgres(db: Session) -> bool:
+    return db.get_bind().dialect.name == "postgresql"
+
+
+def _json_field(db: Session, column: str, field: str) -> str:
+    if _is_postgres(db):
+        return f"{column}->>'{field}'"
+    return f"json_extract({column}, '$.{field}')"
 
 
 def _evaluate_all001(
-    db,
-    run,
-    instance,
-    rtype,
-    csv_rows,
-    no_finding_count,
-):
-    """ALL-001 Duplicate Claim.
+    db: Session,
+    run: DetectionRun,
+    instance: DetectionRuleInstance,
+    rtype: DetectionRuleType,
+    no_finding_count: list[int],
+) -> list[Anomaly]:
+    """ALL-001 Duplicate Claim -- server-side grouping.
 
     Group key: (client_id, patient_unique_hash, resolved_ndc, date_of_service).
-    Eligible rows: B1/Paid only; skip Duplicate/Reversed status rows.
-    Lifecycle filter: skip groups containing any reversed_check=Yes row (BRB pattern).
-    Fire: >= 2 DISTINCT auth_no_hash per group. One anomaly per row in group.
+    Eligible rows: B1/Paid only.
+    Lifecycle filter: skip groups that contain any reversed_check=Yes row.
+    Fire: >= 2 DISTINCT auth_no_hash per group.
+
+    SQL step 1: identify qualifying group keys via GROUP BY / HAVING.
+    SQL step 2: fetch only the B1/Paid rows in those qualifying groups (bounded).
+
+    Peak memory: O(qualifying_rows), not O(total_rows).
     """
-    anomalies = []
-    reversal_groups = set()
-    eligible = {}
+    anomalies: list[Anomaly] = []
 
-    for csv_row in csv_rows:
-        rd = csv_row.row_data
-        pt = str(rd.get("patient_unique_hash", "") or "").strip()
-        ndc = str(csv_row.resolved_ndc or "")
-        dos_raw = str(rd.get("date_of_service", "") or "").strip()
-        client = str(rd.get("client_id", "") or "").strip()
-        dos_parsed = parse_dos(dos_raw)
-        if not pt or not dos_parsed:
-            continue
-        gk = (client, pt, ndc, dos_parsed)
+    pt_field = _json_field(db, "r.row_data", "patient_unique_hash")
+    auth_field = _json_field(db, "r.row_data", "auth_no_hash")
+    tc_field = _json_field(db, "r.row_data", "transaction_code")
+    ts_field = _json_field(db, "r.row_data", "transaction_status")
+    rev_field = _json_field(db, "r.row_data", "reversed_check")
+    dos_field = _json_field(db, "r.row_data", "date_of_service")
+    client_field = _json_field(db, "r.row_data", "client_id")
 
-        if str(rd.get("reversed_check", "") or "").strip().upper() == "YES":
-            reversal_groups.add(gk)
+    params: dict[str, Any] = {
+        "run_id": str(run.id),
+        "tenant_id": str(run.tenant_id),
+    }
 
-        tc = str(rd.get("transaction_code", "") or "").strip().upper()
-        ts = str(rd.get("transaction_status", "") or "").strip()
-        if tc != "B1" or ts not in ("Paid", "paid"):
-            continue
-        if ts in ("Duplicate", "Reversed"):
+    # Step 1: identify qualifying group keys (server-side).
+    sql_groups = text(f"""
+        WITH all_rows AS (
+            SELECT
+                {client_field}  AS client_id,
+                {pt_field}      AS patient_hash,
+                r.resolved_ndc  AS ndc,
+                {dos_field}     AS dos,
+                {tc_field}      AS tc,
+                {ts_field}      AS ts,
+                {auth_field}    AS auth,
+                {rev_field}     AS rev_check
+            FROM reclaimrx.csv_upload_rows r
+            WHERE r.detection_run_id = :run_id
+              AND r.tenant_id        = :tenant_id
+              AND {pt_field} IS NOT NULL
+              AND {pt_field} != ''
+              AND {dos_field} IS NOT NULL
+              AND {dos_field} != ''
+        ),
+        reversal_groups AS (
+            SELECT DISTINCT client_id, patient_hash, ndc, dos
+            FROM all_rows
+            WHERE UPPER(rev_check) = 'YES'
+        ),
+        b1_paid AS (
+            SELECT client_id, patient_hash, ndc, dos, auth
+            FROM all_rows
+            WHERE UPPER(tc) = 'B1'
+              AND (ts = 'Paid' OR ts = 'paid')
+              AND ts NOT IN ('Duplicate', 'Reversed')
+        ),
+        dup_groups AS (
+            SELECT b.client_id, b.patient_hash, b.ndc, b.dos,
+                   COUNT(DISTINCT b.auth) AS auth_count
+            FROM b1_paid b
+            LEFT JOIN reversal_groups rg
+                   ON rg.client_id    = b.client_id
+                  AND rg.patient_hash = b.patient_hash
+                  AND rg.ndc          = b.ndc
+                  AND rg.dos          = b.dos
+            WHERE rg.client_id IS NULL
+            GROUP BY b.client_id, b.patient_hash, b.ndc, b.dos
+            HAVING COUNT(DISTINCT b.auth) >= 2
+        )
+        SELECT client_id, patient_hash, ndc, dos, auth_count
+        FROM dup_groups
+    """)
+
+    group_rows = db.execute(sql_groups, params).fetchall()
+    if not group_rows:
+        return anomalies
+
+    # Step 2: for each qualifying group, fetch its B1/Paid ORM rows (bounded set).
+    for grp in group_rows:
+        client_id = grp.client_id or ""
+        patient_hash = grp.patient_hash or ""
+        ndc = grp.ndc or ""
+        dos_str = grp.dos or ""
+        auth_count = int(grp.auth_count)
+
+        dos_parsed = parse_dos(dos_str)
+        if not dos_parsed:
             continue
 
-        auth = str(rd.get("auth_no_hash", "") or "").strip()
-        if gk not in eligible:
-            eligible[gk] = {}
-        if auth not in eligible[gk]:
-            eligible[gk][auth] = []
-        eligible[gk][auth].append(csv_row)
+        # Filter by resolved_ndc (indexable) then apply JSONB predicates in Python.
+        group_stmt = (
+            select(CsvUploadRow)
+            .where(
+                CsvUploadRow.detection_run_id == run.id,
+                CsvUploadRow.tenant_id == run.tenant_id,
+                CsvUploadRow.resolved_ndc == (ndc if ndc else None),
+            )
+            .execution_options(yield_per=_ROW_BATCH)
+        )
 
-    for gk, auth_map in eligible.items():
-        if gk in reversal_groups:
-            for rows in auth_map.values():
-                no_finding_count[0] += len(rows)
-            continue
-        if len(auth_map) < 2:
-            for rows in auth_map.values():
-                no_finding_count[0] += len(rows)
-            continue
-        auth_hashes = list(auth_map.keys())
-        all_group_rows = [r for rows in auth_map.values() for r in rows]
-        for csv_row in all_group_rows:
+        eligible_rows: list[CsvUploadRow] = []
+        auth_hashes_seen: set[str] = set()
+        for csv_row in db.execute(group_stmt).scalars():
+            rd = csv_row.row_data
+            pt = str(rd.get("patient_unique_hash", "") or "").strip()
+            row_dos_raw = str(rd.get("date_of_service", "") or "").strip()
+            row_client = str(rd.get("client_id", "") or "").strip()
+            row_tc = str(rd.get("transaction_code", "") or "").strip().upper()
+            row_ts = str(rd.get("transaction_status", "") or "").strip()
+
+            if row_client != client_id or pt != patient_hash:
+                continue
+            row_dos_parsed = parse_dos(row_dos_raw)
+            if row_dos_parsed != dos_parsed:
+                continue
+            if row_tc != "B1" or row_ts not in ("Paid", "paid"):
+                continue
+            if row_ts in ("Duplicate", "Reversed"):
+                continue
+
+            auth = str(rd.get("auth_no_hash", "") or "").strip()
+            auth_hashes_seen.add(auth)
+            eligible_rows.append(csv_row)
+
+        auth_hashes = list(auth_hashes_seen)
+        for csv_row in eligible_rows:
             anomaly = _make_anomaly(
                 run=run, instance=instance, csv_row=csv_row,
                 finding_code="ALL-001",
                 finding_summary=(
-                    "Duplicate claim: {} distinct auth numbers for same member/NDC/DOS".format(len(auth_hashes))
+                    "Duplicate claim: {} distinct auth numbers for same member/NDC/DOS".format(auth_count)
                 ),
                 finding_details={
                     "group_key": {
-                        "patient_unique_hash": gk[1],
-                        "ndc": gk[2],
-                        "date_of_service": str(gk[3]),
-                        "client_id": gk[0],
+                        "patient_unique_hash": patient_hash,
+                        "ndc": ndc,
+                        "date_of_service": str(dos_parsed),
+                        "client_id": client_id,
                     },
-                    "auth_count": len(auth_hashes),
+                    "auth_count": auth_count,
                     "auth_hashes": auth_hashes,
                 },
                 severity="critical",
@@ -531,39 +656,97 @@ def _evaluate_all001(
 
 
 def _evaluate_mfr002(
-    db,
-    run,
-    instance,
-    rtype,
-    csv_rows,
-    no_finding_count,
-):
-    """MFR-002 Bill-Reverse-Rebill.
+    db: Session,
+    run: DetectionRun,
+    instance: DetectionRuleInstance,
+    rtype: DetectionRuleType,
+    no_finding_count: list[int],
+) -> list[Anomaly]:
+    """MFR-002 Bill-Reverse-Rebill -- server-side candidate fetch.
 
     Group: (patient_unique_hash, resolved_pharmacy_npi, resolved_ndc).
-    Sort by date_added_timestamp.
     Pattern: B1(Paid) -> B2(reversed_check=Yes) -> B1(Paid) within lookback_days.
     Fire only when rebill abs(IC) > original abs(IC). Flag rebill row only.
-    """
-    anomalies = []
-    lookback_days = int(instance.parameters.get("lookback_days", 14))
-    groups = defaultdict(list)
-    for csv_row in csv_rows:
-        rd = csv_row.row_data
-        pt = str(rd.get("patient_unique_hash", "") or "").strip()
-        npi = str(csv_row.resolved_pharmacy_npi or "").strip()
-        ndc = str(csv_row.resolved_ndc or "").strip()
-        if pt and npi and ndc:
-            groups[(pt, npi, ndc)].append(csv_row)
 
-    def _ts(r):
+    SQL identifies groups having >= 1 B2-reversal AND >= 2 B1-paid rows.
+    Only those candidate groups are fetched into Python memory.
+
+    Peak memory: O(candidate_group_rows), not O(total_rows).
+    """
+    anomalies: list[Anomaly] = []
+    lookback_days = int(instance.parameters.get("lookback_days", 14))
+
+    tc_field = _json_field(db, "r.row_data", "transaction_code")
+    ts_field = _json_field(db, "r.row_data", "transaction_status")
+    rev_field = _json_field(db, "r.row_data", "reversed_check")
+    pt_field = _json_field(db, "r.row_data", "patient_unique_hash")
+
+    params: dict[str, Any] = {
+        "run_id": str(run.id),
+        "tenant_id": str(run.tenant_id),
+    }
+
+    # Identify candidate groups: >= 1 B2-reversal AND >= 2 B1-paid rows.
+    sql_groups = text(f"""
+        WITH grp AS (
+            SELECT
+                {pt_field}              AS patient_hash,
+                r.resolved_pharmacy_npi AS pharmacy_npi,
+                r.resolved_ndc          AS ndc,
+                UPPER({tc_field})       AS tc,
+                {ts_field}              AS ts,
+                UPPER({rev_field})      AS rev_check
+            FROM reclaimrx.csv_upload_rows r
+            WHERE r.detection_run_id = :run_id
+              AND r.tenant_id        = :tenant_id
+              AND {pt_field} IS NOT NULL
+              AND {pt_field} != ''
+              AND r.resolved_pharmacy_npi IS NOT NULL
+              AND r.resolved_ndc IS NOT NULL
+        )
+        SELECT patient_hash, pharmacy_npi, ndc
+        FROM grp
+        GROUP BY patient_hash, pharmacy_npi, ndc
+        HAVING
+            SUM(CASE WHEN tc = 'B2' AND rev_check = 'YES' THEN 1 ELSE 0 END) >= 1
+            AND SUM(CASE WHEN tc = 'B1' AND (ts = 'Paid' OR ts = 'paid') THEN 1 ELSE 0 END) >= 2
+    """)
+
+    candidate_groups = db.execute(sql_groups, params).fetchall()
+    if not candidate_groups:
+        return anomalies
+
+    def _ts(r: CsvUploadRow) -> datetime:
         raw = r.row_data.get("date_added_timestamp", "") or ""
         try:
             return datetime.fromisoformat(str(raw).strip())
         except (ValueError, TypeError):
             return datetime.min
 
-    for _gk, group_rows in groups.items():
+    for grp in candidate_groups:
+        patient_hash = grp.patient_hash or ""
+        pharmacy_npi = grp.pharmacy_npi or ""
+        ndc = grp.ndc or ""
+
+        # Bounded fetch: filter by indexable columns, then apply patient_hash in Python.
+        group_stmt = (
+            select(CsvUploadRow)
+            .where(
+                CsvUploadRow.detection_run_id == run.id,
+                CsvUploadRow.tenant_id == run.tenant_id,
+                CsvUploadRow.resolved_pharmacy_npi == pharmacy_npi,
+                CsvUploadRow.resolved_ndc == ndc,
+            )
+        )
+        all_group_rows = db.execute(group_stmt).scalars().all()
+
+        group_rows = [
+            r for r in all_group_rows
+            if str(r.row_data.get("patient_unique_hash", "") or "").strip() == patient_hash
+        ]
+        if not group_rows:
+            continue
+
         sorted_rows = sorted(group_rows, key=_ts)
         n = len(sorted_rows)
         for i in range(n):
@@ -637,64 +820,106 @@ def _evaluate_mfr002(
                         result="finding_raised", anomaly_id=anomaly.id,
                     )
                     anomalies.append(anomaly)
+
     return anomalies
 
 
 def _evaluate_th002(
-    db,
-    run,
-    instance,
-    rtype,
-    csv_rows,
-    no_finding_count,
-):
-    """TH-002 Telehealth Geographic Dispersion.
+    db: Session,
+    run: DetectionRun,
+    instance: DetectionRuleInstance,
+    rtype: DetectionRuleType,
+    no_finding_count: list[int],
+) -> list[Anomaly]:
+    """TH-002 Telehealth Geographic Dispersion -- server-side aggregation.
 
-    Group by prescriber_npi; count distinct patient_state values.
-    Fire if count > threshold (default 10) AND total claim count >= min_claims
-    (default 20).  A prescriber with 11 claims trivially spans 11 states —
-    min_claims prevents false-positive floods on low-volume prescribers.
-    min_claims is tenant-configurable via instance.parameters (Principle 12).
+    SQL GROUP BY prescriber_npi with HAVING filters for both state-count
+    threshold and min_claims floor.  Only qualifying prescribers returned.
+
+    Peak memory: O(qualifying_prescribers), not O(total_rows).
     """
-    anomalies = []
+    anomalies: list[Anomaly] = []
     threshold = Decimal(str(instance.parameters.get("threshold", 10)))
     min_claims = int(instance.parameters.get("min_claims", 20))
-    presc_states = defaultdict(dict)
-    presc_claims = defaultdict(int)
-    presc_rep = {}
-    for csv_row in csv_rows:
-        rd = csv_row.row_data
-        presc = str(rd.get("prescriber_npi", "") or "").strip()
-        state = str(rd.get("patient_state", "") or "").strip()
-        if not presc or not state:
+
+    presc_field = _json_field(db, "r.row_data", "prescriber_npi")
+    state_field = _json_field(db, "r.row_data", "patient_state")
+
+    params: dict[str, Any] = {
+        "run_id": str(run.id),
+        "tenant_id": str(run.tenant_id),
+        "threshold": int(threshold),
+        "min_claims": min_claims,
+    }
+
+    sql = text(f"""
+        SELECT
+            {presc_field}                    AS prescriber_npi,
+            COUNT(DISTINCT {state_field})    AS state_count,
+            COUNT(*)                         AS claim_count
+        FROM reclaimrx.csv_upload_rows r
+        WHERE r.detection_run_id = :run_id
+          AND r.tenant_id        = :tenant_id
+          AND {presc_field} IS NOT NULL
+          AND {presc_field} != ''
+          AND {state_field} IS NOT NULL
+          AND {state_field} != ''
+        GROUP BY {presc_field}
+        HAVING COUNT(DISTINCT {state_field}) > :threshold
+           AND COUNT(*) >= :min_claims
+    """)
+
+    qualifying = db.execute(sql, params).fetchall()
+    if not qualifying:
+        return anomalies
+
+    for row in qualifying:
+        presc_npi = row.prescriber_npi or ""
+        state_count = int(row.state_count)
+        claim_count = int(row.claim_count)
+
+        # Fetch distinct patient_states for evidence (bounded: one row per state).
+        state_sql = text(f"""
+            SELECT DISTINCT {state_field} AS state
+            FROM reclaimrx.csv_upload_rows r
+            WHERE r.detection_run_id = :run_id
+              AND r.tenant_id        = :tenant_id
+              AND {presc_field}      = :presc_npi
+              AND {state_field} IS NOT NULL
+              AND {state_field} != ''
+        """)
+        state_rows = db.execute(state_sql, {**params, "presc_npi": presc_npi}).fetchall()
+        patient_states = sorted(r.state for r in state_rows if r.state)
+
+        # One representative ORM row for _make_anomaly -- stream until match found.
+        rep_row: CsvUploadRow | None = None
+        rep_stmt = (
+            select(CsvUploadRow)
+            .where(
+                CsvUploadRow.detection_run_id == run.id,
+                CsvUploadRow.tenant_id == run.tenant_id,
+            )
+            .execution_options(yield_per=_ROW_BATCH)
+        )
+        for r in db.execute(rep_stmt).scalars():
+            if str(r.row_data.get("prescriber_npi", "") or "").strip() == presc_npi:
+                rep_row = r
+                break
+        if rep_row is None:
             continue
-        presc_claims[presc] += 1
-        if state not in presc_states[presc]:
-            presc_states[presc][state] = csv_row
-        if presc not in presc_rep:
-            presc_rep[presc] = csv_row
-    for presc, states_map in presc_states.items():
-        claim_count = presc_claims[presc]
-        if claim_count < min_claims:
-            no_finding_count[0] += 1
-            continue
-        state_count = len(states_map)
-        if Decimal(str(state_count)) <= threshold:
-            no_finding_count[0] += 1
-            continue
-        rep_row = presc_rep[presc]
+
         anomaly = _make_anomaly(
             run=run, instance=instance, csv_row=rep_row,
             finding_code="TH-002",
             finding_summary=(
                 "Prescriber {} patients across {} states (threshold > {})".format(
-                    presc, state_count, threshold
+                    presc_npi, state_count, threshold
                 )
             ),
             finding_details={
-                "prescriber_npi": presc,
+                "prescriber_npi": presc_npi,
                 "patient_state_count": state_count,
-                "patient_states": sorted(states_map.keys()),
+                "patient_states": patient_states,
                 "threshold": str(threshold),
                 "claim_count": claim_count,
                 "min_claims": min_claims,
@@ -709,39 +934,83 @@ def _evaluate_th002(
             result="finding_raised", anomaly_id=anomaly.id,
         )
         anomalies.append(anomaly)
+
     return anomalies
 
 
 def _evaluate_th005(
-    db,
-    run,
-    instance,
-    rtype,
-    csv_rows,
-    no_finding_count,
-):
-    """TH-005 Prescriber-Pharmacy Affinity.
+    db: Session,
+    run: DetectionRun,
+    instance: DetectionRuleInstance,
+    rtype: DetectionRuleType,
+    no_finding_count: list[int],
+) -> list[Anomaly]:
+    """TH-005 Prescriber-Pharmacy Affinity -- server-side aggregation.
 
-    Group by prescriber_npi; compute top pharmacy share.
-    Fire when share > threshold (default 0.5) AND total claim count >= min_claims
-    (default 20).  A prescriber with 1-2 claims trivially has 100% pharmacy share
-    — min_claims prevents false-positive floods on low-volume prescribers.
-    min_claims is tenant-configurable via instance.parameters (Principle 12).
+    SQL GROUP BY (prescriber_npi, pharmacy_npi) returns compact aggregate pairs.
+    Python accumulates per-prescriber totals and applies threshold / min_claims.
+    One streaming pass fetches a representative ORM row per qualifying prescriber.
+
+    Peak memory: O(distinct_prescriber_pharmacy_pairs), not O(total_rows).
     """
-    anomalies = []
+    anomalies: list[Anomaly] = []
     threshold = Decimal(str(instance.parameters.get("threshold", "0.5")))
     min_claims = int(instance.parameters.get("min_claims", 20))
-    presc_pharmacy = defaultdict(lambda: defaultdict(int))
-    presc_rep = {}
-    for csv_row in csv_rows:
-        rd = csv_row.row_data
-        presc = str(rd.get("prescriber_npi", "") or "").strip()
-        pharm = str(csv_row.resolved_pharmacy_npi or "").strip()
-        if not presc or not pharm:
-            continue
-        presc_pharmacy[presc][pharm] += 1
-        if presc not in presc_rep:
+
+    presc_field = _json_field(db, "r.row_data", "prescriber_npi")
+
+    params: dict[str, Any] = {
+        "run_id": str(run.id),
+        "tenant_id": str(run.tenant_id),
+    }
+
+    # Aggregate: per (prescriber_npi, pharmacy_npi) pair, count claims.
+    sql = text(f"""
+        SELECT
+            {presc_field}               AS prescriber_npi,
+            r.resolved_pharmacy_npi     AS pharmacy_npi,
+            COUNT(*)                    AS pair_count
+        FROM reclaimrx.csv_upload_rows r
+        WHERE r.detection_run_id        = :run_id
+          AND r.tenant_id               = :tenant_id
+          AND {presc_field} IS NOT NULL
+          AND {presc_field} != ''
+          AND r.resolved_pharmacy_npi IS NOT NULL
+        GROUP BY {presc_field}, r.resolved_pharmacy_npi
+    """)
+
+    pair_rows = db.execute(sql, params).fetchall()
+    if not pair_rows:
+        return anomalies
+
+    # Accumulate per-prescriber pharmacy counts (compact aggregate, not raw rows).
+    presc_pharmacy: dict[str, dict[str, int]] = defaultdict(dict)
+    for row in pair_rows:
+        presc = row.prescriber_npi or ""
+        pharm = row.pharmacy_npi or ""
+        cnt = int(row.pair_count)
+        if presc and pharm:
+            presc_pharmacy[presc][pharm] = cnt
+
+    # Build rep_row map: one ORM row per prescriber (streaming pass).
+    presc_rep: dict[str, CsvUploadRow] = {}
+    needed_prescs = set(presc_pharmacy.keys())
+    rep_stmt = (
+        select(CsvUploadRow)
+        .where(
+            CsvUploadRow.detection_run_id == run.id,
+            CsvUploadRow.tenant_id == run.tenant_id,
+        )
+        .execution_options(yield_per=_ROW_BATCH)
+    )
+    for csv_row in db.execute(rep_stmt).scalars():
+        if not needed_prescs:
+            break
+        presc = str(csv_row.row_data.get("prescriber_npi", "") or "").strip()
+        if presc in needed_prescs and presc not in presc_rep:
             presc_rep[presc] = csv_row
+            needed_prescs.discard(presc)
+
     for presc, pharmacy_counts in presc_pharmacy.items():
         total = sum(pharmacy_counts.values())
         if total == 0:
@@ -755,7 +1024,9 @@ def _evaluate_th005(
         if share <= threshold:
             no_finding_count[0] += 1
             continue
-        rep_row = presc_rep[presc]
+        rep_row = presc_rep.get(presc)
+        if rep_row is None:
+            continue
         anomaly = _make_anomaly(
             run=run, instance=instance, csv_row=rep_row,
             finding_code="TH-005",
@@ -784,19 +1055,22 @@ def _evaluate_th005(
             result="finding_raised", anomaly_id=anomaly.id,
         )
         anomalies.append(anomaly)
+
     return anomalies
 
 
 def _evaluate_grouping_rules(
-    db,
-    run,
-    applicable,
-    rule_type_by_code,
-    csv_rows,
-    no_finding_count,
-):
-    """Dispatch ALL-001, MFR-002, TH-002, TH-005 grouping evaluators."""
-    anomalies = []
+    db: Session,
+    run: DetectionRun,
+    applicable: list[DetectionRuleInstance],
+    rule_type_by_code: dict[str, DetectionRuleType],
+    no_finding_count: list[int],
+) -> list[Anomaly]:
+    """Dispatch ALL-001, MFR-002, TH-002, TH-005 grouping evaluators.
+
+    Each evaluator uses server-side SQL to bound the in-memory candidate set.
+    """
+    anomalies: list[Anomaly] = []
     group_instances = [inst for inst in applicable if inst.rule_type_code in _GROUPING_CODES]
     for instance in group_instances:
         code = instance.rule_type_code
@@ -805,13 +1079,13 @@ def _evaluate_grouping_rules(
             continue
         try:
             if code == "ALL-001":
-                new = _evaluate_all001(db, run, instance, rtype, csv_rows, no_finding_count)
+                new = _evaluate_all001(db, run, instance, rtype, no_finding_count)
             elif code == "MFR-002":
-                new = _evaluate_mfr002(db, run, instance, rtype, csv_rows, no_finding_count)
+                new = _evaluate_mfr002(db, run, instance, rtype, no_finding_count)
             elif code == "TH-002":
-                new = _evaluate_th002(db, run, instance, rtype, csv_rows, no_finding_count)
+                new = _evaluate_th002(db, run, instance, rtype, no_finding_count)
             elif code == "TH-005":
-                new = _evaluate_th005(db, run, instance, rtype, csv_rows, no_finding_count)
+                new = _evaluate_th005(db, run, instance, rtype, no_finding_count)
             else:
                 new = []
             anomalies.extend(new)
@@ -825,7 +1099,7 @@ def _evaluate_grouping_rules(
 # ---------------------------------------------------------------------------
 
 
-def run_detection(db, run):
+def run_detection(db: Session, run: DetectionRun) -> int:
     """Two-pass FWA detection over csv_upload_rows for the given run.
 
     PRECONDITION gate: raises RuntimeError if
@@ -835,16 +1109,20 @@ def run_detection(db, run):
       MFR-009: no registered baseline kind -- logged and skipped.
 
     PASS 2 -- evaluate:
-      SINGLE-ROW:  MFR-001.
-      STATISTICAL: MFR-003, MFR-004, HP-005, HP-008, ALL-006
+      SINGLE-ROW:  MFR-001. Streamed in batches of _ROW_BATCH.
+      STATISTICAL: MFR-003, MFR-004, HP-005, HP-008, ALL-006. Streamed.
                    (MFR-004/HP-005/ALL-006 are entity-level; per-row skipped).
-      GROUPING:    ALL-001, MFR-002, TH-002, TH-005.
+      GROUPING:    ALL-001, MFR-002, TH-002, TH-005. Server-side SQL grouping.
 
     Eval-log policy:
       finding_raised: written with anomaly_id for every fire.
       error: written for caught exceptions.
       no_finding: NOT written per (row x rule); aggregated into
           run.resolution_stats["no_finding_count"].
+
+    Memory guarantee:
+      Peak working set is O(_ROW_BATCH + flagged_rows), not O(total_rows).
+      The full csv_upload_rows set is never materialized into Python memory.
 
     Returns int: count of Anomaly rows created.
     Updates: run.anomaly_count, run.record_count, run.status, run.completed_at.
@@ -870,35 +1148,35 @@ def run_detection(db, run):
     ).scalars().all()
     rule_type_by_code = {rt.code: rt for rt in rule_types}
 
-    # PASS 1 -- baselines
+    # PASS 1 -- baselines (already server-side SQL; no full materialization)
     _run_baselines(db, run, applicable, rule_type_by_code)
     db.flush()
 
-    csv_rows = db.execute(
-        select(CsvUploadRow).where(
+    # Record count via SQL -- never materialize all rows just to call len().
+    record_count = db.execute(
+        select(func.count()).select_from(CsvUploadRow).where(
             CsvUploadRow.detection_run_id == run.id,
             CsvUploadRow.tenant_id == run.tenant_id,
         )
-    ).scalars().all()
-    record_count = len(csv_rows)
+    ).scalar() or 0
 
     no_finding_count = [0]
-    all_anomalies = []
+    all_anomalies: list[Anomaly] = []
 
-    # PASS 2 -- evaluate
+    # PASS 2 -- evaluate (streaming per-row; server-side grouping)
     all_anomalies.extend(
         _evaluate_single_row_rules(
-            db, run, applicable, rule_type_by_code, csv_rows, no_finding_count
+            db, run, applicable, rule_type_by_code, no_finding_count
         )
     )
     all_anomalies.extend(
         _evaluate_statistical_rules(
-            db, run, applicable, rule_type_by_code, csv_rows, no_finding_count
+            db, run, applicable, rule_type_by_code, no_finding_count
         )
     )
     all_anomalies.extend(
         _evaluate_grouping_rules(
-            db, run, applicable, rule_type_by_code, csv_rows, no_finding_count
+            db, run, applicable, rule_type_by_code, no_finding_count
         )
     )
     db.flush()
