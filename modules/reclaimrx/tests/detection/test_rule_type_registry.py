@@ -1,4 +1,4 @@
-"""TDD tests for the rule-type registry + 46-rule catalog.
+"""TDD tests for the rule-type registry + 46-rule catalog + rule instance seeder.
 
 Tests are written BEFORE the implementation (RED phase per TDD discipline).
 
@@ -11,6 +11,13 @@ Contract assertions:
 - MFR-001 is a RUN rule with required_data_columns containing 'extended_wac' and
   'ingredient_cost_paid', and family in {A1..A6}.
 - ALL-002 is a DEFERRED rule with a truthy deferred_reason.
+
+register_rule_instances contract:
+- Given full CSV column set: creates exactly 14 instances (the RUN rules).
+- Deferred rules and rules with missing required columns get no instance.
+- Second call returns 0 (idempotent).
+- Restricted column set gates MFR-001 and MFR-003 (both require extended_wac).
+- The 5 ML placeholder rows in ml_detector_registry are NOT touched by this function.
 
 DB fixture pattern: SAVEPOINT-based isolation (LESSON-001).
 UUID columns: _UUIDString TypeDecorator via module-level patch (LESSON-007).
@@ -32,7 +39,11 @@ from sqlalchemy.types import String, TypeDecorator
 # Must happen BEFORE the engine fixture creates tables (LESSON-007).
 # ---------------------------------------------------------------------------
 from src._shim.db import Base, configure_engine, get_engine
-from src.models.detection_run_models import DetectionRuleType  # noqa: F401 — registers table
+from src.models.detection_run_models import (  # noqa: F401 — registers tables
+    DetectionRuleInstance,
+    DetectionRuleType,
+    MlDetectorRegistry,
+)
 
 
 class _UUIDString(TypeDecorator):
@@ -108,7 +119,11 @@ def db(engine) -> Session:
 # ---------------------------------------------------------------------------
 # Imports under test (deliberately late so the patch applies first)
 # ---------------------------------------------------------------------------
-from src.detection.rule_type_registry import RULE_TYPE_CATALOG, register_rule_types  # noqa: E402
+from src.detection.rule_type_registry import (  # noqa: E402
+    RULE_TYPE_CATALOG,
+    register_rule_instances,
+    register_rule_types,
+)
 
 # ---------------------------------------------------------------------------
 # Constants for the 14 RUN rules (deferred_data_feed=False)
@@ -119,6 +134,31 @@ _RUN_CODES = {
     "ALL-006", "MFR-009",
 }
 _VALID_FAMILIES = {"A1", "A2", "A3", "A4", "A5", "A6"}
+
+# Full CSV column set — union of all required_data_columns across the 14 RUN rules.
+_FULL_CSV_COLUMNS: set[str] = {
+    # ALL-001
+    "patient_unique_hash", "ndc", "date_of_service", "auth_no_hash",
+    "transaction_code", "transaction_status",
+    # ALL-005
+    "day_supply",
+    # ALL-006 / MFR-004 / HP-005 / HP-010 / TH-005
+    "pharmacy_npi", "prescriber_npi", "patient_state",
+    # MFR-001 / MFR-003
+    "extended_wac", "ingredient_cost_paid", "dispensing_fee_paid",
+    "quantity_dispensed",
+    # MFR-002
+    "reversed_check", "date_added_timestamp",
+    # MFR-008
+    "statement_account",
+    # MFR-009
+    "u_c", "pos_adjustment",
+    # HP-008
+    "total_paid_amt",
+}
+
+# A system UUID used as created_by for instances in tests.
+_SYSTEM_UUID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 # ---------------------------------------------------------------------------
@@ -325,3 +365,199 @@ class TestRegisterRuleTypes:
             assert row.required_data_columns, (
                 f"RUN rule {row.code} has empty required_data_columns in DB"
             )
+
+
+class TestRegisterRuleInstances:
+    """Integration tests for register_rule_instances(db, tenant_id, available_columns)."""
+
+    def _seed_types(self, db: Session) -> None:
+        """Seed rule types; required before instances (FK constraint)."""
+        register_rule_types(db)
+
+    def test_full_columns_creates_14_instances(self, db: Session):
+        """Full CSV column set → exactly 14 instances (one per RUN rule)."""
+        from sqlalchemy import func, select
+
+        self._seed_types(db)
+        count = register_rule_instances(db, _SYSTEM_UUID, _FULL_CSV_COLUMNS, _SYSTEM_UUID)
+        assert count == 14
+        total = db.execute(
+            select(func.count()).select_from(DetectionRuleInstance).where(
+                DetectionRuleInstance.tenant_id == _SYSTEM_UUID
+            )
+        ).scalar()
+        assert total == 14
+
+    def test_idempotent_second_call_returns_zero(self, db: Session):
+        """Second call with same tenant + columns → 0 inserts."""
+        self._seed_types(db)
+        register_rule_instances(db, _SYSTEM_UUID, _FULL_CSV_COLUMNS, _SYSTEM_UUID)
+        count2 = register_rule_instances(db, _SYSTEM_UUID, _FULL_CSV_COLUMNS, _SYSTEM_UUID)
+        assert count2 == 0
+
+    def test_idempotent_row_count_unchanged(self, db: Session):
+        """Total row count is still 14 after second call."""
+        from sqlalchemy import func, select
+
+        self._seed_types(db)
+        register_rule_instances(db, _SYSTEM_UUID, _FULL_CSV_COLUMNS, _SYSTEM_UUID)
+        register_rule_instances(db, _SYSTEM_UUID, _FULL_CSV_COLUMNS, _SYSTEM_UUID)
+        total = db.execute(
+            select(func.count()).select_from(DetectionRuleInstance).where(
+                DetectionRuleInstance.tenant_id == _SYSTEM_UUID
+            )
+        ).scalar()
+        assert total == 14
+
+    def test_deferred_rules_get_no_instance(self, db: Session):
+        """Deferred rules (deferred_data_feed=True) must not produce instances."""
+        from sqlalchemy import select
+
+        self._seed_types(db)
+        register_rule_instances(db, _SYSTEM_UUID, _FULL_CSV_COLUMNS, _SYSTEM_UUID)
+        # ALL-002 is deferred; no instance should exist for it.
+        rows = db.execute(
+            select(DetectionRuleInstance).where(
+                DetectionRuleInstance.tenant_id == _SYSTEM_UUID,
+                DetectionRuleInstance.rule_type_code == "ALL-002",
+            )
+        ).scalars().all()
+        assert rows == [], "ALL-002 is deferred and must not have an instance"
+
+    def test_instance_codes_match_run_rule_set(self, db: Session):
+        """The 14 instance rule_type_codes equal the expected RUN rule set."""
+        from sqlalchemy import select
+
+        self._seed_types(db)
+        register_rule_instances(db, _SYSTEM_UUID, _FULL_CSV_COLUMNS, _SYSTEM_UUID)
+        rows = db.execute(
+            select(DetectionRuleInstance).where(
+                DetectionRuleInstance.tenant_id == _SYSTEM_UUID
+            )
+        ).scalars().all()
+        codes = {r.rule_type_code for r in rows}
+        assert codes == _RUN_CODES
+
+    def test_instance_parameters_copied_from_type(self, db: Session):
+        """Instance parameters equal the default_parameters from the rule type."""
+        from sqlalchemy import select
+
+        self._seed_types(db)
+        register_rule_instances(db, _SYSTEM_UUID, _FULL_CSV_COLUMNS, _SYSTEM_UUID)
+        instance = db.execute(
+            select(DetectionRuleInstance).where(
+                DetectionRuleInstance.tenant_id == _SYSTEM_UUID,
+                DetectionRuleInstance.rule_type_code == "MFR-001",
+            )
+        ).scalar_one()
+        expected_params = next(
+            r["default_parameters"] for r in RULE_TYPE_CATALOG if r["code"] == "MFR-001"
+        )
+        assert instance.parameters == expected_params
+
+    def test_instance_enabled_true(self, db: Session):
+        """All created instances default to enabled=True."""
+        from sqlalchemy import select
+
+        self._seed_types(db)
+        register_rule_instances(db, _SYSTEM_UUID, _FULL_CSV_COLUMNS, _SYSTEM_UUID)
+        rows = db.execute(
+            select(DetectionRuleInstance).where(
+                DetectionRuleInstance.tenant_id == _SYSTEM_UUID
+            )
+        ).scalars().all()
+        assert all(r.enabled for r in rows), "All instances must be enabled=True"
+
+    def test_instance_effective_from_is_set(self, db: Session):
+        """effective_from must be set (not None) since the column is NOT NULL."""
+        from sqlalchemy import select
+
+        self._seed_types(db)
+        register_rule_instances(db, _SYSTEM_UUID, _FULL_CSV_COLUMNS, _SYSTEM_UUID)
+        rows = db.execute(
+            select(DetectionRuleInstance).where(
+                DetectionRuleInstance.tenant_id == _SYSTEM_UUID
+            )
+        ).scalars().all()
+        assert all(r.effective_from is not None for r in rows), (
+            "effective_from must be set on all instances"
+        )
+
+    def test_restricted_columns_excludes_mfr001(self, db: Session):
+        """Drop extended_wac → MFR-001 (requires it) must NOT be instantiated."""
+        from sqlalchemy import select
+
+        self._seed_types(db)
+        restricted = _FULL_CSV_COLUMNS - {"extended_wac"}
+        register_rule_instances(db, _SYSTEM_UUID, restricted, _SYSTEM_UUID)
+        rows = db.execute(
+            select(DetectionRuleInstance).where(
+                DetectionRuleInstance.tenant_id == _SYSTEM_UUID,
+                DetectionRuleInstance.rule_type_code == "MFR-001",
+            )
+        ).scalars().all()
+        assert rows == [], "MFR-001 needs extended_wac; must not be created without it"
+
+    def test_restricted_columns_excludes_mfr003(self, db: Session):
+        """Drop extended_wac → MFR-003 (requires it) must NOT be instantiated."""
+        from sqlalchemy import select
+
+        self._seed_types(db)
+        restricted = _FULL_CSV_COLUMNS - {"extended_wac"}
+        register_rule_instances(db, _SYSTEM_UUID, restricted, _SYSTEM_UUID)
+        rows = db.execute(
+            select(DetectionRuleInstance).where(
+                DetectionRuleInstance.tenant_id == _SYSTEM_UUID,
+                DetectionRuleInstance.rule_type_code == "MFR-003",
+            )
+        ).scalars().all()
+        assert rows == [], "MFR-003 needs extended_wac; must not be created without it"
+
+    def test_restricted_columns_still_creates_eligible_rules(self, db: Session):
+        """Removing extended_wac still leaves 12 eligible RUN rules instantiated."""
+        from sqlalchemy import func, select
+
+        self._seed_types(db)
+        restricted = _FULL_CSV_COLUMNS - {"extended_wac"}
+        count = register_rule_instances(db, _SYSTEM_UUID, restricted, _SYSTEM_UUID)
+        # MFR-001 and MFR-003 are gated; remaining 12 should be created.
+        assert count == 12
+        total = db.execute(
+            select(func.count()).select_from(DetectionRuleInstance).where(
+                DetectionRuleInstance.tenant_id == _SYSTEM_UUID
+            )
+        ).scalar()
+        assert total == 12
+
+    def test_ml_detector_registry_not_written(self, db: Session):
+        """register_rule_instances must never INSERT into ml_detector_registry."""
+        from sqlalchemy import func, select
+
+        self._seed_types(db)
+        # Count before
+        before = db.execute(
+            select(func.count()).select_from(MlDetectorRegistry)
+        ).scalar()
+        register_rule_instances(db, _SYSTEM_UUID, _FULL_CSV_COLUMNS, _SYSTEM_UUID)
+        # Count after — must be identical
+        after = db.execute(
+            select(func.count()).select_from(MlDetectorRegistry)
+        ).scalar()
+        assert after == before, (
+            "register_rule_instances must not insert into ml_detector_registry; "
+            f"count changed from {before} to {after}"
+        )
+
+    def test_different_tenants_get_independent_instances(self, db: Session):
+        """Two tenants can each have their own 14 instances independently."""
+        from sqlalchemy import func, select
+
+        tenant_b = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+        self._seed_types(db)
+        register_rule_instances(db, _SYSTEM_UUID, _FULL_CSV_COLUMNS, _SYSTEM_UUID)
+        register_rule_instances(db, tenant_b, _FULL_CSV_COLUMNS, tenant_b)
+        # Each tenant has 14 instances; total = 28.
+        total = db.execute(
+            select(func.count()).select_from(DetectionRuleInstance)
+        ).scalar()
+        assert total == 28

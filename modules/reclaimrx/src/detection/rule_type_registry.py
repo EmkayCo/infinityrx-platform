@@ -1,4 +1,4 @@
-"""Rule-type registry: 46-rule catalog + idempotent DB seeder.
+"""Rule-type registry: 46-rule catalog + idempotent DB seeders.
 
 Severity/confidence derivation (deterministic, from legacy confidence_scoring):
   "high" key, threshold >= 1.0  -> severity="critical", confidence=0.90
@@ -13,10 +13,17 @@ Family mapping: pricing_integrity->A1, billing_pattern->A2, utilization->A3,
 Production seeding note: detection_rule_types is a global reference table (no
   tenant_id). App role must have INSERT, or run via migration/admin context.
   SQLite test fixtures use engine owner -- no grant issue in tests.
+
+ML detector rows (ml_detector_registry) are pre-seeded by migration 0008_ml_detector_seed.
+  The app role has SELECT-only on that table. register_rule_instances MUST NOT write to it.
 """
 from __future__ import annotations
+
+import uuid
+from datetime import date
+
 from sqlalchemy.orm import Session
-from src.models.detection_run_models import DetectionRuleType
+from src.models.detection_run_models import DetectionRuleInstance, DetectionRuleType
 
 _CATEGORY_FAMILY: dict[str, str] = {
     "pricing_integrity": "A1", "billing_pattern": "A2", "utilization": "A3",
@@ -105,5 +112,69 @@ def register_rule_types(db: Session) -> int:
             )
             db.add(row)
             inserted += 1
+    db.flush()
+    return inserted
+
+def register_rule_instances(
+    db: Session,
+    tenant_id: uuid.UUID,
+    available_columns: set[str],
+    created_by: uuid.UUID,
+) -> int:
+    """Idempotent creation of detection_rule_instance rows for a tenant.
+
+    For each rule_type in the catalog where:
+      - deferred_data_feed is False, AND
+      - all required_data_columns are present in available_columns
+
+    creates ONE DetectionRuleInstance for tenant_id if not already present.
+    Idempotency key: (tenant_id, rule_type_code, instance_name).
+
+    Deferred rules and rules whose required columns are not fully present in
+    available_columns produce no instance.
+
+    Does NOT touch ml_detector_registry — those rows are pre-seeded by
+    migration 0008_ml_detector_seed and the app role is SELECT-only there.
+
+    Returns count of rows inserted.
+    """
+    from sqlalchemy import and_, select
+
+    inserted = 0
+    for entry in RULE_TYPE_CATALOG:
+        # Gate 1: skip deferred rules.
+        if entry["deferred_data_feed"]:
+            continue
+        # Gate 2: skip if required columns are not all available.
+        required_cols: list[str] = entry["required_data_columns"]
+        if not set(required_cols) <= available_columns:
+            continue
+
+        code: str = entry["code"]
+        instance_name = f"{code}-default"
+
+        existing = db.execute(
+            select(DetectionRuleInstance).where(
+                and_(
+                    DetectionRuleInstance.tenant_id == tenant_id,
+                    DetectionRuleInstance.rule_type_code == code,
+                    DetectionRuleInstance.instance_name == instance_name,
+                )
+            )
+        ).scalar_one_or_none()
+
+        if existing is None:
+            row = DetectionRuleInstance(
+                tenant_id=tenant_id,
+                rule_type_code=code,
+                instance_name=instance_name,
+                parameters=entry["default_parameters"],
+                enabled=True,
+                effective_from=date.today(),
+                created_by=created_by,
+            )
+            db.add(row)
+            inserted += 1
+
     db.flush()
     return inserted
