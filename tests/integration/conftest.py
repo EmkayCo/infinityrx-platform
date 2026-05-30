@@ -93,7 +93,10 @@ _MIGRATION_MODULES: list[str] = [
     "adjudication-engine",  # adjudication_engine.* (Wave 26 Phase A-prep)
     "paysync",              # paysync.* (Wave 35 — Phase 2 PaySync foundation)
     "network-management",   # network_mgmt.* (Wave 36 — pay-to + banking + 835 dest)
-    "reclaimrx",            # reclaimrx.* (Wave 42 — Phase 3 ReclaimRx foundation)
+    # reclaimrx excluded: two-head migration fork (0008_ml_detector_seed vs
+    # 0008_sp3_extensions) — cannot use standard module-root 'alembic upgrade head'.
+    # Apply explicitly via modules/reclaimrx/alembic/alembic.ini + named revision.
+    # Tracked tech-debt.
     "maxacc-registry",      # maxacc_registry.* (Wave 44a — global ref data)
 ]
 
