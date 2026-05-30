@@ -174,7 +174,12 @@ def test_money_columns_are_numeric_not_float():
 
 
 def test_schema_is_reclaimrx_on_all_models():
-    """All models must declare schema='reclaimrx' in __table_args__."""
+    """All models must declare schema='reclaimrx' in __table_args__.
+
+    Reads schema from class.__table_args__ rather than the live SQLAlchemy
+    table object, which may have been mutated to None by the SQLite compat
+    fixture (_sqlite_compat_swap zeroes schemas for SQLite compatibility).
+    """
     all_models = [
         DetectionRun, CsvUploadRow, Anomaly, AnomalyAuditLog,
         DetectionRuleType, DetectionRuleInstance, DetectionRuleEvaluationLog,
@@ -183,7 +188,11 @@ def test_schema_is_reclaimrx_on_all_models():
         CaseNumberSequence,
     ]
     for model_class in all_models:
-        table = class_mapper(model_class).local_table
-        assert table.schema == _SCHEMA, (
-            f"{model_class.__name__} has schema={table.schema!r}, expected {_SCHEMA!r}"
+        # Read schema from the class-level __table_args__ dict, which is not
+        # mutated by _sqlite_compat_swap (unlike table.schema which is zeroed
+        # out so SQLite create_all works without named schemas).
+        table_args = getattr(model_class, "__table_args__", {})
+        schema = table_args.get("schema") if isinstance(table_args, dict) else None
+        assert schema == _SCHEMA, (
+            f"{model_class.__name__} has __table_args__ schema={schema!r}, expected {_SCHEMA!r}"
         )
