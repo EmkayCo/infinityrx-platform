@@ -93,29 +93,49 @@ def _make_isolated_engine():
     Imports all model modules first (so Base.metadata is fully populated),
     applies LESSON-007 type swap, then creates all tables.
 
+    Schema handling: table.schema values are NOT stripped.  Instead,
+    StaticPool is used so all connections share the same DBAPI connection,
+    and a pool-level 'connect' event ATTACHes ':memory:' AS 'reclaimrx' so
+    that schema-qualified DDL/DML resolves correctly on SQLite.  This keeps
+    Base.metadata schema-qualified so Postgres-gated tests running in the
+    same process emit 'reclaimrx.<table>' queries.
+
     Returns (engine, connection) -- caller must conn.close(); eng.dispose().
     """
     # Import models BEFORE the swap so Base.metadata is fully populated.
     import src.models.tables  # noqa: F401
     import src.models.detection_run_models  # noqa: F401
 
+    from sqlalchemy.pool import StaticPool as _StaticPool
     from src._shim.db import Base
+
+    # Register SQLite-compatible type variants without destroying Postgres types.
+    # with_variant() keeps the base type intact for Postgres while SQLite uses
+    # the alternative.  Guard against double-registration (multiple test modules
+    # may call this in the same process).
+    for table in Base.metadata.tables.values():
+        for col in table.columns:
+            if "sqlite" in getattr(col.type, "_variant_mapping", {}):
+                continue
+            if isinstance(col.type, JSONB):
+                col.type = col.type.with_variant(JSON(), "sqlite")
+            elif isinstance(col.type, PG_UUID):
+                col.type = col.type.with_variant(_UUIDStringHelper(), "sqlite")
+            elif isinstance(col.type, ARRAY):
+                col.type = col.type.with_variant(JSON(), "sqlite")
 
     eng = create_engine(
         "sqlite:///:memory:",
         future=True,
         connect_args={"check_same_thread": False},
+        poolclass=_StaticPool,
     )
 
-    for table in Base.metadata.tables.values():
-        table.schema = None
-        for col in table.columns:
-            if isinstance(col.type, JSONB):
-                col.type = JSON()
-            elif isinstance(col.type, PG_UUID):
-                col.type = _UUIDStringHelper()
-            elif isinstance(col.type, ARRAY):
-                col.type = JSON()
+    from sqlalchemy import event as _sa_event
+
+    @_sa_event.listens_for(eng, "connect")
+    def _attach(dbapi_conn, _rec):
+        dbapi_conn.execute("ATTACH DATABASE ':memory:' AS reclaimrx")
 
     conn = eng.connect()
     Base.metadata.create_all(conn)
@@ -423,12 +443,57 @@ class TestFailurePath:
 # TestRlsIsolation - POSTGRES-GATED
 # ===========================================================================
 
+# Ordered to respect FK constraints (children before parents).
+_CLEANUP_TABLES = (
+    "detection_rule_evaluation_log",  # FK -> detection_rule_instances, detection_runs, anomalies
+    "anomalies",                       # FK -> detection_runs
+    "baseline_cache",
+    "csv_upload_rows",                 # FK -> detection_runs
+    "detection_runs",
+    "detection_rule_instances",        # FK -> detection_rule_types (leave types -- global catalog)
+)
+
+
+def _pg_cleanup(eng, tenant_id: uuid.UUID) -> None:
+    """Delete all test rows written for tenant_id from the real dev DB.
+
+    Must be called in a finally block so dev tables are not polluted across
+    runs.  Uses SET LOCAL GUC = tenant_id so RLS allows the DELETE (ifx_dev_app
+    is not BYPASSRLS).  Runs each DELETE in its own transaction so a partial
+    failure is visible without masking the original test failure.
+
+    detection_rule_types has no tenant_id column (global catalog) and is left
+    untouched — repeated calls to register_rule_types are idempotent anyway.
+    """
+    with eng.connect() as conn:
+        txn = conn.begin()
+        try:
+            conn.execute(
+                text("SET LOCAL app.current_tenant_id = :tid"),
+                {"tid": str(tenant_id)},
+            )
+            for tbl in _CLEANUP_TABLES:
+                conn.execute(
+                    text(
+                        f"DELETE FROM reclaimrx.{tbl} "  # noqa: S608 -- test-only, no user input
+                        f"WHERE tenant_id = CAST(:tid AS uuid)"
+                    ),
+                    {"tid": str(tenant_id)},
+                )
+            txn.commit()
+        except Exception:
+            txn.rollback()
+            raise
+
 
 class TestRlsIsolation:
     """RLS isolation proofs: TENANT_B sees 0 rows; unset GUC sees 0 rows.
 
     ALL assertions in this class require Postgres + ifx_dev_app role.
     Skipped unless RECLAIMRX_TEST_DB_URL is set.
+
+    Each test cleans up the rows it writes in a finally block so the dev
+    reclaimrx tables are not polluted between runs.
     """
 
     @reclaimrx_pg
@@ -468,6 +533,7 @@ class TestRlsIsolation:
                 "If non-zero, RLS policy is not enforcing."
             )
         finally:
+            _pg_cleanup(eng, _TENANT_A)
             eng.dispose()
 
     @reclaimrx_pg
@@ -500,6 +566,7 @@ class TestRlsIsolation:
                 "If non-zero, RLS NULLIF guard is broken."
             )
         finally:
+            _pg_cleanup(eng, _TENANT_A)
             eng.dispose()
 
     @reclaimrx_pg
@@ -525,7 +592,7 @@ class TestRlsIsolation:
                     {"tid": str(_TENANT_A)},
                 )
                 count = conn.execute(
-                    text("SELECT count(*) FROM reclaimrx.anomalies WHERE tenant_id = :tid::uuid"),
+                    text("SELECT count(*) FROM reclaimrx.anomalies WHERE tenant_id = CAST(:tid AS uuid)"),
                     {"tid": str(_TENANT_A)},
                 ).scalar()
                 txn.rollback()
@@ -534,6 +601,7 @@ class TestRlsIsolation:
                 f"TENANT_A should see {expected_count} rows; got {count}"
             )
         finally:
+            _pg_cleanup(eng, _TENANT_A)
             eng.dispose()
 
     @reclaimrx_pg

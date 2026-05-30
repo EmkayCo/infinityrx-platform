@@ -39,31 +39,49 @@ class _UUIDString(TypeDecorator):
         return uuid.UUID(value) if value is not None else None
 
 
-def _sqlite_compat_swap(eng) -> None:
-    """Replace Postgres-only column types on all registered ORM tables.
+def _sqlite_compat_swap() -> None:
+    """Register SQLite-compatible type variants on all registered ORM tables.
 
     Must be called AFTER all model modules are imported (so Base.metadata
     is fully populated) and BEFORE create_all.
 
-    Swaps:
-      JSONB        -> JSON
-      PG_UUID      -> _UUIDString (VARCHAR 36)
-      ARRAY(...)   -> JSON  (lists serialised as JSON arrays)
+    Uses TypeEngine.with_variant() so the base type (JSONB, PG_UUID, ARRAY)
+    is preserved for Postgres while SQLite gets a compatible alternative.
+    This is non-destructive: Postgres-gated tests running later in the same
+    process continue to emit the correct Postgres-native types.
 
-    Also nulls out schema names because SQLite does not support named schemas
-    (other than aliases created via ATTACH DATABASE). The schema="reclaimrx"
-    on World-A tables would cause "unknown database reclaimrx" on create_all.
+    Variants registered:
+      JSONB        -> JSON        (sqlite dialect)
+      PG_UUID      -> _UUIDString (sqlite dialect)
+      ARRAY(...)   -> JSON        (sqlite dialect, lists serialised as JSON arrays)
+
+    Does NOT touch table.schema.  SQLite schema resolution is handled by
+    ATTACHing ':memory:' AS reclaimrx on every connection (see
+    _attach_reclaimrx_schema_on_connect).  This keeps Base.metadata
+    schema-qualified at all times.
     """
     for table in Base.metadata.tables.values():
-        # Null out Postgres schema qualifier -- SQLite has no schema support.
-        table.schema = None
         for col in table.columns:
+            # Guard: skip if this dialect variant is already registered (idempotent
+            # when multiple test modules import and call this function).
+            if "sqlite" in getattr(col.type, "_variant_mapping", {}):
+                continue
             if isinstance(col.type, JSONB):
-                col.type = JSON()
+                col.type = col.type.with_variant(JSON(), "sqlite")
             elif isinstance(col.type, PG_UUID):
-                col.type = _UUIDString()
+                col.type = col.type.with_variant(_UUIDString(), "sqlite")
             elif isinstance(col.type, ARRAY):
-                col.type = JSON()
+                col.type = col.type.with_variant(JSON(), "sqlite")
+
+
+def _attach_reclaimrx_schema_on_connect(dbapi_conn, _connection_record) -> None:
+    """Pool-level 'connect' listener: ATTACH ':memory:' AS reclaimrx on every
+    new DBAPI connection so schema-qualified DDL/DML resolves on SQLite.
+
+    Registered via sqlalchemy event.listen(engine, 'connect', ...) before
+    any connections are drawn, so it fires for the very first connection too.
+    """
+    dbapi_conn.execute("ATTACH DATABASE ':memory:' AS reclaimrx")
 
 
 @pytest.fixture(autouse=True)
@@ -78,21 +96,37 @@ def engine():
     Imports all ORM model modules so Base.metadata is fully populated, then
     applies the LESSON-007 type-swap (JSONB->JSON, PG_UUID->VARCHAR36,
     ARRAY->JSON) before create_all so SQLite can render all column types.
+
+    Schema handling: Base.metadata tables with schema='reclaimrx' are NOT
+    stripped.  StaticPool ensures a single underlying DBAPI connection is
+    reused for all engine.connect() calls, so the ATTACH executed on first
+    connect (via the pool-level event) persists for the entire session and
+    all reclaimrx-schema tables are visible to every Session.  This keeps
+    Base.metadata schema-qualified so Postgres-gated tests running in the
+    same process always emit fully-qualified 'reclaimrx.<table>' queries.
     """
+    from sqlalchemy.pool import StaticPool
+
+    # Register the ATTACH listener BEFORE the engine is created so it fires
+    # on the very first DBAPI connection.
     eng = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
         future=True,
     )
+    event.listen(eng, "connect", _attach_reclaimrx_schema_on_connect)
 
     # Import all ORM models so Base.metadata is fully populated before create_all.
     import src.models.tables  # noqa: F401, PLC0415
     import src.models.detection_run_models  # noqa: F401, PLC0415
 
-    # Swap Postgres-only types to SQLite-compatible equivalents (LESSON-007).
-    _sqlite_compat_swap(eng)
+    # Swap Postgres-only column types to SQLite-compatible equivalents (LESSON-007).
+    # Does NOT touch table.schema — ATTACH handles schema resolution above.
+    _sqlite_compat_swap()
 
-    # Keep a single connection alive so in-memory tables persist for the whole session.
+    # Create tables; the ATTACH event fires on first connect so 'reclaimrx' schema
+    # is available for schema-qualified CREATE TABLE statements.
     _conn = eng.connect()
     Base.metadata.create_all(_conn)
     _conn.commit()

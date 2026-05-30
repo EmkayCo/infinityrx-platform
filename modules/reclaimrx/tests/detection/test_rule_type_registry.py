@@ -38,7 +38,7 @@ from sqlalchemy.types import String, TypeDecorator
 # Module-level patch: SQLite compatibility for PG_UUID and ARRAY(String).
 # Must happen BEFORE the engine fixture creates tables (LESSON-007).
 # ---------------------------------------------------------------------------
-from src._shim.db import Base, configure_engine, get_engine
+from src._shim.db import Base
 from src.models.detection_run_models import (  # noqa: F401 — registers tables
     DetectionRuleInstance,
     DetectionRuleType,
@@ -65,12 +65,14 @@ class _UUIDString(TypeDecorator):
 #   ARRAY(any)  -> JSON        (SQLite has no ARRAY, regardless of item type)
 for _table in Base.metadata.tables.values():
     for _col in _table.columns:
+        if "sqlite" in getattr(_col.type, "_variant_mapping", {}):
+            continue
         if isinstance(_col.type, PG_UUID):
-            _col.type = _UUIDString()
+            _col.type = _col.type.with_variant(_UUIDString(), "sqlite")
         elif isinstance(_col.type, JSONB):
-            _col.type = JSON()
+            _col.type = _col.type.with_variant(JSON(), "sqlite")
         elif isinstance(_col.type, ARRAY):
-            _col.type = JSON()
+            _col.type = _col.type.with_variant(JSON(), "sqlite")
 
 
 # ---------------------------------------------------------------------------
@@ -82,17 +84,35 @@ for _table in Base.metadata.tables.values():
 def engine():
     """In-memory SQLite engine with all reclaimrx tables materialised.
 
-    SQLite does not support schema-qualified tables ('reclaimrx.*').
-    We null out the schema on every table in Base.metadata before create_all
-    so DDL renders as plain unqualified table names.
-    """
-    # Strip schema qualifiers so SQLite create_all works.
-    for _t in Base.metadata.tables.values():
-        _t.schema = None
+    Schema handling: table.schema values are NOT stripped.  StaticPool
+    ensures every engine.connect() reuses the same DBAPI connection, and a
+    pool-level 'connect' event ATTACHes ':memory:' AS 'reclaimrx' so that
+    schema-qualified DDL/DML resolves correctly on SQLite.  Base.metadata
+    stays schema-qualified so Postgres-gated tests running in the same
+    process always emit fully-qualified 'reclaimrx.<table>' queries.
 
-    configure_engine("sqlite:///:memory:")
-    eng = get_engine()
-    Base.metadata.create_all(eng)
+    NOTE: configure_engine / get_engine are not called here because
+    register_rule_types() / register_rule_instances() receive an explicit
+    db Session — they never call get_engine() internally.
+    """
+    from sqlalchemy import create_engine as _ce
+    from sqlalchemy import event as _sa_event
+    from sqlalchemy.pool import StaticPool as _StaticPool
+
+    eng = _ce(
+        "sqlite:///:memory:",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=_StaticPool,
+    )
+
+    @_sa_event.listens_for(eng, "connect")
+    def _attach(dbapi_conn, _rec):
+        dbapi_conn.execute("ATTACH DATABASE ':memory:' AS reclaimrx")
+
+    with eng.connect() as _setup_conn:
+        Base.metadata.create_all(_setup_conn)
+        _setup_conn.commit()
     return eng
 
 

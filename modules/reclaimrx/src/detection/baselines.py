@@ -224,7 +224,7 @@ def _compute_prescriber_peer_volume(
             r.resolved_ndc AS ndc,
             {presc_field}  AS prescriber_npi,
             COUNT(*)       AS entity_n
-        FROM csv_upload_rows r
+        FROM reclaimrx.csv_upload_rows r
         WHERE r.detection_run_id = :run_id
           AND r.tenant_id = :tenant_id
           AND r.resolved_ndc IS NOT NULL
@@ -285,7 +285,7 @@ def _compute_pharmacy_ndc_volume(
             r.resolved_ndc          AS ndc,
             r.resolved_pharmacy_npi AS pharmacy_npi,
             COUNT(*)                AS entity_n
-        FROM csv_upload_rows r
+        FROM reclaimrx.csv_upload_rows r
         WHERE r.detection_run_id = :run_id
           AND r.tenant_id = :tenant_id
           AND r.resolved_ndc IS NOT NULL
@@ -350,7 +350,7 @@ def _compute_member_cost(
                 CAST({total_paid_field} AS REAL) *
                 CAST({total_paid_field} AS REAL)
             ) AS ss
-        FROM csv_upload_rows r
+        FROM reclaimrx.csv_upload_rows r
         WHERE r.detection_run_id = :run_id
           AND r.tenant_id = :tenant_id
           AND {total_paid_field} IS NOT NULL
@@ -415,7 +415,7 @@ def _compute_pharmacy_weekday_volume(
             r.resolved_pharmacy_npi AS pharmacy_npi,
             COUNT(*) AS total_count,
             SUM(CASE WHEN {weekend_expr} THEN 1 ELSE 0 END) AS weekend_count
-        FROM csv_upload_rows r
+        FROM reclaimrx.csv_upload_rows r
         WHERE r.detection_run_id = :run_id
           AND r.tenant_id = :tenant_id
           AND r.resolved_pharmacy_npi IS NOT NULL
@@ -488,7 +488,7 @@ def _compute_pharmacy_own_rate_history(
                 (CAST({ic_field} AS REAL) / CAST({wac_field} AS REAL)) *
                 (CAST({ic_field} AS REAL) / CAST({wac_field} AS REAL))
             ) AS sum_ratio_sq
-        FROM csv_upload_rows r
+        FROM reclaimrx.csv_upload_rows r
         WHERE r.detection_run_id = :run_id
           AND r.tenant_id = :tenant_id
           AND r.resolved_pharmacy_npi IS NOT NULL

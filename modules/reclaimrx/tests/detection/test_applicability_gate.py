@@ -30,7 +30,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Session
 from sqlalchemy.types import String, TypeDecorator
 
-from src._shim.db import Base, configure_engine, get_engine
+from src._shim.db import Base
 from src.models.detection_run_models import (  # noqa: F401 — registers tables
     DetectionRuleEvaluationLog,
     DetectionRuleInstance,
@@ -58,12 +58,14 @@ class _UUIDString(TypeDecorator):
 
 for _table in Base.metadata.tables.values():
     for _col in _table.columns:
+        if "sqlite" in getattr(_col.type, "_variant_mapping", {}):
+            continue
         if isinstance(_col.type, PG_UUID):
-            _col.type = _UUIDString()
+            _col.type = _col.type.with_variant(_UUIDString(), "sqlite")
         elif isinstance(_col.type, JSONB):
-            _col.type = JSON()
+            _col.type = _col.type.with_variant(JSON(), "sqlite")
         elif isinstance(_col.type, ARRAY):
-            _col.type = JSON()
+            _col.type = _col.type.with_variant(JSON(), "sqlite")
 
 
 # ---------------------------------------------------------------------------
@@ -73,13 +75,38 @@ for _table in Base.metadata.tables.values():
 
 @pytest.fixture(scope="module")
 def engine():
-    """In-memory SQLite engine; schema qualifiers stripped for SQLite compat."""
-    for _t in Base.metadata.tables.values():
-        _t.schema = None
+    """In-memory SQLite engine with all reclaimrx tables materialised.
 
-    configure_engine("sqlite:///:memory:")
-    eng = get_engine()
-    Base.metadata.create_all(eng)
+    Schema handling: table.schema values are NOT stripped.  StaticPool
+    ensures every engine.connect() reuses the same DBAPI connection, and a
+    pool-level 'connect' event ATTACHes ':memory:' AS 'reclaimrx' so that
+    schema-qualified DDL/DML resolves correctly on SQLite.  Base.metadata
+    stays schema-qualified so Postgres-gated tests running in the same
+    process always emit fully-qualified 'reclaimrx.<table>' queries.
+
+    NOTE: configure_engine / get_engine are not called here because
+    gate_rules() receives an explicit db Session — it never calls
+    get_engine() internally.  Building the engine directly keeps the
+    shim state unaffected by this module-scoped fixture.
+    """
+    from sqlalchemy import create_engine as _ce
+    from sqlalchemy import event as _sa_event
+    from sqlalchemy.pool import StaticPool as _StaticPool
+
+    eng = _ce(
+        "sqlite:///:memory:",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=_StaticPool,
+    )
+
+    @_sa_event.listens_for(eng, "connect")
+    def _attach(dbapi_conn, _rec):
+        dbapi_conn.execute("ATTACH DATABASE ':memory:' AS reclaimrx")
+
+    with eng.connect() as _setup_conn:
+        Base.metadata.create_all(_setup_conn)
+        _setup_conn.commit()
     return eng
 
 
