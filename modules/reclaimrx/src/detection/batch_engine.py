@@ -4,12 +4,23 @@ gate_rules(db, run, available_columns) -> list[DetectionRuleInstance]
     Loads enabled DetectionRuleInstance rows for run.tenant_id, joins DetectionRuleType,
     returns APPLICABLE subset; writes skipped_inapplicable log rows for non-applicable ones.
 
-run_detection(db, run) -> int
+run_detection(db, run, *, statement_timeout_ms=None) -> int
     PRECONDITION: raises RuntimeError if inserted_count != expected_count.
     PASS 1 - baselines: compute_baseline for each requires_baseline instance.
+             Each baseline runs in its own try/except; a failure logs the error,
+             records it in resolution_stats["errors"], and continues to the next
+             baseline. One baseline timeout MUST NOT abort the detection session.
     PASS 2 - single-row (MFR-001), statistical (MFR-003/4, HP-005/8, ALL-006),
              grouping (ALL-001, MFR-002, TH-002, TH-005).
     Returns count of Anomaly rows created.
+
+statement_timeout_ms (int, default 0 = unlimited):
+    Passed to _set_batch_statement_timeout() at the start of run_detection.
+    Batch analytics legitimately run for minutes; the OLTP 30s default is an
+    OLTP guard inappropriate for batch jobs. The env var
+    RECLAIMRX_BATCH_STATEMENT_TIMEOUT_MS controls the default when the caller
+    does not supply the argument (default: 0 = unlimited).
+    On SQLite (tests) _set_batch_statement_timeout is a no-op.
 
 MFR-008 deferred: needs statement-only-pharmacy reference data (dry-run fix).
 TH-002/TH-005 min-volume floor: skip prescribers below min_claims (default 20)
@@ -30,6 +41,7 @@ CHECKs satisfied by skip rows:
 from __future__ import annotations
 
 import logging
+import os
 from collections import defaultdict
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
@@ -58,6 +70,12 @@ logger = logging.getLogger(__name__)
 # Patching this module-level constant in tests exercises batch-boundary correctness.
 _ROW_BATCH: int = 10_000
 
+# Environment variable controlling the default statement_timeout for batch sessions.
+# 0 = unlimited (no timeout). OLTP servers set this to 30s; batch jobs must override.
+# Override at the process level: RECLAIMRX_BATCH_STATEMENT_TIMEOUT_MS=0
+_BATCH_STATEMENT_TIMEOUT_ENV = "RECLAIMRX_BATCH_STATEMENT_TIMEOUT_MS"
+_DEFAULT_BATCH_STATEMENT_TIMEOUT_MS: int = 0  # unlimited by default
+
 _BASELINE_KIND_MAP: dict[str, str] = {
     "MFR-004": "pharmacy_ndc_volume",
     "MFR-003": "pharmacy_own_rate_history",
@@ -70,6 +88,42 @@ _SINGLE_ROW_CODES: frozenset[str] = frozenset({"MFR-001"})
 _STATISTICAL_CODES: frozenset[str] = frozenset({"MFR-003", "MFR-004", "HP-005", "HP-008", "ALL-006"})
 _GROUPING_CODES: frozenset[str] = frozenset({"ALL-001", "MFR-002", "TH-002", "TH-005"})
 _ZERO = Decimal("0")
+
+
+# ---------------------------------------------------------------------------
+# Statement-timeout helper
+# ---------------------------------------------------------------------------
+
+
+def _set_batch_statement_timeout(db: Session, ms: int) -> None:
+    """Disable (or relax) the Postgres statement_timeout for the batch session.
+
+    Batch analytics jobs legitimately run for minutes; the OLTP 30s default
+    is an OLTP guard and must NOT apply to FWA detection. Setting ms=0 removes
+    the limit entirely for this session.
+
+    This function is a module-level helper (not inlined) so tests can patch
+    it to verify the call and/or to suppress the SQL on SQLite where
+    SET statement_timeout is not a valid command.
+
+    On non-Postgres dialects (SQLite in tests) this is a no-op: SQLite does
+    not support SET statement_timeout, so the guard checks the dialect first.
+
+    Args:
+        db: Active SQLAlchemy Session.
+        ms: Timeout in milliseconds. 0 = unlimited (no timeout).
+    """
+    if db.get_bind().dialect.name != "postgresql":
+        # SQLite and other non-Postgres dialects: no-op.
+        return
+    # SET (without LOCAL) applies for the entire session, not just the current
+    # transaction. This is intentional for batch jobs: we want the relaxed
+    # timeout for the whole detection pass, not just until the next COMMIT.
+    db.execute(text("SET statement_timeout = :ms"), {"ms": ms})
+    logger.info(
+        "Batch statement_timeout set to %d ms (0 = unlimited) for FWA detection session",
+        ms,
+    )
 
 
 def gate_rules(
@@ -215,7 +269,7 @@ def _write_eval_log(
 
 
 # ---------------------------------------------------------------------------
-# Pass 1 - Baseline computation
+# Pass 1 - Baseline computation (per-unit isolation)
 # ---------------------------------------------------------------------------
 
 
@@ -224,10 +278,24 @@ def _run_baselines(
     run: DetectionRun,
     applicable: list[DetectionRuleInstance],
     rule_type_by_code: dict[str, DetectionRuleType],
+    baseline_errors: list[dict[str, str]],
 ) -> None:
     """For each applicable instance whose type.requires_baseline, compute the baseline.
 
-    MFR-009: no baseline kind registered -- logged and skipped.
+    Per-unit isolation: each baseline computation runs in its own try/except.
+    A failure (including a Postgres statement_timeout / QueryCanceled) is logged,
+    recorded in baseline_errors, and the loop continues to the next baseline.
+    One failing baseline MUST NOT abort the detection session.
+
+    MFR-009: no baseline kind registered -- logged and skipped (not an error).
+
+    Args:
+        db:               Active Session.
+        run:              The DetectionRun being processed.
+        applicable:       Applicable rule instances.
+        rule_type_by_code: Rule type lookup map.
+        baseline_errors:  Mutable list; each failing baseline appends
+                          {"kind": str, "rule": str, "reason": str}.
     """
     for instance in applicable:
         rtype = rule_type_by_code.get(instance.rule_type_code)
@@ -236,13 +304,24 @@ def _run_baselines(
         code = instance.rule_type_code
         kind = _BASELINE_KIND_MAP.get(code)
         if kind is None:
-            logger.info("No baseline kind registered for rule %s -- skipping baseline computation", code)
+            logger.info(
+                "No baseline kind registered for rule %s -- skipping baseline computation", code
+            )
             continue
         try:
             n = compute_baseline(db, run, kind=kind)
             logger.debug("Baseline kind=%s rule=%s: %d rows written", kind, code, n)
-        except Exception:
-            logger.exception("Baseline computation failed for kind=%s rule=%s", kind, code)
+        except Exception as exc:
+            # Per-unit isolation: log and record, but do NOT re-raise.
+            # A Postgres statement_timeout (psycopg2.errors.QueryCanceled) lands here.
+            # We continue to the next baseline so the detection session survives.
+            reason = f"{type(exc).__name__}: {exc}"
+            logger.exception(
+                "Baseline computation failed for kind=%s rule=%s -- continuing with next baseline",
+                kind,
+                code,
+            )
+            baseline_errors.append({"kind": kind, "rule": code, "reason": reason})
 
 
 # ---------------------------------------------------------------------------
@@ -1099,14 +1178,28 @@ def _evaluate_grouping_rules(
 # ---------------------------------------------------------------------------
 
 
-def run_detection(db: Session, run: DetectionRun) -> int:
+def run_detection(
+    db: Session,
+    run: DetectionRun,
+    *,
+    statement_timeout_ms: int | None = None,
+) -> int:
     """Two-pass FWA detection over csv_upload_rows for the given run.
 
     PRECONDITION gate: raises RuntimeError if
         run.resolution_stats["inserted_count"] != run.resolution_stats["expected_count"]
 
+    Statement timeout:
+        Calls _set_batch_statement_timeout(db, ms) at the start.  Default ms comes
+        from RECLAIMRX_BATCH_STATEMENT_TIMEOUT_MS env var (0 = unlimited).  The OLTP
+        30s server default is inappropriate for batch analytics; this call relaxes it.
+        On SQLite this is a no-op.
+
     PASS 1 -- baselines: compute_baseline for each requires_baseline instance.
-      MFR-009: no registered baseline kind -- logged and skipped.
+      Per-unit isolation: each baseline runs in its own try/except.
+      A failure is logged and recorded in resolution_stats["errors"]; the loop
+      continues to the next baseline.  One baseline timeout MUST NOT abort the run.
+      MFR-009: no registered baseline kind -- logged and skipped (not an error).
 
     PASS 2 -- evaluate:
       SINGLE-ROW:  MFR-001. Streamed in batches of _ROW_BATCH.
@@ -1124,9 +1217,27 @@ def run_detection(db: Session, run: DetectionRun) -> int:
       Peak working set is O(_ROW_BATCH + flagged_rows), not O(total_rows).
       The full csv_upload_rows set is never materialized into Python memory.
 
+    Finalization:
+      run.status is always set to 'completed' (the run finished, even if some
+      units errored).  Baseline errors are recorded in
+      resolution_stats["errors"] = [{"kind": ..., "rule": ..., "reason": ...}].
+      The run is NEVER left 'in_progress'.
+
     Returns int: count of Anomaly rows created.
-    Updates: run.anomaly_count, run.record_count, run.status, run.completed_at.
+    Updates: run.anomaly_count, run.record_count, run.status, run.completed_at,
+             run.resolution_stats (no_finding_count, errors).
     """
+    # Resolve the statement_timeout value to use.
+    if statement_timeout_ms is None:
+        statement_timeout_ms = int(
+            os.environ.get(_BATCH_STATEMENT_TIMEOUT_ENV, str(_DEFAULT_BATCH_STATEMENT_TIMEOUT_MS))
+        )
+
+    # Disable (or relax) the Postgres statement_timeout for this batch session.
+    # Batch analytics jobs legitimately take minutes; the OLTP 30s guard is wrong here.
+    # On SQLite this is a no-op.
+    _set_batch_statement_timeout(db, statement_timeout_ms)
+
     # PRECONDITION -- full-coverage gate
     stats = run.resolution_stats or {}
     inserted = stats.get("inserted_count")
@@ -1148,8 +1259,9 @@ def run_detection(db: Session, run: DetectionRun) -> int:
     ).scalars().all()
     rule_type_by_code = {rt.code: rt for rt in rule_types}
 
-    # PASS 1 -- baselines (already server-side SQL; no full materialization)
-    _run_baselines(db, run, applicable, rule_type_by_code)
+    # PASS 1 -- baselines (per-unit isolation; one failure does not abort the run)
+    baseline_errors: list[dict[str, str]] = []
+    _run_baselines(db, run, applicable, rule_type_by_code, baseline_errors)
     db.flush()
 
     # Record count via SQL -- never materialize all rows just to call len().
@@ -1181,13 +1293,17 @@ def run_detection(db: Session, run: DetectionRun) -> int:
     )
     db.flush()
 
-    # Update run stats.
+    # Update run stats.  Always set status='completed' -- the run finished even
+    # if individual units (baselines) errored.  Errors are recorded in
+    # resolution_stats["errors"] for operator diagnosis.
     run.anomaly_count = len(all_anomalies)
     run.record_count = record_count
     run.status = "completed"
     run.completed_at = datetime.now(UTC)
     new_stats = dict(run.resolution_stats)
     new_stats["no_finding_count"] = no_finding_count[0]
+    if baseline_errors:
+        new_stats["errors"] = baseline_errors
     run.resolution_stats = new_stats
     db.flush()
 
