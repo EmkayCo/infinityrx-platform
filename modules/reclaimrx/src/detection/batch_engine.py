@@ -7,9 +7,13 @@ gate_rules(db, run, available_columns) -> list[DetectionRuleInstance]
 run_detection(db, run) -> int
     PRECONDITION: raises RuntimeError if inserted_count != expected_count.
     PASS 1 - baselines: compute_baseline for each requires_baseline instance.
-    PASS 2 - single-row (MFR-001, MFR-008), statistical (MFR-003/4, HP-005/8, ALL-006),
+    PASS 2 - single-row (MFR-001), statistical (MFR-003/4, HP-005/8, ALL-006),
              grouping (ALL-001, MFR-002, TH-002, TH-005).
     Returns count of Anomaly rows created.
+
+MFR-008 deferred: needs statement-only-pharmacy reference data (dry-run fix).
+TH-002/TH-005 min-volume floor: skip prescribers below min_claims (default 20)
+    to prevent false-positive floods on low-volume prescribers.
 
 CHECKs satisfied by skip rows:
   ck_reclaimrx_eval_log_result            - skipped_inapplicable is in the enum
@@ -51,7 +55,7 @@ _BASELINE_KIND_MAP: dict[str, str] = {
     "ALL-006": "pharmacy_weekday_volume",
 }
 
-_SINGLE_ROW_CODES: frozenset[str] = frozenset({"MFR-001", "MFR-008"})
+_SINGLE_ROW_CODES: frozenset[str] = frozenset({"MFR-001"})
 _STATISTICAL_CODES: frozenset[str] = frozenset({"MFR-003", "MFR-004", "HP-005", "HP-008", "ALL-006"})
 _GROUPING_CODES: frozenset[str] = frozenset({"ALL-001", "MFR-002", "TH-002", "TH-005"})
 _ZERO = Decimal("0")
@@ -235,14 +239,6 @@ def _run_baselines(
 # ---------------------------------------------------------------------------
 
 
-def _evaluate_mfr008_row(fields: dict[str, Any]) -> RuleResult:
-    """MFR-008: fires when statement_account is non-empty."""
-    stmt = str(fields.get("statement_account", "") or "").strip()
-    if stmt:
-        return RuleResult(fired=True, risk_score=85, severity="critical", confidence="high",
-                          evidence={"statement_account": stmt})
-    return RuleResult(fired=False, risk_score=0, severity=None, confidence=None, evidence={})
-
 
 def _evaluate_single_row_rules(
     db: Session,
@@ -252,7 +248,7 @@ def _evaluate_single_row_rules(
     csv_rows: list[CsvUploadRow],
     no_finding_count: list[int],
 ) -> list[Anomaly]:
-    """Evaluate MFR-001 and MFR-008 per csv_upload_row."""
+    """Evaluate MFR-001 per csv_upload_row."""
     anomalies: list[Anomaly] = []
     single_instances = [inst for inst in applicable if inst.rule_type_code in _SINGLE_ROW_CODES]
     for instance in single_instances:
@@ -268,8 +264,6 @@ def _evaluate_single_row_rules(
             try:
                 if code == "MFR-001":
                     result = evaluate_threshold(fields, params)
-                elif code == "MFR-008":
-                    result = _evaluate_mfr008_row(fields)
                 else:
                     no_finding_count[0] += 1
                     continue
@@ -657,11 +651,16 @@ def _evaluate_th002(
     """TH-002 Telehealth Geographic Dispersion.
 
     Group by prescriber_npi; count distinct patient_state values.
-    Fire if count > threshold (default 10). One anomaly per prescriber.
+    Fire if count > threshold (default 10) AND total claim count >= min_claims
+    (default 20).  A prescriber with 11 claims trivially spans 11 states —
+    min_claims prevents false-positive floods on low-volume prescribers.
+    min_claims is tenant-configurable via instance.parameters (Principle 12).
     """
     anomalies = []
     threshold = Decimal(str(instance.parameters.get("threshold", 10)))
+    min_claims = int(instance.parameters.get("min_claims", 20))
     presc_states = defaultdict(dict)
+    presc_claims = defaultdict(int)
     presc_rep = {}
     for csv_row in csv_rows:
         rd = csv_row.row_data
@@ -669,11 +668,16 @@ def _evaluate_th002(
         state = str(rd.get("patient_state", "") or "").strip()
         if not presc or not state:
             continue
+        presc_claims[presc] += 1
         if state not in presc_states[presc]:
             presc_states[presc][state] = csv_row
         if presc not in presc_rep:
             presc_rep[presc] = csv_row
     for presc, states_map in presc_states.items():
+        claim_count = presc_claims[presc]
+        if claim_count < min_claims:
+            no_finding_count[0] += 1
+            continue
         state_count = len(states_map)
         if Decimal(str(state_count)) <= threshold:
             no_finding_count[0] += 1
@@ -692,6 +696,8 @@ def _evaluate_th002(
                 "patient_state_count": state_count,
                 "patient_states": sorted(states_map.keys()),
                 "threshold": str(threshold),
+                "claim_count": claim_count,
+                "min_claims": min_claims,
             },
             severity=rtype.default_severity,
             confidence_num=Decimal("0.60"),
@@ -717,10 +723,14 @@ def _evaluate_th005(
     """TH-005 Prescriber-Pharmacy Affinity.
 
     Group by prescriber_npi; compute top pharmacy share.
-    Fire when share > threshold (default 0.5). One anomaly per prescriber.
+    Fire when share > threshold (default 0.5) AND total claim count >= min_claims
+    (default 20).  A prescriber with 1-2 claims trivially has 100% pharmacy share
+    — min_claims prevents false-positive floods on low-volume prescribers.
+    min_claims is tenant-configurable via instance.parameters (Principle 12).
     """
     anomalies = []
     threshold = Decimal(str(instance.parameters.get("threshold", "0.5")))
+    min_claims = int(instance.parameters.get("min_claims", 20))
     presc_pharmacy = defaultdict(lambda: defaultdict(int))
     presc_rep = {}
     for csv_row in csv_rows:
@@ -735,6 +745,9 @@ def _evaluate_th005(
     for presc, pharmacy_counts in presc_pharmacy.items():
         total = sum(pharmacy_counts.values())
         if total == 0:
+            continue
+        if total < min_claims:
+            no_finding_count[0] += 1
             continue
         top_pharm = max(pharmacy_counts, key=lambda p: pharmacy_counts[p])
         top_count = pharmacy_counts[top_pharm]
@@ -757,7 +770,9 @@ def _evaluate_th005(
                 "top_pharmacy_share": str(share.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
                 "top_pharmacy_count": top_count,
                 "total_count": total,
+                "claim_count": total,
                 "threshold": str(threshold),
+                "min_claims": min_claims,
             },
             severity=rtype.default_severity,
             confidence_num=Decimal("0.40"),
@@ -820,7 +835,7 @@ def run_detection(db, run):
       MFR-009: no registered baseline kind -- logged and skipped.
 
     PASS 2 -- evaluate:
-      SINGLE-ROW:  MFR-001, MFR-008.
+      SINGLE-ROW:  MFR-001.
       STATISTICAL: MFR-003, MFR-004, HP-005, HP-008, ALL-006
                    (MFR-004/HP-005/ALL-006 are entity-level; per-row skipped).
       GROUPING:    ALL-001, MFR-002, TH-002, TH-005.

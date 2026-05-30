@@ -15,9 +15,10 @@ Contract:
 Fixture pattern:
 - Module-scope SQLite engine with SAVEPOINT-based session isolation (LESSON-001).
 - PG_UUID -> _UUIDString, JSONB -> JSON, ARRAY -> JSON (LESSON-007).
-- Instances are created under _FULL_CSV_COLUMNS (14 instances).
+- Instances are created under _FULL_CSV_COLUMNS (13 instances).
 - gate_rules is called with RESTRICTED columns -> 2 are inapplicable (MFR-001,
-  MFR-003 both require extended_wac) -> 2 skip rows written, 12 returned.
+  MFR-003 both require extended_wac) -> 2 skip rows written, 11 returned.
+  MFR-008 is now DEFERRED so it is never instantiated and never counted here.
 """
 from __future__ import annotations
 
@@ -147,7 +148,8 @@ from src.detection.rule_type_registry import (  # noqa: E402
 _TENANT_ID = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 _SYSTEM_UUID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
-# Full CSV column set — union of all required_data_columns across the 14 RUN rules.
+# Full CSV column set — union of all required_data_columns across the 13 RUN rules.
+# MFR-008 is DEFERRED; statement_account not needed to instantiate rules.
 _FULL_CSV_COLUMNS: set[str] = {
     "patient_unique_hash", "ndc", "date_of_service", "auth_no_hash",
     "transaction_code", "transaction_status",
@@ -156,7 +158,6 @@ _FULL_CSV_COLUMNS: set[str] = {
     "extended_wac", "ingredient_cost_paid", "dispensing_fee_paid",
     "quantity_dispensed",
     "reversed_check", "date_added_timestamp",
-    "statement_account",
     "u_c", "pos_adjustment",
     "total_paid_amt",
 }
@@ -166,7 +167,7 @@ _RESTRICTED_COLUMNS: set[str] = _FULL_CSV_COLUMNS - {"extended_wac"}
 
 # Rules that require extended_wac (become inapplicable under restricted set).
 _INAPPLICABLE_CODES: set[str] = {"MFR-001", "MFR-003"}
-_EXPECTED_APPLICABLE_COUNT = 12  # 14 - 2
+_EXPECTED_APPLICABLE_COUNT = 11  # 13 - 2
 
 
 # ---------------------------------------------------------------------------
@@ -201,14 +202,14 @@ def _seed(db: Session, tenant_id: uuid.UUID) -> DetectionRun:
 class TestGateRulesReturnValue:
     """gate_rules returns exactly the applicable instances."""
 
-    def test_full_columns_returns_all_14(self, db: Session):
-        """Full column set -> all 14 instances are applicable."""
+    def test_full_columns_returns_all_13(self, db: Session):
+        """Full column set -> all 13 instances are applicable (MFR-008 DEFERRED)."""
         run = _seed(db, _TENANT_ID)
         applicable = gate_rules(db, run, _FULL_CSV_COLUMNS)
-        assert len(applicable) == 14
+        assert len(applicable) == 13
 
-    def test_restricted_columns_returns_12(self, db: Session):
-        """Restricted set (no extended_wac) -> 12 applicable; 2 skip rows written."""
+    def test_restricted_columns_returns_11(self, db: Session):
+        """Restricted set (no extended_wac) -> 11 applicable; 2 skip rows written."""
         run = _seed(db, _TENANT_ID)
         applicable = gate_rules(db, run, _RESTRICTED_COLUMNS)
         assert len(applicable) == _EXPECTED_APPLICABLE_COUNT
@@ -231,7 +232,7 @@ class TestGateRulesReturnValue:
             )
 
     def test_applicable_codes_correct(self, db: Session):
-        """The 12 returned codes match the 14-RUN-set minus the two inapplicable ones."""
+        """The 11 returned codes match the 13-RUN-set minus the two inapplicable ones."""
         run = _seed(db, _TENANT_ID)
         applicable = gate_rules(db, run, _RESTRICTED_COLUMNS)
         all_run_codes = {
@@ -392,8 +393,8 @@ class TestSkipRowsWritten:
         ).scalar()
         assert skip_count == 0
 
-    def test_empty_columns_writes_14_skip_rows(self, db: Session):
-        """Empty column set -> all 14 instances inapplicable -> 14 skip rows."""
+    def test_empty_columns_writes_13_skip_rows(self, db: Session):
+        """Empty column set -> all 13 instances inapplicable -> 13 skip rows."""
         run = _seed(db, _TENANT_ID)
         gate_rules(db, run, set())
         db.flush()
@@ -403,7 +404,7 @@ class TestSkipRowsWritten:
                 DetectionRuleEvaluationLog.detection_run_id == run.id,
             )
         ).scalar()
-        assert skip_count == 14
+        assert skip_count == 13
 
 
 class TestCheckConstraintSatisfied:

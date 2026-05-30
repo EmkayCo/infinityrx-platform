@@ -6,14 +6,17 @@ Contract assertions:
 - RULE_TYPE_CATALOG has >= 46 entries.
 - register_rule_types(db) inserts exactly len(RULE_TYPE_CATALOG) rows on first call.
 - Second call returns 0 (idempotent — DO NOTHING on conflict).
-- Exactly 14 rules have deferred_data_feed=False (the "RUN" set).
+- Exactly 13 rules have deferred_data_feed=False (the "RUN" set).
+  MFR-008 (Statement Credit Abuse) was reclassified to DEFERRED in the dry-run
+  fix: it needs statement-only-pharmacy reference data not present in the CSV.
 - Deferred rules have deferred_data_feed=True and a non-empty deferred_reason.
 - MFR-001 is a RUN rule with required_data_columns containing 'extended_wac' and
   'ingredient_cost_paid', and family in {A1..A6}.
 - ALL-002 is a DEFERRED rule with a truthy deferred_reason.
+- MFR-008 is a DEFERRED rule with deferred_data_feed=True and a truthy deferred_reason.
 
 register_rule_instances contract:
-- Given full CSV column set: creates exactly 14 instances (the RUN rules).
+- Given full CSV column set: creates exactly 13 instances (the RUN rules).
 - Deferred rules and rules with missing required columns get no instance.
 - Second call returns 0 (idempotent).
 - Restricted column set gates MFR-001 and MFR-003 (both require extended_wac).
@@ -146,16 +149,18 @@ from src.detection.rule_type_registry import (  # noqa: E402
 )
 
 # ---------------------------------------------------------------------------
-# Constants for the 14 RUN rules (deferred_data_feed=False)
+# Constants for the 13 RUN rules (deferred_data_feed=False)
+# MFR-008 reclassified to DEFERRED (needs statement-only-pharmacy reference data).
 # ---------------------------------------------------------------------------
 _RUN_CODES = {
     "ALL-001", "MFR-001", "MFR-002", "ALL-005", "HP-010", "TH-005",
-    "TH-002", "MFR-008", "MFR-004", "MFR-003", "HP-005", "HP-008",
+    "TH-002", "MFR-004", "MFR-003", "HP-005", "HP-008",
     "ALL-006", "MFR-009",
 }
 _VALID_FAMILIES = {"A1", "A2", "A3", "A4", "A5", "A6"}
 
-# Full CSV column set — union of all required_data_columns across the 14 RUN rules.
+# Full CSV column set — union of all required_data_columns across the 13 RUN rules.
+# MFR-008 is now DEFERRED; statement_account is no longer needed to instantiate rules.
 _FULL_CSV_COLUMNS: set[str] = {
     # ALL-001
     "patient_unique_hash", "ndc", "date_of_service", "auth_no_hash",
@@ -169,8 +174,6 @@ _FULL_CSV_COLUMNS: set[str] = {
     "quantity_dispensed",
     # MFR-002
     "reversed_check", "date_added_timestamp",
-    # MFR-008
-    "statement_account",
     # MFR-009
     "u_c", "pos_adjustment",
     # HP-008
@@ -210,11 +213,11 @@ class TestCatalogCompleteness:
                 f"Rule {rule['code']} has invalid family {rule['family']!r}"
             )
 
-    def test_exactly_14_run_rules(self):
+    def test_exactly_13_run_rules(self):
         run_rules = [r for r in RULE_TYPE_CATALOG if not r["deferred_data_feed"]]
         codes = {r["code"] for r in run_rules}
-        assert len(run_rules) == 14, (
-            f"Expected 14 RUN rules, got {len(run_rules)}: {codes}"
+        assert len(run_rules) == 13, (
+            f"Expected 13 RUN rules, got {len(run_rules)}: {codes}"
         )
         assert codes == _RUN_CODES, (
             f"RUN rule codes mismatch.\nExpected: {_RUN_CODES}\nGot: {codes}"
@@ -295,6 +298,33 @@ class TestAll002DeferredRule:
         assert rule["deferred_reason"]
 
 
+class TestMfr008DeferredRule:
+    """MFR-008 (Statement Credit Abuse) reclassified to DEFERRED.
+
+    The naive 'fires on any non-empty statement_account' logic was a false-positive
+    flood: a populated statement_account is normal for statement-only pharmacies and
+    not fraud without knowing which pharmacies are contractually statement-only.
+    That reference data is not present in the CSV.
+    """
+
+    def test_mfr008_is_deferred(self):
+        rule = next(r for r in RULE_TYPE_CATALOG if r["code"] == "MFR-008")
+        assert rule["deferred_data_feed"] is True, (
+            "MFR-008 must be DEFERRED — requires statement-only-pharmacy reference data"
+        )
+
+    def test_mfr008_deferred_reason_is_truthy(self):
+        rule = next(r for r in RULE_TYPE_CATALOG if r["code"] == "MFR-008")
+        assert rule["deferred_reason"], (
+            "MFR-008 deferred_reason must explain why it needs reference data"
+        )
+
+    def test_mfr008_not_in_run_codes(self):
+        assert "MFR-008" not in _RUN_CODES, (
+            "MFR-008 must not appear in the RUN code set"
+        )
+
+
 class TestBaselineRequiredRules:
     """Rules flagged requires_baseline=True must be in the RUN set."""
 
@@ -365,14 +395,14 @@ class TestRegisterRuleTypes:
         assert row.deferred_data_feed is True
         assert row.deferred_reason
 
-    def test_exactly_14_run_rows_in_db(self, db: Session):
+    def test_exactly_13_run_rows_in_db(self, db: Session):
         from sqlalchemy import select
 
         register_rule_types(db)
         rows = db.execute(
             select(DetectionRuleType).where(DetectionRuleType.deferred_data_feed.is_(False))
         ).scalars().all()
-        assert len(rows) == 14
+        assert len(rows) == 13
 
     def test_all_run_rows_have_required_data_columns(self, db: Session):
         from sqlalchemy import select
@@ -386,6 +416,20 @@ class TestRegisterRuleTypes:
                 f"RUN rule {row.code} has empty required_data_columns in DB"
             )
 
+    def test_mfr008_row_is_deferred_in_db(self, db: Session):
+        from sqlalchemy import select
+
+        register_rule_types(db)
+        row = db.execute(
+            select(DetectionRuleType).where(DetectionRuleType.code == "MFR-008")
+        ).scalar_one()
+        assert row.deferred_data_feed is True, (
+            "MFR-008 must be stored as deferred in DB"
+        )
+        assert row.deferred_reason, (
+            "MFR-008 deferred_reason must be non-empty in DB"
+        )
+
 
 class TestRegisterRuleInstances:
     """Integration tests for register_rule_instances(db, tenant_id, available_columns)."""
@@ -394,19 +438,23 @@ class TestRegisterRuleInstances:
         """Seed rule types; required before instances (FK constraint)."""
         register_rule_types(db)
 
-    def test_full_columns_creates_14_instances(self, db: Session):
-        """Full CSV column set → exactly 14 instances (one per RUN rule)."""
+    def test_full_columns_creates_13_instances(self, db: Session):
+        """Full CSV column set → exactly 13 instances (one per RUN rule).
+
+        MFR-008 is now DEFERRED so it does not produce an instance even when
+        statement_account is present in the column set.
+        """
         from sqlalchemy import func, select
 
         self._seed_types(db)
         count = register_rule_instances(db, _SYSTEM_UUID, _FULL_CSV_COLUMNS, _SYSTEM_UUID)
-        assert count == 14
+        assert count == 13
         total = db.execute(
             select(func.count()).select_from(DetectionRuleInstance).where(
                 DetectionRuleInstance.tenant_id == _SYSTEM_UUID
             )
         ).scalar()
-        assert total == 14
+        assert total == 13
 
     def test_idempotent_second_call_returns_zero(self, db: Session):
         """Second call with same tenant + columns → 0 inserts."""
@@ -416,7 +464,7 @@ class TestRegisterRuleInstances:
         assert count2 == 0
 
     def test_idempotent_row_count_unchanged(self, db: Session):
-        """Total row count is still 14 after second call."""
+        """Total row count is still 13 after second call."""
         from sqlalchemy import func, select
 
         self._seed_types(db)
@@ -427,7 +475,7 @@ class TestRegisterRuleInstances:
                 DetectionRuleInstance.tenant_id == _SYSTEM_UUID
             )
         ).scalar()
-        assert total == 14
+        assert total == 13
 
     def test_deferred_rules_get_no_instance(self, db: Session):
         """Deferred rules (deferred_data_feed=True) must not produce instances."""
@@ -534,20 +582,24 @@ class TestRegisterRuleInstances:
         assert rows == [], "MFR-003 needs extended_wac; must not be created without it"
 
     def test_restricted_columns_still_creates_eligible_rules(self, db: Session):
-        """Removing extended_wac still leaves 12 eligible RUN rules instantiated."""
+        """Removing extended_wac still leaves 11 eligible RUN rules instantiated.
+
+        MFR-008 is DEFERRED (count 13 → 13 base).
+        Drop extended_wac → MFR-001 and MFR-003 also gated → 13 - 2 = 11.
+        """
         from sqlalchemy import func, select
 
         self._seed_types(db)
         restricted = _FULL_CSV_COLUMNS - {"extended_wac"}
         count = register_rule_instances(db, _SYSTEM_UUID, restricted, _SYSTEM_UUID)
-        # MFR-001 and MFR-003 are gated; remaining 12 should be created.
-        assert count == 12
+        # MFR-001 and MFR-003 are column-gated; remaining 11 should be created.
+        assert count == 11
         total = db.execute(
             select(func.count()).select_from(DetectionRuleInstance).where(
                 DetectionRuleInstance.tenant_id == _SYSTEM_UUID
             )
         ).scalar()
-        assert total == 12
+        assert total == 11
 
     def test_ml_detector_registry_not_written(self, db: Session):
         """register_rule_instances must never INSERT into ml_detector_registry."""
@@ -569,15 +621,15 @@ class TestRegisterRuleInstances:
         )
 
     def test_different_tenants_get_independent_instances(self, db: Session):
-        """Two tenants can each have their own 14 instances independently."""
+        """Two tenants can each have their own 13 instances independently."""
         from sqlalchemy import func, select
 
         tenant_b = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
         self._seed_types(db)
         register_rule_instances(db, _SYSTEM_UUID, _FULL_CSV_COLUMNS, _SYSTEM_UUID)
         register_rule_instances(db, tenant_b, _FULL_CSV_COLUMNS, tenant_b)
-        # Each tenant has 14 instances; total = 28.
+        # Each tenant has 13 instances; total = 26.
         total = db.execute(
             select(func.count()).select_from(DetectionRuleInstance)
         ).scalar()
-        assert total == 28
+        assert total == 26

@@ -95,6 +95,8 @@ _FULL_CSV_COLUMNS: set[str] = {
     "extended_wac", "ingredient_cost_paid", "dispensing_fee_paid",
     "quantity_dispensed",
     "reversed_check", "date_added_timestamp",
+    # statement_account kept here so rows can carry it, but MFR-008 is now
+    # DEFERRED and will not be instantiated regardless of column presence.
     "statement_account",
     "u_c", "pos_adjustment",
     "total_paid_amt",
@@ -666,6 +668,79 @@ class TestMfr001NqInflation:
 # ===========================================================================
 
 
+class TestMfr008Deferred:
+    """MFR-008 (Statement Credit Abuse) is DEFERRED — must produce zero anomalies.
+
+    The prior implementation fired on any non-empty statement_account, which
+    caused 54/54 false positives on the dry-run fixture.  A populated
+    statement_account is normal for statement-only pharmacies; the rule needs
+    a reference feed identifying which pharmacies are contractually
+    statement-only, which is not present in the CSV.
+    """
+
+    def test_mfr008_produces_no_anomalies_on_fixture(self, db: Session):
+        """MFR-008 must not fire on the 54-row fixture (rule is DEFERRED)."""
+        run = _load_fixture(db)
+        run_detection(db, run)
+
+        count = db.execute(
+            select(func.count()).select_from(Anomaly).where(
+                Anomaly.data_source_run_id == run.id,
+                Anomaly.finding_code == "MFR-008",
+            )
+        ).scalar()
+        assert count == 0, (
+            f"MFR-008 is DEFERRED and must produce zero anomalies; got {count}"
+        )
+
+    def test_mfr008_produces_no_anomalies_with_statement_account_rows(self, db: Session):
+        """MFR-008 must not fire even when rows explicitly carry statement_account values."""
+        register_rule_types(db)
+        register_rule_instances(db, _TENANT, _FULL_CSV_COLUMNS, _SYS_UID)
+
+        run = DetectionRun(
+            tenant_id=_TENANT,
+            data_source="csv_upload",
+            run_label="mfr008-stmt-test",
+            source_path="/tmp/mfr008.csv",
+            source_filename="mfr008.csv",
+            source_sha256="cc" * 32,
+            created_by=_SYS_UID,
+            resolution_stats={"expected_count": 0, "inserted_count": 0},
+        )
+        db.add(run)
+        db.flush()
+
+        # Seed 5 rows with non-empty statement_account — should still not fire.
+        for i in range(5):
+            _seed_csv_row(
+                db, run,
+                row_number=i + 1,
+                patient_unique_hash=f"PT_MFR008_{i}",
+                auth_no_hash=f"AUTH_MFR008_{i}",
+                pharmacy_npi="1111111111",
+                ndc="00093015401",
+                date_of_service="2024-06-01",
+                statement_account="STMT-ACCT-001",
+            )
+
+        run.resolution_stats = {"expected_count": 5, "inserted_count": 5}
+        db.flush()
+
+        run_detection(db, run)
+
+        count = db.execute(
+            select(func.count()).select_from(Anomaly).where(
+                Anomaly.data_source_run_id == run.id,
+                Anomaly.finding_code == "MFR-008",
+            )
+        ).scalar()
+        assert count == 0, (
+            f"MFR-008 must not fire even with statement_account present "
+            f"(rule is DEFERRED, needs reference data); got {count}"
+        )
+
+
 class TestDeferredAndInapplicableRules:
     """Deferred/inapplicable rules produce zero anomalies and correct skip log rows."""
 
@@ -797,7 +872,12 @@ class TestAnomalyFieldsContract:
 
 
 class TestTh002GeographicDispersion:
-    """TH-002: prescriber with > 10 distinct patient_state values fires."""
+    """TH-002: prescriber with > 10 distinct patient_state values fires.
+
+    Minimum-volume floor: prescribers with fewer than min_claims (default 20)
+    are excluded from evaluation — a prescriber with 11 claims trivially has
+    1 claim per state, which is not meaningful without volume.
+    """
 
     def test_th002_does_not_fire_on_8_state_fixture(self, db: Session):
         """Prescriber 8887776661 has 8 states in fixture — TH-002 requires > 10, no fire."""
@@ -814,10 +894,11 @@ class TestTh002GeographicDispersion:
             f"TH-002 must not fire on 8-state fixture (threshold > 10), got {count}"
         )
 
-    def test_th002_fires_when_prescriber_has_11_states(self, db: Session):
-        """TH-002 fires when a prescriber has >10 distinct states — seeded directly."""
-        # Build a run with enough rows to fire TH-002.
-        # Do NOT modify sample_claims.csv — seed extra rows directly.
+    def test_th002_fires_when_prescriber_has_11_states_and_sufficient_volume(self, db: Session):
+        """TH-002 fires when a prescriber has >10 distinct states AND >= min_claims.
+
+        Seeds 20 rows for one prescriber across 11 states (>= min_claims floor).
+        """
         register_rule_types(db)
         register_rule_instances(db, _TENANT, _FULL_CSV_COLUMNS, _SYS_UID)
 
@@ -834,14 +915,16 @@ class TestTh002GeographicDispersion:
         db.add(run)
         db.flush()
 
-        # Seed 11 rows for same prescriber, each in a different patient_state.
+        # Seed 20 rows for same prescriber spread across 11 states (total >= min_claims).
         states = ["TX", "CA", "NY", "FL", "OH", "GA", "NC", "IL", "PA", "AZ", "WA"]
         assert len(states) == 11
         presc_npi = "9990001111"
-        for i, state in enumerate(states):
+        row_num = 1
+        for i in range(20):
+            state = states[i % len(states)]
             _seed_csv_row(
                 db, run,
-                row_number=i + 1,
+                row_number=row_num,
                 patient_unique_hash=f"PT_TH002_{i}",
                 auth_no_hash=f"AUTH_TH002_{i}",
                 pharmacy_npi="1234567890",
@@ -850,12 +933,12 @@ class TestTh002GeographicDispersion:
                 prescriber_npi=presc_npi,
                 patient_state=state,
             )
+            row_num += 1
 
-        # Update run stats so gate passes
-        run.resolution_stats = {"expected_count": 11, "inserted_count": 11}
+        run.resolution_stats = {"expected_count": 20, "inserted_count": 20}
         db.flush()
 
-        count = run_detection(db, run)
+        run_detection(db, run)
 
         th002_count = db.execute(
             select(func.count()).select_from(Anomaly).where(
@@ -864,7 +947,63 @@ class TestTh002GeographicDispersion:
             )
         ).scalar()
         assert th002_count >= 1, (
-            f"TH-002 must fire when prescriber has 11 states, got {th002_count}"
+            f"TH-002 must fire when prescriber has 11 states and >= 20 claims, "
+            f"got {th002_count}"
+        )
+
+    def test_th002_does_not_fire_below_min_claims(self, db: Session):
+        """TH-002 must NOT fire for a low-volume prescriber (< min_claims=20)
+        even when state count exceeds the threshold.
+
+        A prescriber with 11 claims and 11 states trivially meets the state
+        threshold with only 1 claim per state — not meaningful volume.
+        """
+        register_rule_types(db)
+        register_rule_instances(db, _TENANT, _FULL_CSV_COLUMNS, _SYS_UID)
+
+        run = DetectionRun(
+            tenant_id=_TENANT,
+            data_source="csv_upload",
+            run_label="th002-lowvol-test",
+            source_path="/tmp/th002lv.csv",
+            source_filename="th002lv.csv",
+            source_sha256="aa" * 32,
+            created_by=_SYS_UID,
+            resolution_stats={"expected_count": 0, "inserted_count": 0},
+        )
+        db.add(run)
+        db.flush()
+
+        states = ["TX", "CA", "NY", "FL", "OH", "GA", "NC", "IL", "PA", "AZ", "WA"]
+        presc_npi = "1110001111"
+        # Only 11 rows — one per state — total < min_claims (20).
+        for i, state in enumerate(states):
+            _seed_csv_row(
+                db, run,
+                row_number=i + 1,
+                patient_unique_hash=f"PT_TH002LV_{i}",
+                auth_no_hash=f"AUTH_TH002LV_{i}",
+                pharmacy_npi="1234567890",
+                ndc="00093015401",
+                date_of_service="2024-06-01",
+                prescriber_npi=presc_npi,
+                patient_state=state,
+            )
+
+        run.resolution_stats = {"expected_count": 11, "inserted_count": 11}
+        db.flush()
+
+        run_detection(db, run)
+
+        th002_count = db.execute(
+            select(func.count()).select_from(Anomaly).where(
+                Anomaly.data_source_run_id == run.id,
+                Anomaly.finding_code == "TH-002",
+            )
+        ).scalar()
+        assert th002_count == 0, (
+            f"TH-002 must NOT fire for a prescriber with only 11 claims "
+            f"(below min_claims=20), even with 11 states; got {th002_count}"
         )
 
 
@@ -874,10 +1013,18 @@ class TestTh002GeographicDispersion:
 
 
 class TestTh005PrescriberPharmacyAffinity:
-    """TH-005: prescriber sending > 50% of scripts to single pharmacy fires."""
+    """TH-005: prescriber sending > 50% of scripts to single pharmacy fires.
 
-    def test_th005_fires_when_single_pharmacy_dominates(self, db: Session):
-        """TH-005 fires when >50% of prescriber's claims go to one pharmacy."""
+    Minimum-volume floor: a prescriber with fewer than min_claims (default 20)
+    is excluded from evaluation — 1-2 claims trivially achieves 100% share, which
+    is meaningless without sufficient volume.  min_claims is stored in the rule's
+    default_parameters so it is tenant-configurable (Principle 12).
+    """
+
+    def test_th005_fires_when_single_pharmacy_dominates_above_min_claims(self, db: Session):
+        """TH-005 fires when >50% of prescriber's claims go to one pharmacy AND
+        total claim count >= min_claims (default 20).
+        """
         register_rule_types(db)
         register_rule_instances(db, _TENANT, _FULL_CSV_COLUMNS, _SYS_UID)
 
@@ -898,8 +1045,8 @@ class TestTh005PrescriberPharmacyAffinity:
         dominant_pharmacy = "1111111111"
         other_pharmacy = "2222222222"
 
-        # 7 claims to dominant pharmacy, 3 to others (70% share)
-        for i in range(7):
+        # 14 claims to dominant pharmacy, 6 to others (70% share, total=20 >= min_claims).
+        for i in range(14):
             _seed_csv_row(
                 db, run,
                 row_number=i + 1,
@@ -910,7 +1057,7 @@ class TestTh005PrescriberPharmacyAffinity:
                 date_of_service="2024-06-01",
                 prescriber_npi=presc_npi,
             )
-        for i in range(3):
+        for i in range(6):
             _seed_csv_row(
                 db, run,
                 row_number=100 + i,
@@ -922,7 +1069,7 @@ class TestTh005PrescriberPharmacyAffinity:
                 prescriber_npi=presc_npi,
             )
 
-        run.resolution_stats = {"expected_count": 10, "inserted_count": 10}
+        run.resolution_stats = {"expected_count": 20, "inserted_count": 20}
         db.flush()
 
         run_detection(db, run)
@@ -934,11 +1081,118 @@ class TestTh005PrescriberPharmacyAffinity:
             )
         ).scalar()
         assert th005_count >= 1, (
-            f"TH-005 must fire when 70% claims go to one pharmacy, got {th005_count}"
+            f"TH-005 must fire when 70% claims go to one pharmacy "
+            f"and total >= 20 (min_claims), got {th005_count}"
+        )
+
+    def test_th005_does_not_fire_below_min_claims_even_with_100pct_share(self, db: Session):
+        """TH-005 must NOT fire for a low-volume prescriber (< min_claims=20)
+        even when 100% of scripts go to a single pharmacy.
+
+        A prescriber with 5 claims trivially has 100% pharmacy share; that is
+        not meaningful evidence of affinity fraud.  The min-volume floor
+        prevents this false-positive flood.
+        """
+        register_rule_types(db)
+        register_rule_instances(db, _TENANT, _FULL_CSV_COLUMNS, _SYS_UID)
+
+        run = DetectionRun(
+            tenant_id=_TENANT,
+            data_source="csv_upload",
+            run_label="th005-lowvol-test",
+            source_path="/tmp/th005lv.csv",
+            source_filename="th005lv.csv",
+            source_sha256="dd" * 32,
+            created_by=_SYS_UID,
+            resolution_stats={"expected_count": 0, "inserted_count": 0},
+        )
+        db.add(run)
+        db.flush()
+
+        presc_npi = "6660001111"
+        # Only 5 claims — all to the same pharmacy (100% share), but total < min_claims.
+        for i in range(5):
+            _seed_csv_row(
+                db, run,
+                row_number=i + 1,
+                patient_unique_hash=f"PT_TH005LV_{i}",
+                auth_no_hash=f"AUTH_TH005LV_{i}",
+                pharmacy_npi="5551111111",
+                ndc="00093015401",
+                date_of_service="2024-06-01",
+                prescriber_npi=presc_npi,
+            )
+
+        run.resolution_stats = {"expected_count": 5, "inserted_count": 5}
+        db.flush()
+
+        run_detection(db, run)
+
+        th005_count = db.execute(
+            select(func.count()).select_from(Anomaly).where(
+                Anomaly.data_source_run_id == run.id,
+                Anomaly.finding_code == "TH-005",
+            )
+        ).scalar()
+        assert th005_count == 0, (
+            f"TH-005 must NOT fire for a prescriber with only 5 claims "
+            f"(below min_claims=20), even at 100% share; got {th005_count}"
+        )
+
+    def test_th005_finding_details_contains_claim_count(self, db: Session):
+        """TH-005 finding_details must include claim_count for transparency."""
+        register_rule_types(db)
+        register_rule_instances(db, _TENANT, _FULL_CSV_COLUMNS, _SYS_UID)
+
+        run = DetectionRun(
+            tenant_id=_TENANT,
+            data_source="csv_upload",
+            run_label="th005-details-test",
+            source_path="/tmp/th005d.csv",
+            source_filename="th005d.csv",
+            source_sha256="ee" * 32,
+            created_by=_SYS_UID,
+            resolution_stats={"expected_count": 0, "inserted_count": 0},
+        )
+        db.add(run)
+        db.flush()
+
+        presc_npi = "4440001111"
+        # 21 claims all to same pharmacy (total >= min_claims, 100% share).
+        for i in range(21):
+            _seed_csv_row(
+                db, run,
+                row_number=i + 1,
+                patient_unique_hash=f"PT_TH005D_{i}",
+                auth_no_hash=f"AUTH_TH005D_{i}",
+                pharmacy_npi="7771111111",
+                ndc="00093015401",
+                date_of_service="2024-06-01",
+                prescriber_npi=presc_npi,
+            )
+
+        run.resolution_stats = {"expected_count": 21, "inserted_count": 21}
+        db.flush()
+
+        run_detection(db, run)
+
+        anomaly = db.execute(
+            select(Anomaly).where(
+                Anomaly.data_source_run_id == run.id,
+                Anomaly.finding_code == "TH-005",
+            )
+        ).scalar_one()
+
+        details = anomaly.finding_details
+        assert isinstance(details, dict)
+        # claim_count (or total_count) must appear in evidence so reviewers
+        # can confirm the prescriber was above the min-volume floor.
+        assert "claim_count" in details or "total_count" in details, (
+            f"TH-005 finding_details must include claim_count/total_count; got {details}"
         )
 
     def test_th005_does_not_fire_below_threshold(self, db: Session):
-        """TH-005 does not fire when top pharmacy share is below 0.5."""
+        """TH-005 does not fire when top pharmacy share is below 0.5 (even above min_claims)."""
         register_rule_types(db)
         register_rule_instances(db, _TENANT, _FULL_CSV_COLUMNS, _SYS_UID)
 
@@ -956,12 +1210,12 @@ class TestTh005PrescriberPharmacyAffinity:
         db.flush()
 
         presc_npi = "7770001111"
-        # Distribute evenly: 5 pharmacies, 2 claims each = 20% per pharmacy
+        # Distribute evenly: 5 pharmacies, 4 claims each = 20% per pharmacy, total=20 (>= min_claims)
         for ph_idx in range(5):
-            for cl_idx in range(2):
+            for cl_idx in range(4):
                 _seed_csv_row(
                     db, run,
-                    row_number=ph_idx * 2 + cl_idx + 1,
+                    row_number=ph_idx * 4 + cl_idx + 1,
                     patient_unique_hash=f"PT_TH005B_{ph_idx}_{cl_idx}",
                     auth_no_hash=f"AUTH_TH005B_{ph_idx}_{cl_idx}",
                     pharmacy_npi=f"999000000{ph_idx}",
@@ -970,7 +1224,7 @@ class TestTh005PrescriberPharmacyAffinity:
                     prescriber_npi=presc_npi,
                 )
 
-        run.resolution_stats = {"expected_count": 10, "inserted_count": 10}
+        run.resolution_stats = {"expected_count": 20, "inserted_count": 20}
         db.flush()
 
         run_detection(db, run)
