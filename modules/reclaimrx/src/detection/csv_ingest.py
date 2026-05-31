@@ -12,11 +12,13 @@ create_or_resume_run(db, *, tenant_id, path, created_by, resume, force)
 
 load_csv(db, run, *, chunk_size=10) -> int
     Stream the CSV at run.source_path row-by-row using csv.DictReader.
-    On PostgreSQL: bulk-loads via COPY FROM STDIN in batches of
-    _COPY_BATCH_SIZE rows (default 50,000) using the raw psycopg2 cursor
-    from the existing SQLAlchemy connection (so the GUC
-    SET LOCAL app.current_tenant_id is already set and RLS WITH CHECK
-    passes without any extra plumbing).
+    On PostgreSQL: bulk-loads via psycopg2.extras.execute_values in batches
+    of _INSERT_BATCH_SIZE rows (default 5,000) accumulated in memory, sent
+    to Postgres with page_size=1000.  This path is RLS-safe: COPY FROM is
+    rejected by Postgres on RLS-forced tables for non-superuser roles;
+    execute_values INSERT respects RLS WITH CHECK and is the fast RLS-safe
+    bulk path.  The GUC SET LOCAL app.current_tenant_id is already in effect
+    on the same connection so RLS WITH CHECK passes without extra plumbing.
     On other dialects (SQLite in tests): falls back to the original
     ORM add()/flush() path in chunks of chunk_size so all resolution and
     stat logic is fully exercised without a real Postgres connection.
@@ -38,7 +40,7 @@ load_csv(db, run, *, chunk_size=10) -> int
 
     Chunk failure: exceptions propagate to the caller unchanged.  The
     caller must mark the run 'failed' in a *separate* transaction.
-    load_csv never swallows exceptions; partially-copied batches are
+    load_csv never swallows exceptions; partially-inserted batches are
     rolled back when the caller's surrounding transaction is rolled back.
 
 resolution_method values match the DB CHECK constraint:
@@ -53,18 +55,15 @@ v1 scope:
 
 Performance note
 ----------------
-_COPY_BATCH_SIZE = 50_000 rows per COPY call.  At ~700 bytes/row (JSON
-row_data + metadata) this is ~35 MB per batch, well within psycopg2
-streaming buffer.  For a 2.6M-row / 1.7 GB file this yields ~52 COPY
-calls totalling a few minutes vs the 30-60+ minutes of row-by-row ORM
-INSERT.
+_INSERT_BATCH_SIZE = 5_000 rows accumulated per execute_values call, with
+page_size=1_000 (psycopg2 splits each batch into 1,000-row sub-statements).
+For a 2.6M-row file this is ~520 execute_values calls.  Bounded memory:
+at ~700 bytes/row the in-flight batch is ~3.5 MB.
 """
 from __future__ import annotations
 
 import csv
 import hashlib
-import io
-import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -76,15 +75,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 # ---------------------------------------------------------------------------
-# Batch size for the PostgreSQL COPY path.
-# 50,000 rows ~= 35 MB per batch at ~700 bytes/row.  Keeps memory bounded
-# while amortising COPY protocol overhead across a large number of rows.
+# Batch size for the PostgreSQL execute_values path.
+# 5,000 rows accumulated before each execute_values call (page_size=1,000).
+# At ~700 bytes/row this is ~3.5 MB per batch -- bounded memory for 2.6M rows.
 # ---------------------------------------------------------------------------
-_COPY_BATCH_SIZE: int = 50_000
+_INSERT_BATCH_SIZE: int = 5_000
 
-# COPY column order -- must stay in sync with _format_copy_line and the
-# ORM fallback field list in _stream_orm.
-_COPY_COLUMNS = (
+# Column order for the bulk INSERT -- must stay in sync with _build_insert_tuple
+# and the ORM fallback field list in _stream_orm.
+_INSERT_COLUMNS = (
     "id",
     "tenant_id",
     "detection_run_id",
@@ -98,11 +97,13 @@ _COPY_COLUMNS = (
     "resolution_notes",
 )
 
-_COPY_SQL = (
-    "COPY reclaimrx.csv_upload_rows "
-    "({cols}) "
-    "FROM STDIN WITH (FORMAT csv)"
-).format(cols=", ".join(_COPY_COLUMNS))
+# COPY FROM is rejected by Postgres on RLS-forced tables for non-superuser
+# roles; execute_values INSERT respects RLS WITH CHECK and is the fast
+# RLS-safe bulk path.
+_INSERT_SQL = (
+    "INSERT INTO reclaimrx.csv_upload_rows "
+    "({cols}) VALUES %s"
+).format(cols=", ".join(_INSERT_COLUMNS))
 
 
 @dataclass
@@ -211,7 +212,7 @@ def _acquire_advisory_lock(db: Session, key: str) -> None:
     )
 
 
-def _format_copy_line(
+def _build_insert_tuple(
     *,
     row_id: uuid.UUID,
     tenant_id: uuid.UUID,
@@ -224,46 +225,44 @@ def _format_copy_line(
     resolved_program_id: Optional[uuid.UUID],
     resolution_method: str,
     resolution_notes: Optional[str],
-) -> str:
-    """Format one CSV line for COPY FROM STDIN WITH (FORMAT csv).
+) -> tuple:
+    """Build one row tuple for psycopg2.extras.execute_values INSERT.
 
-    Pure function -- no I/O, no DB, no side effects.  Uses csv.writer to
-    guarantee correct quoting of embedded commas, double-quotes, and
-    newlines in any field value (most critically in row_data JSON).
+    Pure function -- no I/O, no DB, no side effects.
 
-    NULL columns are serialised as empty string so PostgreSQL's CSV reader
-    inserts NULL (the default NULL representation for FORMAT csv is '').
-
-    Column order matches _COPY_COLUMNS exactly:
+    Column order matches _INSERT_COLUMNS exactly:
         id, tenant_id, detection_run_id, row_number, row_data,
         resolved_pharmacy_npi, resolved_ndc, resolved_client_id,
         resolved_program_id, resolution_method, resolution_notes.
 
-    Returns a single line terminated with newline.
+    row_data is wrapped in psycopg2.extras.Json so psycopg2 passes it as a
+    JSONB-typed parameter rather than a plain string.  NULL columns are
+    represented as Python None so execute_values inserts SQL NULL.
+
+    Returns an 11-element tuple matching _INSERT_COLUMNS.
     """
-    buf = io.StringIO()
-    writer = csv.writer(buf, lineterminator="\n")
-    writer.writerow([
+    from psycopg2.extras import Json
+
+    return (
         str(row_id),
         str(tenant_id),
         str(detection_run_id),
         row_number,
-        json.dumps(row_data, separators=(",", ":")),
-        resolved_pharmacy_npi if resolved_pharmacy_npi is not None else "",
-        resolved_ndc if resolved_ndc is not None else "",
-        str(resolved_client_id) if resolved_client_id is not None else "",
-        str(resolved_program_id) if resolved_program_id is not None else "",
+        Json(row_data),
+        resolved_pharmacy_npi,
+        resolved_ndc,
+        str(resolved_client_id) if resolved_client_id is not None else None,
+        str(resolved_program_id) if resolved_program_id is not None else None,
         resolution_method,
-        resolution_notes if resolution_notes is not None else "",
-    ])
-    return buf.getvalue()
+        resolution_notes,
+    )
 
 
 def _resolve_and_hygiene(raw_row: dict, parse_dos) -> ResolvedRow:
     """Apply resolve_row then DOS hygiene.
 
-    Shared by both the COPY path and the ORM fallback path so the logic
-    is written exactly once.
+    Shared by both the execute_values path and the ORM fallback path so the
+    logic is written exactly once.
     """
     resolved = resolve_row(raw_row)
 
@@ -297,7 +296,7 @@ def _update_counters(counters: dict, resolved: ResolvedRow) -> None:
         by_reason[note] = by_reason.get(note, 0) + 1
 
 
-def _stream_copy(
+def _stream_execute_values(
     db: Session,
     source_path: str,
     tenant_id: uuid.UUID,
@@ -305,40 +304,42 @@ def _stream_copy(
     parse_dos,
     counters: dict,
 ) -> None:
-    """PostgreSQL COPY path.
+    """PostgreSQL execute_values bulk INSERT path.
 
-    Streams the source CSV, formats each row via _format_copy_line into a
-    StringIO batch, and issues one psycopg2 copy_expert call per
-    _COPY_BATCH_SIZE rows.
+    COPY FROM is rejected by Postgres on RLS-forced tables for non-superuser
+    roles; execute_values INSERT respects RLS WITH CHECK and is the fast
+    RLS-safe bulk path.
+
+    Streams the source CSV, builds row tuples via _build_insert_tuple, and
+    issues one psycopg2.extras.execute_values call per _INSERT_BATCH_SIZE
+    rows (page_size=1000 within each call so psycopg2 splits large batches
+    into manageable sub-statements).
 
     Runs on the same DBAPI connection that SQLAlchemy already holds so the
     GUC SET LOCAL app.current_tenant_id is in scope and RLS WITH CHECK on
     reclaimrx.csv_upload_rows passes without extra plumbing.
     """
+    from psycopg2.extras import execute_values
+
     # db.connection() returns the SQLAlchemy Connection object.
     # .connection on that is the underlying raw psycopg2 connection.
     raw_conn = db.connection().connection  # type: ignore[attr-defined]
     cur = raw_conn.cursor()
 
-    buf = io.StringIO()
-    batch_row_count = 0
+    batch: list[tuple] = []
 
     def _flush_batch() -> None:
-        nonlocal batch_row_count
-        if batch_row_count == 0:
+        if not batch:
             return
-        buf.seek(0)
-        cur.copy_expert(_COPY_SQL, buf)
-        buf.truncate(0)
-        buf.seek(0)
-        batch_row_count = 0
+        execute_values(cur, _INSERT_SQL, batch, page_size=1000)
+        batch.clear()
 
     with open(source_path, newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
         for row_number, raw_row in enumerate(reader, start=1):
             resolved = _resolve_and_hygiene(raw_row, parse_dos)
 
-            line = _format_copy_line(
+            batch.append(_build_insert_tuple(
                 row_id=uuid.uuid4(),
                 tenant_id=tenant_id,
                 detection_run_id=detection_run_id,
@@ -350,12 +351,10 @@ def _stream_copy(
                 resolved_program_id=resolved.resolved_program_id,
                 resolution_method=resolved.resolution_method,
                 resolution_notes=resolved.resolution_notes,
-            )
-            buf.write(line)
-            batch_row_count += 1
+            ))
             _update_counters(counters, resolved)
 
-            if batch_row_count >= _COPY_BATCH_SIZE:
+            if len(batch) >= _INSERT_BATCH_SIZE:
                 _flush_batch()
 
     _flush_batch()
@@ -530,13 +529,14 @@ def load_csv(
     into memory.
 
     Dialect branch:
-      PostgreSQL: rows are accumulated into StringIO batches of
-        _COPY_BATCH_SIZE lines and sent via psycopg2 COPY FROM STDIN using
-        the raw cursor from the *existing* SQLAlchemy connection.  Because
-        load_csv runs on the same connection that already has
+      PostgreSQL: rows are accumulated into batches of _INSERT_BATCH_SIZE
+        tuples and sent via psycopg2.extras.execute_values using the raw
+        cursor from the *existing* SQLAlchemy connection.  Because load_csv
+        runs on the same connection that already has
         SET LOCAL app.current_tenant_id in effect, RLS WITH CHECK
         policies on reclaimrx.csv_upload_rows pass without any additional
-        plumbing.
+        plumbing.  COPY FROM is NOT used: it is rejected by Postgres on
+        RLS-forced tables for non-superuser roles.
       Other dialects (SQLite in tests): original ORM add()/flush() path in
         batches of chunk_size.  All resolution/stat logic is identical so
         the 54-row fixture tests exercise the full code path.
@@ -559,8 +559,8 @@ def load_csv(
         db:         SQLAlchemy Session.
         run:        DetectionRun in 'in_progress' status.
         chunk_size: Number of rows per ORM flush on non-Postgres dialects
-                    (default 10).  Ignored on the PostgreSQL COPY path,
-                    which always uses _COPY_BATCH_SIZE.
+                    (default 10).  Ignored on the PostgreSQL execute_values
+                    path, which always uses _INSERT_BATCH_SIZE.
 
     Returns:
         Total number of CsvUploadRow records inserted.
@@ -582,10 +582,12 @@ def load_csv(
     }
 
     # Determine which path to use based on the active dialect.
-    use_copy: bool = db.bind.dialect.name == "postgresql"  # type: ignore[union-attr]
+    use_execute_values: bool = db.bind.dialect.name == "postgresql"  # type: ignore[union-attr]
 
-    if use_copy:
-        _stream_copy(db, source_path, tenant_id, detection_run_id, parse_dos, counters)
+    if use_execute_values:
+        _stream_execute_values(
+            db, source_path, tenant_id, detection_run_id, parse_dos, counters
+        )
     else:
         _stream_orm(
             db, source_path, tenant_id, detection_run_id,
