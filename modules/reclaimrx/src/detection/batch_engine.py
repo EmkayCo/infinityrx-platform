@@ -48,6 +48,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.detection.baselines import compute_baseline
@@ -88,6 +89,70 @@ _SINGLE_ROW_CODES: frozenset[str] = frozenset({"MFR-001"})
 _STATISTICAL_CODES: frozenset[str] = frozenset({"MFR-003", "MFR-004", "HP-005", "HP-008", "ALL-006"})
 _GROUPING_CODES: frozenset[str] = frozenset({"ALL-001", "MFR-002", "TH-002", "TH-005"})
 _ZERO = Decimal("0")
+
+
+# ---------------------------------------------------------------------------
+# NPI sanitization helper
+# ---------------------------------------------------------------------------
+
+
+def _valid_npi(value):
+    """Return value only if it is exactly 10 characters; otherwise return None.
+
+    The anomalies table CHECK constraints require:
+      pharmacy_npi   IS NULL OR length(pharmacy_npi)   = 10
+      prescriber_npi IS NULL OR length(prescriber_npi) = 10
+
+    Real-world CSV data can contain non-NPI strings in NPI fields (e.g. state
+    license numbers like 'MA3253488').  Storing them verbatim raises a
+    CheckViolation.  We NULL the snapshot column and preserve the raw value in
+    finding_details so the signal is not lost.
+    """
+    if value is None:
+        return None
+    return value if len(value) == 10 else None
+
+
+# ---------------------------------------------------------------------------
+# Resilient anomaly flush helper (SAVEPOINT-isolated)
+# ---------------------------------------------------------------------------
+
+
+def _flush_anomaly_safe(db, anomaly, run, *, anomaly_write_errors):
+    """Flush one Anomaly inside a SAVEPOINT.
+
+    On success returns True.  On IntegrityError rolls back only the savepoint,
+    logs the offending finding (rule code + source_row_id + constraint),
+    increments anomaly_write_errors[0], and returns False.  The outer session
+    remains usable.
+
+    Sanitization in _make_anomaly handles the known NPI-length case.  This
+    savepoint guard catches any other unanticipated CHECK violation at 2.6M scale.
+    """
+    try:
+        sp = db.begin_nested()
+        db.flush()
+        sp.commit()
+        return True
+    except IntegrityError as exc:
+        sp.rollback()
+        # Expunge the anomaly from the session so the final db.flush() at the
+        # end of run_detection does not re-insert it.  After rollback the object
+        # is in a detached/expired state; expunge removes it from the identity map.
+        try:
+            db.expunge(anomaly)
+        except Exception:
+            pass
+        anomaly_write_errors[0] += 1
+        logger.error(
+            "Anomaly write skipped due to constraint violation -- "
+            "run_id=%s finding_code=%s source_row_id=%s constraint=%s",
+            run.id,
+            getattr(anomaly, "finding_code", "unknown"),
+            getattr(anomaly, "source_row_id", "unknown"),
+            str(exc.orig)[:200] if exc.orig else str(exc)[:200],
+        )
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -217,13 +282,29 @@ def _make_anomaly(
             days_supply = int(days_raw)
         except (ValueError, TypeError):
             pass
+    # Sanitize NPI snapshot columns: anomalies CHECK requires length=10 or NULL.
+    # Real CSV data can hold state license numbers or other non-NPI strings.
+    # NULL the column when invalid; preserve the raw value in finding_details.
+    raw_pharmacy_npi = csv_row.resolved_pharmacy_npi
+    clean_pharmacy_npi = _valid_npi(raw_pharmacy_npi)
+
+    raw_prescriber_npi = rd.get("prescriber_npi") or None
+    clean_prescriber_npi = _valid_npi(raw_prescriber_npi)
+
+    # Inject raw_ keys only when sanitization actually changed the value.
+    sanitized_details = dict(finding_details)
+    if raw_pharmacy_npi is not None and clean_pharmacy_npi is None:
+        sanitized_details["raw_pharmacy_npi"] = raw_pharmacy_npi
+    if raw_prescriber_npi is not None and clean_prescriber_npi is None:
+        sanitized_details["raw_prescriber_npi"] = raw_prescriber_npi
+
     return Anomaly(
         tenant_id=run.tenant_id,
         data_source="csv_upload",
         data_source_run_id=run.id,
         client_id=csv_row.resolved_client_id,
         program_id=csv_row.resolved_program_id,
-        pharmacy_npi=csv_row.resolved_pharmacy_npi,
+        pharmacy_npi=clean_pharmacy_npi,
         ndc=csv_row.resolved_ndc,
         source_table="csv_upload_rows",
         source_row_id=csv_row.id,
@@ -233,14 +314,14 @@ def _make_anomaly(
         confidence=confidence_num,
         date_of_service=dos_val,
         rx_number=rd.get("rx_number_hash"),
-        prescriber_npi=rd.get("prescriber_npi") or None,
+        prescriber_npi=clean_prescriber_npi,
         days_supply=days_supply,
         quantity=quantity,
         amount_paid=amount_paid,
         amount_billed=amount_billed,
         finding_code=finding_code,
         finding_summary=finding_summary,
-        finding_details=finding_details,
+        finding_details=sanitized_details,
         status="open",
     )
 
@@ -335,6 +416,7 @@ def _evaluate_single_row_rules(
     applicable: list[DetectionRuleInstance],
     rule_type_by_code: dict[str, DetectionRuleType],
     no_finding_count: list[int],
+    anomaly_write_errors: list[int],
 ) -> list[Anomaly]:
     """Evaluate MFR-001 per csv_upload_row, streaming in batches of _ROW_BATCH.
 
@@ -388,10 +470,10 @@ def _evaluate_single_row_rules(
                     confidence_num=confidence_num,
                 )
                 db.add(anomaly)
-                db.flush()
-                _write_eval_log(db, run=run, instance=instance, csv_row=csv_row,
-                                result="finding_raised", anomaly_id=anomaly.id)
-                anomalies.append(anomaly)
+                if _flush_anomaly_safe(db, anomaly, run, anomaly_write_errors=anomaly_write_errors):
+                    _write_eval_log(db, run=run, instance=instance, csv_row=csv_row,
+                                    result="finding_raised", anomaly_id=anomaly.id)
+                    anomalies.append(anomaly)
             except Exception:
                 logger.exception("Error evaluating rule %s on csv_row %s", code, csv_row.id)
                 _write_eval_log(db, run=run, instance=instance, csv_row=csv_row,
@@ -473,6 +555,7 @@ def _evaluate_statistical_rules(
     applicable: list[DetectionRuleInstance],
     rule_type_by_code: dict[str, DetectionRuleType],
     no_finding_count: list[int],
+    anomaly_write_errors: list[int],
 ) -> list[Anomaly]:
     """Evaluate statistical rules, streaming rows in batches of _ROW_BATCH."""
     anomalies: list[Anomaly] = []
@@ -541,10 +624,10 @@ def _evaluate_statistical_rules(
                     confidence_num=confidence_num,
                 )
                 db.add(anomaly)
-                db.flush()
-                _write_eval_log(db, run=run, instance=instance, csv_row=csv_row,
-                                result="finding_raised", anomaly_id=anomaly.id)
-                anomalies.append(anomaly)
+                if _flush_anomaly_safe(db, anomaly, run, anomaly_write_errors=anomaly_write_errors):
+                    _write_eval_log(db, run=run, instance=instance, csv_row=csv_row,
+                                    result="finding_raised", anomaly_id=anomaly.id)
+                    anomalies.append(anomaly)
             except Exception:
                 logger.exception("Error in statistical rule %s on csv_row %s", code, csv_row.id)
                 _write_eval_log(db, run=run, instance=instance, csv_row=csv_row,
@@ -574,6 +657,7 @@ def _evaluate_all001(
     instance: DetectionRuleInstance,
     rtype: DetectionRuleType,
     no_finding_count: list[int],
+    anomaly_write_errors: list[int],
 ) -> list[Anomaly]:
     """ALL-001 Duplicate Claim -- server-side grouping.
 
@@ -724,12 +808,12 @@ def _evaluate_all001(
                 confidence_num=Decimal("0.85"),
             )
             db.add(anomaly)
-            db.flush()
-            _write_eval_log(
-                db, run=run, instance=instance, csv_row=csv_row,
-                result="finding_raised", anomaly_id=anomaly.id,
-            )
-            anomalies.append(anomaly)
+            if _flush_anomaly_safe(db, anomaly, run, anomaly_write_errors=anomaly_write_errors):
+                _write_eval_log(
+                    db, run=run, instance=instance, csv_row=csv_row,
+                    result="finding_raised", anomaly_id=anomaly.id,
+                )
+                anomalies.append(anomaly)
 
     return anomalies
 
@@ -740,6 +824,7 @@ def _evaluate_mfr002(
     instance: DetectionRuleInstance,
     rtype: DetectionRuleType,
     no_finding_count: list[int],
+    anomaly_write_errors: list[int],
 ) -> list[Anomaly]:
     """MFR-002 Bill-Reverse-Rebill -- server-side candidate fetch.
 
@@ -893,12 +978,12 @@ def _evaluate_mfr002(
                         confidence_num=Decimal("0.85"),
                     )
                     db.add(anomaly)
-                    db.flush()
-                    _write_eval_log(
-                        db, run=run, instance=instance, csv_row=r_rebill,
-                        result="finding_raised", anomaly_id=anomaly.id,
-                    )
-                    anomalies.append(anomaly)
+                    if _flush_anomaly_safe(db, anomaly, run, anomaly_write_errors=anomaly_write_errors):
+                        _write_eval_log(
+                            db, run=run, instance=instance, csv_row=r_rebill,
+                            result="finding_raised", anomaly_id=anomaly.id,
+                        )
+                        anomalies.append(anomaly)
 
     return anomalies
 
@@ -909,6 +994,7 @@ def _evaluate_th002(
     instance: DetectionRuleInstance,
     rtype: DetectionRuleType,
     no_finding_count: list[int],
+    anomaly_write_errors: list[int],
 ) -> list[Anomaly]:
     """TH-002 Telehealth Geographic Dispersion -- server-side aggregation.
 
@@ -1007,12 +1093,12 @@ def _evaluate_th002(
             confidence_num=Decimal("0.60"),
         )
         db.add(anomaly)
-        db.flush()
-        _write_eval_log(
-            db, run=run, instance=instance, csv_row=rep_row,
-            result="finding_raised", anomaly_id=anomaly.id,
-        )
-        anomalies.append(anomaly)
+        if _flush_anomaly_safe(db, anomaly, run, anomaly_write_errors=anomaly_write_errors):
+            _write_eval_log(
+                db, run=run, instance=instance, csv_row=rep_row,
+                result="finding_raised", anomaly_id=anomaly.id,
+            )
+            anomalies.append(anomaly)
 
     return anomalies
 
@@ -1023,6 +1109,7 @@ def _evaluate_th005(
     instance: DetectionRuleInstance,
     rtype: DetectionRuleType,
     no_finding_count: list[int],
+    anomaly_write_errors: list[int],
 ) -> list[Anomaly]:
     """TH-005 Prescriber-Pharmacy Affinity -- server-side aggregation.
 
@@ -1128,12 +1215,12 @@ def _evaluate_th005(
             confidence_num=Decimal("0.40"),
         )
         db.add(anomaly)
-        db.flush()
-        _write_eval_log(
-            db, run=run, instance=instance, csv_row=rep_row,
-            result="finding_raised", anomaly_id=anomaly.id,
-        )
-        anomalies.append(anomaly)
+        if _flush_anomaly_safe(db, anomaly, run, anomaly_write_errors=anomaly_write_errors):
+            _write_eval_log(
+                db, run=run, instance=instance, csv_row=rep_row,
+                result="finding_raised", anomaly_id=anomaly.id,
+            )
+            anomalies.append(anomaly)
 
     return anomalies
 
@@ -1144,6 +1231,7 @@ def _evaluate_grouping_rules(
     applicable: list[DetectionRuleInstance],
     rule_type_by_code: dict[str, DetectionRuleType],
     no_finding_count: list[int],
+    anomaly_write_errors: list[int],
 ) -> list[Anomaly]:
     """Dispatch ALL-001, MFR-002, TH-002, TH-005 grouping evaluators.
 
@@ -1158,13 +1246,13 @@ def _evaluate_grouping_rules(
             continue
         try:
             if code == "ALL-001":
-                new = _evaluate_all001(db, run, instance, rtype, no_finding_count)
+                new = _evaluate_all001(db, run, instance, rtype, no_finding_count, anomaly_write_errors)
             elif code == "MFR-002":
-                new = _evaluate_mfr002(db, run, instance, rtype, no_finding_count)
+                new = _evaluate_mfr002(db, run, instance, rtype, no_finding_count, anomaly_write_errors)
             elif code == "TH-002":
-                new = _evaluate_th002(db, run, instance, rtype, no_finding_count)
+                new = _evaluate_th002(db, run, instance, rtype, no_finding_count, anomaly_write_errors)
             elif code == "TH-005":
-                new = _evaluate_th005(db, run, instance, rtype, no_finding_count)
+                new = _evaluate_th005(db, run, instance, rtype, no_finding_count, anomaly_write_errors)
             else:
                 new = []
             anomalies.extend(new)
@@ -1273,22 +1361,23 @@ def run_detection(
     ).scalar() or 0
 
     no_finding_count = [0]
+    anomaly_write_errors: list[int] = [0]
     all_anomalies: list[Anomaly] = []
 
     # PASS 2 -- evaluate (streaming per-row; server-side grouping)
     all_anomalies.extend(
         _evaluate_single_row_rules(
-            db, run, applicable, rule_type_by_code, no_finding_count
+            db, run, applicable, rule_type_by_code, no_finding_count, anomaly_write_errors
         )
     )
     all_anomalies.extend(
         _evaluate_statistical_rules(
-            db, run, applicable, rule_type_by_code, no_finding_count
+            db, run, applicable, rule_type_by_code, no_finding_count, anomaly_write_errors
         )
     )
     all_anomalies.extend(
         _evaluate_grouping_rules(
-            db, run, applicable, rule_type_by_code, no_finding_count
+            db, run, applicable, rule_type_by_code, no_finding_count, anomaly_write_errors
         )
     )
     db.flush()
@@ -1302,6 +1391,8 @@ def run_detection(
     run.completed_at = datetime.now(UTC)
     new_stats = dict(run.resolution_stats)
     new_stats["no_finding_count"] = no_finding_count[0]
+    if anomaly_write_errors[0]:
+        new_stats["anomaly_write_errors"] = anomaly_write_errors[0]
     if baseline_errors:
         new_stats["errors"] = baseline_errors
     run.resolution_stats = new_stats
