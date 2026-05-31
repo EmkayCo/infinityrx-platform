@@ -108,3 +108,35 @@ DEA validation, formulary/PA, therapeutic-class, 340B, workers-comp, telehealth-
 | Single-scan refactor regresses rule results | Parity test vs current per-rule results on the fixture |
 | Portal type swap breaks Leakage Monitor | Adapter + type test; keep World-B Investigation screens untouched |
 | Detection still slow at 2.6M | Single-scan + batched writes + set-based grouping; measure in acceptance run |
+
+---
+
+## 12. Codex L1 hardening (supersedes looser language above)
+
+### H1 — Guardrail safe + schema-valid (was V7)
+- **Stage then promote.** Detection writes anomalies to a **run-scoped staging path**: either (a) count fires per rule in-pass and insert only after the run passes the cap, or (b) insert into `reclaimrx.anomalies` inside ONE transaction and **roll back the whole run** if the cap trips (no partial flood ever visible). Default = (b) hard atomic.
+- **No new status value.** `detection_runs.status` stays in the existing CHECK (`in_progress/completed/failed/cancelled`). Over-cap → `status='failed'` + `resolution_stats.guardrail = {tripped:true, rule, fire_rate, cap}`. Persist NO anomalies for a failed run.
+- **Hard-fail, not warn.** Full-file detection over the cap is a `failed` run, not a warning with persisted rows.
+- **Cap default = 1%** total run fire rate (aligned to target), plus a per-rule cap (default 0.5%). Configurable in run params.
+
+### H2 — Calibration parameter table (exact, per rule) — was V2
+Each `detection_rule_instance.parameters` MUST carry these explicit keys (no implicit defaults):
+`cohort_key` (exact columns), `eligible_statuses` (e.g. ['Paid'] B1 only), `lookback_window_days` + `current_window`, `statistic` (`percentile_cont` value e.g. 0.99 OR z-score with `z_threshold`), `tie_handling`, `min_group_size`, `min_entity_count`, `dollar_floor` (Decimal), `rule_fire_rate_cap`. Percentiles computed **within the named cohort**, not global, unless stated. Reversals/rejects excluded unless the rule targets them. **Acceptance = run FAILS if total flag rate > 1%** (not a 5% warn). The plan must enumerate these values per recalibrated rule (MFR-003/004, HP-005/008, ALL-006, ALL-005).
+
+### H3 — MFR-001 coverage-gated (was V3)
+- **Disabled by default** until a coverage report runs: count patients with ≥`min_prior_fills` paid B1 fills of the same drug (`ndc`) within `lookback_window_days`. Exact defs: patient key=`patient_unique_hash`, drug key=`ndc` (GPI as alt if NDC too sparse), paid B1-only, `min_prior_fills` (default 3), `min_elapsed_days`, prior statistic = **median** prior NQ (robust to outliers).
+- If coverage < a threshold (e.g. <20% of claims have enough history) → **fall back** to the per-NDC top-percentile approach (catalog doc) OR keep MFR-001 disabled. The plan includes the coverage-measurement task as a hard gate before enabling.
+
+### H4 — Anomalies API is server-side filtered/paginated (was V8/V9)
+- `GET /anomalies` contract: server-side `finding_code`, `severity`, `entity_type`, `status`, `run_id` filters + sort + `page`/`page_size` + `total_count`. NOT client-side fetch-all.
+- **`entity_name` enrichment is set-based per page**: collect the distinct NPIs in the page, one batched join to `reference.dataq_master`/`reference.prescribers`, map back. No per-anomaly lookup.
+- Leakage Monitor frontend MUST send filters/page to the backend (replace the client-side `useMemo` fetch-all). This is a real change to the page, not just a queryFn repoint.
+
+### H5 — ALL-002/003 operate only on valid NPIs (was V5)
+- Reference rules evaluate ONLY normalized **10-digit** NPIs. Missing/invalid/non-NPI identifiers are **NOT** flagged as phantom — they increment a `data_quality` counter in `resolution_stats` (or an optional separate low-severity `data_quality` finding), OUTSIDE the <1% FWA target.
+- Phantom = valid 10-digit NPI with **no** match in `reference.dataq_master`/`reference.prescribers`. Excluded = exact NPI match in `reference.oig_leie_exclusions`/`sam_exclusions`. Both require exact identifier match + source provenance (table, exclusion date) in `finding_details`.
+
+### H6 (was MEDIUM) — locked
+- **Reject 75→70 group key:** HARD GATE — pick `rx_number_hash` (same-claim rebill) as primary; document collision/split behavior with reviewed examples before production enablement.
+- **`finding_code → LeakageCategory` mapping:** defined in the plan as an explicit table; **anomaly API uses its OWN DTO** (`AnomalyRead`), adapted to the portal row shape only at the page boundary — World-B `Investigation`/`LeakageFlag` types are NOT mutated (no shared-type breakage).
+- **AWP/SWP gate in rule config:** WAC-based rules may run; any SWP-as-AWP rule stays `disabled` until the pricing basis is signed off by the team.
