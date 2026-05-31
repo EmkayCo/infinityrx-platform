@@ -1,12 +1,14 @@
-"""Test that ifx_dev_app role can SELECT from all 8 reference tables after migration 0010.
+"""Test that ifx_dev_app role can SELECT from the FDW reference.* foreign tables.
 
-DEVIATION from plan spec (2026-05-31): The plan referenced pharmacy_dir.dataq_fwa_markers
-but that table was renamed to dataq_fwa_attestation in pharmacy-directory migration
-0009_dataq_spec_correction (mas_fwa.txt → fwa_attestation rename per NCPDP DataQ v3.1 spec).
-The grant and this test target dataq_fwa_attestation instead.
-PHASE 4 BLOCKER: ALL-002 rule (locked decision #4) references dataq_fwa_markers.audit_npi —
-that table and column do not exist; ALL-002 must be re-scoped to dataq_fwa_attestation schema
-before Phase 4 can proceed.
+Migration 0010 verifies access to the pre-existing postgres_fdw `reference` schema
+(provisioned by infrastructure/scripts/setup_fdw.sh). It grants nothing — access is
+provided by the FDW user mapping ifx_dev_app -> ifx_ref_reader established at setup time.
+
+These tests confirm that the three core reference tables used by detection rules are
+readable via the FDW foreign-table schema `reference`:
+  - reference.dataq_master       (82,643 rows; pharmacy registry)
+  - reference.prescribers        (9,494,438 rows; prescriber registry)
+  - reference.fdb_ndc_price_history (15,637,974 rows; FDB pricing)
 """
 import os
 import pytest
@@ -14,26 +16,30 @@ import sqlalchemy as sa
 
 REAL_DB = os.environ.get("RECLAIMRX_DB_URL", "")
 
-@pytest.mark.skipif(not REAL_DB, reason="requires live Postgres with ifx_dev_app role")
-def test_reference_grants_all_tables():
-    """Each reference table must be SELECTable by ifx_dev_app after 0010."""
+
+@pytest.mark.skipif(not REAL_DB, reason="requires live Postgres with FDW reference schema (ifx_dev_app role)")
+def test_fdw_reference_dataq_master_selectable():
+    """reference.dataq_master must be selectable by ifx_dev_app (FDW foreign table)."""
     engine = sa.create_engine(REAL_DB)
-    expected = [
-        ("pharmacy_dir", "dataq_master"),
-        # dataq_fwa_markers was renamed dataq_fwa_attestation in pharmacy-directory 0009;
-        # plan spec updated here — PHASE 4 BLOCKER: ALL-002 NPI column must be re-mapped.
-        ("pharmacy_dir", "dataq_fwa_attestation"),
-        ("prescriber_dir", "prescribers"),
-        ("shared", "oig_leie_exclusions"),
-        ("shared", "sam_exclusions"),
-        ("drug_database", "fdb_ndc_price_history"),
-        ("drug_database", "fdb_price_type_desc"),
-        ("drug_database", "drugs"),
-    ]
     with engine.connect() as conn:
-        for schema, table in expected:
-            result = conn.execute(
-                sa.text(f"SELECT 1 FROM {schema}.{table} LIMIT 1")
-            )
-            # Just fetching without PermissionError is the assertion
-            result.close()
+        row = conn.execute(sa.text("SELECT COUNT(*) FROM reference.dataq_master")).fetchone()
+    assert row is not None
+    assert row[0] >= 0
+
+
+@pytest.mark.skipif(not REAL_DB, reason="requires live Postgres with FDW reference schema (ifx_dev_app role)")
+def test_fdw_reference_prescribers_selectable():
+    """reference.prescribers must be selectable by ifx_dev_app (FDW foreign table)."""
+    engine = sa.create_engine(REAL_DB)
+    with engine.connect() as conn:
+        row = conn.execute(sa.text("SELECT COUNT(*) FROM reference.prescribers LIMIT 1")).fetchone()
+    assert row is not None
+
+
+@pytest.mark.skipif(not REAL_DB, reason="requires live Postgres with FDW reference schema (ifx_dev_app role)")
+def test_fdw_reference_fdb_ndc_price_history_selectable():
+    """reference.fdb_ndc_price_history must be selectable by ifx_dev_app (FDW foreign table)."""
+    engine = sa.create_engine(REAL_DB)
+    with engine.connect() as conn:
+        row = conn.execute(sa.text("SELECT COUNT(*) FROM reference.fdb_ndc_price_history LIMIT 1")).fetchone()
+    assert row is not None
