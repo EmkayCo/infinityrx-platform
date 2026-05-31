@@ -66,11 +66,11 @@ Ingest path (COPY-rejected→`execute_values`, RLS via `SET LOCAL app.current_te
 
 - **Single scan:** one `yield_per` stream over `csv_upload_rows` per run; for each row, evaluate all applicable per-row rules (MFR-001, ALL-002/003, pricing); accumulate anomalies in a buffer; flush via `execute_values` every N (e.g. 5,000). Grouping/statistical rules stay set-based SQL (one query each), not per-row.
 - **No savepoint-per-anomaly:** batch insert; sanitize snapshot fields up front (NPI→NULL-if-not-10, keep raw in `finding_details`) so inserts don't violate CHECKs.
-- **Flag-rate guardrail:** track per-rule + total fire counts; if total fires > `flag_rate_cap × record_count` (default 5%), mark the run `completed_with_warnings` (or abort per config), record the offending rule(s) in `resolution_stats`, and do NOT silently persist a 30% flood.
+- **Flag-rate guardrail:** SEE §12 H1 (authoritative) — stage-then-promote, default total cap **1%** + per-rule cap, over-cap = `status='failed'` with NO persisted anomalies + `resolution_stats.guardrail`. (Earlier "5% / completed_with_warnings" wording is superseded by §12 H1.)
 - **Eval-log:** `finding_raised` + `error` rows only; `no_finding` as aggregate counts on the run.
 - **Statement timeout:** stays 0 for the batch session.
 
-## 7. API + portal wiring (V8/V9)
+## 7. API + portal wiring (V8/V9) — binding contract in §12 H4 (server-side filter/sort/paginate + set-based name enrichment; supersedes any lighter wording here)
 
 - **Backend:** `GET /api/v1/reclaimrx/anomalies?run_id&finding_code&severity&entity_type&status&page` → paginated `AnomalyRead` (RLS-scoped, MFA per existing pattern). `GET /api/v1/reclaimrx/detection-runs` → run list (`source_filename`, `record_count`, `anomaly_count`, `status`, `started_at`, `resolution_stats`).
 - **Adapter (Anomaly → Leakage row):** `finding_code`→category (mapping table), entity_type from which NPI is set, `entity_name` via reference lookup, `amount_paid`→estimated_leakage, status map (`open→new`, `under_review→under_investigation`, …), `case_id`→investigation_id.
