@@ -1,4 +1,4 @@
-"""CSV ingestion helpers: row entity resolution + detection-run creation.
+﻿"""CSV ingestion helpers: row entity resolution + detection-run creation.
 
 Public API
 ----------
@@ -12,8 +12,16 @@ create_or_resume_run(db, *, tenant_id, path, created_by, resume, force)
 
 load_csv(db, run, *, chunk_size=10) -> int
     Stream the CSV at run.source_path row-by-row using csv.DictReader.
-    Insert CsvUploadRow records in chunks of chunk_size, flush after each
-    chunk.  Apply DOS hygiene: rows whose date_of_service fails parse_dos
+    On PostgreSQL: bulk-loads via COPY FROM STDIN in batches of
+    _COPY_BATCH_SIZE rows (default 50,000) using the raw psycopg2 cursor
+    from the existing SQLAlchemy connection (so the GUC
+    SET LOCAL app.current_tenant_id is already set and RLS WITH CHECK
+    passes without any extra plumbing).
+    On other dialects (SQLite in tests): falls back to the original
+    ORM add()/flush() path in chunks of chunk_size so all resolution and
+    stat logic is fully exercised without a real Postgres connection.
+
+    Apply DOS hygiene: rows whose date_of_service fails parse_dos
     (e.g. 9999-09-09) are marked resolution_method='unmapped' with
     resolution_notes='invalid DOS'.  Null-NDC rows whose pharmacy_npi is
     present remain 'declared'.
@@ -30,7 +38,7 @@ load_csv(db, run, *, chunk_size=10) -> int
 
     Chunk failure: exceptions propagate to the caller unchanged.  The
     caller must mark the run 'failed' in a *separate* transaction.
-    load_csv never swallows exceptions; partially-flushed chunks are
+    load_csv never swallows exceptions; partially-copied batches are
     rolled back when the caller's surrounding transaction is rolled back.
 
 resolution_method values match the DB CHECK constraint:
@@ -42,11 +50,21 @@ v1 scope:
   - resolved_client_id and resolved_program_id are always None -- raw
     integer client_id/program_id values are not coerced to UUIDs in v1.
     The raw values remain accessible via the original row dict.
+
+Performance note
+----------------
+_COPY_BATCH_SIZE = 50_000 rows per COPY call.  At ~700 bytes/row (JSON
+row_data + metadata) this is ~35 MB per batch, well within psycopg2
+streaming buffer.  For a 2.6M-row / 1.7 GB file this yields ~52 COPY
+calls totalling a few minutes vs the 30-60+ minutes of row-by-row ORM
+INSERT.
 """
 from __future__ import annotations
 
 import csv
 import hashlib
+import io
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -56,6 +74,35 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
+# ---------------------------------------------------------------------------
+# Batch size for the PostgreSQL COPY path.
+# 50,000 rows ~= 35 MB per batch at ~700 bytes/row.  Keeps memory bounded
+# while amortising COPY protocol overhead across a large number of rows.
+# ---------------------------------------------------------------------------
+_COPY_BATCH_SIZE: int = 50_000
+
+# COPY column order -- must stay in sync with _format_copy_line and the
+# ORM fallback field list in _stream_orm.
+_COPY_COLUMNS = (
+    "id",
+    "tenant_id",
+    "detection_run_id",
+    "row_number",
+    "row_data",
+    "resolved_pharmacy_npi",
+    "resolved_ndc",
+    "resolved_client_id",
+    "resolved_program_id",
+    "resolution_method",
+    "resolution_notes",
+)
+
+_COPY_SQL = (
+    "COPY reclaimrx.csv_upload_rows "
+    "({cols}) "
+    "FROM STDIN WITH (FORMAT csv)"
+).format(cols=", ".join(_COPY_COLUMNS))
 
 
 @dataclass
@@ -162,6 +209,208 @@ def _acquire_advisory_lock(db: Session, key: str) -> None:
         text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
         {"k": key},
     )
+
+
+def _format_copy_line(
+    *,
+    row_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    detection_run_id: uuid.UUID,
+    row_number: int,
+    row_data: dict,
+    resolved_pharmacy_npi: Optional[str],
+    resolved_ndc: Optional[str],
+    resolved_client_id: Optional[uuid.UUID],
+    resolved_program_id: Optional[uuid.UUID],
+    resolution_method: str,
+    resolution_notes: Optional[str],
+) -> str:
+    """Format one CSV line for COPY FROM STDIN WITH (FORMAT csv).
+
+    Pure function -- no I/O, no DB, no side effects.  Uses csv.writer to
+    guarantee correct quoting of embedded commas, double-quotes, and
+    newlines in any field value (most critically in row_data JSON).
+
+    NULL columns are serialised as empty string so PostgreSQL's CSV reader
+    inserts NULL (the default NULL representation for FORMAT csv is '').
+
+    Column order matches _COPY_COLUMNS exactly:
+        id, tenant_id, detection_run_id, row_number, row_data,
+        resolved_pharmacy_npi, resolved_ndc, resolved_client_id,
+        resolved_program_id, resolution_method, resolution_notes.
+
+    Returns a single line terminated with newline.
+    """
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow([
+        str(row_id),
+        str(tenant_id),
+        str(detection_run_id),
+        row_number,
+        json.dumps(row_data, separators=(",", ":")),
+        resolved_pharmacy_npi if resolved_pharmacy_npi is not None else "",
+        resolved_ndc if resolved_ndc is not None else "",
+        str(resolved_client_id) if resolved_client_id is not None else "",
+        str(resolved_program_id) if resolved_program_id is not None else "",
+        resolution_method,
+        resolution_notes if resolution_notes is not None else "",
+    ])
+    return buf.getvalue()
+
+
+def _resolve_and_hygiene(raw_row: dict, parse_dos) -> ResolvedRow:
+    """Apply resolve_row then DOS hygiene.
+
+    Shared by both the COPY path and the ORM fallback path so the logic
+    is written exactly once.
+    """
+    resolved = resolve_row(raw_row)
+
+    dos_str = (raw_row.get("date_of_service", "") or "").strip()
+    if dos_str:
+        dos_valid = parse_dos(dos_str) is not None
+        if not dos_valid:
+            if resolved.resolution_method != "unmapped":
+                # NPI check takes priority: if already unmapped due to
+                # missing pharmacy_npi, preserve that note.
+                resolved = ResolvedRow(
+                    resolved_pharmacy_npi=resolved.resolved_pharmacy_npi,
+                    resolved_ndc=resolved.resolved_ndc,
+                    resolved_client_id=resolved.resolved_client_id,
+                    resolved_program_id=resolved.resolved_program_id,
+                    resolution_method="unmapped",
+                    resolution_notes="invalid DOS",
+                )
+    return resolved
+
+
+def _update_counters(counters: dict, resolved: ResolvedRow) -> None:
+    """Increment the shared stat counters dict in-place."""
+    counters["inserted"] = counters["inserted"] + 1
+    if resolved.resolution_method == "declared":
+        counters["declared"] = counters["declared"] + 1
+    else:
+        counters["unmapped"] = counters["unmapped"] + 1
+        note = resolved.resolution_notes or "unspecified"
+        by_reason = counters["by_reason"]
+        by_reason[note] = by_reason.get(note, 0) + 1
+
+
+def _stream_copy(
+    db: Session,
+    source_path: str,
+    tenant_id: uuid.UUID,
+    detection_run_id: uuid.UUID,
+    parse_dos,
+    counters: dict,
+) -> None:
+    """PostgreSQL COPY path.
+
+    Streams the source CSV, formats each row via _format_copy_line into a
+    StringIO batch, and issues one psycopg2 copy_expert call per
+    _COPY_BATCH_SIZE rows.
+
+    Runs on the same DBAPI connection that SQLAlchemy already holds so the
+    GUC SET LOCAL app.current_tenant_id is in scope and RLS WITH CHECK on
+    reclaimrx.csv_upload_rows passes without extra plumbing.
+    """
+    # db.connection() returns the SQLAlchemy Connection object.
+    # .connection on that is the underlying raw psycopg2 connection.
+    raw_conn = db.connection().connection  # type: ignore[attr-defined]
+    cur = raw_conn.cursor()
+
+    buf = io.StringIO()
+    batch_row_count = 0
+
+    def _flush_batch() -> None:
+        nonlocal batch_row_count
+        if batch_row_count == 0:
+            return
+        buf.seek(0)
+        cur.copy_expert(_COPY_SQL, buf)
+        buf.truncate(0)
+        buf.seek(0)
+        batch_row_count = 0
+
+    with open(source_path, newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        for row_number, raw_row in enumerate(reader, start=1):
+            resolved = _resolve_and_hygiene(raw_row, parse_dos)
+
+            line = _format_copy_line(
+                row_id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                detection_run_id=detection_run_id,
+                row_number=row_number,
+                row_data=dict(raw_row),
+                resolved_pharmacy_npi=resolved.resolved_pharmacy_npi,
+                resolved_ndc=resolved.resolved_ndc,
+                resolved_client_id=resolved.resolved_client_id,
+                resolved_program_id=resolved.resolved_program_id,
+                resolution_method=resolved.resolution_method,
+                resolution_notes=resolved.resolution_notes,
+            )
+            buf.write(line)
+            batch_row_count += 1
+            _update_counters(counters, resolved)
+
+            if batch_row_count >= _COPY_BATCH_SIZE:
+                _flush_batch()
+
+    _flush_batch()
+    cur.close()
+
+
+def _stream_orm(
+    db: Session,
+    source_path: str,
+    tenant_id: uuid.UUID,
+    detection_run_id: uuid.UUID,
+    parse_dos,
+    counters: dict,
+    CsvUploadRow,
+    chunk_size: int,
+) -> None:
+    """SQLite / non-PostgreSQL fallback path using ORM add()/flush().
+
+    Keeps all 54-row unit-test fixture assertions working on SQLite so
+    resolution and stat logic is fully exercised dialect-independently.
+    """
+    chunk: list = []
+
+    def _flush_chunk() -> None:
+        for obj in chunk:
+            db.add(obj)
+        db.flush()
+        chunk.clear()
+
+    with open(source_path, newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        for row_number, raw_row in enumerate(reader, start=1):
+            resolved = _resolve_and_hygiene(raw_row, parse_dos)
+
+            upload_row = CsvUploadRow(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                detection_run_id=detection_run_id,
+                row_number=row_number,
+                row_data=dict(raw_row),
+                resolved_client_id=resolved.resolved_client_id,
+                resolved_program_id=resolved.resolved_program_id,
+                resolved_pharmacy_npi=resolved.resolved_pharmacy_npi,
+                resolved_ndc=resolved.resolved_ndc,
+                resolution_method=resolved.resolution_method,
+                resolution_notes=resolved.resolution_notes,
+            )
+            chunk.append(upload_row)
+            _update_counters(counters, resolved)
+
+            if len(chunk) >= chunk_size:
+                _flush_chunk()
+
+    if chunk:
+        _flush_chunk()
 
 
 # ---------------------------------------------------------------------------
@@ -275,21 +524,30 @@ def load_csv(
     *,
     chunk_size: int = 10,
 ) -> int:
-    """Stream the CSV file and insert CsvUploadRow records in chunks.
+    """Stream the CSV file and bulk-insert CsvUploadRow records.
 
     Reads run.source_path via csv.DictReader -- never loads the whole file
-    into memory. Inserts rows in batches of chunk_size, flushing after each
-    batch so memory footprint stays bounded.
+    into memory.
+
+    Dialect branch:
+      PostgreSQL: rows are accumulated into StringIO batches of
+        _COPY_BATCH_SIZE lines and sent via psycopg2 COPY FROM STDIN using
+        the raw cursor from the *existing* SQLAlchemy connection.  Because
+        load_csv runs on the same connection that already has
+        SET LOCAL app.current_tenant_id in effect, RLS WITH CHECK
+        policies on reclaimrx.csv_upload_rows pass without any additional
+        plumbing.
+      Other dialects (SQLite in tests): original ORM add()/flush() path in
+        batches of chunk_size.  All resolution/stat logic is identical so
+        the 54-row fixture tests exercise the full code path.
 
     DOS hygiene (applies after resolve_row):
       - If date_of_service is present but parse_dos returns None (e.g.
         9999-09-09), the row's resolution_method is overridden to 'unmapped'
         and resolution_notes is set to 'invalid DOS', UNLESS the row was
         already unmapped due to missing pharmacy_npi (in which case the
-        existing 'missing pharmacy_npi' note is preserved; the 'invalid DOS'
-        reason is still counted in by_reason).
-      - Null-NDC rows with a valid pharmacy_npi remain 'declared'; ndc-
-        requiring rules simply won't match them in Phase 3.
+        existing 'missing pharmacy_npi' note is preserved).
+      - Null-NDC rows with a valid pharmacy_npi remain 'declared'.
 
     After streaming, merges into run.resolution_stats:
       - inserted_count : total rows written to csv_upload_rows
@@ -297,18 +555,12 @@ def load_csv(
       - unmapped       : count of rows with resolution_method == 'unmapped'
       - by_reason      : {resolution_notes: count} for unmapped rows
 
-    Full-coverage gate: inserted_count and expected_count are both present in
-    resolution_stats. Phase 3 detection checks
-    ``inserted_count == expected_count`` before running rules.
-
-    Chunk failure: exceptions propagate unchanged. The caller must mark the
-    run 'failed' in a separate transaction. Partially-inserted chunks are
-    rolled back when the caller's surrounding transaction is rolled back.
-
     Args:
         db:         SQLAlchemy Session.
         run:        DetectionRun in 'in_progress' status.
-        chunk_size: Number of rows to add() and flush() at once (default 10).
+        chunk_size: Number of rows per ORM flush on non-Postgres dialects
+                    (default 10).  Ignored on the PostgreSQL COPY path,
+                    which always uses _COPY_BATCH_SIZE.
 
     Returns:
         Total number of CsvUploadRow records inserted.
@@ -321,71 +573,29 @@ def load_csv(
     detection_run_id: uuid.UUID = run.id
     source_path: str = run.source_path
 
-    inserted_count: int = 0
-    declared_count: int = 0
-    unmapped_count: int = 0
-    by_reason: dict[str, int] = {}
+    # Shared mutable counters updated by both path implementations.
+    counters: dict = {
+        "inserted": 0,
+        "declared": 0,
+        "unmapped": 0,
+        "by_reason": {},
+    }
 
-    chunk: list = []
+    # Determine which path to use based on the active dialect.
+    use_copy: bool = db.bind.dialect.name == "postgresql"  # type: ignore[union-attr]
 
-    def _flush_chunk() -> None:
-        for obj in chunk:
-            db.add(obj)
-        db.flush()
-        chunk.clear()
+    if use_copy:
+        _stream_copy(db, source_path, tenant_id, detection_run_id, parse_dos, counters)
+    else:
+        _stream_orm(
+            db, source_path, tenant_id, detection_run_id,
+            parse_dos, counters, CsvUploadRow, chunk_size,
+        )
 
-    with open(source_path, newline="", encoding="utf-8") as fh:
-        reader = csv.DictReader(fh)
-        for row_number, raw_row in enumerate(reader, start=1):
-            # Entity resolution from pharmacy_npi / ndc.
-            resolved = resolve_row(raw_row)
-
-            # DOS hygiene: override resolution if date_of_service is invalid.
-            dos_str = (raw_row.get("date_of_service", "") or "").strip()
-            if dos_str:
-                dos_valid = parse_dos(dos_str) is not None
-                if not dos_valid:
-                    if resolved.resolution_method != "unmapped":
-                        # Promote to unmapped; by_reason will be counted below.
-                        resolved = ResolvedRow(
-                            resolved_pharmacy_npi=resolved.resolved_pharmacy_npi,
-                            resolved_ndc=resolved.resolved_ndc,
-                            resolved_client_id=resolved.resolved_client_id,
-                            resolved_program_id=resolved.resolved_program_id,
-                            resolution_method="unmapped",
-                            resolution_notes="invalid DOS",
-                        )
-
-            upload_row = CsvUploadRow(
-                id=uuid.uuid4(),
-                tenant_id=tenant_id,
-                detection_run_id=detection_run_id,
-                row_number=row_number,
-                row_data=dict(raw_row),
-                resolved_client_id=resolved.resolved_client_id,
-                resolved_program_id=resolved.resolved_program_id,
-                resolved_pharmacy_npi=resolved.resolved_pharmacy_npi,
-                resolved_ndc=resolved.resolved_ndc,
-                resolution_method=resolved.resolution_method,
-                resolution_notes=resolved.resolution_notes,
-            )
-            chunk.append(upload_row)
-
-            if resolved.resolution_method == "declared":
-                declared_count += 1
-            else:
-                unmapped_count += 1
-                note = resolved.resolution_notes or "unspecified"
-                by_reason[note] = by_reason.get(note, 0) + 1
-
-            inserted_count += 1
-
-            if len(chunk) >= chunk_size:
-                _flush_chunk()
-
-    # Flush any remaining rows in the last partial chunk.
-    if chunk:
-        _flush_chunk()
+    inserted_count: int = counters["inserted"]
+    declared_count: int = counters["declared"]
+    unmapped_count: int = counters["unmapped"]
+    by_reason: dict = counters["by_reason"]
 
     # Merge resolution stats into the run's JSONB column.
     # Reassign to trigger SQLAlchemy JSONB mutation tracking.

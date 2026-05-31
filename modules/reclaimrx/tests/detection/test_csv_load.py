@@ -298,3 +298,186 @@ class TestLoadCsvResolutionMethodValues:
             assert row.resolution_method in self._ALLOWED, (
                 f"row {row.row_number}: invalid resolution_method={row.resolution_method!r}"
             )
+
+
+class TestCopyBufferEscaping:
+    """Unit tests for _format_copy_line — the pure CSV-line formatter used by the
+    PostgreSQL COPY path.  No DB required; these test the helper in isolation.
+
+    The helper must produce a single line that, when fed to:
+        COPY reclaimrx.csv_upload_rows (...) FROM STDIN WITH (FORMAT csv)
+    is parsed back to exactly the original values by PostgreSQL's CSV reader.
+
+    Critical escaping cases:
+      - row_data JSON contains embedded commas  -> must be quoted
+      - row_data JSON contains embedded double-quotes -> quotes must be doubled
+      - row_data JSON contains embedded newlines -> must be quoted
+      - NULL columns serialised as empty field between consecutive commas
+      - UUID columns serialised as plain hyphenated string
+    """
+
+    def test_format_copy_line_produces_correct_field_count(self):
+        """Line produced by _format_copy_line has exactly 11 comma-separated fields
+        (matching the COPY column list: id, tenant_id, detection_run_id, row_number,
+        row_data, resolved_pharmacy_npi, resolved_ndc, resolved_client_id,
+        resolved_program_id, resolution_method, resolution_notes).
+        """
+        import csv
+        import io
+        from src.detection.csv_ingest import _format_copy_line
+
+        row_id = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        tenant_id = uuid.UUID("11111111-1111-1111-1111-111111111111")
+        run_id = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+        row_data = {"pharmacy_npi": "1234567890", "ndc": "12345678901"}
+
+        line = _format_copy_line(
+            row_id=row_id,
+            tenant_id=tenant_id,
+            detection_run_id=run_id,
+            row_number=1,
+            row_data=row_data,
+            resolved_pharmacy_npi="1234567890",
+            resolved_ndc="12345678901",
+            resolved_client_id=None,
+            resolved_program_id=None,
+            resolution_method="declared",
+            resolution_notes=None,
+        )
+        # Parse the line back with csv.reader to count fields.
+        reader = csv.reader(io.StringIO(line.rstrip("\n")))
+        fields = next(reader)
+        assert len(fields) == 11
+
+    def test_format_copy_line_null_columns_are_empty_string(self):
+        """NULL columns (resolved_client_id, resolved_program_id, resolution_notes)
+        are serialised as empty fields so PostgreSQL interprets them as NULL when
+        combined with a COPY NULL '' directive (the default for CSV FORMAT).
+        """
+        import csv
+        import io
+        from src.detection.csv_ingest import _format_copy_line
+
+        line = _format_copy_line(
+            row_id=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+            detection_run_id=uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            row_number=7,
+            row_data={"x": "y"},
+            resolved_pharmacy_npi=None,
+            resolved_ndc=None,
+            resolved_client_id=None,
+            resolved_program_id=None,
+            resolution_method="unmapped",
+            resolution_notes="missing pharmacy_npi",
+        )
+        reader = csv.reader(io.StringIO(line.rstrip("\n")))
+        fields = next(reader)
+        # resolved_client_id is field index 7, resolved_program_id is 8.
+        assert fields[7] == ""
+        assert fields[8] == ""
+
+    def test_format_copy_line_row_data_with_embedded_comma(self):
+        """row_data JSON containing an embedded comma round-trips correctly through
+        csv.reader — the comma does not split the field.
+        """
+        import csv
+        import io
+        from src.detection.csv_ingest import _format_copy_line
+
+        row_data = {"drug_name": "Aspirin, 500mg", "qty": "30"}
+        line = _format_copy_line(
+            row_id=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+            detection_run_id=uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            row_number=3,
+            row_data=row_data,
+            resolved_pharmacy_npi="1234567890",
+            resolved_ndc=None,
+            resolved_client_id=None,
+            resolved_program_id=None,
+            resolution_method="declared",
+            resolution_notes=None,
+        )
+        reader = csv.reader(io.StringIO(line.rstrip("\n")))
+        fields = next(reader)
+        import json
+        parsed_row_data = json.loads(fields[4])
+        assert parsed_row_data["drug_name"] == "Aspirin, 500mg"
+
+    def test_format_copy_line_row_data_with_embedded_double_quote(self):
+        """row_data JSON containing an embedded double-quote round-trips correctly
+        (CSV quoting: the quote is doubled inside a quoted field).
+        """
+        import csv
+        import io
+        from src.detection.csv_ingest import _format_copy_line
+
+        row_data = {"note": 'He said "hello"', "qty": "30"}
+        line = _format_copy_line(
+            row_id=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+            detection_run_id=uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            row_number=5,
+            row_data=row_data,
+            resolved_pharmacy_npi=None,
+            resolved_ndc=None,
+            resolved_client_id=None,
+            resolved_program_id=None,
+            resolution_method="unmapped",
+            resolution_notes=None,
+        )
+        reader = csv.reader(io.StringIO(line.rstrip("\n")))
+        fields = next(reader)
+        import json
+        parsed_row_data = json.loads(fields[4])
+        assert parsed_row_data["note"] == 'He said "hello"'
+
+    def test_format_copy_line_row_data_with_embedded_newline(self):
+        """row_data JSON containing an embedded newline round-trips correctly."""
+        import csv
+        import io
+        from src.detection.csv_ingest import _format_copy_line
+
+        row_data = {"note": "line1\nline2", "qty": "10"}
+        line = _format_copy_line(
+            row_id=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+            detection_run_id=uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            row_number=9,
+            row_data=row_data,
+            resolved_pharmacy_npi="0987654321",
+            resolved_ndc="00000000000",
+            resolved_client_id=None,
+            resolved_program_id=None,
+            resolution_method="declared",
+            resolution_notes=None,
+        )
+        reader = csv.reader(io.StringIO(line.rstrip("\n")))
+        fields = next(reader)
+        import json
+        parsed_row_data = json.loads(fields[4])
+        assert parsed_row_data["note"] == "line1\nline2"
+
+    def test_format_copy_line_resolution_notes_preserved(self):
+        """resolution_notes string value is preserved in the last field."""
+        import csv
+        import io
+        from src.detection.csv_ingest import _format_copy_line
+
+        line = _format_copy_line(
+            row_id=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+            detection_run_id=uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            row_number=11,
+            row_data={"x": "1"},
+            resolved_pharmacy_npi=None,
+            resolved_ndc=None,
+            resolved_client_id=None,
+            resolved_program_id=None,
+            resolution_method="unmapped",
+            resolution_notes="invalid DOS",
+        )
+        reader = csv.reader(io.StringIO(line.rstrip("\n")))
+        fields = next(reader)
+        assert fields[10] == "invalid DOS"
