@@ -7,6 +7,11 @@ import { AlertTriangle } from "lucide-react";
 import { apiGet, buildUrl } from "@shared/lib/api-client";
 import { API_URLS } from "@shared/lib/constants";
 import type { LeakageFlag, LeakageCategory } from "@shared/types/reclaimrx";
+import {
+  anomalyToLeakageFlag,
+  buildAnomalyQueryParams,
+} from "@/lib/reclaimrx/anomaly-adapter";
+import type { AnomalyListResponse } from "@/lib/reclaimrx/anomaly-adapter";
 import { ConfigurableDataTable, type Column } from "@/components/ui/configurable-data-table";
 import { FilterPanel, type FilterField, type FilterValues } from "@/components/ui/filter-panel";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -39,6 +44,15 @@ const STATUS_MAP: Record<string, "active" | "inactive" | "warning" | "error" | "
   dismissed: "inactive",
 };
 
+// All known finding codes for the rule filter
+const KNOWN_FINDING_CODES = [
+  "ALL-001", "ALL-002", "ALL-003", "ALL-005", "ALL-006",
+  "MFR-001", "MFR-002", "MFR-003", "MFR-004",
+  "HP-005", "HP-008",
+  "REJECT-75-70",
+  "TH-002", "TH-005",
+];
+
 const FILTER_FIELDS: FilterField[] = [
   {
     id: "category",
@@ -49,13 +63,29 @@ const FILTER_FIELDS: FilterField[] = [
     ),
   },
   {
+    id: "finding_code",
+    label: "Rule (Finding Code)",
+    type: "multi-select",
+    options: KNOWN_FINDING_CODES.map((code) => ({ value: code, label: code })),
+  },
+  {
     id: "entity_type",
     label: "Entity Type",
     type: "select",
     options: [
       { value: "pharmacy", label: "Pharmacy" },
       { value: "prescriber", label: "Prescriber" },
-      { value: "patient", label: "Patient" },
+    ],
+  },
+  {
+    id: "severity",
+    label: "Severity",
+    type: "select",
+    options: [
+      { value: "critical", label: "Critical" },
+      { value: "high", label: "High" },
+      { value: "medium", label: "Medium" },
+      { value: "low", label: "Low" },
     ],
   },
   {
@@ -68,12 +98,6 @@ const FILTER_FIELDS: FilterField[] = [
       { value: "confirmed", label: "Confirmed" },
       { value: "dismissed", label: "Dismissed" },
     ],
-  },
-  {
-    id: "program",
-    label: "Program",
-    type: "text",
-    placeholder: "Filter by program name",
   },
 ];
 
@@ -165,37 +189,46 @@ export default function LeakageMonitorPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialCategory = searchParams.get("category");
+  const initialRunId = searchParams.get("run_id");
 
-  const [filterValues, setFilterValues] = useState<FilterValues>(
-    initialCategory ? { category: [initialCategory] } : {}
-  );
+  const [filterValues, setFilterValues] = useState<FilterValues>(() => {
+    const init: FilterValues = {};
+    if (initialCategory) init.category = [initialCategory];
+    if (initialRunId) init.data_source_run_id = initialRunId;
+    return init;
+  });
 
-  const { data: flags = [], isLoading } = useQuery<LeakageFlag[]>({
-    queryKey: ["leakage-flags"],
+  // Build backend query params from filter state
+  const backendParams = useMemo(() => {
+    return buildAnomalyQueryParams({
+      category: filterValues.category as LeakageCategory[] | undefined,
+      finding_code: filterValues.finding_code as string[] | undefined,
+      severity: filterValues.severity as string | undefined,
+      status: filterValues.status as string[] | undefined,
+      entity_type: filterValues.entity_type as string | undefined,
+      data_source_run_id: (filterValues.data_source_run_id ?? initialRunId) as string | undefined,
+      page_size: 200,
+    });
+  }, [filterValues, initialRunId]);
+
+  const { data: response, isLoading } = useQuery<AnomalyListResponse>({
+    queryKey: ["anomalies", backendParams],
     queryFn: () =>
-      apiGet<LeakageFlag[]>(buildUrl(`${API_URLS.reclaimrx}/api/v1/reclaimrx/leakage`)),
+      apiGet<AnomalyListResponse>(
+        buildUrl(`${API_URLS.reclaimrx}/api/v1/reclaimrx/anomalies`, backendParams)
+      ),
     staleTime: 60_000,
   });
 
-  const filtered = useMemo(() => {
-    return flags.filter((flag) => {
-      const catFilter = filterValues.category as string[] | undefined;
-      if (catFilter && catFilter.length > 0 && !catFilter.includes(flag.category)) return false;
-      const typeFilter = filterValues.entity_type as string | undefined;
-      if (typeFilter && flag.entity_type !== typeFilter) return false;
-      const statusFilter = filterValues.status as string[] | undefined;
-      if (statusFilter && statusFilter.length > 0 && !statusFilter.includes(flag.status)) return false;
-      const programFilter = filterValues.program as string | undefined;
-      if (programFilter && !flag.program_name?.toLowerCase().includes(programFilter.toLowerCase()))
-        return false;
-      return true;
-    });
-  }, [flags, filterValues]);
+  const flags: LeakageFlag[] = useMemo(
+    () => (response?.items ?? []).map(anomalyToLeakageFlag),
+    [response]
+  );
 
   const totalLeakage = useMemo(
     () =>
-      filtered.reduce((sum, f) => sum + parseFloat(f.estimated_leakage || "0"), 0),
-    [filtered]
+      flags.reduce((sum, f) => sum + parseFloat(f.estimated_leakage || "0"), 0),
+    [flags]
   );
 
   return (
@@ -219,7 +252,7 @@ export default function LeakageMonitorPage() {
               <h1 className="text-xl font-bold text-ifx-gray-900">Leakage Monitor</h1>
             </div>
             <p className="text-sm text-ifx-gray-400 mt-0.5">
-              {filtered.length} flags · Est. total:{" "}
+              {flags.length} flags · Est. total:{" "}
               <span className="font-semibold text-red-600">
                 ${(totalLeakage / 1000).toFixed(0)}K
               </span>
@@ -231,7 +264,7 @@ export default function LeakageMonitorPage() {
           <ConfigurableDataTable
             tableId="leakage-monitor"
             columns={COLUMNS}
-            data={filtered}
+            data={flags}
             loading={isLoading}
             searchable
             exportable

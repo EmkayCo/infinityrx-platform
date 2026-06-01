@@ -103,6 +103,8 @@ export const NAV_MODULES: NavModule[] = [
     children: [
       { label: "GTN Dashboard", href: "/reclaimrx" },
       { label: "Leakage Monitor", href: "/reclaimrx/leakage" },
+      { label: "Detection Runs", href: "/reclaimrx/runs" },
+      { label: "Upload CSV", href: "/reclaimrx/upload" },
       { label: "Investigations", href: "/reclaimrx/investigations" },
       { label: "Pharmacy Risk Scores", href: "/reclaimrx/risk" },
       { label: "Recovery Tracking", href: "/reclaimrx/recovery" },

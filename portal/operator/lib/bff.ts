@@ -256,19 +256,29 @@ export async function forwardJson<T>(
  * Mirror of modules/.../main.py port assignments. Single source of truth
  * for portal→backend addressing.
  */
+// Port assignments verified against scripts/start-services/start-all-services.ps1 (2026-06-01).
+// NOTE: payment-processing module is not in start-all-services.ps1 port map — its
+// payment-batch endpoints are served by the billing module (8001). The paymentProcessing
+// alias is kept as a named entry so existing callers compile; update if the module is
+// added to the launch script with its own port.
 export const BACKENDS = {
   corePlatform: "http://localhost:8000",
   billing: "http://localhost:8001",
-  paymentProcessing: "http://localhost:8002",
-  reclaimrx: "http://localhost:8003",
-  reporting: "http://localhost:8004",
-  ediCompliance: "http://localhost:8005",
-  medicalClaims: "http://localhost:8006",
-  aiNlp: "http://localhost:8007",
-  dataiq: "http://localhost:8008",
+  paymentProcessing: "http://localhost:8001", // payment-processing endpoints served via billing
+  reclaimrx: "http://localhost:8002",
+  medicalClaims: "http://localhost:8003",
+  memberManagement: "http://localhost:8004",
+  planDesign: "http://localhost:8005",
+  programConfig: "http://localhost:8006",
+  rebateManagement: "http://localhost:8007",
+  rulesEngine: "http://localhost:8008",
   pharmacyDirectory: "http://localhost:8009",
   prescriberDirectory: "http://localhost:8010",
   drugDatabase: "http://localhost:8011",
-  memberManagement: "http://localhost:8012",
-  adjudicationEngine: "http://localhost:8013",
+  reporting: "http://localhost:8012",
+  dataiq: "http://localhost:8013",
+  adjudicationEngine: "http://localhost:8014",
+  ediCompliance: "http://localhost:8015",
+  ebvEbiRtbc: "http://localhost:8016",
+  priorAuthorization: "http://localhost:8017",
 } as const;

@@ -110,7 +110,7 @@ describe("POST /api/v1/claims/manual", () => {
     expect(resp.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const calledUrl = fetchMock.mock.calls[0][0] as string;
-    expect(calledUrl).toBe("http://localhost:8013/claims/adjudicate");
+    expect(calledUrl).toBe("http://localhost:8014/claims/adjudicate");
   });
 
   it("forwards compound claim_type to adjudication-engine /claims/adjudicate", async () => {
@@ -122,7 +122,7 @@ describe("POST /api/v1/claims/manual", () => {
 
     const resp = await POST(makeRequest({ claim_type: "compound", first_name: "Test" }));
     expect(resp.status).toBe(200);
-    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8013/claims/adjudicate");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8014/claims/adjudicate");
   });
 
   it("forwards medical claim_type to medical-claims /api/v1/medical-claims/claims", async () => {
@@ -135,7 +135,7 @@ describe("POST /api/v1/claims/manual", () => {
     const resp = await POST(makeRequest({ claim_type: "medical", first_name: "Test" }));
     expect(resp.status).toBe(200);
     expect(fetchMock.mock.calls[0][0]).toBe(
-      "http://localhost:8006/api/v1/medical-claims/claims"
+      "http://localhost:8003/api/v1/medical-claims/claims"
     );
   });
 
