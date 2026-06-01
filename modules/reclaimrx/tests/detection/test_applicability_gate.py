@@ -15,9 +15,11 @@ Contract:
 Fixture pattern:
 - Module-scope SQLite engine with SAVEPOINT-based session isolation (LESSON-001).
 - PG_UUID -> _UUIDString, JSONB -> JSON, ARRAY -> JSON (LESSON-007).
-- Instances are created under _FULL_CSV_COLUMNS (13 instances).
-- gate_rules is called with RESTRICTED columns -> 2 are inapplicable (MFR-001,
-  MFR-003 both require extended_wac) -> 2 skip rows written, 11 returned.
+- Instances are created under _FULL_CSV_COLUMNS (13 instances;
+  REJECT-75-70 requires rx_number_hash/reject_code absent from this set).
+- gate_rules is called with RESTRICTED columns -> 3 are inapplicable (MFR-001,
+  MFR-003 require extended_wac; REJECT-75-70 requires rx_number_hash) ->
+  3 skip rows written, 11 returned.
   MFR-008 is now DEFERRED so it is never instantiated and never counted here.
 """
 from __future__ import annotations
@@ -165,9 +167,11 @@ _FULL_CSV_COLUMNS: set[str] = {
 # Restricted set: drop extended_wac -> MFR-001 and MFR-003 become inapplicable.
 _RESTRICTED_COLUMNS: set[str] = _FULL_CSV_COLUMNS - {"extended_wac"}
 
-# Rules that require extended_wac (become inapplicable under restricted set).
-_INAPPLICABLE_CODES: set[str] = {"MFR-001", "MFR-003"}
-_EXPECTED_APPLICABLE_COUNT = 11  # 13 - 2
+# Rules inapplicable under _RESTRICTED_COLUMNS.
+# MFR-001, MFR-003: require extended_wac (absent from restricted set).
+# REJECT-75-70: requires rx_number_hash/reject_code (absent from both sets).
+_INAPPLICABLE_CODES: set[str] = {"MFR-001", "MFR-003", "REJECT-75-70"}
+_EXPECTED_APPLICABLE_COUNT = 11  # 14 RUN rules - 3 inapplicable = 11
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +207,12 @@ class TestGateRulesReturnValue:
     """gate_rules returns exactly the applicable instances."""
 
     def test_full_columns_returns_all_13(self, db: Session):
-        """Full column set -> all 13 instances are applicable (MFR-008 DEFERRED)."""
+        """Full column set -> 13 instances are applicable.
+
+        MFR-008 is DEFERRED. REJECT-75-70 requires rx_number_hash/reject_code which
+        are absent from _FULL_CSV_COLUMNS, so it is also inapplicable here.
+        Total applicable = 14 RUN rules - 1 deferred - 1 missing-columns = 13.
+        """
         run = _seed(db, _TENANT_ID)
         applicable = gate_rules(db, run, _FULL_CSV_COLUMNS)
         assert len(applicable) == 13
@@ -232,7 +241,12 @@ class TestGateRulesReturnValue:
             )
 
     def test_applicable_codes_correct(self, db: Session):
-        """The 11 returned codes match the 13-RUN-set minus the two inapplicable ones."""
+        """The 11 returned codes match the 14-RUN-set minus the 3 inapplicable ones.
+
+        MFR-001 and MFR-003 require extended_wac (absent from _RESTRICTED_COLUMNS).
+        REJECT-75-70 requires rx_number_hash/reject_code (absent from both column sets).
+        14 RUN rules - 3 inapplicable = 11 expected.
+        """
         run = _seed(db, _TENANT_ID)
         applicable = gate_rules(db, run, _RESTRICTED_COLUMNS)
         all_run_codes = {
@@ -394,7 +408,11 @@ class TestSkipRowsWritten:
         assert skip_count == 0
 
     def test_empty_columns_writes_13_skip_rows(self, db: Session):
-        """Empty column set -> all 13 instances inapplicable -> 13 skip rows."""
+        """Empty column set -> all 13 instances inapplicable -> 13 skip rows.
+
+        REJECT-75-70 is not instantiated under _FULL_CSV_COLUMNS (missing required
+        columns), so only 13 instances exist -> 13 skip rows on empty-column gate.
+        """
         run = _seed(db, _TENANT_ID)
         gate_rules(db, run, set())
         db.flush()

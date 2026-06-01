@@ -149,18 +149,21 @@ from src.detection.rule_type_registry import (  # noqa: E402
 )
 
 # ---------------------------------------------------------------------------
-# Constants for the 13 RUN rules (deferred_data_feed=False)
+# Constants for the 14 RUN rules (deferred_data_feed=False)
 # MFR-008 reclassified to DEFERRED (needs statement-only-pharmacy reference data).
+# REJECT-75-70 added in Phase 3 (reject-75->70 fast-rebill, group key rx_number_hash).
 # ---------------------------------------------------------------------------
 _RUN_CODES = {
     "ALL-001", "MFR-001", "MFR-002", "ALL-005", "HP-010", "TH-005",
     "TH-002", "MFR-004", "MFR-003", "HP-005", "HP-008",
-    "ALL-006", "MFR-009",
+    "ALL-006", "MFR-009", "REJECT-75-70",
 }
 _VALID_FAMILIES = {"A1", "A2", "A3", "A4", "A5", "A6"}
 
-# Full CSV column set — union of all required_data_columns across the 13 RUN rules.
-# MFR-008 is now DEFERRED; statement_account is no longer needed to instantiate rules.
+# Full CSV column set — union of required_data_columns present in this set.
+# 14 RUN rules exist; REJECT-75-70 requires rx_number_hash/reject_code (absent here),
+# so register_rule_instances creates 13 instances (not 14) with these columns.
+# MFR-008 is DEFERRED; statement_account is no longer needed to instantiate rules.
 _FULL_CSV_COLUMNS: set[str] = {
     # ALL-001
     "patient_unique_hash", "ndc", "date_of_service", "auth_no_hash",
@@ -213,11 +216,11 @@ class TestCatalogCompleteness:
                 f"Rule {rule['code']} has invalid family {rule['family']!r}"
             )
 
-    def test_exactly_13_run_rules(self):
+    def test_exactly_14_run_rules(self):
         run_rules = [r for r in RULE_TYPE_CATALOG if not r["deferred_data_feed"]]
         codes = {r["code"] for r in run_rules}
-        assert len(run_rules) == 13, (
-            f"Expected 13 RUN rules, got {len(run_rules)}: {codes}"
+        assert len(run_rules) == 14, (
+            f"Expected 14 RUN rules, got {len(run_rules)}: {codes}"
         )
         assert codes == _RUN_CODES, (
             f"RUN rule codes mismatch.\nExpected: {_RUN_CODES}\nGot: {codes}"
@@ -395,14 +398,14 @@ class TestRegisterRuleTypes:
         assert row.deferred_data_feed is True
         assert row.deferred_reason
 
-    def test_exactly_13_run_rows_in_db(self, db: Session):
+    def test_exactly_14_run_rows_in_db(self, db: Session):
         from sqlalchemy import select
 
         register_rule_types(db)
         rows = db.execute(
             select(DetectionRuleType).where(DetectionRuleType.deferred_data_feed.is_(False))
         ).scalars().all()
-        assert len(rows) == 13
+        assert len(rows) == 14
 
     def test_all_run_rows_have_required_data_columns(self, db: Session):
         from sqlalchemy import select
@@ -493,7 +496,12 @@ class TestRegisterRuleInstances:
         assert rows == [], "ALL-002 is deferred and must not have an instance"
 
     def test_instance_codes_match_run_rule_set(self, db: Session):
-        """The 14 instance rule_type_codes equal the expected RUN rule set."""
+        """The instances codes equal RUN rules that are applicable under _FULL_CSV_COLUMNS.
+
+        _FULL_CSV_COLUMNS has 13 instantiable rules:
+        REJECT-75-70 is in _RUN_CODES but requires rx_number_hash/reject_code which
+        are absent from _FULL_CSV_COLUMNS, so it is not instantiated here.
+        """
         from sqlalchemy import select
 
         self._seed_types(db)
@@ -504,7 +512,9 @@ class TestRegisterRuleInstances:
             )
         ).scalars().all()
         codes = {r.rule_type_code for r in rows}
-        assert codes == _RUN_CODES
+        # REJECT-75-70 not instantiated under _FULL_CSV_COLUMNS (missing required cols)
+        expected = _RUN_CODES - {"REJECT-75-70"}
+        assert codes == expected
 
     def test_instance_parameters_copied_from_type(self, db: Session):
         """Instance parameters equal the default_parameters from the rule type."""
