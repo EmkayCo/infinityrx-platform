@@ -1,4 +1,4 @@
-﻿"""Seed script: insert 1 completed detection_run + ~50 anomalies for demo tenant.
+"""Seed script: insert 1 completed detection_run + ~50 anomalies for demo tenant.
 
 Demo tenant: a0000000-0000-0000-0000-000000000001
 Finding codes: >=6 codes, 4 severities, pharmacy + prescriber entities, varied amounts.
@@ -26,7 +26,7 @@ _HERE = Path(__file__).resolve().parent.parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.models.detection_run_models import Anomaly, DetectionRun
@@ -97,6 +97,9 @@ def _make_anomaly(
         source_table="csv_upload_rows",
         source_row_id=uuid.uuid4(),
         detection_kind="rule",
+        # ck_reclaimrx_anomalies_detection_id_kind: rule-kind anomalies MUST have a detection_id
+        # (engine uses the DetectionRuleInstance id; no FK, so a fresh UUID satisfies the constraint).
+        detection_id=uuid.uuid4(),
         severity=severity,
         confidence=confidence,
         finding_code=finding_code,
@@ -118,6 +121,9 @@ def _make_anomaly(
 
 def seed(db: Session) -> None:
     """Insert demo run and anomalies. Idempotent -- skips if run_label already exists."""
+    # RLS: migration 0002 policies read the Postgres GUC app.current_tenant_id.
+    # ifx_dev_app is NON-BYPASSRLS, so set it for this transaction before any read/write.
+    db.execute(text("SET LOCAL app.current_tenant_id = '%s'" % DEMO_TENANT_ID))
     existing = db.execute(
         select(DetectionRun).where(
             DetectionRun.tenant_id == DEMO_TENANT_ID,

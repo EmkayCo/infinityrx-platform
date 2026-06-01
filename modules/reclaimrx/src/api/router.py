@@ -20,6 +20,7 @@ from src.api.dependencies import (
     get_db,
     require_mfa_elevated,
     require_tenant_match,
+    bind_tenant_context,
 )
 from src.api.errors import build_error_envelope
 from src.api.schemas import (
@@ -1251,7 +1252,7 @@ async def list_anomalies(
     page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
     user: CurrentUser = RECLAIMRX_VIEWER_DEP,
-    _tenant: CurrentUser = Depends(require_tenant_match),
+    _tenant: CurrentUser = Depends(bind_tenant_context),
 ) -> PaginatedResponse:
     """List anomalies for the tenant with server-side AND-filters and pagination."""
     from datetime import date as _date
@@ -1369,7 +1370,7 @@ async def list_detection_runs(
     response: Response,
     db: Session = Depends(get_db),
     user: CurrentUser = RECLAIMRX_VIEWER_DEP,
-    _tenant: CurrentUser = Depends(require_tenant_match),
+    _tenant: CurrentUser = Depends(bind_tenant_context),
 ) -> list:
     """List detection runs for the tenant, newest first."""
     from src.models.detection_run_models import DetectionRun as _DR
@@ -1386,7 +1387,7 @@ async def get_detection_run(
     response: Response,
     db: Session = Depends(get_db),
     user: CurrentUser = RECLAIMRX_VIEWER_DEP,
-    _tenant: CurrentUser = Depends(require_tenant_match),
+    _tenant: CurrentUser = Depends(bind_tenant_context),
 ) -> dict:
     """Get a single detection run with per-rule breakdown (tenant-scoped GROUP BY)."""
     import uuid as _uuid
@@ -1432,7 +1433,7 @@ async def ingest_detection_run(
     run_label: str | None = Form(default=None),
     db: Session = Depends(get_db),
     user: CurrentUser = RECLAIMRX_VIEWER_DEP,
-    _tenant: CurrentUser = Depends(require_tenant_match),
+    _tenant: CurrentUser = Depends(bind_tenant_context),
 ) -> dict:
     """Upload a CSV and run full ingest+detection pipeline synchronously.
 

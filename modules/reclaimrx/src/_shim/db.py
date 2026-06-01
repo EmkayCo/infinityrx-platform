@@ -48,6 +48,27 @@ def configure_engine(url: str = "sqlite:///:memory:") -> None:
 
     install_tenant_loader(_SessionLocal)
 
+    # RLS GUC: PostgreSQL row-level-security policies (migration 0002) read the
+    # session-local setting ``app.current_tenant_id``. The ORM tenant-loader adds a
+    # WHERE clause but RLS is enforced independently at the DB layer, so without the
+    # GUC every read returns zero rows and every write is rejected. Set it from the
+    # shared tenant contextvar at transaction start -- order-independent: by the time a
+    # handler issues its first query, get_current_user() has populated the contextvar.
+    # SQLite has no such GUC, so this is Postgres-only. The listener is bound to THIS
+    # sessionmaker (a fresh one per configure_engine call), so no duplicate registration.
+    if _engine.dialect.name == "postgresql":
+        from sqlalchemy import event as _event, text as _text
+        from shared.db.tenant_context import current_tenant_id as _current_tenant_id
+
+        @_event.listens_for(_SessionLocal, "after_begin")
+        def _set_rls_tenant_guc(session, transaction, connection):  # noqa: ANN001
+            _tid = _current_tenant_id.get()
+            if _tid is not None:
+                # SET LOCAL scopes the GUC to this transaction. _tid is a UUID -> safe to format.
+                connection.exec_driver_sql(
+                    "SET LOCAL app.current_tenant_id = '%s'" % _tid
+                )
+
 
 def get_engine():  # type: ignore[return]
     if _engine is None:

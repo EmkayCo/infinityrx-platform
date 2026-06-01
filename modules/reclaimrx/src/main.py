@@ -36,6 +36,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     import asyncio as _asyncio  # noqa: PLC0415
 
+    # P1-db: configure the SYNC engine the HTTP API's get_db uses. Without this the
+    # _shim defaults to in-memory SQLite, so every live DB-backed endpoint 500s with
+    # a detached-connection error. Tests don't set the env var (they override get_db),
+    # so the SQLite default is preserved for them.
+    try:
+        import os as _os  # noqa: PLC0415
+        from ._shim.db import configure_engine  # noqa: PLC0415
+        _db_url = _os.environ.get("RECLAIMRX_DATABASE_URL") or _os.environ.get("DATABASE_URL_SYNC")
+        if _db_url:
+            configure_engine(_db_url)
+    except Exception:  # pragma: no cover -- best-effort; tests override get_db
+        logger.exception("reclaimrx.engine_config_failed")
+
+    # P1-auth: register the auth loader before the app handles requests so
+    # shared.auth.dependencies.get_current_user has a UserLoader + revoked repo.
+    # Without this, every authenticated request 500s with 'auth not configured'.
+    # Mirrors billing / drug-database / prescriber-directory main.py. Dev/test only:
+    # configure_auth_trust_jwt() refuses to run in production (wire a real loader there).
+    try:
+        from shared.auth.dev_trust_jwt import configure_auth_trust_jwt  # noqa: PLC0415
+        configure_auth_trust_jwt()
+    except Exception:  # pragma: no cover -- best-effort; test overrides bypass this
+        logger.exception("reclaimrx.auth_config_failed")
+
     # --- Event-bus consumer wiring ---
     try:
         from shared.events.factory import get_event_bus  # noqa: PLC0415

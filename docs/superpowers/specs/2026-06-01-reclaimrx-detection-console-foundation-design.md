@@ -39,9 +39,25 @@ driven: the read API and a populated DB unblock everything else.
 
 Three layers, each reusing existing patterns. No new frameworks.
 
+### Layer 0 — Ingest endpoint (the on-screen "ingest → detect" trigger)
+
+The ingest pipeline already exists as functions (`src/detection/csv_ingest.py`:
+`create_or_resume_run` + `load_csv`, then `src/detection/batch_engine.py:run_detection`) — the CLI
+chains them. This slice wraps them in a REST endpoint so ingest is operable on screen.
+
+**`POST /api/v1/reclaimrx/detection-runs`** (multipart `file: UploadFile`, optional `run_label`):
+- Auth/tenant: `get_db` + `get_current_user` + `require_tenant_match` (same as reads).
+- Save the upload to `data/uploads/<tenant_id>/<run_id>/<filename>` (existing convention).
+- Chain: `create_or_resume_run(db, tenant_id, path, created_by, resume=False, force=False)` →
+  `load_csv(db, run)` → `run_detection(db, run)`. Returns `DetectionRunRead` (status + anomaly_count).
+- **Synchronous** for the foundation slice (fine for the sample/fixture CSV). The 2.6M-row set needs
+  `BackgroundTasks` + polling — tracked as a follow-up, NOT this slice. Add a configurable max-rows
+  guard (reject oversized sync uploads with 413 + "use CLI/async") — no hardcoded magic number.
+- Decimal-only, tenant_id set explicitly, `Cache-Control: no-store`.
+
 ### Layer 1 — Backend read API (`modules/reclaimrx/src/api/router.py`)
 
-Two endpoints, added to the existing `APIRouter` (prefix `/api/v1/reclaimrx`). Reuse the existing
+Two read endpoints, added to the existing `APIRouter` (prefix `/api/v1/reclaimrx`). Reuse the existing
 dependencies already used by the FWA routes: `get_db`, `get_current_user`, `require_tenant_match`.
 All queries tenant-scoped (`tenant_id == current tenant`). Responses carry `Cache-Control: no-store`
 (PHI). Pydantic response models only.
@@ -79,6 +95,10 @@ All queries tenant-scoped (`tenant_id == current tenant`). Responses carry `Cach
   The page already has `ConfigurableDataTable` + `FilterPanel` + `StatusBadge` + client filtering;
   push filters to the backend query (category→finding_codes, severity, status, entity_type) and add
   a **rule (`finding_code`) filter** to `FILTER_FIELDS`.
+- **Upload page (new — the on-screen ingest):** `app/reclaimrx/upload/page.tsx` — CSV file picker +
+  optional run label → `POST /detection-runs` (multipart) → on success redirect to the Anomalies
+  view filtered by the new `run_id` (closes the ingest→detect→review loop). Show ingest/detection
+  status + data_quality summary on return.
 - **Runs list page (new, Task 7c):** `app/reclaimrx/runs/page.tsx` → `/detection-runs`, table of runs
   with status, counts, data_quality chips; row → run detail (per-rule breakdown). Add nav entry.
 - **Config fix:** correct the stale reclaimrx port in `portal/shared/lib/constants.ts:10`

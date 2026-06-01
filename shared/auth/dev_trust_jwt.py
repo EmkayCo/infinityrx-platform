@@ -60,14 +60,16 @@ def configure_auth_trust_jwt(default_email: str = "dev@infinityrx.local") -> Non
         tid = _current_request_tenant_id.get()
         tenant_id = tid if tid is not None else user_id
 
-        # Include operator + approver roles so the dev platform_admin user
-        # passes billing's upload RBAC gate (only operator/approver may write).
+        # Include module-specific roles so the dev user passes per-module RBAC
+        # gates: operator/approver for billing's upload gate; reclaimrx.admin
+        # (top of the reclaimrx.admin > investigator > viewer hierarchy) for the
+        # reclaimrx detection console read/write gates.
         return CurrentUser(
             id=user_id,
             tenant_id=tenant_id,
             email=default_email,
             status="active",
-            roles=("platform_admin", "operator", "approver"),
+            roles=("platform_admin", "operator", "approver", "reclaimrx.admin"),
             permissions=("*",),
         )
 

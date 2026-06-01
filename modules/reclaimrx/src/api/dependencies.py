@@ -1,4 +1,4 @@
-﻿"""SP-3 reclaimrx route dependencies.
+"""SP-3 reclaimrx route dependencies.
 
 R1 BLOCK 2 fix: dependencies wrap `shared/auth/dependencies.py` factories.
 R1 BLOCK 3 fix: require_mfa_elevated returns 403 MFA_REQUIRED (not 503).
@@ -22,6 +22,7 @@ from shared.auth.dependencies import (
     get_current_user,
     require_roles,
 )
+from shared.db.tenant_context import set_tenant_context
 
 from src.api.errors import build_error_envelope
 
@@ -36,6 +37,7 @@ RECLAIMRX_INVESTIGATOR_DEP = Depends(
     require_roles("reclaimrx.investigator", "reclaimrx.admin")
 )
 RECLAIMRX_ADMIN_DEP = Depends(require_roles("reclaimrx.admin"))
+
 
 
 # ── MFA dependency (spec D6a; R1 BLOCK 3 fix) ─────────────────────────────────
@@ -138,3 +140,19 @@ from sqlalchemy.orm import Session
 
 def get_db() -> Generator[Session, None, None]:
     yield from _get_session()
+
+
+async def bind_tenant_context(
+    user: CurrentUser = Depends(require_tenant_match),
+) -> CurrentUser:
+    """Async wrapper over require_tenant_match that publishes the authenticated tenant
+    into the shared contextvar IN THE ROUTE'S ASYNC TASK CONTEXT.
+
+    require_tenant_match / get_current_user are sync deps that FastAPI runs in a
+    threadpool; any set_tenant_context() there lands in a throwaway worker-thread context
+    the async handler never sees, leaving the ORM tenant-loader + Postgres RLS GUC unset
+    (every read returns 0 rows). Setting it here -- in an async dep -- binds it to the same
+    task the handler and its sync DB session run in. Mirrors dataiq's get_tenant_id.
+    """
+    set_tenant_context(user.tenant_id)
+    return user
