@@ -87,7 +87,9 @@ _BASELINE_KIND_MAP: dict[str, str] = {
 }
 
 _SINGLE_ROW_CODES: frozenset[str] = frozenset({"MFR-001"})
-_STATISTICAL_CODES: frozenset[str] = frozenset({"MFR-003", "MFR-004", "HP-005", "HP-008", "ALL-006"})
+# MFR-003, HP-008: per-row evaluators (FDB WAC / high-cost percentile).
+# MFR-004, HP-005, ALL-006, ALL-005: entity-level set-based SQL evaluators (Task 2b).
+_STATISTICAL_CODES: frozenset[str] = frozenset({"MFR-003", "MFR-004", "HP-005", "HP-008", "ALL-006", "ALL-005"})
 _GROUPING_CODES: frozenset[str] = frozenset({"ALL-001", "MFR-002", "TH-002", "TH-005"})
 _ZERO = Decimal("0")
 
@@ -568,84 +570,421 @@ def _derive_statistical_metric(code: str, rd: dict[str, Any], baseline: Baseline
 def _evaluate_statistical_rules(
     db: Session,
     run: DetectionRun,
+    instance: DetectionRuleInstance,
+) -> list[Anomaly]:
+    """Generic param-driven statistical outlier evaluator for MFR-004, HP-005, ALL-006, ALL-005.
+
+    Called once per statistical rule instance (entity-level rules only).
+    NOT called for MFR-003 or HP-008 -- those use per-row adapters via _PER_ROW_EVALUATORS.
+
+    Reads ALL thresholds from instance.parameters (set by migration 0011).
+    ZERO hardcoded ratio/absolute threshold values -- outlier decisions use
+    zscore_flag, percentile_within_cohort, or threshold-mode gap check only,
+    all gated by passes_min_sample + passes_dollar_floor.
+
+    Entity-level: one Anomaly per flagged entity (not per claim row).
+    Set-based: one SQL aggregate query per rule invocation; no per-entity loop query.
+    Rep-row: ONE batched DISTINCT ON query for all fired entities after aggregation.
+
+    Returns list[Anomaly] (NOT flushed -- caller accumulates for guardrail check).
+    """
+    from collections import defaultdict  # noqa: PLC0415
+
+    from src.detection.calibration import (  # noqa: PLC0415
+        zscore_flag,
+        passes_min_sample,
+        passes_dollar_floor,
+    )
+
+    code = instance.rule_type_code
+    params = instance.parameters
+
+    # Read H2 params (all set by migration 0011)
+    eligible_statuses: list[str] = params.get("eligible_statuses", ["Paid"])
+    min_group_size: int = int(params.get("min_group_size", 20))
+    min_entity_count: int = int(params.get("min_entity_count", 1))
+    dollar_floor_str = params.get("dollar_floor", "0.00")
+    dollar_floor = Decimal(str(dollar_floor_str)) if dollar_floor_str else None
+    z_thresh = Decimal(str(params.get("z_threshold", "3.0")))
+    pct_thresh = Decimal(str(params.get("percentile_threshold", "0.99")))
+    refill_pct_thresh = Decimal(str(params.get("refill_pct_threshold", "0.50")))
+
+    anomalies: list[Anomaly] = []
+
+    if code == "MFR-004":
+        # Metric: fill volume per NDC (count of paid-B1 claims per pharmacy per NDC).
+        # Cohort: all entities with the same NDC. z-score across cohort.
+        rows = db.execute(text("""
+            SELECT
+                (row_data->>'pharmacy_npi') AS entity_id,
+                resolved_ndc AS cohort_ndc,
+                COUNT(*) AS fill_volume,
+                SUM((row_data->>'total_paid_amt')::numeric) AS dollar_sum
+            FROM reclaimrx.csv_upload_rows
+            WHERE detection_run_id = :run_id
+              AND tenant_id = :tenant_id
+              AND (row_data->>'transaction_code') = 'B1'
+              AND (row_data->>'transaction_status') = ANY(:statuses)
+              AND resolved_ndc IS NOT NULL
+            GROUP BY (row_data->>'pharmacy_npi'), resolved_ndc
+            HAVING COUNT(*) >= :min_group
+        """), {
+            "run_id": str(run.id), "tenant_id": str(run.tenant_id),
+            "statuses": eligible_statuses, "min_group": min_group_size,
+        }).fetchall()
+
+        cohort_map: dict = defaultdict(list)
+        for r in rows:
+            cohort_map[r.cohort_ndc].append(
+                (r.entity_id, Decimal(str(r.fill_volume)), Decimal(str(r.dollar_sum or 0)))
+            )
+
+        fired_mfr004: list[tuple] = []
+        for ndc, entities in cohort_map.items():
+            if len(entities) < min_entity_count:
+                continue
+            all_volumes = [v for _, v, _ in entities]
+            n = Decimal(str(len(all_volumes)))
+            cohort_mean = sum(all_volumes) / n
+            variance = sum((v - cohort_mean) ** 2 for v in all_volumes) / n
+            cohort_stddev = variance.sqrt().quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+            for entity_id, vol, dollar_sum in entities:
+                if not passes_dollar_floor(dollar_sum, dollar_floor):
+                    continue
+                fired, z = zscore_flag(value=vol, mean=cohort_mean, stddev=cohort_stddev, z_threshold=z_thresh)
+                if fired:
+                    fired_mfr004.append((entity_id, ndc, vol, cohort_mean, z))
+
+        if fired_mfr004:
+            entity_ndc_pairs = [(e, n) for e, n, *_ in fired_mfr004]
+            or_clauses = " OR ".join(
+                f"((row_data->>'pharmacy_npi') = :en_{i} AND resolved_ndc = :nd_{i})"
+                for i in range(len(entity_ndc_pairs))
+            )
+            rep_params: dict = {"run_id": str(run.id), "tenant_id": str(run.tenant_id)}
+            for i, (en, nd) in enumerate(entity_ndc_pairs):
+                rep_params[f"en_{i}"] = en
+                rep_params[f"nd_{i}"] = nd
+            rep_rows_raw = db.execute(text(f"""
+                SELECT DISTINCT ON ((row_data->>'pharmacy_npi'), resolved_ndc)
+                    id, (row_data->>'pharmacy_npi') AS entity_id, resolved_ndc AS cohort_ndc
+                FROM reclaimrx.csv_upload_rows
+                WHERE detection_run_id = :run_id AND tenant_id = :tenant_id
+                  AND ({or_clauses})
+                ORDER BY (row_data->>'pharmacy_npi'), resolved_ndc, id
+            """), rep_params).fetchall()
+            rep_row_map: dict[tuple, object] = {
+                (r.entity_id, r.cohort_ndc): r.id for r in rep_rows_raw
+            }
+            for entity_id, ndc, vol, cohort_mean, z in fired_mfr004:
+                rep_row_id = rep_row_map.get((entity_id, ndc))
+                if rep_row_id:
+                    anomalies.append(Anomaly(
+                        tenant_id=run.tenant_id, data_source="csv_upload",
+                        data_source_run_id=run.id,
+                        source_table="csv_upload_rows", source_row_id=rep_row_id,
+                        detection_kind="rule",
+                        severity=params.get("severity", "high"),
+                        confidence=Decimal(str(params.get("confidence", "0.80"))),
+                        finding_code="MFR-004",
+                        finding_summary=f"Unusually high fill volume for NDC {ndc} entity {entity_id}",
+                        finding_details={
+                            "entity_id": entity_id, "ndc": ndc,
+                            "fill_volume": str(vol), "cohort_mean": str(cohort_mean),
+                            "_z": str(z), "statistic": "zscore",
+                        },
+                        status="open",
+                    ))
+
+    elif code == "HP-005":
+        # Metric: prescriber claim volume per NDC cohort. z-score across prescribers.
+        rows = db.execute(text("""
+            SELECT
+                (row_data->>'prescriber_npi') AS entity_id,
+                resolved_ndc AS cohort_ndc,
+                COUNT(*) AS claim_volume,
+                SUM((row_data->>'total_paid_amt')::numeric) AS dollar_sum
+            FROM reclaimrx.csv_upload_rows
+            WHERE detection_run_id = :run_id
+              AND tenant_id = :tenant_id
+              AND (row_data->>'transaction_code') = 'B1'
+              AND (row_data->>'transaction_status') = ANY(:statuses)
+              AND (row_data->>'prescriber_npi') IS NOT NULL
+              AND resolved_ndc IS NOT NULL
+            GROUP BY (row_data->>'prescriber_npi'), resolved_ndc
+            HAVING COUNT(*) >= :min_group
+        """), {
+            "run_id": str(run.id), "tenant_id": str(run.tenant_id),
+            "statuses": eligible_statuses, "min_group": min_group_size,
+        }).fetchall()
+
+        cohort_map2: dict = defaultdict(list)
+        for r in rows:
+            cohort_map2[r.cohort_ndc].append(
+                (r.entity_id, Decimal(str(r.claim_volume)), Decimal(str(r.dollar_sum or 0)))
+            )
+
+        fired_hp005: list[tuple] = []
+        for ndc, entities in cohort_map2.items():
+            if len(entities) < min_entity_count:
+                continue
+            all_vols = [v for _, v, _ in entities]
+            n = Decimal(str(len(all_vols)))
+            cohort_mean = sum(all_vols) / n
+            variance = sum((v - cohort_mean) ** 2 for v in all_vols) / n
+            cohort_stddev = variance.sqrt().quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+            for entity_id, vol, dollar_sum in entities:
+                if not passes_dollar_floor(dollar_sum, dollar_floor):
+                    continue
+                fired, z = zscore_flag(value=vol, mean=cohort_mean, stddev=cohort_stddev, z_threshold=z_thresh)
+                if fired:
+                    fired_hp005.append((entity_id, ndc, vol, cohort_mean, z))
+
+        if fired_hp005:
+            entity_ndc_pairs2 = [(e, n) for e, n, *_ in fired_hp005]
+            or_clauses2 = " OR ".join(
+                f"((row_data->>'prescriber_npi') = :en_{i} AND resolved_ndc = :nd_{i})"
+                for i in range(len(entity_ndc_pairs2))
+            )
+            rep_params2: dict = {"run_id": str(run.id), "tenant_id": str(run.tenant_id)}
+            for i, (en, nd) in enumerate(entity_ndc_pairs2):
+                rep_params2[f"en_{i}"] = en
+                rep_params2[f"nd_{i}"] = nd
+            rep_rows2 = db.execute(text(f"""
+                SELECT DISTINCT ON ((row_data->>'prescriber_npi'), resolved_ndc)
+                    id, (row_data->>'prescriber_npi') AS entity_id, resolved_ndc AS cohort_ndc
+                FROM reclaimrx.csv_upload_rows
+                WHERE detection_run_id = :run_id AND tenant_id = :tenant_id
+                  AND ({or_clauses2})
+                ORDER BY (row_data->>'prescriber_npi'), resolved_ndc, id
+            """), rep_params2).fetchall()
+            rep_row_map2: dict[tuple, object] = {
+                (r.entity_id, r.cohort_ndc): r.id for r in rep_rows2
+            }
+            for entity_id, ndc, vol, cohort_mean, z in fired_hp005:
+                rep_row_id = rep_row_map2.get((entity_id, ndc))
+                if rep_row_id:
+                    anomalies.append(Anomaly(
+                        tenant_id=run.tenant_id, data_source="csv_upload",
+                        data_source_run_id=run.id,
+                        source_table="csv_upload_rows", source_row_id=rep_row_id,
+                        detection_kind="rule",
+                        severity=params.get("severity", "high"),
+                        confidence=Decimal(str(params.get("confidence", "0.80"))),
+                        finding_code="HP-005",
+                        finding_summary=f"Prescriber {entity_id} outlier volume for NDC {ndc}",
+                        finding_details={
+                            "prescriber_npi": entity_id, "ndc": ndc,
+                            "claim_volume": str(vol), "cohort_mean": str(cohort_mean),
+                            "_z": str(z), "statistic": "zscore",
+                        },
+                        status="open",
+                    ))
+
+    elif code == "ALL-006":
+        # Metric: weekend/holiday fill ratio per pharmacy (weekends only; DOW in (0,6)).
+        rows = db.execute(text("""
+            SELECT
+                (row_data->>'pharmacy_npi') AS entity_id,
+                COUNT(*) AS total_fills,
+                SUM(CASE WHEN EXTRACT(DOW FROM (row_data->>'date_of_service')::date) IN (0, 6)
+                         THEN 1 ELSE 0 END) AS weekend_fills,
+                SUM((row_data->>'total_paid_amt')::numeric) AS dollar_sum
+            FROM reclaimrx.csv_upload_rows
+            WHERE detection_run_id = :run_id
+              AND tenant_id = :tenant_id
+              AND (row_data->>'transaction_code') = 'B1'
+              AND (row_data->>'transaction_status') = ANY(:statuses)
+              AND (row_data->>'pharmacy_npi') IS NOT NULL
+              AND (row_data->>'date_of_service') IS NOT NULL
+            GROUP BY (row_data->>'pharmacy_npi')
+            HAVING COUNT(*) >= :min_group
+        """), {
+            "run_id": str(run.id), "tenant_id": str(run.tenant_id),
+            "statuses": eligible_statuses, "min_group": min_group_size,
+        }).fetchall()
+
+        if len(rows) < min_entity_count:
+            return anomalies
+
+        ratios: list[tuple] = []
+        for r in rows:
+            total = Decimal(str(r.total_fills)) if r.total_fills else Decimal("1")
+            weekend = Decimal(str(r.weekend_fills or 0))
+            ratio = (weekend / total).quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+            dollar_sum = Decimal(str(r.dollar_sum or 0))
+            ratios.append((r.entity_id, ratio, dollar_sum))
+
+        all_ratios = [v for _, v, _ in ratios]
+        if not all_ratios:
+            return anomalies
+
+        n = Decimal(str(len(all_ratios)))
+        cohort_mean = sum(all_ratios) / n
+        variance = sum((v - cohort_mean) ** 2 for v in all_ratios) / n
+        cohort_stddev = variance.sqrt().quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+
+        fired_all006: list[tuple] = []
+        for entity_id, ratio, dollar_sum in ratios:
+            if not passes_dollar_floor(dollar_sum, dollar_floor):
+                continue
+            fired, z = zscore_flag(value=ratio, mean=cohort_mean, stddev=cohort_stddev, z_threshold=z_thresh)
+            if fired:
+                fired_all006.append((entity_id, ratio, z))
+
+        if fired_all006:
+            fired_npis = [e for e, *_ in fired_all006]
+            or_clauses3 = " OR ".join(
+                f"(row_data->>'pharmacy_npi') = :ph_{i}"
+                for i in range(len(fired_npis))
+            )
+            rep_params3: dict = {"run_id": str(run.id), "tenant_id": str(run.tenant_id)}
+            for i, ph in enumerate(fired_npis):
+                rep_params3[f"ph_{i}"] = ph
+            rep_rows3 = db.execute(text(f"""
+                SELECT DISTINCT ON ((row_data->>'pharmacy_npi'))
+                    id, (row_data->>'pharmacy_npi') AS entity_id
+                FROM reclaimrx.csv_upload_rows
+                WHERE detection_run_id = :run_id AND tenant_id = :tenant_id
+                  AND ({or_clauses3})
+                ORDER BY (row_data->>'pharmacy_npi'), id
+            """), rep_params3).fetchall()
+            rep_row_map3: dict[str, object] = {r.entity_id: r.id for r in rep_rows3}
+            for entity_id, ratio, z in fired_all006:
+                rep_row_id = rep_row_map3.get(entity_id)
+                if rep_row_id:
+                    anomalies.append(Anomaly(
+                        tenant_id=run.tenant_id, data_source="csv_upload",
+                        data_source_run_id=run.id,
+                        source_table="csv_upload_rows", source_row_id=rep_row_id,
+                        detection_kind="rule",
+                        severity=params.get("severity", "medium"),
+                        confidence=Decimal(str(params.get("confidence", "0.75"))),
+                        finding_code="ALL-006",
+                        finding_summary=f"Pharmacy {entity_id} has anomalous weekend/holiday fill rate",
+                        finding_details={
+                            "pharmacy_npi": entity_id,
+                            "weekend_ratio": str(ratio),
+                            "cohort_mean": str(cohort_mean),
+                            "_z": str(z),
+                            "statistic": "zscore",
+                        },
+                        status="open",
+                    ))
+
+    elif code == "ALL-005":
+        # Metric: min gap in days between consecutive fills for same (patient, ndc).
+        # Flags when min_gap_days < days_supply * refill_pct_threshold.
+        # Statistic = "threshold" (no z-score; direct threshold comparison).
+        # Bind refill_pct_thresh as string; SQL casts ::numeric to avoid float.
+        rows = db.execute(text("""
+            WITH fills AS (
+                SELECT
+                    (row_data->>'patient_unique_hash') AS patient_hash,
+                    resolved_ndc AS ndc,
+                    (row_data->>'date_of_service')::date AS dos,
+                    (row_data->>'days_supply')::int AS days_supply,
+                    (row_data->>'total_paid_amt')::numeric AS paid_amt,
+                    id AS row_id
+                FROM reclaimrx.csv_upload_rows
+                WHERE detection_run_id = :run_id
+                  AND tenant_id = :tenant_id
+                  AND (row_data->>'transaction_code') = 'B1'
+                  AND (row_data->>'transaction_status') = ANY(:statuses)
+                  AND (row_data->>'patient_unique_hash') IS NOT NULL
+                  AND resolved_ndc IS NOT NULL
+                  AND (row_data->>'date_of_service') IS NOT NULL
+                  AND (row_data->>'days_supply') IS NOT NULL
+            ),
+            with_lag AS (
+                SELECT
+                    patient_hash, ndc, dos, days_supply, paid_amt, row_id,
+                    LAG(dos) OVER (PARTITION BY patient_hash, ndc ORDER BY dos) AS prior_dos
+                FROM fills
+            ),
+            gaps AS (
+                SELECT
+                    patient_hash, ndc, dos, days_supply, paid_amt, row_id,
+                    (dos - prior_dos) AS gap_days
+                FROM with_lag
+                WHERE prior_dos IS NOT NULL
+                  AND (dos - prior_dos) < days_supply * CAST(:pct_thresh AS numeric)
+            )
+            SELECT
+                patient_hash, ndc,
+                MIN(gap_days) AS min_gap,
+                COUNT(*) AS early_refill_count,
+                MAX(paid_amt) AS max_paid,
+                MIN(row_id::text) AS rep_row_id
+            FROM gaps
+            GROUP BY patient_hash, ndc
+            HAVING COUNT(*) >= :min_group
+        """), {
+            "run_id": str(run.id), "tenant_id": str(run.tenant_id),
+            "statuses": eligible_statuses, "min_group": min_group_size,
+            # Bind as Decimal-safe string; SQL casts to ::numeric. No float().
+            "pct_thresh": str(refill_pct_thresh),
+        }).fetchall()
+
+        for r in rows:
+            dollar_val = Decimal(str(r.max_paid or 0))
+            if not passes_dollar_floor(dollar_val, dollar_floor):
+                continue
+            if r.early_refill_count < min_entity_count:
+                continue
+            anomalies.append(Anomaly(
+                tenant_id=run.tenant_id, data_source="csv_upload",
+                data_source_run_id=run.id,
+                source_table="csv_upload_rows", source_row_id=r.rep_row_id,
+                detection_kind="rule",
+                severity=params.get("severity", "medium"),
+                confidence=Decimal(str(params.get("confidence", "0.75"))),
+                finding_code="ALL-005",
+                finding_summary=f"Early refill pattern: patient {r.patient_hash} NDC {r.ndc}",
+                finding_details={
+                    "patient_unique_hash": r.patient_hash, "ndc": r.ndc,
+                    "min_gap_days": str(r.min_gap),
+                    "early_refill_count": r.early_refill_count,
+                    "refill_pct_threshold": str(refill_pct_thresh),
+                    "statistic": "threshold",
+                },
+                status="open",
+            ))
+
+    return anomalies
+
+
+def _dispatch_statistical_rules(
+    db: Session,
+    run: DetectionRun,
     applicable: list[DetectionRuleInstance],
     rule_type_by_code: dict[str, DetectionRuleType],
     no_finding_count: list[int],
     anomaly_write_errors: list[int],
 ) -> list[Anomaly]:
-    """Evaluate statistical rules, streaming rows in batches of _ROW_BATCH."""
+    """Dispatch _evaluate_statistical_rules per applicable stat instance.
+
+    MFR-003, HP-008: per-row evaluators (streamed batches, FDB WAC / percentile).
+    MFR-004, HP-005, ALL-006, ALL-005: entity-level set-based SQL (one call per instance).
+    """
     anomalies: list[Anomaly] = []
     stat_instances = [inst for inst in applicable if inst.rule_type_code in _STATISTICAL_CODES]
     if not stat_instances:
         return anomalies
 
-    stmt = (
-        select(CsvUploadRow)
-        .where(
-            CsvUploadRow.detection_run_id == run.id,
-            CsvUploadRow.tenant_id == run.tenant_id,
-        )
-        .execution_options(yield_per=_ROW_BATCH)
-    )
+    # Entity-level codes: dispatched directly via _evaluate_statistical_rules (per instance)
+    _ENTITY_LEVEL_CODES = frozenset({"MFR-004", "HP-005", "ALL-006", "ALL-005"})
 
     for instance in stat_instances:
         code = instance.rule_type_code
-        rtype = rule_type_by_code.get(code)
-        if rtype is None:
-            continue
-        kind = _BASELINE_KIND_MAP.get(code)
-        if kind is None:
-            continue
-        baseline_cache = _load_baseline_cache(db, run, kind)
-        if not baseline_cache:
-            logger.debug("No baseline cache for kind=%s; skipping statistical rule %s", kind, code)
-            continue
-        params = dict(instance.parameters)
-        params["confidence_scoring"] = _build_confidence_scoring(params)
-
-        for csv_row in db.execute(stmt).scalars():
-            rd = csv_row.row_data
-            scope_key = _scope_key_for_row(code, rd, csv_row)
-            if scope_key is None:
-                no_finding_count[0] += 1
-                continue
-            baseline = baseline_cache.get(scope_key)
-            if baseline is None:
-                no_finding_count[0] += 1
-                continue
-            try:
-                extra = _derive_statistical_metric(code, rd, baseline)
-            except Exception:
-                no_finding_count[0] += 1
-                continue
-            if not extra:
-                no_finding_count[0] += 1
-                continue
-            fields: dict[str, Any] = {**rd, **extra}
-            try:
-                result = evaluate_threshold(fields, params)
-                if not result.fired:
-                    no_finding_count[0] += 1
-                    continue
-                confidence_num = _confidence_tier_to_num(result.confidence or "medium")
-                anomaly = _make_anomaly(
-                    run=run, instance=instance, csv_row=csv_row,
-                    finding_code=code,
-                    finding_summary=(
-                        f"{rtype.name}: {params.get('field', '')} "
-                        f"{params.get('operator', '')} {params.get('threshold', '')}"
-                    ),
-                    finding_details={**result.evidence, "scope_key": scope_key},
-                    severity=result.severity or rtype.default_severity,
-                    confidence_num=confidence_num,
-                )
-                _write_eval_log(db, run=run, instance=instance, csv_row=csv_row,
-                                result="finding_raised", anomaly_id=None)
-                anomalies.append(anomaly)
-            except Exception:
-                logger.exception("Error in statistical rule %s on csv_row %s", code, csv_row.id)
-                _write_eval_log(db, run=run, instance=instance, csv_row=csv_row,
-                                result="error", error_message=f"Evaluation error for {code}")
+        try:
+            if code in _ENTITY_LEVEL_CODES:
+                new = _evaluate_statistical_rules(db, run, instance)
+                anomalies.extend(new)
+            # MFR-003 and HP-008: streamed per-row (handled by _evaluate_per_row_statistical below)
+            # They remain in _STATISTICAL_CODES for gate filtering but use a different path.
+        except Exception:
+            logger.exception("Error in statistical rule %s", code)
 
     return anomalies
 
@@ -1453,7 +1792,7 @@ def run_detection(
         )
     )
     all_anomalies.extend(
-        _evaluate_statistical_rules(
+        _dispatch_statistical_rules(
             db, run, applicable, rule_type_by_code, no_finding_count, anomaly_write_errors
         )
     )

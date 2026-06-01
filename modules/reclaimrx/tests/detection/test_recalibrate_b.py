@@ -474,6 +474,35 @@ _STAT_PG_SKIP = pytest.mark.skipif(
 )
 
 
+@pytest.fixture()
+def pg_db():
+    """Postgres session for DB-backed statistical evaluator tests.
+
+    Connects to RECLAIMRX_DB_URL; sets the tenant GUC so RLS allows DML;
+    rolls back on teardown (no persistent data).
+    Skips if RECLAIMRX_DB_URL is not set.
+    """
+    import os as _os_pg  # noqa: PLC0415
+    from sqlalchemy import create_engine as _ce, text as _text  # noqa: PLC0415
+    from sqlalchemy.orm import Session as _Sess  # noqa: PLC0415
+
+    url = _os_pg.environ.get("RECLAIMRX_DB_URL")
+    if not url:
+        pytest.skip("RECLAIMRX_DB_URL not set")
+
+    _engine = _ce(url, future=True)
+    _conn = _engine.connect()
+    _trans = _conn.begin()
+    # Set tenant GUC required by RLS policies.
+    _conn.execute(_text("SET LOCAL app.current_tenant_id = :tid"), {"tid": str(TEST_TENANT_ID)})
+    _session = _Sess(bind=_conn, join_transaction_mode="create_savepoint")
+    yield _session
+    _session.close()
+    _trans.rollback()
+    _conn.close()
+    _engine.dispose()
+
+
 class TestMFR004StatisticalOutlier:
     """MFR-004: fill volume per NDC — z-score, min_entity_count=5, min_group_size=5,
     dollar_floor=100.00.
@@ -484,10 +513,11 @@ class TestMFR004StatisticalOutlier:
     """
 
     @_STAT_PG_SKIP
-    def test_fires_only_on_planted_volume_outlier(self, db):
+    def test_fires_only_on_planted_volume_outlier(self, pg_db):
         """Seed 19 normal pharmacies (fill_volume=10 each) + 1 outlier (fill_volume=200).
         Cohort mean≈10, stddev small. Outlier z >> 3.0 → fires. Normals z < 3.0 → no fire.
         Flag rate = 1/200 = 0.5% ≤ 0.5% cap → under cap. """
+        db = pg_db
         from src.detection.batch_engine import _evaluate_statistical_rules
         from src.models.detection_run_models import (
             DetectionRun, CsvUploadRow, DetectionRuleType, DetectionRuleInstance,
@@ -570,9 +600,10 @@ class TestMFR004StatisticalOutlier:
         assert flag_rate <= Decimal("0.005"), f"Flag rate {flag_rate} exceeds 0.5% cap"
 
     @_STAT_PG_SKIP
-    def test_blocked_by_eligible_statuses(self, db):
+    def test_blocked_by_eligible_statuses(self, pg_db):
         """Non-Paid rows must be excluded from the cohort aggregate.
         Seed: 5 pharmacies with only Reversed rows → cohort is empty → no anomaly."""
+        db = pg_db
         from src.detection.batch_engine import _evaluate_statistical_rules
         from src.models.detection_run_models import (
             DetectionRun, CsvUploadRow, DetectionRuleInstance,
@@ -623,9 +654,10 @@ class TestHP005StatisticalOutlier:
     """
 
     @_STAT_PG_SKIP
-    def test_fires_only_on_planted_prescriber_outlier(self, db):
+    def test_fires_only_on_planted_prescriber_outlier(self, pg_db):
         """Seed 20 normal prescribers (5 claims each) + 1 outlier (200 claims).
         Outlier z >> 3.0 → fires. Normals → no fire. Flag rate = 1/300 < 0.5%."""
+        db = pg_db
         from src.detection.batch_engine import _evaluate_statistical_rules
         from src.models.detection_run_models import (
             DetectionRun, CsvUploadRow, DetectionRuleInstance,
@@ -675,7 +707,9 @@ class TestHP005StatisticalOutlier:
             parameters={
                 "cohort_key": ["ndc"], "eligible_statuses": ["Paid"],
                 "statistic": "zscore", "z_threshold": "3.0",
-                "min_group_size": 20, "min_entity_count": 20,
+                # min_group_size=5 so normal prescribers (5 rows each) pass HAVING.
+                # min_entity_count=20 requires >= 20 prescribers in cohort (21 pass HAVING).
+                "min_group_size": 5, "min_entity_count": 20,
                 "dollar_floor": "0.00", "rule_fire_rate_cap": "0.005",
             },
             enabled=True, effective_from=date.today(), created_by=TEST_USER_ID,
@@ -701,8 +735,9 @@ class TestHP005StatisticalOutlier:
         assert all(a.finding_details.get("statistic") == "zscore" for a in outlier_anomalies)
 
     @_STAT_PG_SKIP
-    def test_blocked_by_min_entity_count(self, db):
+    def test_blocked_by_min_entity_count(self, pg_db):
         """Cohort with < min_entity_count prescribers must produce no anomaly."""
+        db = pg_db
         from src.detection.batch_engine import _evaluate_statistical_rules
         from src.models.detection_run_models import (
             DetectionRun, CsvUploadRow, DetectionRuleInstance,
@@ -753,9 +788,10 @@ class TestALL006StatisticalOutlier:
     """
 
     @_STAT_PG_SKIP
-    def test_fires_only_on_planted_weekend_outlier(self, db):
+    def test_fires_only_on_planted_weekend_outlier(self, pg_db):
         """Seed 20 pharmacies with 5% weekend rate + 1 outlier with 95% weekend rate.
         Outlier z >> 3.0 → fires. Normals → no fire."""
+        db = pg_db
         from src.detection.batch_engine import _evaluate_statistical_rules
         from src.models.detection_run_models import (
             DetectionRun, CsvUploadRow, DetectionRuleInstance,
@@ -836,8 +872,9 @@ class TestALL006StatisticalOutlier:
         assert all(a.finding_details.get("statistic") == "zscore" for a in outlier_fires)
 
     @_STAT_PG_SKIP
-    def test_min_sample_gate_blocks_small_cohort(self, db):
+    def test_min_sample_gate_blocks_small_cohort(self, pg_db):
         """Pharmacy with < min_group_size=20 rows must not be evaluated."""
+        db = pg_db
         from src.detection.batch_engine import _evaluate_statistical_rules
         from src.models.detection_run_models import (
             DetectionRun, CsvUploadRow, DetectionRuleInstance,
@@ -890,9 +927,10 @@ class TestALL005StatisticalOutlier:
     """
 
     @_STAT_PG_SKIP
-    def test_fires_on_planted_early_refill_pattern(self, db):
+    def test_fires_on_planted_early_refill_pattern(self, pg_db):
         """Seed patient-A with 2 fills 5 days apart (days_supply=30, threshold=0.50
         → min_gap < 30*0.5=15 → fires). Patient-B with 20 days apart (> 15 → no fire)."""
+        db = pg_db
         from src.detection.batch_engine import _evaluate_statistical_rules
         from src.models.detection_run_models import (
             DetectionRun, CsvUploadRow, DetectionRuleInstance,
@@ -949,7 +987,8 @@ class TestALL005StatisticalOutlier:
                 "statistic": "threshold",
                 "refill_pct_threshold": "0.50",
                 "repeat_offender_min_count": 2,
-                "min_group_size": 2,
+                # min_group_size=1: the patient has 1 early-refill gap row → HAVING COUNT(*)>=1
+                "min_group_size": 1,
                 "min_entity_count": 1,
                 "dollar_floor": "0.00",
                 "rule_fire_rate_cap": "0.005",
@@ -977,9 +1016,10 @@ class TestALL005StatisticalOutlier:
             )
 
     @_STAT_PG_SKIP
-    def test_dollar_floor_blocks_cheap_refill(self, db):
+    def test_dollar_floor_blocks_cheap_refill(self, pg_db):
         """dollar_floor gate: an early-refill pattern with max_paid below the floor
         must not fire."""
+        db = pg_db
         from src.detection.batch_engine import _evaluate_statistical_rules
         from src.models.detection_run_models import (
             DetectionRun, CsvUploadRow, DetectionRuleInstance,
@@ -1014,8 +1054,8 @@ class TestALL005StatisticalOutlier:
                 "cohort_key": ["patient_unique_hash", "ndc"],
                 "eligible_statuses": ["Paid"],
                 "statistic": "threshold", "refill_pct_threshold": "0.50",
-                "repeat_offender_min_count": 2, "min_group_size": 2,
-                "min_entity_count": 1, "dollar_floor": "50.00",  # 0.50 < 50.00
+                "repeat_offender_min_count": 2, "min_group_size": 1,  # 1 gap row
+                "min_entity_count": 1, "dollar_floor": "50.00",  # 0.50 < 50.00 → blocked
                 "rule_fire_rate_cap": "0.005",
             },
             enabled=True, effective_from=_date.today(), created_by=TEST_USER_ID,
@@ -1062,31 +1102,37 @@ class TestStatisticalRepRowQueryCountConstant:
         db.add(run)
         db.flush()
 
-        # 19 normal pharmacies: 20 rows each (volume=20 per entity, z << 3)
+        # Use unique NDCs per call so each cohort is isolated.
+        # n_outliers=1: 1 outlier vs 19 normals → z >> 3 (one outlier is extreme vs 19 normals).
+        # n_outliers=3: each gets its own NDC (separate cohort per outlier), so each cohort
+        #               still has 1 outlier vs 19 normals → same z behavior → same query count.
+        # This eliminates the "multiple outliers dilute themselves" problem.
         row_num = 1
-        for i in range(19):
-            for _ in range(20):
-                db.add(CsvUploadRow(
-                    tenant_id=TEST_TENANT_ID, detection_run_id=run.id, row_number=row_num,
-                    row_data={
-                        "pharmacy_npi": f"QC_NORM_{i:04d}", "ndc": "QCNDC001",
-                        "transaction_code": "B1", "transaction_status": "Paid",
-                        "total_paid_amt": "15.00",
-                    },
-                    resolution_method="declared", resolved_ndc="QCNDC001",
-                ))
-                row_num += 1
-        # n_outliers pharmacies: 500 rows each (volume=500 per entity, z >> 3)
         for k in range(n_outliers):
+            ndc_tag = f"QCNDC{n_outliers:03d}{k:02d}"
+            # 19 normals for this cohort/NDC: 20 rows each
+            for i in range(19):
+                for _ in range(20):
+                    db.add(CsvUploadRow(
+                        tenant_id=TEST_TENANT_ID, detection_run_id=run.id, row_number=row_num,
+                        row_data={
+                            "pharmacy_npi": f"QC_N_{k}_{i:04d}", "ndc": ndc_tag,
+                            "transaction_code": "B1", "transaction_status": "Paid",
+                            "total_paid_amt": "15.00",
+                        },
+                        resolution_method="declared", resolved_ndc=ndc_tag,
+                    ))
+                    row_num += 1
+            # 1 outlier for this cohort: 500 rows (z >> 3: mean≈44, stddev≈95, z≈4.8)
             for _ in range(500):
                 db.add(CsvUploadRow(
                     tenant_id=TEST_TENANT_ID, detection_run_id=run.id, row_number=row_num,
                     row_data={
-                        "pharmacy_npi": f"QC_OUT_{k:04d}", "ndc": "QCNDC001",
+                        "pharmacy_npi": f"QC_OUT_{k:04d}", "ndc": ndc_tag,
                         "transaction_code": "B1", "transaction_status": "Paid",
                         "total_paid_amt": "15.00",
                     },
-                    resolution_method="declared", resolved_ndc="QCNDC001",
+                    resolution_method="declared", resolved_ndc=ndc_tag,
                 ))
                 row_num += 1
         db.flush()
@@ -1119,7 +1165,7 @@ class TestStatisticalRepRowQueryCountConstant:
             db.execute = original_execute  # type: ignore[method-assign]
         return call_count[0]
 
-    def test_query_count_constant_across_fire_counts(self, db):
+    def test_query_count_constant_across_fire_counts(self, pg_db):
         """Query count with 1 fired entity must equal query count with 3 fired entities.
 
         Both should issue exactly 2 SQL queries:
@@ -1129,8 +1175,8 @@ class TestStatisticalRepRowQueryCountConstant:
         If the old per-entity-loop pattern were used, count_3 would equal count_1 + 2.
         The assertion count_3 == count_1 proves the batched approach is in place.
         """
-        count_1 = self._count_queries_for_n_outliers(db, n_outliers=1)
-        count_3 = self._count_queries_for_n_outliers(db, n_outliers=3)
+        count_1 = self._count_queries_for_n_outliers(pg_db, n_outliers=1)
+        count_3 = self._count_queries_for_n_outliers(pg_db, n_outliers=3)
 
         assert count_3 == count_1, (
             f"Query count must be CONSTANT regardless of fired entity count. "
