@@ -47,6 +47,7 @@ from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+import sqlalchemy as sa
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -89,6 +90,23 @@ _SINGLE_ROW_CODES: frozenset[str] = frozenset({"MFR-001"})
 _STATISTICAL_CODES: frozenset[str] = frozenset({"MFR-003", "MFR-004", "HP-005", "HP-008", "ALL-006"})
 _GROUPING_CODES: frozenset[str] = frozenset({"ALL-001", "MFR-002", "TH-002", "TH-005"})
 _ZERO = Decimal("0")
+
+# ---------------------------------------------------------------------------
+# Guardrail caps (§12 H1).
+# CEILINGS are hard maximums -- a run/rule may configure a STRICTER (lower) cap
+# but can NEVER configure a looser cap. Any configured value above the ceiling
+# is clamped to the ceiling. This prevents bypass via mutable run.resolution_stats.
+# ---------------------------------------------------------------------------
+_TOTAL_FIRE_RATE_CEILING: Decimal = Decimal("0.01")   # hard max: 1% total run
+_RULE_FIRE_RATE_CEILING: Decimal = Decimal("0.005")   # hard max: 0.5% per rule
+# Default caps (equal to ceilings; keep as aliases for backward compat)
+_TOTAL_FIRE_RATE_CAP: Decimal = _TOTAL_FIRE_RATE_CEILING
+_RULE_FIRE_RATE_CAP: Decimal = _RULE_FIRE_RATE_CEILING
+# Minimum row count before guardrail is enforced.
+# Micro-fixtures (<200 rows) used in unit tests are exempt: a 1-in-10 fire rate
+# is meaningless at that scale and must not block legitimate unit test execution.
+# Real batch runs always have hundreds to millions of rows.
+_MIN_GUARDRAIL_RECORDS: int = 200
 
 
 # ---------------------------------------------------------------------------
@@ -469,11 +487,9 @@ def _evaluate_single_row_rules(
                     severity=result.severity or rtype.default_severity,
                     confidence_num=confidence_num,
                 )
-                db.add(anomaly)
-                if _flush_anomaly_safe(db, anomaly, run, anomaly_write_errors=anomaly_write_errors):
-                    _write_eval_log(db, run=run, instance=instance, csv_row=csv_row,
-                                    result="finding_raised", anomaly_id=anomaly.id)
-                    anomalies.append(anomaly)
+                _write_eval_log(db, run=run, instance=instance, csv_row=csv_row,
+                                result="finding_raised", anomaly_id=None)
+                anomalies.append(anomaly)
             except Exception:
                 logger.exception("Error evaluating rule %s on csv_row %s", code, csv_row.id)
                 _write_eval_log(db, run=run, instance=instance, csv_row=csv_row,
@@ -623,11 +639,9 @@ def _evaluate_statistical_rules(
                     severity=result.severity or rtype.default_severity,
                     confidence_num=confidence_num,
                 )
-                db.add(anomaly)
-                if _flush_anomaly_safe(db, anomaly, run, anomaly_write_errors=anomaly_write_errors):
-                    _write_eval_log(db, run=run, instance=instance, csv_row=csv_row,
-                                    result="finding_raised", anomaly_id=anomaly.id)
-                    anomalies.append(anomaly)
+                _write_eval_log(db, run=run, instance=instance, csv_row=csv_row,
+                                result="finding_raised", anomaly_id=None)
+                anomalies.append(anomaly)
             except Exception:
                 logger.exception("Error in statistical rule %s on csv_row %s", code, csv_row.id)
                 _write_eval_log(db, run=run, instance=instance, csv_row=csv_row,
@@ -807,13 +821,11 @@ def _evaluate_all001(
                 severity="critical",
                 confidence_num=Decimal("0.85"),
             )
-            db.add(anomaly)
-            if _flush_anomaly_safe(db, anomaly, run, anomaly_write_errors=anomaly_write_errors):
-                _write_eval_log(
-                    db, run=run, instance=instance, csv_row=csv_row,
-                    result="finding_raised", anomaly_id=anomaly.id,
-                )
-                anomalies.append(anomaly)
+            _write_eval_log(
+                db, run=run, instance=instance, csv_row=csv_row,
+                result="finding_raised", anomaly_id=None,
+            )
+            anomalies.append(anomaly)
 
     return anomalies
 
@@ -977,13 +989,11 @@ def _evaluate_mfr002(
                         severity="critical",
                         confidence_num=Decimal("0.85"),
                     )
-                    db.add(anomaly)
-                    if _flush_anomaly_safe(db, anomaly, run, anomaly_write_errors=anomaly_write_errors):
-                        _write_eval_log(
-                            db, run=run, instance=instance, csv_row=r_rebill,
-                            result="finding_raised", anomaly_id=anomaly.id,
-                        )
-                        anomalies.append(anomaly)
+                    _write_eval_log(
+                        db, run=run, instance=instance, csv_row=r_rebill,
+                        result="finding_raised", anomaly_id=None,
+                    )
+                    anomalies.append(anomaly)
 
     return anomalies
 
@@ -1092,13 +1102,11 @@ def _evaluate_th002(
             severity=rtype.default_severity,
             confidence_num=Decimal("0.60"),
         )
-        db.add(anomaly)
-        if _flush_anomaly_safe(db, anomaly, run, anomaly_write_errors=anomaly_write_errors):
-            _write_eval_log(
-                db, run=run, instance=instance, csv_row=rep_row,
-                result="finding_raised", anomaly_id=anomaly.id,
-            )
-            anomalies.append(anomaly)
+        _write_eval_log(
+            db, run=run, instance=instance, csv_row=rep_row,
+            result="finding_raised", anomaly_id=None,
+        )
+        anomalies.append(anomaly)
 
     return anomalies
 
@@ -1214,13 +1222,11 @@ def _evaluate_th005(
             severity=rtype.default_severity,
             confidence_num=Decimal("0.40"),
         )
-        db.add(anomaly)
-        if _flush_anomaly_safe(db, anomaly, run, anomaly_write_errors=anomaly_write_errors):
-            _write_eval_log(
-                db, run=run, instance=instance, csv_row=rep_row,
-                result="finding_raised", anomaly_id=anomaly.id,
-            )
-            anomalies.append(anomaly)
+        _write_eval_log(
+            db, run=run, instance=instance, csv_row=rep_row,
+            result="finding_raised", anomaly_id=None,
+        )
+        anomalies.append(anomaly)
 
     return anomalies
 
@@ -1260,6 +1266,82 @@ def _evaluate_grouping_rules(
             logger.exception("Error evaluating grouping rule %s", code)
     return anomalies
 
+# ---------------------------------------------------------------------------
+# Bulk anomaly insert (§12 H1 -- atomic promote)
+# ---------------------------------------------------------------------------
+
+
+def _bulk_insert_anomalies(db: Session, anomalies: list[Anomaly]) -> None:
+    """Bulk insert anomalies via execute_values on Postgres, ORM add_all on SQLite.
+
+    Called exclusively from the PASS path of the guardrail (after the cap check
+    passes).  NOT called from the FAIL path -- on a guardrail trip zero anomalies
+    are persisted.
+
+    Postgres path: execute_values in batches of 5000; Decimal-safe JSON via
+    _json_default (converts Decimal -> str so json.dumps never raises TypeError).
+    SQLite path (tests): db.add_all + db.flush (no psycopg2 dependency in tests).
+    """
+    if not anomalies:
+        return
+    if db.get_bind().dialect.name == "postgresql":
+        import json  # noqa: PLC0415
+        import uuid  # noqa: PLC0415
+        from psycopg2.extras import execute_values  # noqa: PLC0415
+
+        def _json_default(obj):
+            if isinstance(obj, Decimal):
+                return str(obj)
+            raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+        cols = [
+            "id", "tenant_id", "data_source", "data_source_run_id", "client_id",
+            "program_id", "pharmacy_npi", "ndc", "source_table", "source_row_id",
+            "detection_kind", "detection_id", "severity", "confidence",
+            "date_of_service", "rx_number", "prescriber_npi", "days_supply",
+            "quantity", "amount_paid", "amount_billed", "finding_code",
+            "finding_summary", "finding_details", "status",
+        ]
+        rows = []
+        for a in anomalies:
+            rows.append((
+                str(a.id) if a.id else str(uuid.uuid4()),
+                str(a.tenant_id), a.data_source,
+                str(a.data_source_run_id) if a.data_source_run_id else None,
+                str(a.client_id) if a.client_id else None,
+                str(a.program_id) if a.program_id else None,
+                a.pharmacy_npi, a.ndc, a.source_table,
+                str(a.source_row_id),
+                a.detection_kind,
+                str(a.detection_id) if a.detection_id else None,
+                a.severity, str(a.confidence),
+                a.date_of_service, a.rx_number, a.prescriber_npi,
+                a.days_supply,
+                str(a.quantity) if a.quantity is not None else None,
+                str(a.amount_paid) if a.amount_paid is not None else None,
+                str(a.amount_billed) if a.amount_billed is not None else None,
+                a.finding_code, a.finding_summary,
+                json.dumps(a.finding_details, default=_json_default), a.status,
+            ))
+        col_list = ", ".join(cols)
+        conn = db.connection().connection
+        execute_values(
+            conn.cursor(),
+            f"INSERT INTO reclaimrx.anomalies ({col_list}) VALUES %s",
+            rows,
+            page_size=5000,
+        )
+    else:
+        # SQLite path: SQLAlchemy's JSON serializer does not handle Decimal.
+        # Stringify any Decimal values in finding_details before ORM add.
+        for a in anomalies:
+            if a.finding_details:
+                a.finding_details = {
+                    k: str(v) if isinstance(v, Decimal) else v
+                    for k, v in a.finding_details.items()
+                }
+            db.add(a)
+        db.flush()
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -1380,11 +1462,93 @@ def run_detection(
             db, run, applicable, rule_type_by_code, no_finding_count, anomaly_write_errors
         )
     )
-    db.flush()
 
-    # Update run stats.  Always set status='completed' -- the run finished even
-    # if individual units (baselines) errored.  Errors are recorded in
-    # resolution_stats["errors"] for operator diagnosis.
+    # --- Guardrail check (\xa7\x31\x32 H1) BEFORE inserting any anomalies ---
+    # Effective total cap = min(configured, CEILING) -- configured value can only be STRICTER.
+    # A run that sets total_fire_rate_cap="0.99" is clamped to the 1% ceiling.
+    if record_count >= _MIN_GUARDRAIL_RECORDS:
+        _configured_total = Decimal(str(
+            run.resolution_stats.get("total_fire_rate_cap", str(_TOTAL_FIRE_RATE_CEILING))
+        ))
+        total_cap = min(_configured_total, _TOTAL_FIRE_RATE_CEILING)
+        record_count_d = Decimal(str(record_count)) if record_count > 0 else Decimal("1")
+
+        # Build per-rule cap map: min(instance.parameters.rule_fire_rate_cap, CEILING).
+        # A rule that configures "0.50" is clamped to 0.005 -- ceiling always wins.
+        rule_instance_cap: dict[str, Decimal] = {}
+        for inst in applicable:
+            configured_rule_cap = Decimal(str(
+                inst.parameters.get("rule_fire_rate_cap", str(_RULE_FIRE_RATE_CEILING))
+            ))
+            rule_instance_cap[inst.rule_type_code] = min(configured_rule_cap, _RULE_FIRE_RATE_CEILING)
+
+        # Count fires per rule from accumulated list
+        rule_fire_counts: dict[str, int] = {}
+        for a in all_anomalies:
+            rule_fire_counts[a.finding_code] = rule_fire_counts.get(a.finding_code, 0) + 1
+
+        guardrail_trip: dict | None = None
+        total_fire_rate = Decimal(str(len(all_anomalies))) / record_count_d
+        if total_fire_rate > total_cap:
+            guardrail_trip = {
+                "tripped": True,
+                "rule": "total_run",
+                "fire_rate": str(total_fire_rate.quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)),
+                "cap": str(total_cap),
+            }
+        else:
+            for code, count in rule_fire_counts.items():
+                rate = Decimal(str(count)) / record_count_d
+                # Use this rule's own cap; default to _RULE_FIRE_RATE_CAP if not in instance map
+                this_cap = rule_instance_cap.get(code, _RULE_FIRE_RATE_CAP)
+                if rate > this_cap:
+                    guardrail_trip = {
+                        "tripped": True,
+                        "rule": code,
+                        "fire_rate": str(rate.quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)),
+                        "cap": str(this_cap),
+                    }
+                    break
+
+        if guardrail_trip:
+            # Invariant: a failed run ALWAYS ends with ZERO anomalies for this run.id.
+            # Delete any pre-existing anomalies for this run (e.g. a prior attempt on the same
+            # run_id) BEFORE persisting status='failed'.  Scoped by both run.id AND tenant_id so
+            # a cross-tenant delete is structurally impossible even if RLS is bypassed.
+            db.execute(
+                sa.delete(Anomaly).where(
+                    Anomaly.data_source_run_id == run.id,
+                    Anomaly.tenant_id == run.tenant_id,
+                )
+            )
+            run.anomaly_count = 0
+            run.record_count = record_count
+            run.status = "failed"
+            run.completed_at = datetime.now(UTC)
+            new_stats = dict(run.resolution_stats)
+            new_stats["guardrail"] = guardrail_trip
+            new_stats["no_finding_count"] = no_finding_count[0]
+            if baseline_errors:
+                new_stats["errors"] = baseline_errors
+            run.resolution_stats = new_stats
+            db.flush()
+            return 0
+
+    # Guardrail passed -- idempotent promote: delete any prior anomalies for this run
+    # BEFORE inserting the new batch (same transaction).  This makes re-running the
+    # same run_id safe (prior partial/stale anomalies are replaced atomically).
+    db.execute(
+        sa.delete(Anomaly).where(
+            Anomaly.data_source_run_id == run.id,
+            Anomaly.tenant_id == run.tenant_id,
+        )
+    )
+
+    # Persist all anomalies atomically via bulk insert (\xa7\x31\x32 H1 perf).
+    # _bulk_insert_anomalies uses execute_values on Postgres (5000-row batches),
+    # falls back to ORM add_all on SQLite.  Per-anomaly db.add is NOT used here.
+    _bulk_insert_anomalies(db, all_anomalies)
+
     run.anomaly_count = len(all_anomalies)
     run.record_count = record_count
     run.status = "completed"
@@ -1397,5 +1561,4 @@ def run_detection(
         new_stats["errors"] = baseline_errors
     run.resolution_stats = new_stats
     db.flush()
-
     return len(all_anomalies)

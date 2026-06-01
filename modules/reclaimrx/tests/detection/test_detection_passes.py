@@ -844,9 +844,10 @@ class TestAnomalyFieldsContract:
             )
         ).scalars().all()
 
+        # Post-refactor (§12 H1): anomaly_id is None; bulk insert runs after guardrail.
         for row in rows:
-            assert row.anomaly_id is not None, (
-                f"finding_raised log row must have anomaly_id set"
+            assert row.anomaly_id is None, (
+                f"finding_raised log row anomaly_id must be None post-refactor; got {row.anomaly_id!r}"
             )
 
     def test_eval_log_rows_have_source_table_and_row_id(self, db: Session):
@@ -1665,42 +1666,24 @@ class TestAnomalyNpiSanitization:
         run.resolution_stats = {"expected_count": 3, "inserted_count": 3}
         db.flush()
 
-        # Patch _flush_anomaly_safe: fail the second call (simulate a CHECK violation
-        # that sanitization didn't catch — e.g., a new constraint added post-deploy).
-        _real_flush = _be._flush_anomaly_safe
-        _flush_call = [0]
+        # §12 H1 refactor: _flush_anomaly_safe no longer called by evaluators.
+        # Anomalies accumulate in memory and are bulk-inserted atomically.
+        # All 3 anomalies persist; anomaly_write_errors stays 0.
+        run_detection(db, run)
 
-        def _patched_flush(db_, anomaly_, run_, *, anomaly_write_errors):
-            _flush_call[0] += 1
-            if _flush_call[0] == 2:
-                # Simulate IntegrityError on second anomaly flush.
-                # Must expunge so the final db.flush() doesn't re-insert it.
-                try:
-                    db_.expunge(anomaly_)
-                except Exception:
-                    pass
-                anomaly_write_errors[0] += 1
-                return False
-            return _real_flush(db_, anomaly_, run_, anomaly_write_errors=anomaly_write_errors)
-
-        with _patch.object(_be, "_flush_anomaly_safe", side_effect=_patched_flush):
-            run_detection(db, run)
-
-        # 2 of 3 anomalies should persist (the second one was rejected by the patch)
         db_count = db.execute(
             select(func.count()).select_from(Anomaly).where(
                 Anomaly.data_source_run_id == run.id,
                 Anomaly.tenant_id == _TENANT,
             )
         ).scalar()
-        assert db_count == 2, (
-            f"Expected 2 anomalies (1 bad row skipped by savepoint), got {db_count}"
+        assert db_count == 3, (
+            f"Expected 3 anomalies (atomic bulk insert, no per-row rejection), got {db_count}"
         )
 
-        # run.resolution_stats must record the skipped anomaly
         stats = run.resolution_stats
-        assert stats.get("anomaly_write_errors", 0) == 1, (
-            f"Expected anomaly_write_errors=1 in resolution_stats, got {stats}"
+        assert stats.get("anomaly_write_errors", 0) == 0, (
+            f"anomaly_write_errors must be 0 in bulk-insert path, got {stats}"
         )
 
         # run completes (not aborted)
