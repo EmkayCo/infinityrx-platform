@@ -90,7 +90,7 @@ _SINGLE_ROW_CODES: frozenset[str] = frozenset({"MFR-001"})
 # MFR-003, HP-008: per-row evaluators (FDB WAC / high-cost percentile).
 # MFR-004, HP-005, ALL-006, ALL-005: entity-level set-based SQL evaluators (Task 2b).
 _STATISTICAL_CODES: frozenset[str] = frozenset({"MFR-003", "MFR-004", "HP-005", "HP-008", "ALL-006", "ALL-005"})
-_GROUPING_CODES: frozenset[str] = frozenset({"ALL-001", "MFR-002", "TH-002", "TH-005"})
+_GROUPING_CODES: frozenset[str] = frozenset({"ALL-001", "MFR-002", "TH-002", "TH-005", "REJECT-75-70"})
 _ZERO = Decimal("0")
 
 # ---------------------------------------------------------------------------
@@ -1598,6 +1598,9 @@ def _evaluate_grouping_rules(
                 new = _evaluate_th002(db, run, instance, rtype, no_finding_count, anomaly_write_errors)
             elif code == "TH-005":
                 new = _evaluate_th005(db, run, instance, rtype, no_finding_count, anomaly_write_errors)
+            elif code == "REJECT-75-70":
+                from src.detection.reject_rebill import evaluate_reject_75_70  # noqa: PLC0415
+                new = evaluate_reject_75_70(db, run, instance=instance, rtype=rtype)
             else:
                 new = []
             anomalies.extend(new)
