@@ -53,6 +53,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.detection.baselines import compute_baseline
+from src.detection.fdb_pricing import fetch_current_prices_for_ndcs
+from src.detection.mfr003_evaluator import evaluate_hp008_row, evaluate_mfr003_row
 from src.detection.parsing import parse_dos, parse_money
 from src.detection.rule_evaluators import RuleResult, derive_fields, evaluate_threshold
 from src.models.detection_run_models import (
@@ -961,10 +963,11 @@ def _dispatch_statistical_rules(
     rule_type_by_code: dict[str, DetectionRuleType],
     no_finding_count: list[int],
     anomaly_write_errors: list[int],
+    _fdb_cache: dict | None = None,
 ) -> list[Anomaly]:
     """Dispatch _evaluate_statistical_rules per applicable stat instance.
 
-    MFR-003, HP-008: per-row evaluators (streamed batches, FDB WAC / percentile).
+    MFR-003, HP-008: per-row evaluators using _fdb_cache (pre-fetched WAC; zero per-row DB queries).
     MFR-004, HP-005, ALL-006, ALL-005: entity-level set-based SQL (one call per instance).
     """
     anomalies: list[Anomaly] = []
@@ -972,8 +975,13 @@ def _dispatch_statistical_rules(
     if not stat_instances:
         return anomalies
 
-    # Entity-level codes: dispatched directly via _evaluate_statistical_rules (per instance)
     _ENTITY_LEVEL_CODES = frozenset({"MFR-004", "HP-005", "ALL-006", "ALL-005"})
+    _PER_ROW_STAT_CODES = frozenset({"MFR-003", "HP-008"})
+    _per_row_evaluators = {
+        "MFR-003": evaluate_mfr003_row,
+        "HP-008": evaluate_hp008_row,
+    }
+    fdb = _fdb_cache or {}
 
     for instance in stat_instances:
         code = instance.rule_type_code
@@ -981,8 +989,22 @@ def _dispatch_statistical_rules(
             if code in _ENTITY_LEVEL_CODES:
                 new = _evaluate_statistical_rules(db, run, instance)
                 anomalies.extend(new)
-            # MFR-003 and HP-008: streamed per-row (handled by _evaluate_per_row_statistical below)
-            # They remain in _STATISTICAL_CODES for gate filtering but use a different path.
+            elif code in _PER_ROW_STAT_CODES:
+                # Per-row streaming: MFR-003 (FDB WAC IC deviation), HP-008 (high-cost claimant).
+                # _fdb_cache pre-fetched before the stream -- zero per-row DB queries.
+                evaluator = _per_row_evaluators[code]
+                stmt = (
+                    select(CsvUploadRow)
+                    .where(
+                        CsvUploadRow.detection_run_id == run.id,
+                        CsvUploadRow.tenant_id == run.tenant_id,
+                    )
+                    .execution_options(yield_per=_ROW_BATCH)
+                )
+                for csv_row in db.execute(stmt).scalars():
+                    result = evaluator(csv_row, db=db, _fdb_cache=fdb, instance=instance)
+                    if result is not None:
+                        anomalies.append(result)
         except Exception:
             logger.exception("Error in statistical rule %s", code)
 
@@ -1776,6 +1798,36 @@ def run_detection(
     _run_baselines(db, run, applicable, rule_type_by_code, baseline_errors)
     db.flush()
 
+    # ── FDB prefetch: distinct NDCs -> _fdb_cache (one IN query, zero per-row) ──────
+    # fetch_current_prices_for_ndcs is imported at MODULE SCOPE so tests can patch it as
+    # src.detection.batch_engine.fetch_current_prices_for_ndcs (local import would break patch).
+    _distinct_ndc_rows = db.execute(
+        text(
+            "SELECT DISTINCT resolved_ndc AS ndc FROM reclaimrx.csv_upload_rows"
+            " WHERE detection_run_id = :run_id AND tenant_id = :tenant_id"
+            " AND resolved_ndc IS NOT NULL"
+        ),
+        {"run_id": str(run.id), "tenant_id": str(run.tenant_id)},
+    ).fetchall()
+    _distinct_ndcs: list[str] = [r.ndc for r in _distinct_ndc_rows if r.ndc]
+    # fetch_current_prices_for_ndcs uses Postgres-specific unnest(ARRAY[...]::text[]) syntax.
+    # On SQLite (unit tests) skip the call -- reference.fdb_ndc_price_history is a FDW
+    # foreign table that does not exist in SQLite test fixtures.
+    _is_pg = _is_postgres(db)
+    _raw_fdb = fetch_current_prices_for_ndcs(db, _distinct_ndcs) if (_distinct_ndcs and _is_pg) else {}
+    _fdb_cache: dict[str, dict] = {
+        ndc: {
+            "wac": price_data.get("wac"),
+            "price_type": "09" if price_data.get("wac") is not None else None,
+            "effective_date": None,
+            "wac_source": "fdb",
+        }
+        for ndc, price_data in _raw_fdb.items()
+    }
+    _no_fdb_wac: int = sum(
+        1 for ndc in _distinct_ndcs if _fdb_cache.get(ndc, {}).get("wac") is None
+    )
+
     # Record count via SQL -- never materialize all rows just to call len().
     record_count = db.execute(
         select(func.count()).select_from(CsvUploadRow).where(
@@ -1796,7 +1848,8 @@ def run_detection(
     )
     all_anomalies.extend(
         _dispatch_statistical_rules(
-            db, run, applicable, rule_type_by_code, no_finding_count, anomaly_write_errors
+            db, run, applicable, rule_type_by_code, no_finding_count, anomaly_write_errors,
+            _fdb_cache=_fdb_cache,
         )
     )
     all_anomalies.extend(
@@ -1804,6 +1857,48 @@ def run_detection(
             db, run, applicable, rule_type_by_code, no_finding_count, anomaly_write_errors
         )
     )
+
+    # ── ALL-002 / ALL-003 set-based phantom-NPI checks (instance-gated) ────────
+    # Local imports avoid circular import (reference_rules -> batch_engine -> reference_rules).
+    from src.detection.reference_rules import (  # noqa: PLC0415
+        evaluate_all002_phantom_pharmacy,
+        evaluate_all003_phantom_prescriber,
+    )
+    # Each evaluator runs <=4 set-based queries; returns (list[Anomaly], dict[str,int]).
+    # Gated: only fires when an enabled DetectionRuleInstance for that code exists AND
+    # on Postgres -- the evaluators use unnest(ARRAY[...]::text[]) + reference.* FDW
+    # foreign tables that do not exist in SQLite unit-test fixtures (mirrors the FDB
+    # prefetch guard above). On SQLite the counters stay {} and the data_quality keys
+    # remain initialized to 0 below.
+    _all002_quality: dict[str, int] = {}
+    _all003_quality: dict[str, int] = {}
+    _ref_instance_map = {inst.rule_type_code: inst for inst in applicable}
+    _all002_inst = _ref_instance_map.get("ALL-002")
+    if _is_pg and _all002_inst is not None:
+        _a002_anomalies, _all002_quality = evaluate_all002_phantom_pharmacy(
+            db, run, instance=_all002_inst
+        )
+        all_anomalies.extend(_a002_anomalies)
+    _all003_inst = _ref_instance_map.get("ALL-003")
+    if _is_pg and _all003_inst is not None:
+        _a003_anomalies, _all003_quality = evaluate_all003_phantom_prescriber(
+            db, run, instance=_all003_inst
+        )
+        all_anomalies.extend(_a003_anomalies)
+
+    # ── data_quality dict: merge FDB no_fdb_wac + ALL-002/003 NPI counters ─────
+    # All 5 keys initialized to 0 so absent evaluators still expose their keys.
+    _data_quality: dict[str, int] = {
+        "no_fdb_wac": _no_fdb_wac,
+        "missing_pharmacy_npi": 0,
+        "invalid_pharmacy_npi": 0,
+        "missing_prescriber_npi": 0,
+        "invalid_prescriber_npi": 0,
+        **_all002_quality,
+        **_all003_quality,
+    }
+    # _data_quality is merged into resolution_stats by the finalization blocks below
+    # (not pre-assigned here to avoid double-mutation that causes StaleDataError on SQLite)
 
     # --- Guardrail check (\xa7\x31\x32 H1) BEFORE inserting any anomalies ---
     # Effective total cap = min(configured, CEILING) -- configured value can only be STRICTER.
@@ -1870,6 +1965,7 @@ def run_detection(
             new_stats = dict(run.resolution_stats)
             new_stats["guardrail"] = guardrail_trip
             new_stats["no_finding_count"] = no_finding_count[0]
+            new_stats["data_quality"] = _data_quality
             if baseline_errors:
                 new_stats["errors"] = baseline_errors
             run.resolution_stats = new_stats
@@ -1897,6 +1993,7 @@ def run_detection(
     run.completed_at = datetime.now(UTC)
     new_stats = dict(run.resolution_stats)
     new_stats["no_finding_count"] = no_finding_count[0]
+    new_stats["data_quality"] = _data_quality
     if anomaly_write_errors[0]:
         new_stats["anomaly_write_errors"] = anomaly_write_errors[0]
     if baseline_errors:

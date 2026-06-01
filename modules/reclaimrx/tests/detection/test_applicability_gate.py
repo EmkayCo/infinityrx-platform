@@ -171,7 +171,12 @@ _RESTRICTED_COLUMNS: set[str] = _FULL_CSV_COLUMNS - {"extended_wac"}
 # MFR-001, MFR-003: require extended_wac (absent from restricted set).
 # REJECT-75-70: requires rx_number_hash/reject_code (absent from both sets).
 _INAPPLICABLE_CODES: set[str] = {"MFR-001", "MFR-003", "REJECT-75-70"}
-_EXPECTED_APPLICABLE_COUNT = 11  # 14 RUN rules - 3 inapplicable = 11
+# 16 RUN rules; REJECT-75-70 is never instantiated (no rx_number_hash) so _seed creates
+# 15 instances. Under restricted columns MFR-001/MFR-003 are gated out -> 15 - 2 = 13.
+# ALL-002/ALL-003 are column-agnostic reference feeds and remain applicable.
+_EXPECTED_APPLICABLE_COUNT = 13
+# Reference-feed rules: applicable regardless of available CSV columns (required cols []).
+_REFERENCE_FEED_CODES: set[str] = {"ALL-002", "ALL-003"}
 
 
 # ---------------------------------------------------------------------------
@@ -206,19 +211,20 @@ def _seed(db: Session, tenant_id: uuid.UUID) -> DetectionRun:
 class TestGateRulesReturnValue:
     """gate_rules returns exactly the applicable instances."""
 
-    def test_full_columns_returns_all_13(self, db: Session):
-        """Full column set -> 13 instances are applicable.
+    def test_full_columns_returns_all_15(self, db: Session):
+        """Full column set -> 15 instances are applicable.
 
-        MFR-008 is DEFERRED. REJECT-75-70 requires rx_number_hash/reject_code which
-        are absent from _FULL_CSV_COLUMNS, so it is also inapplicable here.
-        Total applicable = 14 RUN rules - 1 deferred - 1 missing-columns = 13.
+        REJECT-75-70 requires rx_number_hash/reject_code which are absent from
+        _FULL_CSV_COLUMNS, so it is never instantiated. ALL-002/ALL-003 went live in
+        Phase 4 (column-agnostic reference feeds) and ARE applicable.
+        Total applicable = 16 RUN rules - 1 (REJECT-75-70 missing columns) = 15.
         """
         run = _seed(db, _TENANT_ID)
         applicable = gate_rules(db, run, _FULL_CSV_COLUMNS)
-        assert len(applicable) == 13
+        assert len(applicable) == 15
 
-    def test_restricted_columns_returns_11(self, db: Session):
-        """Restricted set (no extended_wac) -> 11 applicable; 2 skip rows written."""
+    def test_restricted_columns_returns_13(self, db: Session):
+        """Restricted set (no extended_wac) -> 13 applicable; 2 skip rows written."""
         run = _seed(db, _TENANT_ID)
         applicable = gate_rules(db, run, _RESTRICTED_COLUMNS)
         assert len(applicable) == _EXPECTED_APPLICABLE_COUNT
@@ -241,11 +247,11 @@ class TestGateRulesReturnValue:
             )
 
     def test_applicable_codes_correct(self, db: Session):
-        """The 11 returned codes match the 14-RUN-set minus the 3 inapplicable ones.
+        """The 13 returned codes match the 16-RUN-set minus the 3 inapplicable ones.
 
         MFR-001 and MFR-003 require extended_wac (absent from _RESTRICTED_COLUMNS).
         REJECT-75-70 requires rx_number_hash/reject_code (absent from both column sets).
-        14 RUN rules - 3 inapplicable = 11 expected.
+        16 RUN rules - 3 inapplicable = 13 expected.
         """
         run = _seed(db, _TENANT_ID)
         applicable = gate_rules(db, run, _RESTRICTED_COLUMNS)
@@ -258,11 +264,17 @@ class TestGateRulesReturnValue:
         returned_codes = {inst.rule_type_code for inst in applicable}
         assert returned_codes == expected_codes
 
-    def test_empty_available_columns_returns_no_instances(self, db: Session):
-        """When no columns are available, every instance is inapplicable."""
+    def test_empty_available_columns_returns_only_reference_feeds(self, db: Session):
+        """With no CSV columns, only the column-agnostic reference feeds apply.
+
+        Every column-gated rule is inapplicable, but ALL-002/ALL-003 have
+        required_data_columns=[] (they source NPIs from row_data + FDW reference tables),
+        so they remain applicable even when no declared columns are present.
+        """
         run = _seed(db, _TENANT_ID)
         applicable = gate_rules(db, run, set())
-        assert applicable == []
+        codes = {inst.rule_type_code for inst in applicable}
+        assert codes == _REFERENCE_FEED_CODES
 
 
 class TestSkipRowsWritten:

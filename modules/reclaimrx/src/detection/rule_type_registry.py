@@ -37,8 +37,8 @@ _CATEGORY_FAMILY: dict[str, str] = {
 
 RULE_TYPE_CATALOG: list[dict] = [
     {"code":'ALL-001',"name":'Duplicate Claim',"description":'Same member, same NDC, same DOS, different auth number',"family":_CATEGORY_FAMILY['duplicate'],"parameter_schema_version":"1.0","default_severity":'critical',"default_confidence":0.9,"requires_baseline":False,"requires_history":False,"deferred_data_feed":False,"deferred_reason":'',"required_data_columns":['patient_unique_hash', 'ndc', 'date_of_service', 'auth_no_hash', 'transaction_code', 'transaction_status'],"default_parameters":{'pattern': 'duplicate_claim', 'threshold': 1.0}},
-    {"code":'ALL-002',"name":'Phantom Pharmacy',"description":'NPI not in NCPDP database or OIG excluded',"family":_CATEGORY_FAMILY['eligibility'],"parameter_schema_version":"1.0","default_severity":'critical',"default_confidence":0.9,"requires_baseline":False,"requires_history":False,"deferred_data_feed":True,"deferred_reason":'Requires NCPDP registry and OIG exclusion list -- external data feeds not present in CSV',"required_data_columns":[],"default_parameters":{'pattern': 'phantom_pharmacy'}},
-    {"code":'ALL-003',"name":'Phantom Prescriber',"description":'NPI invalid, DEA inactive, or OIG excluded',"family":_CATEGORY_FAMILY['eligibility'],"parameter_schema_version":"1.0","default_severity":'critical',"default_confidence":0.9,"requires_baseline":False,"requires_history":False,"deferred_data_feed":True,"deferred_reason":'Requires DEA active/inactive registry and OIG exclusion list -- external data feeds not present in CSV',"required_data_columns":[],"default_parameters":{'pattern': 'phantom_prescriber'}},
+    {"code":'ALL-002',"name":'Phantom Pharmacy',"description":'NPI not in NCPDP database or OIG excluded',"family":_CATEGORY_FAMILY['eligibility'],"parameter_schema_version":"1.0","default_severity":'critical',"default_confidence":0.9,"requires_baseline":False,"requires_history":False,"deferred_data_feed":False,"deferred_reason":'FDW reference.dataq_master + reference.oig_leie_exclusions live via postgres_fdw (setup_fdw.sh); evaluate_all002_phantom_pharmacy',"required_data_columns":[],"default_parameters":{'pattern': 'phantom_pharmacy'}},
+    {"code":'ALL-003',"name":'Phantom Prescriber',"description":'NPI invalid, DEA inactive, or OIG excluded',"family":_CATEGORY_FAMILY['eligibility'],"parameter_schema_version":"1.0","default_severity":'critical',"default_confidence":0.9,"requires_baseline":False,"requires_history":False,"deferred_data_feed":False,"deferred_reason":'FDW reference.prescribers + reference.oig_leie_exclusions live via postgres_fdw (setup_fdw.sh); evaluate_all003_phantom_prescriber',"required_data_columns":[],"default_parameters":{'pattern': 'phantom_prescriber'}},
     {"code":'ALL-004',"name":'Days Supply Manipulation',"description":'Quantity and days supply inconsistent with NDC packaging/dosing',"family":_CATEGORY_FAMILY['billing_pattern'],"parameter_schema_version":"1.0","default_severity":'medium',"default_confidence":0.7,"requires_baseline":False,"requires_history":False,"deferred_data_feed":True,"deferred_reason":'Requires NDC packaging/dosing reference data to compute days_supply_deviation_pct',"required_data_columns":[],"default_parameters":{'field': 'days_supply_deviation_pct', 'operator': 'gt', 'threshold': 0.2}},
     {"code":'ALL-005',"name":'Early Refill',"description":'Fill date before configured percent of previous days supply',"family":_CATEGORY_FAMILY['billing_pattern'],"parameter_schema_version":"1.0","default_severity":'medium',"default_confidence":0.7,"requires_baseline":False,"requires_history":True,"deferred_data_feed":False,"deferred_reason":'',"required_data_columns":['patient_unique_hash', 'ndc', 'date_of_service', 'day_supply'],"default_parameters":{'field': 'refill_pct', 'operator': 'lt', 'threshold': 0.75}},
     {"code":'ALL-006',"name":'Weekend/Holiday Volume Spike',"description":'Pharmacy claims volume on weekend/holiday exceeds weekday average',"family":_CATEGORY_FAMILY['billing_pattern'],"parameter_schema_version":"1.0","default_severity":'low',"default_confidence":0.5,"requires_baseline":True,"requires_history":True,"deferred_data_feed":False,"deferred_reason":'',"required_data_columns":['pharmacy_npi', 'date_of_service'],"default_parameters":{'field': 'weekend_volume_vs_weekday_ratio', 'operator': 'gt', 'threshold': 2.0}},
@@ -90,9 +90,9 @@ RULE_TYPE_CATALOG: list[dict] = [
 def register_rule_types(db: Session) -> int:
     """Idempotent upsert of all RULE_TYPE_CATALOG entries into detection_rule_types.
 
-    Existing rows (matched by code) are skipped. Returns count inserted.
-    Production: run under a role with INSERT on reclaimrx.detection_rule_types,
-    or via migration/admin context (same pattern as ml_detector_registry seeding).
+    INSERT new rows, UPDATE existing rows where catalog values differ.
+    Returns count inserted (not count updated).
+    Production: run under a role with INSERT/UPDATE on reclaimrx.detection_rule_types.
     """
     from sqlalchemy import select
     inserted = 0
@@ -116,6 +116,13 @@ def register_rule_types(db: Session) -> int:
             )
             db.add(row)
             inserted += 1
+        else:
+            # Update mutable fields so catalog changes (e.g. deferred_data_feed going False
+            # when FDW data becomes available) propagate to existing rows.
+            existing.deferred_data_feed = entry["deferred_data_feed"]
+            existing.deferred_reason = entry["deferred_reason"]
+            existing.required_data_columns = entry["required_data_columns"]
+            existing.default_parameters = entry["default_parameters"]
     db.flush()
     return inserted
 
