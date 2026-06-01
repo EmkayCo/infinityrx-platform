@@ -1,4 +1,4 @@
-"""Pydantic v2 request/response schemas for ReclaimRx API.
+﻿"""Pydantic v2 request/response schemas for ReclaimRx API.
 
 All monetary amounts use Decimal. No floats.
 """
@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, TypeVar
+from typing import Any, Generic, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -14,14 +14,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 T = TypeVar("T")
 
 
-class PaginatedResponse[T](BaseModel):
+class PaginatedResponse(BaseModel, Generic[T]):
     items: list[T]
     total: int
     limit: int
     offset: int
 
 
-# ── Claim Evaluation ──────────────────────────────────────────────────────────
+# -- Claim Evaluation ---------------------------------------------------------
 
 class ClaimEvaluateRequest(BaseModel):
     model_config = ConfigDict(strict=False)
@@ -75,7 +75,7 @@ class ClaimEvaluateResponse(BaseModel):
     flagged_claim_ids: list[str] = Field(default_factory=list)
 
 
-# ── Detection Rules ───────────────────────────────────────────────────────────
+# -- Detection Rules ----------------------------------------------------------
 
 class DetectionRuleRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -96,7 +96,7 @@ class DetectionRuleRead(BaseModel):
     created_at: datetime
 
 
-# ── Flagged Claims ────────────────────────────────────────────────────────────
+# -- Flagged Claims -----------------------------------------------------------
 
 class FlaggedClaimRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -135,7 +135,7 @@ class FlaggedClaimUpdate(BaseModel):
     resolution: str | None = None
 
 
-# ── Investigations ────────────────────────────────────────────────────────────
+# -- Investigations -----------------------------------------------------------
 
 class InvestigationCreate(BaseModel):
     subject_type: str
@@ -191,7 +191,7 @@ class InvestigationUpdate(BaseModel):
     notes: str | None = None
 
 
-# ── Recoveries ────────────────────────────────────────────────────────────────
+# -- Recoveries ---------------------------------------------------------------
 
 class RecoveryCreate(BaseModel):
     recovery_method: str
@@ -224,7 +224,7 @@ class RecoveryRead(BaseModel):
     created_at: datetime
 
 
-# ── Activities ────────────────────────────────────────────────────────────────
+# -- Activities ---------------------------------------------------------------
 
 class ActivityCreate(BaseModel):
     activity_type: str
@@ -245,7 +245,7 @@ class ActivityRead(BaseModel):
     created_at: datetime
 
 
-# ── Payment Holds ─────────────────────────────────────────────────────────────
+# -- Payment Holds ------------------------------------------------------------
 
 class PaymentHoldCreate(BaseModel):
     entity_type: str
@@ -281,7 +281,7 @@ class PaymentHoldRelease(BaseModel):
     reason: str = Field(..., min_length=1)
 
 
-# ── Tips ─────────────────────────────────────────────────────────────────────
+# -- Tips ---------------------------------------------------------------------
 
 class TipCreate(BaseModel):
     tip_type: str
@@ -306,7 +306,7 @@ class TipRead(BaseModel):
     created_at: datetime
 
 
-# ── Entity Profiles ───────────────────────────────────────────────────────────
+# -- Entity Profiles ----------------------------------------------------------
 
 class PharmacyProfileRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -370,3 +370,62 @@ class AccumulatorDetectionRead(BaseModel):
     amount_not_applied: Decimal | None
     projected_annual_impact: Decimal | None
     created_at: datetime
+
+
+# -- Detection Console (Foundation Slice) -------------------------------------
+
+
+class AnomalyRead(BaseModel):
+    """Read schema for reclaimrx.anomalies rows (Foundation slice).
+
+    All Decimal amounts serialized as str to preserve precision.
+    No floats.
+    """
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    finding_code: str
+    finding_summary: str
+    severity: str
+    confidence: str
+    status: str
+    entity_type: str
+    pharmacy_npi: str | None
+    pharmacy_name: str | None
+    prescriber_npi: str | None
+    prescriber_name: str | None
+    ndc: str | None
+    amount_paid: str | None
+    amount_billed: str | None
+    recovery_amount: str | None
+    date_of_service: date | None
+    data_source_run_id: str | None
+    created_at: datetime
+
+
+class RuleBreakdownItem(BaseModel):
+    finding_code: str
+    severity: str
+    count: int
+
+
+class DetectionRunRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    run_label: str
+    status: str
+    data_source: str
+    source_filename: str | None
+    record_count: int
+    anomaly_count: int
+    period_start: date | None
+    period_end: date | None
+    started_at: datetime
+    completed_at: datetime | None
+    failure_reason: str | None
+    data_quality: dict | None
+
+
+class DetectionRunDetail(DetectionRunRead):
+    per_rule_breakdown: list[RuleBreakdownItem] = []

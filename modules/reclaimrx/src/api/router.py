@@ -1,4 +1,4 @@
-"""ReclaimRx FastAPI router -- thin API layer; all logic in services."""
+﻿"""ReclaimRx FastAPI router -- thin API layer; all logic in services."""
 from __future__ import annotations
 
 import uuid
@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -1176,3 +1176,336 @@ async def list_tips(
     return list(
         db.execute(stmt.order_by(TipRecord.created_at.desc()).limit(limit).offset(offset)).scalars()
     )
+
+
+# ---------------------------------------------------------------------------
+# Detection Console: Anomalies (Foundation Slice)
+# ---------------------------------------------------------------------------
+
+
+def _derive_entity_type(pharmacy_npi, prescriber_npi) -> str:
+    if pharmacy_npi is not None:
+        return "pharmacy"
+    if prescriber_npi is not None:
+        return "prescriber"
+    return "unknown"
+
+
+def _decimal_to_str(v):
+    if v is None:
+        return None
+    return str(v)
+
+
+def _is_postgres_session(db: Session) -> bool:
+    try:
+        return db.bind.dialect.name == "postgresql"
+    except Exception:
+        return False
+
+
+def _enrich_names_set_based(db: Session, rows) -> dict:
+    pharm_npis = {a.pharmacy_npi for a in rows if a.pharmacy_npi}
+    presc_npis = {a.prescriber_npi for a in rows if a.prescriber_npi}
+    pharm_names: dict = {}
+    presc_names: dict = {}
+    if not _is_postgres_session(db):
+        return {"pharmacy": pharm_names, "prescriber": presc_names}
+    if pharm_npis:
+        try:
+            from sqlalchemy import text as _text
+            res = db.execute(
+                _text("SELECT npi, legal_business_name FROM reference.dataq_master WHERE npi = ANY(:npis)"),
+                {"npis": list(pharm_npis)},
+            ).fetchall()
+            pharm_names = {r[0]: r[1] for r in res if r[0] and r[1]}
+        except Exception:
+            pass
+    if presc_npis:
+        try:
+            from sqlalchemy import text as _text
+            res = db.execute(
+                _text("SELECT npi, provider_last_name FROM reference.prescribers WHERE npi = ANY(:npis)"),
+                {"npis": list(presc_npis)},
+            ).fetchall()
+            presc_names = {r[0]: r[1] for r in res if r[0] and r[1]}
+        except Exception:
+            pass
+    return {"pharmacy": pharm_names, "prescriber": presc_names}
+
+@router.get("/anomalies", response_model=PaginatedResponse)
+async def list_anomalies(
+    response: Response,
+    finding_code: list[str] = Query(default=[]),
+    severity: str | None = Query(None),
+    status: str | None = Query(None),
+    entity_type: str | None = Query(None),
+    pharmacy_npi: str | None = Query(None),
+    prescriber_npi: str | None = Query(None),
+    ndc: str | None = Query(None),
+    data_source_run_id: str | None = Query(None),
+    min_amount: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    user: CurrentUser = RECLAIMRX_VIEWER_DEP,
+    _tenant: CurrentUser = Depends(require_tenant_match),
+) -> PaginatedResponse:
+    """List anomalies for the tenant with server-side AND-filters and pagination."""
+    from datetime import date as _date
+    from decimal import Decimal, InvalidOperation
+    from src.models.detection_run_models import Anomaly as _Anomaly
+    from src.api.schemas.schemas import AnomalyRead as _AnomalyRead
+
+    response.headers["Cache-Control"] = "no-store"
+    stmt = select(_Anomaly).where(_Anomaly.tenant_id == user.tenant_id)
+
+    if finding_code:
+        stmt = stmt.where(_Anomaly.finding_code.in_(finding_code))
+    if severity:
+        stmt = stmt.where(_Anomaly.severity == severity)
+    if status:
+        stmt = stmt.where(_Anomaly.status == status)
+    if entity_type == "pharmacy":
+        stmt = stmt.where(_Anomaly.pharmacy_npi.is_not(None))
+    elif entity_type == "prescriber":
+        stmt = stmt.where(_Anomaly.prescriber_npi.is_not(None), _Anomaly.pharmacy_npi.is_(None))
+    elif entity_type == "unknown":
+        stmt = stmt.where(_Anomaly.pharmacy_npi.is_(None), _Anomaly.prescriber_npi.is_(None))
+    if pharmacy_npi:
+        stmt = stmt.where(_Anomaly.pharmacy_npi == pharmacy_npi)
+    if prescriber_npi:
+        stmt = stmt.where(_Anomaly.prescriber_npi == prescriber_npi)
+    if ndc:
+        stmt = stmt.where(_Anomaly.ndc == ndc)
+    if data_source_run_id:
+        try:
+            import uuid as _uuid
+            stmt = stmt.where(_Anomaly.data_source_run_id == _uuid.UUID(data_source_run_id))
+        except (ValueError, TypeError):
+            pass
+    if min_amount:
+        try:
+            stmt = stmt.where(_Anomaly.amount_paid >= Decimal(str(min_amount)))
+        except InvalidOperation:
+            pass
+    if date_from:
+        try:
+            stmt = stmt.where(_Anomaly.date_of_service >= _date.fromisoformat(date_from))
+        except (ValueError, TypeError):
+            pass
+    if date_to:
+        try:
+            stmt = stmt.where(_Anomaly.date_of_service <= _date.fromisoformat(date_to))
+        except (ValueError, TypeError):
+            pass
+
+    total_stmt = select(func.count()).select_from(stmt.subquery())
+    total: int = db.execute(total_stmt).scalar_one()
+
+    offset = (page - 1) * page_size
+    rows = db.execute(
+        stmt.order_by(_Anomaly.created_at.desc(), _Anomaly.id).limit(page_size).offset(offset)
+    ).scalars().all()
+
+    names = _enrich_names_set_based(db, rows)
+    pharm_map = names["pharmacy"]
+    presc_map = names["prescriber"]
+
+    items = [
+        _AnomalyRead(
+            id=str(a.id),
+            finding_code=a.finding_code,
+            finding_summary=a.finding_summary,
+            severity=a.severity,
+            confidence=str(a.confidence),
+            status=a.status,
+            entity_type=_derive_entity_type(a.pharmacy_npi, a.prescriber_npi),
+            pharmacy_npi=a.pharmacy_npi,
+            pharmacy_name=pharm_map.get(a.pharmacy_npi) if a.pharmacy_npi else None,
+            prescriber_npi=a.prescriber_npi,
+            prescriber_name=presc_map.get(a.prescriber_npi) if a.prescriber_npi else None,
+            ndc=a.ndc,
+            amount_paid=_decimal_to_str(a.amount_paid),
+            amount_billed=_decimal_to_str(a.amount_billed),
+            recovery_amount=_decimal_to_str(a.recovery_amount),
+            date_of_service=a.date_of_service,
+            data_source_run_id=str(a.data_source_run_id) if a.data_source_run_id else None,
+            created_at=a.created_at,
+        )
+        for a in rows
+    ]
+    return PaginatedResponse(items=items, total=total, limit=page_size, offset=offset)
+
+
+# ---------------------------------------------------------------------------
+# Detection Console: Detection Runs
+# ---------------------------------------------------------------------------
+
+
+def _run_to_dict(run) -> dict:
+    stats = run.resolution_stats or {}
+    return {
+        "id": str(run.id),
+        "run_label": run.run_label,
+        "status": run.status,
+        "data_source": run.data_source,
+        "source_filename": run.source_filename,
+        "record_count": run.record_count,
+        "anomaly_count": run.anomaly_count,
+        "period_start": run.period_start.isoformat() if run.period_start else None,
+        "period_end": run.period_end.isoformat() if run.period_end else None,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        "failure_reason": run.failure_reason,
+        "data_quality": stats.get("data_quality"),
+    }
+
+
+@router.get("/detection-runs")
+async def list_detection_runs(
+    response: Response,
+    db: Session = Depends(get_db),
+    user: CurrentUser = RECLAIMRX_VIEWER_DEP,
+    _tenant: CurrentUser = Depends(require_tenant_match),
+) -> list:
+    """List detection runs for the tenant, newest first."""
+    from src.models.detection_run_models import DetectionRun as _DR
+    response.headers["Cache-Control"] = "no-store"
+    runs = db.execute(
+        select(_DR).where(_DR.tenant_id == user.tenant_id).order_by(_DR.started_at.desc())
+    ).scalars().all()
+    return [_run_to_dict(r) for r in runs]
+
+
+@router.get("/detection-runs/{run_id}")
+async def get_detection_run(
+    run_id: str,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: CurrentUser = RECLAIMRX_VIEWER_DEP,
+    _tenant: CurrentUser = Depends(require_tenant_match),
+) -> dict:
+    """Get a single detection run with per-rule breakdown (tenant-scoped GROUP BY)."""
+    import uuid as _uuid
+    from src.models.detection_run_models import Anomaly as _Anomaly, DetectionRun as _DR
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        run_uuid = _uuid.UUID(run_id)
+    except (ValueError, TypeError):
+        raise _not_found("Detection run not found.")
+    run = db.execute(
+        select(_DR).where(_DR.id == run_uuid, _DR.tenant_id == user.tenant_id)
+    ).scalar_one_or_none()
+    if run is None:
+        raise _not_found("Detection run not found.")
+    breakdown_rows = db.execute(
+        select(
+            _Anomaly.finding_code,
+            _Anomaly.severity,
+            func.count(_Anomaly.id).label("cnt"),
+        ).where(
+            _Anomaly.data_source_run_id == run_uuid,
+            _Anomaly.tenant_id == user.tenant_id,
+        ).group_by(_Anomaly.finding_code, _Anomaly.severity)
+        .order_by(func.count(_Anomaly.id).desc())
+    ).all()
+    result = _run_to_dict(run)
+    result["per_rule_breakdown"] = [
+        {"finding_code": r.finding_code, "severity": r.severity, "count": r.cnt}
+        for r in breakdown_rows
+    ]
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Detection Console: Ingest
+# ---------------------------------------------------------------------------
+
+
+@router.post("/detection-runs", status_code=201)
+async def ingest_detection_run(
+    response: Response,
+    file: UploadFile = File(...),
+    run_label: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+    user: CurrentUser = RECLAIMRX_VIEWER_DEP,
+    _tenant: CurrentUser = Depends(require_tenant_match),
+) -> dict:
+    """Upload a CSV and run full ingest+detection pipeline synchronously.
+
+    Configurable max-rows guard via RECLAIMRX_MAX_UPLOAD_ROWS env var.
+    Returns HTTP 413 for oversized files (no hardcoded magic number).
+    """
+    import csv as _csv
+    import os as _os
+    import shutil as _shutil
+    import uuid as _uuid
+    from pathlib import Path as _Path
+    from src.detection.batch_engine import run_detection as _run_detection
+    from src.detection.csv_ingest import create_or_resume_run as _create_run, load_csv as _load_csv
+
+    response.headers["Cache-Control"] = "no-store"
+
+    max_rows_env = _os.environ.get("RECLAIMRX_MAX_UPLOAD_ROWS", "500000")
+    try:
+        max_rows = int(max_rows_env)
+    except (ValueError, TypeError):
+        max_rows = 500_000
+
+    tenant_id = user.tenant_id
+    upload_run_id = _uuid.uuid4()
+    upload_dir = _Path("data") / "uploads" / str(tenant_id) / str(upload_run_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    filename = file.filename or "upload.csv"
+    dest_path = upload_dir / filename
+
+    with dest_path.open("wb") as fh:
+        _shutil.copyfileobj(file.file, fh)
+
+    row_count = 0
+    with dest_path.open(newline="", encoding="utf-8") as fh:
+        for _ in _csv.reader(fh):
+            row_count += 1
+    data_rows = max(0, row_count - 1)
+
+    if data_rows > max_rows:
+        _shutil.rmtree(upload_dir, ignore_errors=True)
+        raise HTTPException(
+            status_code=413,
+            detail=build_error_envelope(
+                "FILE_TOO_LARGE",
+                f"File has {data_rows} rows which exceeds the synchronous limit of {max_rows}. Use the CLI for large files.",
+                field="file",
+            ),
+        )
+
+    try:
+        run = _create_run(
+            db,
+            tenant_id=tenant_id,
+            path=str(dest_path),
+            created_by=user.id,
+            resume=False,
+            force=False,
+        )
+        if run_label:
+            run.run_label = run_label
+            db.flush()
+        _load_csv(db, run)
+        _run_detection(db, run)
+        db.commit()
+        db.refresh(run)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=build_error_envelope(
+                "INGEST_ERROR",
+                f"Ingest failed: {type(exc).__name__}: {exc}",
+            ),
+        ) from exc
+
+    return _run_to_dict(run)
