@@ -127,3 +127,23 @@ entities.json
 packages/**/node_modules
 packages/**/dist
 packages/**/*.tsbuildinfo
+
+# --- Local datasets: large/sensitive, never commit (1.7GB claims data) ---
+data/ReclaimRx/
+data/uploads/
+modules/*/data/
+nonstandard-e2e.csv
+
+# --- Generated module manifests ---
+packages/modules/*/module.config.js
+packages/modules/*/module.config.d.ts
+packages/modules/*/module.config.js.map
+packages/modules/*/module.config.d.ts.map
+
+# --- Session / agent transcripts + stray artifacts ---
+.agents/
+waves/*/sub-sessions/
+/~/
+
+# --- Logs ---
+*.log

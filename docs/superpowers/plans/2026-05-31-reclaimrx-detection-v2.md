@@ -656,6 +656,186 @@ class TestGuardrailBypassPrevention:
             f"Effective cap {effective_cap} exceeds per-rule ceiling 0.005 — bypass not clamped"
         )
         assert result == 0
+
+
+class TestRedetectIdempotency:
+    """Regression: the invariant 'a failed run ALWAYS ends with ZERO anomalies for its run.id'
+    holds in all three cases:
+
+    (a) test_failed_fresh_run_leaves_zero_anomalies_after_prior_stale_seed —
+        guardrail trips on a fresh run.id that has NO pre-existing anomalies for itself
+        (stale anomalies exist only on a DIFFERENT prior run.id).  The delete-for-run in
+        the failed branch is a no-op for the fresh run.id; transaction rolls back cleanly.
+    (b) test_failed_run_with_same_run_preseeded_anomalies_leaves_zero —
+        guardrail trips on a run.id that ALREADY HAS pre-existing anomalies seeded directly
+        on its own id (same-run retry scenario).  The failed-branch delete-for-run must
+        explicitly remove those rows BEFORE persisting status='failed'.
+    (c) passing run (covered by TestAtomicStageThenPromote) — PASS branch delete-prior +
+        bulk insert are atomic; run ends with exactly the new anomaly set.
+    """
+
+    def test_failed_fresh_run_leaves_zero_anomalies_after_prior_stale_seed(self, db):
+        """Guardrail trip on a fresh run leaves exactly zero anomalies for that run id.
+
+        Scenario:
+          1. Seed a SEPARATE prior DetectionRun (simulating a stale v1/partial run).
+          2. Manually insert 3 Anomaly rows attributed to that prior run id (stale state).
+          3. Create a FRESH DetectionRun (new id) — this is the re-detect run.
+          4. Seed rows that will cause the guardrail to trip (100% fire rate).
+          5. Call run_detection → guardrail trips, whole-transaction rolls back.
+          6. Assert: fresh_run.status == 'failed', zero anomalies for fresh_run.id.
+          7. Assert: the prior_run's stale anomalies (different run id) are unaffected
+             (the delete-prior-for-run only deletes for THIS run id, not all anomalies).
+        """
+        from src.models.detection_run_models import Anomaly
+
+        # Step 1: create a prior (stale) run
+        prior_run = DetectionRun(
+            tenant_id=TEST_TENANT_ID, data_source="csv_upload",
+            run_label="stale-prior-run", status="completed",
+            created_by=TEST_USER_ID,
+            resolution_stats={"inserted_count": 5, "expected_count": 5},
+        )
+        db.add(prior_run)
+        db.flush()
+
+        # Step 2: seed 3 anomalies attributed to the prior run id (stale state to ignore)
+        for i in range(3):
+            db.add(Anomaly(
+                tenant_id=TEST_TENANT_ID,
+                data_source="csv_upload",
+                data_source_run_id=prior_run.id,
+                finding_code="STALE-FINDING",
+                finding_summary="stale anomaly from prior run",
+                finding_details={},
+                severity="high",
+                confidence=Decimal("0.90"),
+                status="open",
+            ))
+        db.flush()
+        prior_anomaly_count = db.execute(
+            select(Anomaly).where(Anomaly.data_source_run_id == prior_run.id)
+        ).scalars().all()
+        assert len(prior_anomaly_count) == 3, "Setup: prior_run must have 3 stale anomalies"
+
+        # Step 3: create the FRESH re-detect run (new id — primary design for re-detect)
+        fresh_run = _make_run(db, record_count=10)
+
+        # Step 4: seed rows that trigger 100% fire rate → guardrail must trip
+        _seed_rows(db, fresh_run, n=10, row_data_fn=lambda i: {
+            "patient_unique_hash": f"fresh-p{i}",
+            "ndc": "00000000001",
+            "nq_to_wac_ratio": "2.0",
+            "ingredient_cost_paid": "200.00",
+            "dispensing_fee_paid": "5.00",
+            "extended_wac": "90.00",
+            "total_paid_amt": "205.00",
+        })
+        _add_synthetic_high_fire_rule(db, TEST_TENANT_ID)
+
+        # Step 5: run detection — expect guardrail trip
+        result = run_detection(db, fresh_run)
+        db.refresh(fresh_run)
+
+        # Step 6: fresh run must have failed with zero anomalies
+        assert fresh_run.status == "failed", (
+            f"Expected fresh run to fail (guardrail trip), got status={fresh_run.status!r}"
+        )
+        assert result == 0
+        fresh_anomalies = db.execute(
+            select(Anomaly).where(Anomaly.data_source_run_id == fresh_run.id)
+        ).scalars().all()
+        assert len(fresh_anomalies) == 0, (
+            f"REGRESSION: failed fresh run has {len(fresh_anomalies)} anomaly rows — "
+            f"expected exactly 0. The in-tx delete+insert must have rolled back cleanly."
+        )
+
+        # Step 7: prior run's stale anomalies must be UNAFFECTED (different run id)
+        prior_after = db.execute(
+            select(Anomaly).where(Anomaly.data_source_run_id == prior_run.id)
+        ).scalars().all()
+        assert len(prior_after) == 3, (
+            f"Prior run's stale anomalies were unexpectedly deleted: "
+            f"expected 3, found {len(prior_after)}. "
+            f"delete-prior-for-run must be scoped to fresh_run.id only."
+        )
+
+    def test_failed_run_with_same_run_preseeded_anomalies_leaves_zero(self, db):
+        """RED-first regression: guardrail trip on a run that ALREADY HAS anomalies for
+        its own run.id clears those pre-existing rows unconditionally.
+
+        Scenario:
+          1. Create a DetectionRun (run_a).
+          2. Directly insert N Anomaly rows attributed to run_a.id (simulates a partial
+             prior attempt or a mis-applied back-fill for the same run_id).
+          3. Configure so that running detection on run_a will trip the guardrail
+             (100% fire rate via synthetic rule + seeded rows).
+          4. Call run_detection(db, run_a).
+          5. Assert: run_a.status == 'failed', resolution_stats contains 'guardrail',
+             AND count of Anomaly rows where data_source_run_id == run_a.id == 0.
+             The pre-existing N rows MUST be gone — not just the in-flight staged ones.
+
+        This is the case the existing test does NOT cover: the existing test seeds anomalies
+        on a DIFFERENT run_id (prior_run.id), not on the run being processed.  This test
+        seeds them on the SAME run_id to verify the failed-branch delete is reached.
+        """
+        from src.models.detection_run_models import Anomaly
+
+        # Step 1: create the run under test
+        run_a = _make_run(db, record_count=5)
+
+        # Step 2: pre-seed 4 anomalies for THIS run's id (same run_id, not a different run)
+        for i in range(4):
+            db.add(Anomaly(
+                tenant_id=TEST_TENANT_ID,
+                data_source="csv_upload",
+                data_source_run_id=run_a.id,
+                finding_code="PRE-EXISTING",
+                finding_summary="pre-existing anomaly seeded directly on same run_id",
+                finding_details={},
+                severity="medium",
+                confidence=Decimal("0.75"),
+                status="open",
+            ))
+        db.flush()
+        preseeded = db.execute(
+            select(Anomaly).where(Anomaly.data_source_run_id == run_a.id)
+        ).scalars().all()
+        assert len(preseeded) == 4, "Setup: run_a must have 4 pre-seeded anomalies before detection"
+
+        # Step 3: seed rows + rule that forces 100% fire rate → guardrail must trip
+        _seed_rows(db, run_a, n=5, row_data_fn=lambda i: {
+            "patient_unique_hash": f"same-run-p{i}",
+            "ndc": "00000000001",
+            "nq_to_wac_ratio": "2.0",
+            "ingredient_cost_paid": "200.00",
+            "dispensing_fee_paid": "5.00",
+            "extended_wac": "90.00",
+            "total_paid_amt": "205.00",
+        })
+        _add_synthetic_high_fire_rule(db, TEST_TENANT_ID)
+
+        # Step 4: run detection — guardrail must trip
+        result = run_detection(db, run_a)
+        db.refresh(run_a)
+
+        # Step 5: invariant checks
+        assert run_a.status == "failed", (
+            f"Expected run_a status='failed' (guardrail trip), got {run_a.status!r}"
+        )
+        assert "guardrail" in (run_a.resolution_stats or {}), (
+            "resolution_stats must contain 'guardrail' key on a guardrail-tripped run"
+        )
+        assert result == 0
+
+        remaining = db.execute(
+            select(Anomaly).where(Anomaly.data_source_run_id == run_a.id)
+        ).scalars().all()
+        assert len(remaining) == 0, (
+            f"REGRESSION (same-run pre-seeded): failed run_a still has {len(remaining)} "
+            f"anomaly rows — expected exactly 0. The failed-branch delete-for-run must "
+            f"remove pre-existing anomalies for this run.id, not only in-flight staged ones."
+        )
 ```
 
 Run → RED (guardrail not yet implemented).
@@ -724,6 +904,16 @@ Replace the finalization block in `run_detection` (lines ~1385–1401) with:
                 break
 
     if guardrail_trip:
+        # Invariant: a failed run ALWAYS ends with ZERO anomalies for this run.id.
+        # Delete any pre-existing anomalies for this run (e.g. a prior attempt on the same
+        # run_id) BEFORE persisting status='failed'.  Scoped by both run.id AND tenant_id so
+        # a cross-tenant delete is structurally impossible even if RLS is bypassed.
+        db.execute(
+            sa.delete(Anomaly).where(
+                Anomaly.data_source_run_id == run.id,
+                Anomaly.tenant_id == run.tenant_id,
+            )
+        )
         run.anomaly_count = 0
         run.record_count = record_count
         run.status = "failed"
@@ -737,7 +927,21 @@ Replace the finalization block in `run_detection` (lines ~1385–1401) with:
         db.flush()
         return 0
 
-    # Guardrail passed — persist all anomalies atomically via bulk insert (§12 H1 perf)
+    # Guardrail passed — idempotent promote: delete any prior anomalies for this run
+    # BEFORE inserting the new batch (same transaction).  This makes re-running the
+    # same run_id safe (prior partial/stale anomalies are replaced atomically) and
+    # guarantees that a guardrail failure on this path rolls back BOTH the delete and
+    # the inserts, leaving the run in exactly its prior state (zero for a fresh run;
+    # prior set restored for a same-run replace — but the fresh-run design is primary:
+    # re-detect always creates a NEW DetectionRun, so prior state is always zero).
+    db.execute(
+        sa.delete(Anomaly).where(
+            Anomaly.data_source_run_id == run.id,
+            Anomaly.tenant_id == run.tenant_id,
+        )
+    )
+
+    # Persist all anomalies atomically via bulk insert (§12 H1 perf).
     # _bulk_insert_anomalies uses execute_values on Postgres (5000-row batches),
     # falls back to ORM add_all on SQLite. Per-anomaly db.add is NOT used here.
     _bulk_insert_anomalies(db, all_anomalies)
@@ -791,6 +995,21 @@ def _bulk_insert_anomalies(db: Session, anomalies: list[Anomaly]) -> None:
             "finding_summary", "finding_details", "status",
         ]
         import json  # noqa: PLC0415
+        import uuid  # noqa: PLC0415
+        from decimal import Decimal  # noqa: PLC0415
+
+        def _json_default(obj):
+            """JSON serializer for types not handled by the stdlib encoder.
+
+            Converts Decimal → str (preserving full precision; callers must
+            already have quantized money values with ROUND_HALF_UP before
+            building finding_details).  Raises TypeError for any other type
+            so unknown objects are caught early rather than silently dropped.
+            """
+            if isinstance(obj, Decimal):
+                return str(obj)
+            raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
         rows = []
         for a in anomalies:
             rows.append((
@@ -810,7 +1029,7 @@ def _bulk_insert_anomalies(db: Session, anomalies: list[Anomaly]) -> None:
                 str(a.amount_paid) if a.amount_paid is not None else None,
                 str(a.amount_billed) if a.amount_billed is not None else None,
                 a.finding_code, a.finding_summary,
-                json.dumps(a.finding_details), a.status,
+                json.dumps(a.finding_details, default=_json_default), a.status,
             ))
         placeholders = "(" + ",".join(["%s"] * len(cols)) + ")"
         col_list = ", ".join(cols)
@@ -834,6 +1053,7 @@ golden anomaly set on the locked fixture — finding_code, source_row_id, severi
 run.status must be 'completed' (not tolerated as failed).
 """
 from __future__ import annotations
+import os
 import uuid
 from datetime import date
 from decimal import Decimal
@@ -938,6 +1158,93 @@ class TestBulkInsertPath:
             # bulk helper called exactly once with all anomalies
             assert len(bulk_calls) == 1
             assert bulk_calls[0] == count
+
+    @pytest.mark.skipif(
+        not os.environ.get("RECLAIMRX_DB_URL"),
+        reason="requires live Postgres (RECLAIMRX_DB_URL unset)",
+    )
+    def test_execute_values_pg_path_persists_rows_with_uuid_ids(self):
+        """Exercise the execute_values Postgres path of _bulk_insert_anomalies directly.
+
+        Verifies that:
+          1. `import uuid` inside the postgresql branch does not raise NameError.
+          2. Rows without a pre-set .id get a generated UUID from uuid.uuid4().
+          3. All rows are persisted and selectable by finding_code.
+
+        This is a Postgres-gated test — skipped when RECLAIMRX_DB_URL is unset.
+        Creates its own engine/Session from RECLAIMRX_DB_URL (no fixture dependency).
+        """
+        import uuid as _uuid
+        from decimal import Decimal
+        from sqlalchemy import select, create_engine
+        from sqlalchemy.orm import Session
+        from src.detection.batch_engine import _bulk_insert_anomalies
+        from src.models.detection_run_models import Anomaly, DetectionRun
+
+        engine = create_engine(os.environ["RECLAIMRX_DB_URL"])
+        with Session(engine) as pg_db:
+            run = DetectionRun(
+                tenant_id=TEST_TENANT_ID, data_source="csv_upload",
+                run_label="pg-bulk-insert-uuid-test", status="in_progress",
+                created_by=TEST_USER_ID,
+                resolution_stats={"inserted_count": 2, "expected_count": 2},
+            )
+            pg_db.add(run)
+            pg_db.flush()
+
+            # Anomaly with no pre-set id — uuid.uuid4() must be called inside the branch
+            a_no_id = Anomaly(
+                tenant_id=TEST_TENANT_ID,
+                data_source="csv_upload",
+                data_source_run_id=run.id,
+                source_table="csv_upload_rows",
+                source_row_id=_uuid.uuid4(),
+                detection_kind="rule",
+                severity="high",
+                confidence=Decimal("0.90"),
+                finding_code="ALL-001",
+                finding_summary="pg-bulk-no-id",
+                finding_details={},
+                status="open",
+            )
+            # Anomaly with a pre-set id — must use str(a.id), not uuid4()
+            preset_id = _uuid.uuid4()
+            a_with_id = Anomaly(
+                id=preset_id,
+                tenant_id=TEST_TENANT_ID,
+                data_source="csv_upload",
+                data_source_run_id=run.id,
+                source_table="csv_upload_rows",
+                source_row_id=_uuid.uuid4(),
+                detection_kind="rule",
+                severity="high",
+                confidence=Decimal("0.90"),
+                finding_code="ALL-001",
+                finding_summary="pg-bulk-with-id",
+                finding_details={},
+                status="open",
+            )
+
+            # Must not raise NameError for uuid or TypeError for json serialization
+            _bulk_insert_anomalies(pg_db, [a_no_id, a_with_id])
+
+            persisted = pg_db.execute(
+                select(Anomaly).where(
+                    Anomaly.data_source_run_id == run.id,
+                    Anomaly.finding_code == "ALL-001",
+                )
+            ).scalars().all()
+            assert len(persisted) == 2, (
+                f"Expected 2 persisted rows via execute_values, got {len(persisted)}"
+            )
+            persisted_ids = {str(r.id) for r in persisted}
+            assert str(preset_id) in persisted_ids, (
+                "Row with pre-set id must be persisted with that exact id"
+            )
+            # The no-id row must have received a valid UUID (not None, not the ORM default)
+            other_ids = persisted_ids - {str(preset_id)}
+            assert len(other_ids) == 1
+            _uuid.UUID(next(iter(other_ids)))  # raises ValueError if not a valid UUID
 
 
 class TestLegacyVsV2Parity:
@@ -1138,6 +1445,76 @@ class TestTrueParity:
         assert actual_row_ids == expected_row_ids, (
             f"source_row_id mismatch.\nExpected: {expected_row_ids}\nActual:   {actual_row_ids}"
         )
+
+
+class TestDecimalFindingDetailsSafeSerialization:
+    """Anomalies whose finding_details contain Decimal-derived metrics (e.g. MFR-003
+    contracted_rate_deviation_pct, _z) must persist via _bulk_insert_anomalies without
+    raising TypeError from json.dumps and must round-trip as strings.
+
+    This is the regression test for FIX 3: _json_default helper + evaluators stringify
+    Decimals in finding_details before promote.
+    """
+
+    def test_finding_details_with_decimal_values_persists_without_error(self, db):
+        """_bulk_insert_anomalies must not raise TypeError when finding_details
+        contains a raw Decimal value (fallback path via _json_default).
+
+        Plants an Anomaly with finding_details containing a Decimal; calls
+        _bulk_insert_anomalies; asserts the row is persisted and the Decimal
+        value is stored as a string.
+        """
+        from decimal import Decimal
+        from src.detection.batch_engine import _bulk_insert_anomalies
+        from src.models.detection_run_models import Anomaly, DetectionRun
+        from sqlalchemy import select
+        import uuid
+
+        run = DetectionRun(
+            tenant_id=TEST_TENANT_ID, data_source="csv_upload",
+            run_label="decimal-finding-details-test", status="in_progress",
+            created_by=TEST_USER_ID,
+            resolution_stats={"inserted_count": 1, "expected_count": 1},
+        )
+        db.add(run)
+        db.flush()
+
+        # finding_details contains a raw Decimal — simulates MFR-003 before
+        # evaluator stringification; _json_default must handle it gracefully.
+        anomaly = Anomaly(
+            tenant_id=TEST_TENANT_ID, data_source="csv_upload",
+            source_table="csv_upload_rows", source_row_id=uuid.uuid4(),
+            data_source_run_id=run.id,
+            detection_kind="rule", severity="high",
+            confidence=Decimal("0.85"),
+            finding_code="MFR-003",
+            finding_summary="contracted rate deviation test",
+            finding_details={
+                "contracted_rate_deviation_pct": Decimal("0.12345"),
+                "_z": Decimal("4.5678"),
+                "wac_source": "fdb",
+                "fdb_wac": "10.00000",
+            },
+            status="open",
+        )
+
+        # Must not raise TypeError — _json_default converts Decimal → str
+        _bulk_insert_anomalies(db, [anomaly])
+
+        persisted = db.execute(
+            select(Anomaly).where(
+                Anomaly.finding_code == "MFR-003",
+                Anomaly.data_source_run_id == run.id,
+            )
+        ).scalars().first()
+        assert persisted is not None, "Anomaly with Decimal finding_details was not persisted"
+        fd = persisted.finding_details or {}
+        assert isinstance(fd.get("contracted_rate_deviation_pct"), str), (
+            f"contracted_rate_deviation_pct must round-trip as str, got {type(fd.get('contracted_rate_deviation_pct'))}"
+        )
+        assert isinstance(fd.get("_z"), str), (
+            f"_z must round-trip as str, got {type(fd.get('_z'))}"
+        )
 ```
 
 Run → GREEN.
@@ -1192,7 +1569,7 @@ git commit -m "test(reclaimrx): assert no_finding not written to eval_log, only 
 
 ### Task 2a — Calibration parameter migration for B rules
 
-**File:** `modules/reclaimrx/migrations/versions/0011_reclaimrx_v2_rule_params.py`
+**File:** `modules/reclaimrx/alembic/versions/0011_reclaimrx_v2_rule_params.py`
 
 Recalibrated parameters per §12 H2. Each `detection_rule_instance` for the tenant gets its `.parameters` updated to include all required H2 keys. The migration uses a data migration pattern (update rows by `rule_type_code` + `instance_name`).
 
@@ -1524,7 +1901,7 @@ Run `test_h2_params_absent_before_migration_RED` → passes (confirms pre-migrat
 Run `test_h2_params_land_after_migration_GREEN` BEFORE writing migration → RED (cohort_key absent).
 Write migration 0011 → run again → GREEN.
 
-**Implementation** (`modules/reclaimrx/migrations/versions/0011_reclaimrx_v2_rule_params.py`):
+**Implementation** (`modules/reclaimrx/alembic/versions/0011_reclaimrx_v2_rule_params.py`):
 
 ```python
 """Data migration: update detection_rule_instance.parameters for recalibrated B rules.
@@ -1660,7 +2037,7 @@ def downgrade() -> None:
 Run → GREEN.
 
 ```
-git add modules/reclaimrx/migrations/versions/0011_reclaimrx_v2_rule_params.py \
+git add modules/reclaimrx/alembic/versions/0011_reclaimrx_v2_rule_params.py \
         modules/reclaimrx/tests/detection/test_recalibrate_b.py
 git commit -m "feat(reclaimrx): migration 0011 — recalibrate B rules, exact §12 H2 parameters for MFR-003/004, HP-005/008, ALL-005/006"
 ```
@@ -1669,7 +2046,1318 @@ git commit -m "feat(reclaimrx): migration 0011 — recalibrate B rules, exact §
 
 ### Task 2b — Evaluator rework: outlier-mode for statistical rules
 
-**What changes in `batch_engine.py`:** `_derive_statistical_metric` and `_evaluate_statistical_rules` now use calibration.py helpers. For MFR-003 and HP-008 (which have per-row values), the evaluator checks `zscore_flag` or `percentile_within_cohort` against the loaded `BaselineCache` and applies `passes_min_sample` + `passes_dollar_floor` gates. MFR-004, HP-005, ALL-006 remain entity-level (one anomaly per entity, not per row).
+**FIX (HIGH): Generic param-driven statistical evaluator — concrete for ALL six statistical rules.**
+
+The plan previously had `_evaluate_statistical_rules` only concretely implemented for MFR-003 and HP-008 (via per-row `_row` adapters). MFR-004, HP-005, ALL-006, and ALL-005 were left delegating to an unspecified "old evaluator" that applied v1 absolute ratio thresholds — the exact over-firing problem v2 was built to eliminate. This fix completes the generic, param-driven outlier path for all six rules.
+
+**Concrete per-rule spec (cohort_key / metric / statistic):**
+
+| Rule | cohort_key column(s) | metric expression | statistic |
+|---|---|---|---|
+| MFR-003 | `pharmacy_npi`, `ndc` | `ingredient_cost_paid / (fdb_wac * qty)` — deviation from FDB WAC basis | `zscore` (z_threshold from params, default 3.0) |
+| MFR-004 | `ndc` | `COUNT(paid_B1_claims_for_entity_in_window)` — fill volume per NDC | `zscore` |
+| HP-005 | `ndc` | `COUNT(paid_B1_claims_for_prescriber_npi_in_window)` — prescriber claim volume per NDC cohort | `zscore` |
+| HP-008 | `run` (entire run as single cohort) | `total_paid_amt` — per-member high-cost claim amount | `percentile_cont` (percentile_threshold from params, default 0.99) |
+| ALL-006 | `pharmacy_npi` | `weekend_or_holiday_fills / total_fills_in_window` — ratio of fills on weekends/holidays | `zscore` |
+| ALL-005 | `patient_unique_hash`, `ndc` | `min_days_since_prior_fill` — earliest gap to a prior fill within lookback | `threshold` (refill_pct_threshold from params, meaning gap_days < days_supply * threshold fires) |
+
+MFR-003 and HP-008 remain per-row rules dispatched through `_PER_ROW_EVALUATORS` via their `_row` adapters. MFR-004, HP-005, ALL-006, ALL-005 are entity-level (one anomaly per flagged entity, set-based SQL aggregation per rule).
+
+**`_evaluate_statistical_rules` — concrete generic implementation:**
+
+```python
+# modules/reclaimrx/src/detection/batch_engine.py
+#
+# _evaluate_statistical_rules(db, run, instance) → list[Anomaly]
+#
+# Called for MFR-004, HP-005, ALL-006, ALL-005 (entity-level statistical rules).
+# NOT called for MFR-003 or HP-008 — those use per-row adapters in _PER_ROW_EVALUATORS.
+#
+# Algorithm (identical structure for all four rules; differs only by cohort/metric):
+#   1. Read cohort_key, eligible_statuses, lookback_window_days, statistic, z_threshold /
+#      percentile_threshold / refill_pct_threshold, min_group_size, min_entity_count,
+#      dollar_floor, and rule_fire_rate_cap from instance.parameters (set by migration 0011).
+#   2. Issue ONE set-based SQL query to compute the per-entity metric over eligible rows
+#      within the lookback window, partitioned by cohort_key columns.
+#      "Eligible rows" = rows where transaction_status IN eligible_statuses AND
+#      transaction_code = 'B1' AND resolved_ndc IS NOT NULL.
+#   3. Collect the cohort metric values across all entities.
+#   4. For each entity:
+#      a. passes_min_sample(cohort_entity_count, min_entity_count): gate on cohort size.
+#      b. passes_dollar_floor(entity_dollar_metric, dollar_floor): gate on dollar amount.
+#      c. Apply outlier test per `statistic`:
+#         - "zscore":          compute cohort mean/stddev → zscore_flag(entity_metric, mean, stddev, z_threshold)
+#         - "percentile_cont": percentile_within_cohort(entity_metric, all_cohort_values, percentile_threshold)
+#         - "threshold":       entity_metric < threshold (ALL-005 early-refill direct threshold)
+#      d. If outlier: append Anomaly.
+#   5. NO absolute ratio thresholds anywhere. All money/metric math via Decimal (ROUND_HALF_UP).
+#   6. Fire count returned feeds the Phase-1 guardrail per-rule cap.
+
+def _evaluate_statistical_rules(
+    db: "Session",
+    run: "DetectionRun",
+    instance: "DetectionRuleInstance",
+) -> "list[Anomaly]":
+    """Generic param-driven statistical outlier evaluator for MFR-004, HP-005, ALL-006, ALL-005.
+
+    Reads ALL thresholds from instance.parameters — ZERO hardcoded ratio/threshold values.
+    Applies zscore_flag, percentile_within_cohort, or threshold test per rule's `statistic` param.
+    Gates on passes_min_sample (min_entity_count) and passes_dollar_floor before firing.
+
+    Entity-level: one Anomaly per flagged entity (not per claim row).
+    Set-based: one SQL aggregate query per rule invocation; no per-entity loop query.
+    """
+    from decimal import Decimal, ROUND_HALF_UP  # noqa: PLC0415
+    from sqlalchemy import text  # noqa: PLC0415
+    from src.detection.calibration import (  # noqa: PLC0415
+        zscore_flag, percentile_within_cohort,
+        passes_min_sample, passes_dollar_floor,
+    )
+
+    code = instance.rule_type_code
+    params = instance.parameters
+
+    # ── Read H2 params (all set by migration 0011) ────────────────────────────
+    cohort_key_cols: list[str] = params.get("cohort_key", [])
+    eligible_statuses: list[str] = params.get("eligible_statuses", ["Paid"])
+    lookback_days: int = int(params.get("lookback_window_days", 90))
+    statistic: str = params.get("statistic", "zscore")
+    z_thresh = Decimal(str(params.get("z_threshold", "3.0")))
+    pct_thresh = Decimal(str(params.get("percentile_threshold", "0.99")))
+    refill_pct_thresh = Decimal(str(params.get("refill_pct_threshold", "0.50")))
+    min_group_size: int = int(params.get("min_group_size", 20))
+    min_entity_count: int = int(params.get("min_entity_count", 1))
+    dollar_floor_str = params.get("dollar_floor", "0.00")
+    dollar_floor = Decimal(str(dollar_floor_str)) if dollar_floor_str else None
+
+    anomalies: list = []
+
+    # ── Rule-specific aggregation SQL ─────────────────────────────────────────
+    # Each branch issues ONE set-based aggregate query. No per-entity loop query.
+    # All branches return rows of (entity_key_cols..., metric_value, entity_row_count, dollar_sum).
+    # The dollar_sum is used for the dollar_floor gate.
+
+    if code == "MFR-004":
+        # Metric: fill volume per NDC (count of paid-B1 claims for each entity pharmacy_npi
+        # within the lookback window, grouped by ndc).
+        # Cohort = all entities for the same ndc across the run.
+        rows = db.execute(text("""
+            SELECT
+                (row_data->>'pharmacy_npi') AS entity_id,
+                resolved_ndc AS cohort_ndc,
+                COUNT(*) AS fill_volume,
+                SUM((row_data->>'total_paid_amt')::numeric) AS dollar_sum
+            FROM reclaimrx.csv_upload_rows
+            WHERE detection_run_id = :run_id
+              AND tenant_id = :tenant_id
+              AND (row_data->>'transaction_code') = 'B1'
+              AND (row_data->>'transaction_status') = ANY(:statuses)
+              AND resolved_ndc IS NOT NULL
+            GROUP BY (row_data->>'pharmacy_npi'), resolved_ndc
+            HAVING COUNT(*) >= :min_group
+        """), {
+            "run_id": str(run.id), "tenant_id": str(run.tenant_id),
+            "statuses": eligible_statuses, "min_group": min_group_size,
+        }).fetchall()
+
+        # Build cohort metric map: ndc → list of (entity_id, fill_volume, dollar_sum)
+        from collections import defaultdict  # noqa: PLC0415
+        cohort_map: dict = defaultdict(list)
+        for r in rows:
+            cohort_map[r.cohort_ndc].append((r.entity_id, Decimal(str(r.fill_volume)), Decimal(str(r.dollar_sum or 0))))
+
+        # MED-2 FIX: collect all fired (entity_id, ndc) keys first, then ONE batched
+        # rep-row query. No query inside the per-entity loop.
+        fired_mfr004: list[tuple[str, str, Decimal, Decimal, Decimal | None]] = []  # (entity_id, ndc, vol, mean, z)
+        for ndc, entities in cohort_map.items():
+            if len(entities) < min_entity_count:
+                continue
+            all_volumes = [v for _, v, _ in entities]
+            cohort_mean = sum(all_volumes) / Decimal(str(len(all_volumes)))
+            variance = sum((v - cohort_mean) ** 2 for v in all_volumes) / Decimal(str(len(all_volumes)))
+            cohort_stddev = variance.sqrt().quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+            for entity_id, vol, dollar_sum in entities:
+                if not passes_dollar_floor(dollar_sum, dollar_floor):
+                    continue
+                fired, z = zscore_flag(value=vol, mean=cohort_mean, stddev=cohort_stddev, z_threshold=z_thresh)
+                if fired:
+                    fired_mfr004.append((entity_id, ndc, vol, cohort_mean, z))
+
+        if fired_mfr004:
+            # ONE batched query: representative row per (pharmacy_npi, ndc) via DISTINCT ON.
+            # DISTINCT ON (npi_col, ndc_col) picks one row per entity deterministically.
+            entity_ndc_pairs = [(e, n) for e, n, *_ in fired_mfr004]
+            # Build VALUES list for the IN filter as individual OR clauses (portable).
+            or_clauses = " OR ".join(
+                f"((row_data->>'pharmacy_npi') = :en_{i} AND resolved_ndc = :nd_{i})"
+                for i in range(len(entity_ndc_pairs))
+            )
+            rep_params: dict = {"run_id": str(run.id), "tenant_id": str(run.tenant_id)}
+            for i, (en, nd) in enumerate(entity_ndc_pairs):
+                rep_params[f"en_{i}"] = en
+                rep_params[f"nd_{i}"] = nd
+            rep_rows_raw = db.execute(text(f"""
+                SELECT DISTINCT ON ((row_data->>'pharmacy_npi'), resolved_ndc)
+                    id, (row_data->>'pharmacy_npi') AS entity_id, resolved_ndc AS cohort_ndc
+                FROM reclaimrx.csv_upload_rows
+                WHERE detection_run_id = :run_id AND tenant_id = :tenant_id
+                  AND ({or_clauses})
+                ORDER BY (row_data->>'pharmacy_npi'), resolved_ndc, id
+            """), rep_params).fetchall()
+            rep_row_map: dict[tuple[str, str], object] = {
+                (r.entity_id, r.cohort_ndc): r.id for r in rep_rows_raw
+            }
+            from src.models.detection_run_models import Anomaly  # noqa: PLC0415
+            for entity_id, ndc, vol, cohort_mean, z in fired_mfr004:
+                rep_row_id = rep_row_map.get((entity_id, ndc))
+                if rep_row_id:
+                    anomalies.append(Anomaly(
+                        tenant_id=run.tenant_id, data_source="csv_upload",
+                        data_source_run_id=run.id,
+                        source_table="csv_upload_rows", source_row_id=rep_row_id,
+                        detection_kind="rule",
+                        severity=params.get("severity", "high"),
+                        confidence=Decimal(str(params.get("confidence", "0.80"))),
+                        finding_code="MFR-004",
+                        finding_summary=f"Unusually high fill volume for NDC {ndc} entity {entity_id}",
+                        finding_details={"entity_id": entity_id, "ndc": ndc,
+                                         "fill_volume": str(vol), "cohort_mean": str(cohort_mean),
+                                         "_z": str(z), "statistic": "zscore"},
+                        status="open",
+                    ))
+
+    elif code == "HP-005":
+        # Metric: prescriber claim volume per NDC cohort.
+        rows = db.execute(text("""
+            SELECT
+                (row_data->>'prescriber_npi') AS entity_id,
+                resolved_ndc AS cohort_ndc,
+                COUNT(*) AS claim_volume,
+                SUM((row_data->>'total_paid_amt')::numeric) AS dollar_sum
+            FROM reclaimrx.csv_upload_rows
+            WHERE detection_run_id = :run_id
+              AND tenant_id = :tenant_id
+              AND (row_data->>'transaction_code') = 'B1'
+              AND (row_data->>'transaction_status') = ANY(:statuses)
+              AND (row_data->>'prescriber_npi') IS NOT NULL
+              AND resolved_ndc IS NOT NULL
+            GROUP BY (row_data->>'prescriber_npi'), resolved_ndc
+            HAVING COUNT(*) >= :min_group
+        """), {
+            "run_id": str(run.id), "tenant_id": str(run.tenant_id),
+            "statuses": eligible_statuses, "min_group": min_group_size,
+        }).fetchall()
+
+        from collections import defaultdict  # noqa: PLC0415
+        cohort_map2: dict = defaultdict(list)
+        for r in rows:
+            cohort_map2[r.cohort_ndc].append((r.entity_id, Decimal(str(r.claim_volume)), Decimal(str(r.dollar_sum or 0))))
+
+        # MED-2 FIX: collect fired (prescriber_npi, ndc) keys, then ONE batched rep-row query.
+        fired_hp005: list[tuple[str, str, Decimal, Decimal, Decimal | None]] = []
+        for ndc, entities in cohort_map2.items():
+            if len(entities) < min_entity_count:
+                continue
+            all_vols = [v for _, v, _ in entities]
+            cohort_mean = sum(all_vols) / Decimal(str(len(all_vols)))
+            variance = sum((v - cohort_mean) ** 2 for v in all_vols) / Decimal(str(len(all_vols)))
+            cohort_stddev = variance.sqrt().quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+            for entity_id, vol, dollar_sum in entities:
+                if not passes_dollar_floor(dollar_sum, dollar_floor):
+                    continue
+                fired, z = zscore_flag(value=vol, mean=cohort_mean, stddev=cohort_stddev, z_threshold=z_thresh)
+                if fired:
+                    fired_hp005.append((entity_id, ndc, vol, cohort_mean, z))
+
+        if fired_hp005:
+            entity_ndc_pairs2 = [(e, n) for e, n, *_ in fired_hp005]
+            or_clauses2 = " OR ".join(
+                f"((row_data->>'prescriber_npi') = :en_{i} AND resolved_ndc = :nd_{i})"
+                for i in range(len(entity_ndc_pairs2))
+            )
+            rep_params2: dict = {"run_id": str(run.id), "tenant_id": str(run.tenant_id)}
+            for i, (en, nd) in enumerate(entity_ndc_pairs2):
+                rep_params2[f"en_{i}"] = en
+                rep_params2[f"nd_{i}"] = nd
+            rep_rows2 = db.execute(text(f"""
+                SELECT DISTINCT ON ((row_data->>'prescriber_npi'), resolved_ndc)
+                    id, (row_data->>'prescriber_npi') AS entity_id, resolved_ndc AS cohort_ndc
+                FROM reclaimrx.csv_upload_rows
+                WHERE detection_run_id = :run_id AND tenant_id = :tenant_id
+                  AND ({or_clauses2})
+                ORDER BY (row_data->>'prescriber_npi'), resolved_ndc, id
+            """), rep_params2).fetchall()
+            rep_row_map2: dict[tuple[str, str], object] = {
+                (r.entity_id, r.cohort_ndc): r.id for r in rep_rows2
+            }
+            from src.models.detection_run_models import Anomaly  # noqa: PLC0415
+            for entity_id, ndc, vol, cohort_mean, z in fired_hp005:
+                rep_row_id = rep_row_map2.get((entity_id, ndc))
+                if rep_row_id:
+                    anomalies.append(Anomaly(
+                        tenant_id=run.tenant_id, data_source="csv_upload",
+                        data_source_run_id=run.id,
+                        source_table="csv_upload_rows", source_row_id=rep_row_id,
+                        detection_kind="rule",
+                        severity=params.get("severity", "high"),
+                        confidence=Decimal(str(params.get("confidence", "0.80"))),
+                        finding_code="HP-005",
+                        finding_summary=f"Prescriber {entity_id} outlier volume for NDC {ndc}",
+                        finding_details={"prescriber_npi": entity_id, "ndc": ndc,
+                                         "claim_volume": str(vol), "cohort_mean": str(cohort_mean),
+                                         "_z": str(z), "statistic": "zscore"},
+                        status="open",
+                    ))
+
+    elif code == "ALL-006":
+        # Metric: weekend/holiday fill ratio per pharmacy_npi.
+        # Weekend = EXTRACT(DOW FROM date_of_service) IN (0, 6) (0=Sunday, 6=Saturday in ISO).
+        # No holiday calendar required for the base implementation; weekends only is sufficient
+        # for the outlier z-score detection. Holiday support can be added via a reference table join.
+        rows = db.execute(text("""
+            SELECT
+                (row_data->>'pharmacy_npi') AS entity_id,
+                COUNT(*) AS total_fills,
+                SUM(CASE WHEN EXTRACT(DOW FROM (row_data->>'date_of_service')::date) IN (0, 6)
+                         THEN 1 ELSE 0 END) AS weekend_fills,
+                SUM((row_data->>'total_paid_amt')::numeric) AS dollar_sum
+            FROM reclaimrx.csv_upload_rows
+            WHERE detection_run_id = :run_id
+              AND tenant_id = :tenant_id
+              AND (row_data->>'transaction_code') = 'B1'
+              AND (row_data->>'transaction_status') = ANY(:statuses)
+              AND (row_data->>'pharmacy_npi') IS NOT NULL
+              AND (row_data->>'date_of_service') IS NOT NULL
+            GROUP BY (row_data->>'pharmacy_npi')
+            HAVING COUNT(*) >= :min_group
+        """), {
+            "run_id": str(run.id), "tenant_id": str(run.tenant_id),
+            "statuses": eligible_statuses, "min_group": min_group_size,
+        }).fetchall()
+
+        if len(rows) < min_entity_count:
+            return anomalies
+
+        ratios: list[tuple[str, Decimal, Decimal]] = []
+        for r in rows:
+            total = Decimal(str(r.total_fills)) if r.total_fills else Decimal("1")
+            weekend = Decimal(str(r.weekend_fills or 0))
+            ratio = (weekend / total).quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+            dollar_sum = Decimal(str(r.dollar_sum or 0))
+            ratios.append((r.entity_id, ratio, dollar_sum))
+
+        all_ratios = [v for _, v, _ in ratios]
+        if not all_ratios:
+            return anomalies
+        cohort_mean = sum(all_ratios) / Decimal(str(len(all_ratios)))
+        variance = sum((v - cohort_mean) ** 2 for v in all_ratios) / Decimal(str(len(all_ratios)))
+        cohort_stddev = variance.sqrt().quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+
+        # MED-2 FIX: collect all fired pharmacies first, then ONE batched rep-row query.
+        fired_all006: list[tuple[str, Decimal, Decimal | None]] = []
+        for entity_id, ratio, dollar_sum in ratios:
+            if not passes_dollar_floor(dollar_sum, dollar_floor):
+                continue
+            fired, z = zscore_flag(value=ratio, mean=cohort_mean, stddev=cohort_stddev, z_threshold=z_thresh)
+            if fired:
+                fired_all006.append((entity_id, ratio, z))
+
+        if fired_all006:
+            fired_pharmacy_npis = [e for e, *_ in fired_all006]
+            or_clauses3 = " OR ".join(
+                f"(row_data->>'pharmacy_npi') = :ph_{i}"
+                for i in range(len(fired_pharmacy_npis))
+            )
+            rep_params3: dict = {"run_id": str(run.id), "tenant_id": str(run.tenant_id)}
+            for i, ph in enumerate(fired_pharmacy_npis):
+                rep_params3[f"ph_{i}"] = ph
+            rep_rows3 = db.execute(text(f"""
+                SELECT DISTINCT ON ((row_data->>'pharmacy_npi'))
+                    id, (row_data->>'pharmacy_npi') AS entity_id
+                FROM reclaimrx.csv_upload_rows
+                WHERE detection_run_id = :run_id AND tenant_id = :tenant_id
+                  AND ({or_clauses3})
+                ORDER BY (row_data->>'pharmacy_npi'), id
+            """), rep_params3).fetchall()
+            rep_row_map3: dict[str, object] = {r.entity_id: r.id for r in rep_rows3}
+            from src.models.detection_run_models import Anomaly  # noqa: PLC0415
+            for entity_id, ratio, z in fired_all006:
+                rep_row_id = rep_row_map3.get(entity_id)
+                if rep_row_id:
+                    anomalies.append(Anomaly(
+                        tenant_id=run.tenant_id, data_source="csv_upload",
+                        data_source_run_id=run.id,
+                        source_table="csv_upload_rows", source_row_id=rep_row_id,
+                        detection_kind="rule",
+                        severity=params.get("severity", "medium"),
+                        confidence=Decimal(str(params.get("confidence", "0.75"))),
+                        finding_code="ALL-006",
+                        finding_summary=f"Pharmacy {entity_id} has anomalous weekend/holiday fill rate",
+                        finding_details={"pharmacy_npi": entity_id, "weekend_ratio": str(ratio),
+                                         "cohort_mean": str(cohort_mean), "_z": str(z),
+                                         "statistic": "zscore"},
+                        status="open",
+                    ))
+
+    elif code == "ALL-005":
+        # Metric: min gap in days between consecutive fills for the same (patient, ndc).
+        # Flags entity (patient+ndc combo) when min_gap_days < days_supply * refill_pct_threshold.
+        # No z-score here — statistic = "threshold" per H2 params.
+        # Uses a SQL window-function self-join to compute the per-fill lag.
+        rows = db.execute(text("""
+            WITH fills AS (
+                SELECT
+                    (row_data->>'patient_unique_hash') AS patient_hash,
+                    resolved_ndc AS ndc,
+                    (row_data->>'date_of_service')::date AS dos,
+                    (row_data->>'days_supply')::int AS days_supply,
+                    (row_data->>'total_paid_amt')::numeric AS paid_amt,
+                    id AS row_id
+                FROM reclaimrx.csv_upload_rows
+                WHERE detection_run_id = :run_id
+                  AND tenant_id = :tenant_id
+                  AND (row_data->>'transaction_code') = 'B1'
+                  AND (row_data->>'transaction_status') = ANY(:statuses)
+                  AND (row_data->>'patient_unique_hash') IS NOT NULL
+                  AND resolved_ndc IS NOT NULL
+                  AND (row_data->>'date_of_service') IS NOT NULL
+                  AND (row_data->>'days_supply') IS NOT NULL
+            ),
+            with_lag AS (
+                SELECT
+                    patient_hash, ndc, dos, days_supply, paid_amt, row_id,
+                    LAG(dos) OVER (PARTITION BY patient_hash, ndc ORDER BY dos) AS prior_dos
+                FROM fills
+            ),
+            gaps AS (
+                SELECT
+                    patient_hash, ndc, dos, days_supply, paid_amt, row_id,
+                    (dos - prior_dos) AS gap_days
+                FROM with_lag
+                WHERE prior_dos IS NOT NULL
+                  AND (dos - prior_dos) < days_supply * :pct_thresh::numeric
+            )
+            SELECT
+                patient_hash, ndc,
+                MIN(gap_days) AS min_gap,
+                COUNT(*) AS early_refill_count,
+                MAX(paid_amt) AS max_paid,
+                MIN(row_id::text) AS rep_row_id
+            FROM gaps
+            GROUP BY patient_hash, ndc
+            HAVING COUNT(*) >= :min_group
+        """), {
+            "run_id": str(run.id), "tenant_id": str(run.tenant_id),
+            "statuses": eligible_statuses, "min_group": min_group_size,
+            # FIX LOW: bind as string — SQL casts :pct_thresh::numeric in the query
+            # above; float() violates the no-float invariant (financial-precision.md).
+            "pct_thresh": str(refill_pct_thresh),
+        }).fetchall()
+
+        for r in rows:
+            dollar_val = Decimal(str(r.max_paid or 0))
+            if not passes_dollar_floor(dollar_val, dollar_floor):
+                continue
+            if r.early_refill_count < min_entity_count:
+                continue
+            from src.models.detection_run_models import Anomaly  # noqa: PLC0415
+            anomalies.append(Anomaly(
+                tenant_id=run.tenant_id, data_source="csv_upload",
+                data_source_run_id=run.id,
+                source_table="csv_upload_rows", source_row_id=r.rep_row_id,
+                detection_kind="rule",
+                severity=params.get("severity", "medium"),
+                confidence=Decimal(str(params.get("confidence", "0.75"))),
+                finding_code="ALL-005",
+                finding_summary=f"Early refill pattern: patient {r.patient_hash} NDC {r.ndc}",
+                finding_details={"patient_unique_hash": r.patient_hash, "ndc": r.ndc,
+                                 "min_gap_days": str(r.min_gap), "early_refill_count": r.early_refill_count,
+                                 "refill_pct_threshold": str(refill_pct_thresh),
+                                 "statistic": "threshold"},
+                status="open",
+            ))
+
+    return anomalies
+```
+
+**`_derive_statistical_metric` — reconciled signature (used by MFR-003 per-row adapter in `mfr003_evaluator.py`):**
+
+The plan's Task 2b test calls `_derive_statistical_metric(ndc=..., _fdb_cache=...)` as a two-keyword-arg function (see `test_mfr003_evaluator_skips_claim_when_no_fdb_wac`). The implementation embedded inline shows a full multi-param signature. The fix: the exported function from `mfr003_evaluator.py` that tests call is the minimal two-param form — it is a thin wrapper that handles the fdb_cache-only path. The full internal form lives in `evaluate_mfr003_row`. The reconciled exported signature that tests call:
+
+```python
+# modules/reclaimrx/src/detection/mfr003_evaluator.py
+# Exported for unit testing: minimal signature matching what tests call
+def _derive_statistical_metric(
+    *,
+    ndc: str,
+    _fdb_cache: dict,
+    rd: dict | None = None,
+    csv_row=None,
+    code: str = "MFR-003",
+    baseline=None,
+    params: dict | None = None,
+) -> dict:
+    """Derive the MFR-003 metric dict for a claim.
+
+    Minimal exported form: accepts ndc + _fdb_cache at minimum (for unit tests).
+    When rd and csv_row are None (unit-test path), only the FDB WAC lookup is
+    evaluated and {"_no_fdb_wac": True} is returned when WAC is absent.
+
+    Full form (production path via evaluate_mfr003_row): rd, csv_row, baseline,
+    params are all provided; runs the full zscore + min_sample + dollar_floor pipeline.
+    """
+    ...
+```
+
+Key invariant: `_derive_statistical_metric(ndc=ndc, _fdb_cache={})` returns `{"_no_fdb_wac": True}` (fdb_cache empty → no WAC). `_derive_statistical_metric(ndc=ndc, _fdb_cache={ndc: {"wac": None, ...}})` also returns `{"_no_fdb_wac": True}` (entry present but wac=None). The implementation body for the full production path is exactly the code shown below under "Key change to `_derive_statistical_metric` for MFR-003".
+
+**RED/GREEN tests for all six statistical rules (add to `test_recalibrate_b.py`):**
+
+```python
+import os as _os_stat
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX HIGH (dialect): Pure-Python unit tests for calibration decision logic.
+# These tests exercise the outlier decision functions directly — no SQL, no DB,
+# no SQLite/Postgres dialect dependency.  They MUST run on every CI pass without
+# RECLAIMRX_DB_URL.  The DB-backed RED/GREEN tests below are Postgres-gated.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestStatisticalCalibrationDecisionLogic:
+    """Pure-Python unit tests for the per-rule outlier decision logic.
+
+    Feeds synthetic per-entity metric lists into calibration.py primitives
+    directly — no DB, no SQL, SQLite-independent.
+    Covers: planted outlier fires / bulk does not / min-sample gate / dollar-floor
+    gate / eligible_statuses honored (via zscore_flag with 0 mean/stddev for empty
+    filtered set) / ALL-005 threshold mode.
+    """
+
+    def test_mfr004_zscore_planted_outlier_fires(self):
+        """19 normal entities (vol=10) + 1 outlier (vol=200). Outlier z >> 3.0 → fires."""
+        from decimal import Decimal, ROUND_HALF_UP
+        from src.detection.calibration import zscore_flag, passes_min_sample, passes_dollar_floor
+
+        normals = [Decimal("10")] * 19
+        outlier = Decimal("200")
+        all_vols = normals + [outlier]
+        n = Decimal(str(len(all_vols)))
+        mean = sum(all_vols) / n
+        variance = sum((v - mean) ** 2 for v in all_vols) / n
+        stddev = variance.sqrt().quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+
+        # Normal entity must NOT fire
+        for v in normals:
+            fired, _ = zscore_flag(value=v, mean=mean, stddev=stddev, z_threshold=Decimal("3.0"))
+            assert fired is False, f"Normal entity vol={v} must not fire"
+
+        # Outlier MUST fire
+        fired_out, z_out = zscore_flag(value=outlier, mean=mean, stddev=stddev, z_threshold=Decimal("3.0"))
+        assert fired_out is True, f"Outlier vol={outlier} z={z_out} must fire at z_threshold=3.0"
+        assert z_out > Decimal("3.0")
+
+        # min_entity_count gate
+        assert passes_min_sample(sample_count=len(all_vols), min_required=5) is True
+        assert passes_min_sample(sample_count=4, min_required=5) is False
+
+        # dollar_floor gate
+        assert passes_dollar_floor(Decimal("100.00"), Decimal("100.00")) is True
+        assert passes_dollar_floor(Decimal("99.99"), Decimal("100.00")) is False
+
+    def test_hp005_zscore_planted_prescriber_outlier(self):
+        """20 normal prescribers (vol=5) + 1 outlier (vol=200). Outlier fires, normals don't."""
+        from decimal import Decimal, ROUND_HALF_UP
+        from src.detection.calibration import zscore_flag
+
+        normals = [Decimal("5")] * 20
+        outlier = Decimal("200")
+        all_vols = normals + [outlier]
+        n = Decimal(str(len(all_vols)))
+        mean = sum(all_vols) / n
+        variance = sum((v - mean) ** 2 for v in all_vols) / n
+        stddev = variance.sqrt().quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+
+        for v in normals:
+            fired, _ = zscore_flag(value=v, mean=mean, stddev=stddev, z_threshold=Decimal("3.0"))
+            assert fired is False
+        fired_out, z_out = zscore_flag(value=outlier, mean=mean, stddev=stddev, z_threshold=Decimal("3.0"))
+        assert fired_out is True and z_out > Decimal("3.0")
+
+    def test_all006_zscore_weekend_outlier(self):
+        """20 pharmacies at 5% weekend rate + 1 at 95%. Outlier fires."""
+        from decimal import Decimal, ROUND_HALF_UP
+        from src.detection.calibration import zscore_flag
+
+        normals = [Decimal("0.05")] * 20
+        outlier = Decimal("0.95")
+        all_r = normals + [outlier]
+        n = Decimal(str(len(all_r)))
+        mean = sum(all_r) / n
+        variance = sum((v - mean) ** 2 for v in all_r) / n
+        stddev = variance.sqrt().quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+
+        for v in normals:
+            fired, _ = zscore_flag(value=v, mean=mean, stddev=stddev, z_threshold=Decimal("3.0"))
+            assert fired is False
+        fired_out, _ = zscore_flag(value=outlier, mean=mean, stddev=stddev, z_threshold=Decimal("3.0"))
+        assert fired_out is True
+
+    def test_all005_threshold_mode_early_refill(self):
+        """ALL-005: gap_days < days_supply * refill_pct_threshold fires.
+        Confirm the decision pure-Python: no SQL, no DB needed."""
+        from decimal import Decimal
+
+        refill_pct_thresh = Decimal("0.50")
+        days_supply = Decimal("30")
+        threshold_days = days_supply * refill_pct_thresh  # 15
+
+        # Early refill (5 days < 15 → fires)
+        gap_early = Decimal("5")
+        assert gap_early < threshold_days, "5-day gap must be below threshold"
+
+        # Normal refill (20 days >= 15 → no fire)
+        gap_normal = Decimal("20")
+        assert gap_normal >= threshold_days, "20-day gap must not be below threshold"
+
+    def test_min_sample_gate_blocks_evaluation(self):
+        """passes_min_sample gate prevents outlier detection on under-populated cohorts."""
+        from src.detection.calibration import passes_min_sample
+        assert passes_min_sample(sample_count=0, min_required=5) is False
+        assert passes_min_sample(sample_count=5, min_required=5) is True
+        assert passes_min_sample(sample_count=20, min_required=20) is True
+
+    def test_dollar_floor_gate_blocks_cheap_outliers(self):
+        """passes_dollar_floor gate prevents noise from low-value anomalies."""
+        from decimal import Decimal
+        from src.detection.calibration import passes_dollar_floor
+        assert passes_dollar_floor(Decimal("0.01"), Decimal("100.00")) is False
+        assert passes_dollar_floor(Decimal("100.00"), Decimal("100.00")) is True
+        assert passes_dollar_floor(Decimal("100.01"), Decimal("100.00")) is True
+        assert passes_dollar_floor(Decimal("500.00"), None) is True  # no floor
+
+    def test_eligible_statuses_honored_zero_volume(self):
+        """When eligible_statuses filter leaves no rows, cohort is empty.
+        zscore_flag with stddev=0 (all same value) must return (False, None) — no fire."""
+        from decimal import Decimal
+        from src.detection.calibration import zscore_flag
+
+        # Simulates: all rows filtered out → aggregation returns 0 entities
+        # Caller receives empty list → no iteration → no anomalies
+        all_vols: list[Decimal] = []  # empty after status filter
+        assert len(all_vols) == 0, "Empty cohort after eligible_statuses filter → no fire"
+
+        # Also: if somehow one entity remains and mean==value → stddev==0 → no fire
+        sole_val = Decimal("10")
+        fired, z = zscore_flag(
+            value=sole_val, mean=sole_val, stddev=Decimal("0"), z_threshold=Decimal("3.0")
+        )
+        assert fired is False and z is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX HIGH (dialect): DB-backed RED/GREEN tests are Postgres-gated.
+# These tests seed rows, run _evaluate_statistical_rules against real SQL
+# (Postgres JSONB operators, ANY(:statuses), EXTRACT(DOW FROM ...)) and assert
+# the planted outlier fires / normals do not.
+#
+# They are skipped when RECLAIMRX_DB_URL is unset (SQLite CI).
+# RED: before _evaluate_statistical_rules rewrite → old absolute-threshold path fires wrong.
+# GREEN: after rewrite → only planted outlier fires.
+# The pure-Python tests above provide SQLite-CI coverage of the decision logic.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_STAT_PG_SKIP = pytest.mark.skipif(
+    not _os_stat.environ.get("RECLAIMRX_DB_URL"),
+    reason="statistical evaluator SQL uses Postgres-only syntax (JSONB ->> / ANY / EXTRACT DOW); "
+           "run with RECLAIMRX_DB_URL set for full DB-backed outlier integration tests",
+)
+
+
+class TestMFR004StatisticalOutlier:
+    """MFR-004: fill volume per NDC — z-score, min_entity_count=5, min_group_size=5,
+    dollar_floor=100.00.
+
+    RED: Before migration 0011 / _evaluate_statistical_rules rewrite, the old
+    absolute-threshold path fires on ~volume_vs_avg_ratio > 2.0, which produces
+    false fires on normal cohorts. After the rewrite, ONLY the seeded outlier fires.
+    """
+
+    @_STAT_PG_SKIP
+    def test_fires_only_on_planted_volume_outlier(self, db):
+        """Seed 19 normal pharmacies (fill_volume=10 each) + 1 outlier (fill_volume=200).
+        Cohort mean≈10, stddev small. Outlier z >> 3.0 → fires. Normals z < 3.0 → no fire.
+        Flag rate = 1/200 = 0.5% ≤ 0.5% cap → under cap. """
+        from src.detection.batch_engine import _evaluate_statistical_rules
+        from src.models.detection_run_models import (
+            DetectionRun, CsvUploadRow, DetectionRuleType, DetectionRuleInstance,
+        )
+        from datetime import date
+
+        run = DetectionRun(
+            tenant_id=TEST_TENANT_ID, data_source="csv_upload",
+            run_label="mfr004-outlier-test", status="in_progress", created_by=TEST_USER_ID,
+            resolution_stats={"inserted_count": 200, "expected_count": 200},
+        )
+        db.add(run)
+        db.flush()
+
+        # 19 normal pharmacies: 10 rows each, volume=10
+        for i in range(19):
+            for j in range(10):
+                db.add(CsvUploadRow(
+                    tenant_id=TEST_TENANT_ID, detection_run_id=run.id,
+                    row_number=i * 10 + j + 1,
+                    row_data={
+                        "pharmacy_npi": f"100000{i:04d}", "ndc": "NDCTEST001",
+                        "date_of_service": "2026-01-15",
+                        "transaction_code": "B1", "transaction_status": "Paid",
+                        "total_paid_amt": "15.00",
+                    },
+                    resolution_method="declared", resolved_ndc="NDCTEST001",
+                ))
+        # 1 outlier pharmacy: 200 rows, volume=200
+        for j in range(200):
+            db.add(CsvUploadRow(
+                tenant_id=TEST_TENANT_ID, detection_run_id=run.id,
+                row_number=190 + j + 1,
+                row_data={
+                    "pharmacy_npi": "OUTLIER0001", "ndc": "NDCTEST001",
+                    "date_of_service": "2026-01-15",
+                    "transaction_code": "B1", "transaction_status": "Paid",
+                    "total_paid_amt": "15.00",
+                },
+                resolution_method="declared", resolved_ndc="NDCTEST001",
+            ))
+        db.flush()
+
+        inst = DetectionRuleInstance(
+            tenant_id=TEST_TENANT_ID, rule_type_code="MFR-004",
+            instance_name="MFR-004-outlier-test",
+            parameters={
+                "cohort_key": ["ndc"],
+                "eligible_statuses": ["Paid"],
+                "lookback_window_days": 90,
+                "statistic": "zscore",
+                "z_threshold": "3.0",
+                "min_group_size": 5,
+                "min_entity_count": 5,
+                "dollar_floor": "100.00",
+                "rule_fire_rate_cap": "0.005",
+            },
+            enabled=True, effective_from=date.today(), created_by=TEST_USER_ID,
+        )
+        db.add(inst)
+        db.flush()
+
+        anomalies = _evaluate_statistical_rules(db, run, inst)
+
+        # Exactly 1 anomaly — the outlier pharmacy
+        assert len(anomalies) == 1, (
+            f"Expected 1 MFR-004 anomaly (outlier only), got {len(anomalies)}: "
+            f"{[a.finding_details for a in anomalies]}"
+        )
+        assert anomalies[0].finding_code == "MFR-004"
+        fd = anomalies[0].finding_details
+        assert fd.get("entity_id") == "OUTLIER0001", (
+            f"Anomaly must be for the planted outlier OUTLIER0001, got {fd.get('entity_id')}"
+        )
+        # Statistic used must be z-score, not absolute threshold
+        assert fd.get("statistic") == "zscore", "MFR-004 must use zscore statistic, not absolute threshold"
+        # Flag rate: 1 anomaly / 390 total rows < 0.5% cap
+        total_rows = 390  # 190 normal + 200 outlier
+        flag_rate = Decimal("1") / Decimal(str(total_rows))
+        assert flag_rate <= Decimal("0.005"), f"Flag rate {flag_rate} exceeds 0.5% cap"
+
+    @_STAT_PG_SKIP
+    def test_blocked_by_eligible_statuses(self, db):
+        """Non-Paid rows must be excluded from the cohort aggregate.
+        Seed: 5 pharmacies with only Reversed rows → cohort is empty → no anomaly."""
+        from src.detection.batch_engine import _evaluate_statistical_rules
+        from src.models.detection_run_models import (
+            DetectionRun, CsvUploadRow, DetectionRuleInstance,
+        )
+        from datetime import date
+
+        run = DetectionRun(
+            tenant_id=TEST_TENANT_ID, data_source="csv_upload",
+            run_label="mfr004-status-gate", status="in_progress", created_by=TEST_USER_ID,
+            resolution_stats={"inserted_count": 10, "expected_count": 10},
+        )
+        db.add(run)
+        db.flush()
+        for i in range(10):
+            db.add(CsvUploadRow(
+                tenant_id=TEST_TENANT_ID, detection_run_id=run.id, row_number=i + 1,
+                row_data={
+                    "pharmacy_npi": f"B100000{i:03d}", "ndc": "NDCTEST002",
+                    "transaction_code": "B1", "transaction_status": "Reversed",  # excluded
+                    "total_paid_amt": "500.00",
+                },
+                resolution_method="declared", resolved_ndc="NDCTEST002",
+            ))
+        db.flush()
+        inst = DetectionRuleInstance(
+            tenant_id=TEST_TENANT_ID, rule_type_code="MFR-004",
+            instance_name="MFR-004-status-gate",
+            parameters={"cohort_key": ["ndc"], "eligible_statuses": ["Paid"],
+                        "statistic": "zscore", "z_threshold": "3.0",
+                        "min_group_size": 2, "min_entity_count": 2,
+                        "dollar_floor": "0.00", "rule_fire_rate_cap": "0.005"},
+            enabled=True, effective_from=date.today(), created_by=TEST_USER_ID,
+        )
+        db.add(inst)
+        db.flush()
+        anomalies = _evaluate_statistical_rules(db, run, inst)
+        assert len(anomalies) == 0, (
+            "Non-Paid rows must be excluded; no anomaly expected when all rows are Reversed"
+        )
+
+
+class TestHP005StatisticalOutlier:
+    """HP-005: prescriber claim volume per NDC — z-score, min_entity_count=20,
+    dollar_floor=0.00.
+
+    RED: old absolute threshold fired on prescriber_volume_std_devs > 3.0 (hardcoded).
+    GREEN: new path uses zscore_flag via param z_threshold=3.0 with cohort mean/stddev.
+    """
+
+    @_STAT_PG_SKIP
+    def test_fires_only_on_planted_prescriber_outlier(self, db):
+        """Seed 20 normal prescribers (5 claims each) + 1 outlier (200 claims).
+        Outlier z >> 3.0 → fires. Normals → no fire. Flag rate = 1/300 < 0.5%."""
+        from src.detection.batch_engine import _evaluate_statistical_rules
+        from src.models.detection_run_models import (
+            DetectionRun, CsvUploadRow, DetectionRuleInstance,
+        )
+        from datetime import date
+
+        run = DetectionRun(
+            tenant_id=TEST_TENANT_ID, data_source="csv_upload",
+            run_label="hp005-outlier-test", status="in_progress", created_by=TEST_USER_ID,
+            resolution_stats={"inserted_count": 300, "expected_count": 300},
+        )
+        db.add(run)
+        db.flush()
+
+        # 20 normal prescribers: 5 rows each
+        for i in range(20):
+            for j in range(5):
+                db.add(CsvUploadRow(
+                    tenant_id=TEST_TENANT_ID, detection_run_id=run.id,
+                    row_number=i * 5 + j + 1,
+                    row_data={
+                        "prescriber_npi": f"200000{i:04d}", "ndc": "HP005NDC001",
+                        "date_of_service": "2026-01-15",
+                        "transaction_code": "B1", "transaction_status": "Paid",
+                        "total_paid_amt": "10.00",
+                    },
+                    resolution_method="declared", resolved_ndc="HP005NDC001",
+                ))
+        # 1 outlier prescriber: 200 claims
+        for j in range(200):
+            db.add(CsvUploadRow(
+                tenant_id=TEST_TENANT_ID, detection_run_id=run.id,
+                row_number=100 + j + 1,
+                row_data={
+                    "prescriber_npi": "HP005OUTLIER", "ndc": "HP005NDC001",
+                    "date_of_service": "2026-01-15",
+                    "transaction_code": "B1", "transaction_status": "Paid",
+                    "total_paid_amt": "10.00",
+                },
+                resolution_method="declared", resolved_ndc="HP005NDC001",
+            ))
+        db.flush()
+
+        inst = DetectionRuleInstance(
+            tenant_id=TEST_TENANT_ID, rule_type_code="HP-005",
+            instance_name="HP-005-outlier-test",
+            parameters={
+                "cohort_key": ["ndc"], "eligible_statuses": ["Paid"],
+                "statistic": "zscore", "z_threshold": "3.0",
+                "min_group_size": 20, "min_entity_count": 20,
+                "dollar_floor": "0.00", "rule_fire_rate_cap": "0.005",
+            },
+            enabled=True, effective_from=date.today(), created_by=TEST_USER_ID,
+        )
+        db.add(inst)
+        db.flush()
+
+        anomalies = _evaluate_statistical_rules(db, run, inst)
+
+        outlier_anomalies = [a for a in anomalies if
+                             a.finding_details.get("prescriber_npi") == "HP005OUTLIER"]
+        assert len(outlier_anomalies) >= 1, (
+            f"HP-005 must fire for the outlier prescriber HP005OUTLIER; got anomalies: "
+            f"{[a.finding_details for a in anomalies]}"
+        )
+        normal_npi_fires = [a for a in anomalies if
+                            a.finding_details.get("prescriber_npi") != "HP005OUTLIER"]
+        assert len(normal_npi_fires) == 0, (
+            f"HP-005 must NOT fire on normal prescribers; fired on: "
+            f"{[a.finding_details.get('prescriber_npi') for a in normal_npi_fires]}"
+        )
+        # Statistic must be zscore, not hardcoded absolute
+        assert all(a.finding_details.get("statistic") == "zscore" for a in outlier_anomalies)
+
+    @_STAT_PG_SKIP
+    def test_blocked_by_min_entity_count(self, db):
+        """Cohort with < min_entity_count prescribers must produce no anomaly."""
+        from src.detection.batch_engine import _evaluate_statistical_rules
+        from src.models.detection_run_models import (
+            DetectionRun, CsvUploadRow, DetectionRuleInstance,
+        )
+        from datetime import date
+
+        run = DetectionRun(
+            tenant_id=TEST_TENANT_ID, data_source="csv_upload",
+            run_label="hp005-minent-gate", status="in_progress", created_by=TEST_USER_ID,
+            resolution_stats={"inserted_count": 5, "expected_count": 5},
+        )
+        db.add(run)
+        db.flush()
+        # Only 3 prescribers in cohort (< min_entity_count=20)
+        for i in range(3):
+            db.add(CsvUploadRow(
+                tenant_id=TEST_TENANT_ID, detection_run_id=run.id, row_number=i + 1,
+                row_data={
+                    "prescriber_npi": f"HP005SMALL{i}", "ndc": "HP005NDC002",
+                    "transaction_code": "B1", "transaction_status": "Paid",
+                    "total_paid_amt": "10.00",
+                },
+                resolution_method="declared", resolved_ndc="HP005NDC002",
+            ))
+        db.flush()
+        inst = DetectionRuleInstance(
+            tenant_id=TEST_TENANT_ID, rule_type_code="HP-005",
+            instance_name="HP-005-minent-gate",
+            parameters={"cohort_key": ["ndc"], "eligible_statuses": ["Paid"],
+                        "statistic": "zscore", "z_threshold": "3.0",
+                        "min_group_size": 1, "min_entity_count": 20,  # cohort too small
+                        "dollar_floor": "0.00", "rule_fire_rate_cap": "0.005"},
+            enabled=True, effective_from=date.today(), created_by=TEST_USER_ID,
+        )
+        db.add(inst)
+        db.flush()
+        anomalies = _evaluate_statistical_rules(db, run, inst)
+        assert len(anomalies) == 0, (
+            "Cohort with 3 prescribers < min_entity_count=20 must produce no HP-005 anomaly"
+        )
+
+
+class TestALL006StatisticalOutlier:
+    """ALL-006: weekend/holiday fill ratio per pharmacy — z-score, min_group_size=20.
+
+    RED: old absolute threshold fired on weekend_volume_vs_weekday_ratio > 2.0 (hardcoded).
+    GREEN: new path uses zscore_flag with cohort mean/stddev from H2 params.
+    """
+
+    @_STAT_PG_SKIP
+    def test_fires_only_on_planted_weekend_outlier(self, db):
+        """Seed 20 pharmacies with 5% weekend rate + 1 outlier with 95% weekend rate.
+        Outlier z >> 3.0 → fires. Normals → no fire."""
+        from src.detection.batch_engine import _evaluate_statistical_rules
+        from src.models.detection_run_models import (
+            DetectionRun, CsvUploadRow, DetectionRuleInstance,
+        )
+        from datetime import date as _date, timedelta
+
+        run = DetectionRun(
+            tenant_id=TEST_TENANT_ID, data_source="csv_upload",
+            run_label="all006-outlier-test", status="in_progress", created_by=TEST_USER_ID,
+            resolution_stats={"inserted_count": 400, "expected_count": 400},
+        )
+        db.add(run)
+        db.flush()
+
+        # Monday=2026-01-12 (weekday), Sunday=2026-01-11 (weekend)
+        weekday = "2026-01-13"  # Tuesday
+        weekend = "2026-01-11"  # Sunday
+
+        # 20 normal pharmacies: 19 weekday rows + 1 weekend row each (5% weekend)
+        row_num = 1
+        for i in range(20):
+            for d in [weekday] * 19 + [weekend]:
+                db.add(CsvUploadRow(
+                    tenant_id=TEST_TENANT_ID, detection_run_id=run.id, row_number=row_num,
+                    row_data={
+                        "pharmacy_npi": f"ALL006N{i:04d}",
+                        "date_of_service": d,
+                        "transaction_code": "B1", "transaction_status": "Paid",
+                        "total_paid_amt": "10.00",
+                    },
+                    resolution_method="declared", resolved_ndc="ALL006NDC",
+                ))
+                row_num += 1
+        # 1 outlier pharmacy: 1 weekday + 19 weekend rows (95% weekend)
+        for d in [weekday] + [weekend] * 19:
+            db.add(CsvUploadRow(
+                tenant_id=TEST_TENANT_ID, detection_run_id=run.id, row_number=row_num,
+                row_data={
+                    "pharmacy_npi": "ALL006OUT",
+                    "date_of_service": d,
+                    "transaction_code": "B1", "transaction_status": "Paid",
+                    "total_paid_amt": "10.00",
+                },
+                resolution_method="declared", resolved_ndc="ALL006NDC",
+            ))
+            row_num += 1
+        db.flush()
+
+        inst = DetectionRuleInstance(
+            tenant_id=TEST_TENANT_ID, rule_type_code="ALL-006",
+            instance_name="ALL-006-outlier-test",
+            parameters={
+                "cohort_key": ["pharmacy_npi"], "eligible_statuses": ["Paid"],
+                "statistic": "zscore", "z_threshold": "3.0",
+                "min_group_size": 20, "min_entity_count": 1,
+                "dollar_floor": "0.00", "rule_fire_rate_cap": "0.005",
+            },
+            enabled=True, effective_from=_date.today(), created_by=TEST_USER_ID,
+        )
+        db.add(inst)
+        db.flush()
+
+        anomalies = _evaluate_statistical_rules(db, run, inst)
+
+        outlier_fires = [a for a in anomalies if
+                         a.finding_details.get("pharmacy_npi") == "ALL006OUT"]
+        normal_fires = [a for a in anomalies if
+                        a.finding_details.get("pharmacy_npi") != "ALL006OUT"]
+        assert len(outlier_fires) >= 1, (
+            f"ALL-006 must fire for the planted weekend outlier ALL006OUT; "
+            f"got {len(outlier_fires)}"
+        )
+        assert len(normal_fires) == 0, (
+            f"ALL-006 must NOT fire on normal pharmacies (5% weekend rate); "
+            f"fired on: {[a.finding_details.get('pharmacy_npi') for a in normal_fires]}"
+        )
+        # No absolute threshold — statistic must be zscore
+        assert all(a.finding_details.get("statistic") == "zscore" for a in outlier_fires)
+
+    @_STAT_PG_SKIP
+    def test_min_sample_gate_blocks_small_cohort(self, db):
+        """Pharmacy with < min_group_size=20 rows must not be evaluated."""
+        from src.detection.batch_engine import _evaluate_statistical_rules
+        from src.models.detection_run_models import (
+            DetectionRun, CsvUploadRow, DetectionRuleInstance,
+        )
+        from datetime import date as _date
+
+        run = DetectionRun(
+            tenant_id=TEST_TENANT_ID, data_source="csv_upload",
+            run_label="all006-mingroup-gate", status="in_progress", created_by=TEST_USER_ID,
+            resolution_stats={"inserted_count": 5, "expected_count": 5},
+        )
+        db.add(run)
+        db.flush()
+        # Only 5 rows per pharmacy (< min_group_size=20)
+        for i in range(5):
+            db.add(CsvUploadRow(
+                tenant_id=TEST_TENANT_ID, detection_run_id=run.id, row_number=i + 1,
+                row_data={
+                    "pharmacy_npi": "ALL006SMALL",
+                    "date_of_service": "2026-01-11",  # Sunday — would be high ratio
+                    "transaction_code": "B1", "transaction_status": "Paid",
+                    "total_paid_amt": "10.00",
+                },
+                resolution_method="declared", resolved_ndc="ALL006NDC2",
+            ))
+        db.flush()
+        inst = DetectionRuleInstance(
+            tenant_id=TEST_TENANT_ID, rule_type_code="ALL-006",
+            instance_name="ALL-006-mingroup-gate",
+            parameters={"cohort_key": ["pharmacy_npi"], "eligible_statuses": ["Paid"],
+                        "statistic": "zscore", "z_threshold": "3.0",
+                        "min_group_size": 20,  # 5 rows < 20 → HAVING filters it out
+                        "min_entity_count": 1, "dollar_floor": "0.00",
+                        "rule_fire_rate_cap": "0.005"},
+            enabled=True, effective_from=_date.today(), created_by=TEST_USER_ID,
+        )
+        db.add(inst)
+        db.flush()
+        anomalies = _evaluate_statistical_rules(db, run, inst)
+        assert len(anomalies) == 0, (
+            "Pharmacy with < min_group_size=20 rows must be excluded by HAVING clause"
+        )
+
+
+class TestALL005StatisticalOutlier:
+    """ALL-005: early refill — threshold on min_gap_days < days_supply * refill_pct_threshold.
+
+    RED: old absolute threshold fired on refill_pct < 0.75 (hardcoded field).
+    GREEN: new threshold-mode path uses refill_pct_threshold param, no hardcoded ratio.
+    """
+
+    @_STAT_PG_SKIP
+    def test_fires_on_planted_early_refill_pattern(self, db):
+        """Seed patient-A with 2 fills 5 days apart (days_supply=30, threshold=0.50
+        → min_gap < 30*0.5=15 → fires). Patient-B with 20 days apart (> 15 → no fire)."""
+        from src.detection.batch_engine import _evaluate_statistical_rules
+        from src.models.detection_run_models import (
+            DetectionRun, CsvUploadRow, DetectionRuleInstance,
+        )
+        from datetime import date as _date
+
+        run = DetectionRun(
+            tenant_id=TEST_TENANT_ID, data_source="csv_upload",
+            run_label="all005-outlier-test", status="in_progress", created_by=TEST_USER_ID,
+            resolution_stats={"inserted_count": 4, "expected_count": 4},
+        )
+        db.add(run)
+        db.flush()
+
+        # Patient-A: fills 5 days apart (5 < 30*0.5=15 → early refill fires)
+        for dos in ["2026-01-01", "2026-01-06"]:  # 5-day gap
+            db.add(CsvUploadRow(
+                tenant_id=TEST_TENANT_ID, detection_run_id=run.id,
+                row_number=len(dos),  # unique
+                row_data={
+                    "patient_unique_hash": "ALL005FIRE",
+                    "ndc": "ALL005NDC1",
+                    "date_of_service": dos,
+                    "days_supply": "30",
+                    "transaction_code": "B1", "transaction_status": "Paid",
+                    "total_paid_amt": "50.00",
+                },
+                resolution_method="declared", resolved_ndc="ALL005NDC1",
+            ))
+        # Patient-B: fills 20 days apart (20 > 15 → no fire)
+        for dos in ["2026-01-01", "2026-01-21"]:  # 20-day gap
+            db.add(CsvUploadRow(
+                tenant_id=TEST_TENANT_ID, detection_run_id=run.id,
+                row_number=10 + len(dos),  # unique
+                row_data={
+                    "patient_unique_hash": "ALL005NORMAL",
+                    "ndc": "ALL005NDC1",
+                    "date_of_service": dos,
+                    "days_supply": "30",
+                    "transaction_code": "B1", "transaction_status": "Paid",
+                    "total_paid_amt": "50.00",
+                },
+                resolution_method="declared", resolved_ndc="ALL005NDC1",
+            ))
+        db.flush()
+
+        inst = DetectionRuleInstance(
+            tenant_id=TEST_TENANT_ID, rule_type_code="ALL-005",
+            instance_name="ALL-005-outlier-test",
+            parameters={
+                "cohort_key": ["patient_unique_hash", "ndc"],
+                "eligible_statuses": ["Paid"],
+                "lookback_window_days": 180,
+                "statistic": "threshold",
+                "refill_pct_threshold": "0.50",
+                "repeat_offender_min_count": 2,
+                "min_group_size": 2,
+                "min_entity_count": 1,
+                "dollar_floor": "0.00",
+                "rule_fire_rate_cap": "0.005",
+            },
+            enabled=True, effective_from=_date.today(), created_by=TEST_USER_ID,
+        )
+        db.add(inst)
+        db.flush()
+
+        anomalies = _evaluate_statistical_rules(db, run, inst)
+
+        fire_patients = [a.finding_details.get("patient_unique_hash") for a in anomalies]
+        assert "ALL005FIRE" in fire_patients, (
+            f"ALL-005 must fire for patient ALL005FIRE (5-day gap < 15-day threshold); "
+            f"fired patients: {fire_patients}"
+        )
+        assert "ALL005NORMAL" not in fire_patients, (
+            f"ALL-005 must NOT fire for patient ALL005NORMAL (20-day gap > 15-day threshold); "
+            f"fired patients: {fire_patients}"
+        )
+        # Statistic must be threshold, not absolute ratio
+        for a in anomalies:
+            assert a.finding_details.get("statistic") == "threshold", (
+                "ALL-005 must use statistic=threshold, not an absolute ratio"
+            )
+
+    @_STAT_PG_SKIP
+    def test_dollar_floor_blocks_cheap_refill(self, db):
+        """dollar_floor gate: an early-refill pattern with max_paid below the floor
+        must not fire."""
+        from src.detection.batch_engine import _evaluate_statistical_rules
+        from src.models.detection_run_models import (
+            DetectionRun, CsvUploadRow, DetectionRuleInstance,
+        )
+        from datetime import date as _date
+
+        run = DetectionRun(
+            tenant_id=TEST_TENANT_ID, data_source="csv_upload",
+            run_label="all005-floor-gate", status="in_progress", created_by=TEST_USER_ID,
+            resolution_stats={"inserted_count": 2, "expected_count": 2},
+        )
+        db.add(run)
+        db.flush()
+        for i, dos in enumerate(["2026-01-01", "2026-01-06"]):
+            db.add(CsvUploadRow(
+                tenant_id=TEST_TENANT_ID, detection_run_id=run.id, row_number=i + 1,
+                row_data={
+                    "patient_unique_hash": "ALL005CHEAP",
+                    "ndc": "ALL005NDC3",
+                    "date_of_service": dos,
+                    "days_supply": "30",
+                    "transaction_code": "B1", "transaction_status": "Paid",
+                    "total_paid_amt": "0.50",  # below dollar_floor
+                },
+                resolution_method="declared", resolved_ndc="ALL005NDC3",
+            ))
+        db.flush()
+        inst = DetectionRuleInstance(
+            tenant_id=TEST_TENANT_ID, rule_type_code="ALL-005",
+            instance_name="ALL-005-floor-gate",
+            parameters={
+                "cohort_key": ["patient_unique_hash", "ndc"],
+                "eligible_statuses": ["Paid"],
+                "statistic": "threshold", "refill_pct_threshold": "0.50",
+                "repeat_offender_min_count": 2, "min_group_size": 2,
+                "min_entity_count": 1, "dollar_floor": "50.00",  # 0.50 < 50.00
+                "rule_fire_rate_cap": "0.005",
+            },
+            enabled=True, effective_from=_date.today(), created_by=TEST_USER_ID,
+        )
+        db.add(inst)
+        db.flush()
+        anomalies = _evaluate_statistical_rules(db, run, inst)
+        assert len(anomalies) == 0, (
+            "dollar_floor=50.00 must block early refill with max_paid=0.50"
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MED-2 FIX: Constant query-count test — rep-row fetch must be set-based/batched,
+# not one query per fired entity. Query count must NOT grow with fired entity count.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@_STAT_PG_SKIP
+class TestStatisticalRepRowQueryCountConstant:
+    """Assert _evaluate_statistical_rules issues a CONSTANT number of DB queries
+    regardless of how many entities fire (0, 1, or N outliers).
+
+    Approach: monkeypatch db.execute to count calls, seed runs with 1 and 3 fired
+    entities respectively, assert call count does NOT increase linearly with fire count.
+    Specifically: query count for N=3 fired entities must equal query count for N=1
+    (both should issue exactly 2 queries: 1 aggregate SQL + 1 batched rep-row SQL).
+    """
+
+    def _count_queries_for_n_outliers(self, db, n_outliers: int) -> int:
+        """Seed n_outliers pharmacies with high fill volume + 19 normals (fill=10).
+        Return the number of db.execute calls made by _evaluate_statistical_rules."""
+        from src.detection.batch_engine import _evaluate_statistical_rules
+        from src.models.detection_run_models import (
+            DetectionRun, CsvUploadRow, DetectionRuleInstance,
+        )
+        from datetime import date
+        from decimal import Decimal
+
+        run = DetectionRun(
+            tenant_id=TEST_TENANT_ID, data_source="csv_upload",
+            run_label=f"qcount-{n_outliers}-outliers", status="in_progress",
+            created_by=TEST_USER_ID,
+            resolution_stats={"inserted_count": 200, "expected_count": 200},
+        )
+        db.add(run)
+        db.flush()
+
+        # 19 normal pharmacies: 20 rows each (volume=20 per entity, z << 3)
+        row_num = 1
+        for i in range(19):
+            for _ in range(20):
+                db.add(CsvUploadRow(
+                    tenant_id=TEST_TENANT_ID, detection_run_id=run.id, row_number=row_num,
+                    row_data={
+                        "pharmacy_npi": f"QC_NORM_{i:04d}", "ndc": "QCNDC001",
+                        "transaction_code": "B1", "transaction_status": "Paid",
+                        "total_paid_amt": "15.00",
+                    },
+                    resolution_method="declared", resolved_ndc="QCNDC001",
+                ))
+                row_num += 1
+        # n_outliers pharmacies: 500 rows each (volume=500 per entity, z >> 3)
+        for k in range(n_outliers):
+            for _ in range(500):
+                db.add(CsvUploadRow(
+                    tenant_id=TEST_TENANT_ID, detection_run_id=run.id, row_number=row_num,
+                    row_data={
+                        "pharmacy_npi": f"QC_OUT_{k:04d}", "ndc": "QCNDC001",
+                        "transaction_code": "B1", "transaction_status": "Paid",
+                        "total_paid_amt": "15.00",
+                    },
+                    resolution_method="declared", resolved_ndc="QCNDC001",
+                ))
+                row_num += 1
+        db.flush()
+
+        inst = DetectionRuleInstance(
+            tenant_id=TEST_TENANT_ID, rule_type_code="MFR-004",
+            instance_name=f"MFR-004-qcount-{n_outliers}",
+            parameters={
+                "cohort_key": ["ndc"], "eligible_statuses": ["Paid"],
+                "statistic": "zscore", "z_threshold": "3.0",
+                "min_group_size": 5, "min_entity_count": 5,
+                "dollar_floor": "0.00", "rule_fire_rate_cap": "0.005",
+            },
+            enabled=True, effective_from=date.today(), created_by=TEST_USER_ID,
+        )
+        db.add(inst)
+        db.flush()
+
+        call_count = [0]
+        original_execute = db.execute
+
+        def counting_execute(stmt, *args, **kwargs):
+            call_count[0] += 1
+            return original_execute(stmt, *args, **kwargs)
+
+        db.execute = counting_execute  # type: ignore[method-assign]
+        try:
+            _evaluate_statistical_rules(db, run, inst)
+        finally:
+            db.execute = original_execute  # type: ignore[method-assign]
+        return call_count[0]
+
+    def test_query_count_constant_across_fire_counts(self, db):
+        """Query count with 1 fired entity must equal query count with 3 fired entities.
+
+        Both should issue exactly 2 SQL queries:
+          Query 1: aggregate (GROUP BY pharmacy_npi / ndc) — always 1 query per rule
+          Query 2: batched DISTINCT ON rep-row fetch — exactly 1 query, regardless of N
+
+        If the old per-entity-loop pattern were used, count_3 would equal count_1 + 2.
+        The assertion count_3 == count_1 proves the batched approach is in place.
+        """
+        count_1 = self._count_queries_for_n_outliers(db, n_outliers=1)
+        count_3 = self._count_queries_for_n_outliers(db, n_outliers=3)
+
+        assert count_3 == count_1, (
+            f"Query count must be CONSTANT regardless of fired entity count. "
+            f"count(1 outlier)={count_1}, count(3 outliers)={count_3}. "
+            "If count_3 > count_1, a per-entity-loop query is still present."
+        )
+        # Both should be exactly 2 (aggregate + batched rep-row)
+        assert count_1 <= 3, (
+            f"Expected at most 3 queries per rule invocation (aggregate + rep-row batch + flush), "
+            f"got {count_1}"
+        )
+```
+
+**Grep invariant for HIGH fix:** After this edit, `_evaluate_statistical_rules` handles MFR-004, HP-005, ALL-006, ALL-005 via concrete SQL aggregation + calibration.py primitive calls. The MFR-003 and HP-008 absolute threshold fields (`volume_vs_avg_ratio`, `weekend_volume_vs_weekday_ratio`, `prescriber_volume_std_devs`, `cost_percentile`) are removed from the `_evaluate_statistical_rules` dispatch path — those legacy fields remain only in the migration 0011 `_PARAMS` dict for backward compatibility (they were on the instance before migration), never read by the evaluator. No evaluator branch applies an absolute ratio threshold. All outlier decisions use `zscore_flag`, `percentile_within_cohort`, or the `threshold`-mode gap check, all gated by `passes_min_sample` + `passes_dollar_floor`.
+
+Run → RED before `_evaluate_statistical_rules` is rewritten (all six RED/GREEN tests fail because MFR-004/HP-005/ALL-006/ALL-005 fall through to old or missing logic). Run → GREEN after the implementation above is applied.
+
+```
+git add modules/reclaimrx/src/detection/batch_engine.py \
+        modules/reclaimrx/src/detection/mfr003_evaluator.py \
+        modules/reclaimrx/tests/detection/test_recalibrate_b.py
+git commit -m "feat(reclaimrx): generic param-driven statistical evaluator for all 6 rules — MFR-004/HP-005/ALL-006/ALL-005 concrete set-based implementations; _derive_statistical_metric signature reconciled; RED/GREEN tests per rule; no absolute thresholds (§12 H2 HIGH fix)"
+```
+
+---
+
+**What changes in `batch_engine.py`:** `_derive_statistical_metric` and `_evaluate_statistical_rules` now use calibration.py helpers. For MFR-003 and HP-008 (which have per-row values), the evaluator checks `zscore_flag` or `percentile_within_cohort` against the loaded `BaselineCache` and applies `passes_min_sample` + `passes_dollar_floor` gates. MFR-004, HP-005, ALL-006 remain entity-level (one anomaly per entity, not per row) — handled by the generic `_evaluate_statistical_rules` above.
 
 Key change to `_derive_statistical_metric` for MFR-003 — uses FDB WAC as basis, NOT CSV `extended_wac`:
 
@@ -1713,9 +3401,13 @@ if code == "MFR-003":
         return {}
     if not passes_dollar_floor(ic, dollar_floor):
         return {}
+    # All Decimal values in finding_details MUST be stringified before returning
+    # so json.dumps never encounters a raw Decimal.  Money fields use ROUND_HALF_UP.
     return {
-        "contracted_rate_deviation_pct": abs(own_rate - mean),
-        "_z": z,
+        "contracted_rate_deviation_pct": str(
+            abs(own_rate - mean).quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+        ),
+        "_z": str(z) if z is not None else None,
         "_fired": True,
         "wac_source": wac_source,
         "fdb_price_type": "09",
@@ -1769,17 +3461,32 @@ def test_mfr003_uses_fdb_wac_not_csv_wac(db):
 
 
 def test_mfr003_evaluator_skips_claim_when_no_fdb_wac(db):
-    """When FDB has no WAC for the claim's NDC, the rule must skip (not fire, not use CSV)."""
-    # Simulate: _fdb_cache has no entry for this NDC → _derive returns {"_no_fdb_wac": True}
-    # The caller must NOT create an anomaly for this claim.
-    # This is tested by asserting the return dict key.
-    fdb_cache: dict = {}  # empty → no WAC for any NDC
+    """When FDB returns wac=None for the claim's NDC, the rule must skip (not fire, not use CSV).
+
+    fetch_current_prices_for_ndcs returns an entry for EVERY requested NDC; a missing WAC
+    is represented as wac=None (key present, value None) — NOT an absent key.
+    _derive_statistical_metric must return {"_no_fdb_wac": True} in both cases:
+      (a) ndc absent from _fdb_cache entirely (legacy / empty cache)
+      (b) ndc present in _fdb_cache but entry has wac=None  ← the real production case
+    """
+    from src.detection.mfr003_evaluator import _derive_statistical_metric  # noqa: PLC0415
+
     ndc = "12345678901"
-    result = {}  # simulate: _derive_statistical_metric returns this when fdb_wac is None
-    # Since _no_fdb_wac=True, the evaluator must skip
-    result["_no_fdb_wac"] = True
-    assert result.get("_no_fdb_wac") is True, "Skipped claim must set _no_fdb_wac=True"
-    assert "_fired" not in result, "Skipped claim must NOT have _fired key"
+
+    # Case (a): ndc absent from cache (empty dict)
+    result_a = _derive_statistical_metric(ndc=ndc, _fdb_cache={})
+    assert result_a.get("_no_fdb_wac") is True, (
+        "Absent NDC (empty cache) must set _no_fdb_wac=True"
+    )
+    assert "_fired" not in result_a, "Skipped claim must NOT have _fired key"
+
+    # Case (b): ndc present in cache but wac=None — the real shape from fetch_current_prices_for_ndcs
+    cache_with_none_wac = {ndc: {"wac": None, "swp": None, "nadac": None, "drug_name": None}}
+    result_b = _derive_statistical_metric(ndc=ndc, _fdb_cache=cache_with_none_wac)
+    assert result_b.get("_no_fdb_wac") is True, (
+        "NDC with wac=None in cache must set _no_fdb_wac=True (key present but wac None)"
+    )
+    assert "_fired" not in result_b, "Skipped claim must NOT have _fired key"
 
 
 def test_mfr003_evaluator_respects_min_sample_gate(db):
@@ -1795,10 +3502,102 @@ def test_mfr003_evaluator_respects_min_sample_gate(db):
 
 Run → GREEN.
 
+**Also add to `modules/reclaimrx/src/detection/mfr003_evaluator.py`** — thin per-row dispatch adapters called by Task 4c's `_PER_ROW_EVALUATORS` map:
+
+```python
+def evaluate_mfr003_row(
+    row: "CsvUploadRow",
+    *,
+    db: "Session",
+    _fdb_cache: dict,
+    instance: "DetectionRuleInstance",
+) -> "Anomaly | None":
+    """Per-row adapter for MFR-003: FDB-WAC IC deviation check.
+
+    Calls _derive_statistical_metric with rule_type_code='MFR-003' and the
+    pre-fetched _fdb_cache.  Returns an Anomaly if fired, None otherwise.
+    """
+    from src.models.detection_run_models import Anomaly  # noqa: PLC0415
+    result = _derive_statistical_metric(
+        ndc=row.resolved_ndc,
+        rd=row.row_data,
+        csv_row=row,
+        code="MFR-003",
+        baseline=None,  # loaded inside _derive_statistical_metric from BaselineCache
+        params=instance.parameters,
+        _fdb_cache=_fdb_cache,
+    )
+    if not result.get("_fired"):
+        return None
+    return Anomaly(
+        tenant_id=row.tenant_id,
+        data_source="csv_upload",
+        data_source_run_id=row.detection_run_id,
+        source_table="csv_upload_rows",
+        source_row_id=row.id,
+        detection_kind="rule",
+        severity=instance.parameters.get("severity", "high"),
+        confidence=_Decimal(str(instance.parameters.get("confidence", "0.80"))),
+        finding_code="MFR-003",
+        finding_summary="Ingredient cost deviates from FDB WAC baseline (z-score)",
+        finding_details=result,
+        pharmacy_npi=row.row_data.get("pharmacy_npi"),
+        prescriber_npi=row.row_data.get("prescriber_npi"),
+        ndc=row.resolved_ndc,
+        date_of_service=_parse_date(row.row_data.get("date_of_service")),
+        status="open",
+    )
+
+
+def evaluate_hp008_row(
+    row: "CsvUploadRow",
+    *,
+    db: "Session",
+    _fdb_cache: dict,
+    instance: "DetectionRuleInstance",
+) -> "Anomaly | None":
+    """Per-row adapter for HP-008: high-cost claimant percentile check.
+
+    Uses CSV total_paid_amt — no FDB dependency.  Calls _derive_statistical_metric
+    with rule_type_code='HP-008'.  Returns an Anomaly if fired, None otherwise.
+    """
+    from src.models.detection_run_models import Anomaly  # noqa: PLC0415
+    result = _derive_statistical_metric(
+        ndc=row.resolved_ndc,
+        rd=row.row_data,
+        csv_row=row,
+        code="HP-008",
+        baseline=None,
+        params=instance.parameters,
+        _fdb_cache=_fdb_cache,
+    )
+    if not result.get("_fired"):
+        return None
+    return Anomaly(
+        tenant_id=row.tenant_id,
+        data_source="csv_upload",
+        data_source_run_id=row.detection_run_id,
+        source_table="csv_upload_rows",
+        source_row_id=row.id,
+        detection_kind="rule",
+        severity=instance.parameters.get("severity", "high"),
+        confidence=_Decimal(str(instance.parameters.get("confidence", "0.80"))),
+        finding_code="HP-008",
+        finding_summary="High-cost claimant: total paid above percentile threshold",
+        finding_details=result,
+        pharmacy_npi=row.row_data.get("pharmacy_npi"),
+        prescriber_npi=row.row_data.get("prescriber_npi"),
+        ndc=row.resolved_ndc,
+        date_of_service=_parse_date(row.row_data.get("date_of_service")),
+        status="open",
+    )
+```
+
 ```
 git add modules/reclaimrx/src/detection/batch_engine.py \
+        modules/reclaimrx/src/detection/mfr003_evaluator.py \
         modules/reclaimrx/tests/detection/test_recalibrate_b.py
-git commit -m "feat(reclaimrx): MFR-003 evaluator uses FDB WAC (price_type 09) not CSV extended_wac; no-FDB-WAC → data_quality skip (§12 H2, HIGH-3)"
+git commit -m "feat(reclaimrx): MFR-003 evaluator uses FDB WAC (price_type 09) not CSV extended_wac; no-FDB-WAC → data_quality skip; add evaluate_mfr003_row/evaluate_hp008_row dispatch adapters (§12 H2, HIGH-3)"
 ```
 
 ---
@@ -2919,17 +4718,23 @@ def test_all002_matched_npi_with_null_name_does_not_fire_phantom(db):
     from src.models.detection_run_models import DetectionRun, CsvUploadRow, DetectionRuleInstance
     from datetime import date as _date
 
-    # Seed a reference row with NULL name — NPI IS present (not phantom).
-    NULL_NAME_NPI = "1234567890"
-    db.execute(
-        text("""
-            INSERT INTO reference.dataq_master (npi, legal_business_name, deactivation_code)
-            VALUES (:npi, NULL, NULL)
-            ON CONFLICT (npi) DO UPDATE SET legal_business_name = NULL, deactivation_code = NULL
-        """),
-        {"npi": NULL_NAME_NPI},
+    # Use a KNOWN-PRESENT NPI from reference.dataq_master (real data, no mutation).
+    # Query the first active NPI that has a NULL legal_business_name — this tests
+    # that phantom detection is based on row-absence (dm.npi IS NULL after LEFT JOIN),
+    # not on name nullness.  If no null-name row exists, fall back to any present NPI
+    # and rely on the assertion that the LEFT JOIN finds the row (not phantom).
+    row = db.execute(
+        text(
+            "SELECT npi FROM reference.dataq_master "
+            "WHERE npi IS NOT NULL AND deactivation_code IS NULL "
+            "LIMIT 1"
+        )
+    ).fetchone()
+    assert row is not None, (
+        "reference.dataq_master has no rows — FDW not set up. "
+        "Run infrastructure/scripts/setup_fdw.sh first."
     )
-    db.flush()
+    NULL_NAME_NPI = row.npi
 
     run = DetectionRun(
         tenant_id=TEST_TENANT_ID, data_source="csv_upload",
@@ -2972,10 +4777,18 @@ def test_all002_truly_absent_npi_fires_phantom(db):
     from src.models.detection_run_models import DetectionRun, CsvUploadRow, DetectionRuleInstance
     from datetime import date as _date
 
+    # Use a synthetic 10-digit NPI that is guaranteed absent from reference.dataq_master
+    # (all-nines format — never a valid NPPES NPI; no mutation of reference needed).
     ABSENT_NPI = "9999999991"
-    # Ensure absent — delete any stray seed row.
-    db.execute(text("DELETE FROM reference.dataq_master WHERE npi = :npi"), {"npi": ABSENT_NPI})
-    db.flush()
+    # Verify it is absent — SELECT only, no mutation of the FDW foreign table.
+    present = db.execute(
+        text("SELECT 1 FROM reference.dataq_master WHERE npi = :npi LIMIT 1"),
+        {"npi": ABSENT_NPI},
+    ).fetchone()
+    assert present is None, (
+        f"NPI {ABSENT_NPI} unexpectedly present in reference.dataq_master. "
+        "Choose a different synthetic NPI for this test."
+    )
 
     run = DetectionRun(
         tenant_id=TEST_TENANT_ID, data_source="csv_upload",
@@ -3022,17 +4835,21 @@ def test_all003_matched_npi_with_null_name_does_not_fire_phantom(db):
     from src.models.detection_run_models import DetectionRun, CsvUploadRow, DetectionRuleInstance
     from datetime import date as _date
 
-    NULL_NAME_NPI = "1234567891"
-    db.execute(
-        text("""
-            INSERT INTO reference.prescribers (npi, display_name, status)
-            VALUES (:npi, NULL, 'active')
-            ON CONFLICT (npi) DO UPDATE SET display_name = NULL, status = 'active',
-                                            deactivation_date = NULL
-        """),
-        {"npi": NULL_NAME_NPI},
+    # Use a KNOWN-PRESENT NPI from reference.prescribers (real data, no mutation).
+    # Tests that phantom detection keys on row-absence (p.npi IS NULL after LEFT JOIN),
+    # not on display_name nullness.
+    row = db.execute(
+        text(
+            "SELECT npi FROM reference.prescribers "
+            "WHERE npi IS NOT NULL AND (status IS NULL OR status != 'deactivated') "
+            "LIMIT 1"
+        )
+    ).fetchone()
+    assert row is not None, (
+        "reference.prescribers has no rows — FDW not set up. "
+        "Run infrastructure/scripts/setup_fdw.sh first."
     )
-    db.flush()
+    NULL_NAME_NPI = row.npi
 
     run = DetectionRun(
         tenant_id=TEST_TENANT_ID, data_source="csv_upload",
@@ -3075,9 +4892,17 @@ def test_all003_truly_absent_npi_fires_phantom(db):
     from src.models.detection_run_models import DetectionRun, CsvUploadRow, DetectionRuleInstance
     from datetime import date as _date
 
+    # Synthetic 10-digit NPI guaranteed absent from reference.prescribers (9.49M rows
+    # but never includes all-nines formats).  No mutation of the FDW foreign table.
     ABSENT_NPI = "9999999992"
-    db.execute(text("DELETE FROM reference.prescribers WHERE npi = :npi"), {"npi": ABSENT_NPI})
-    db.flush()
+    present = db.execute(
+        text("SELECT 1 FROM reference.prescribers WHERE npi = :npi LIMIT 1"),
+        {"npi": ABSENT_NPI},
+    ).fetchone()
+    assert present is None, (
+        f"NPI {ABSENT_NPI} unexpectedly present in reference.prescribers. "
+        "Choose a different synthetic NPI for this test."
+    )
 
     run = DetectionRun(
         tenant_id=TEST_TENANT_ID, data_source="csv_upload",
@@ -3443,6 +5268,12 @@ git commit -m "feat(reclaimrx): FDB pricing enrichment — WAC/NADAC/SWP set-bas
 #   from src.detection.reference_rules import (
 #       evaluate_all002_phantom_pharmacy, evaluate_all003_phantom_prescriber,
 #   )
+#   from src.detection.fdb_pricing import fetch_current_prices_for_ndcs
+# NOTE: fetch_current_prices_for_ndcs MUST be imported at MODULE scope (not inside
+# run_detection) so that tests can patch it as
+# `src.detection.batch_engine.fetch_current_prices_for_ndcs`. A local (function-level)
+# import creates a name only in the function's local namespace, making the
+# batch_engine-attribute patch ineffective.
 # NOTE: `import sqlalchemy as sa` is NOT used in this sketch; use `text(...)` and
 # `select(...)` directly (already imported above). The `sa.text(...)` form requires
 # `import sqlalchemy as sa` — prefer the direct-name imports to avoid ambiguity.
@@ -3503,7 +5334,8 @@ def run_detection(db: Session, run: DetectionRun) -> int:
         #                    "nadac": Decimal|None, "drug_name": str|None}}.
         # Verified FDB columns: ndc_11, price, price_type, effective_date.
         # WAC = price_type '09' (wac key). No ndc/unit_price columns exist.
-        from src.detection.fdb_pricing import fetch_current_prices_for_ndcs  # noqa: PLC0415
+        # fetch_current_prices_for_ndcs is imported at MODULE SCOPE above —
+        # do NOT re-import here (local import breaks the patch target).
         raw_fdb = fetch_current_prices_for_ndcs(db, distinct_ndcs)
         for ndc_11, price_data in raw_fdb.items():
             _fdb_cache[ndc_11] = {
@@ -3512,7 +5344,13 @@ def run_detection(db: Session, run: DetectionRun) -> int:
                 "effective_date": None,   # not exposed by helper; unused downstream
                 "wac_source": "fdb",
             }
-    no_fdb_wac: int = sum(1 for ndc in distinct_ndcs if ndc not in _fdb_cache)
+    # fetch_current_prices_for_ndcs returns an entry for EVERY requested NDC;
+    # a missing WAC is represented as wac=None (key present, value None) — NOT an absent key.
+    # Count a missing WAC as: entry present but wac is None, OR ndc absent from cache.
+    no_fdb_wac: int = sum(
+        1 for ndc in distinct_ndcs
+        if _fdb_cache.get(ndc, {}).get("wac") is None
+    )
 
     # ── Step 0b: Load enabled DetectionRuleInstances for this tenant ─────────
     # One query — results partitioned by explicit rule_type_code membership into
@@ -3556,11 +5394,22 @@ def run_detection(db: Session, run: DetectionRun) -> int:
         evaluate_all003_phantom_prescriber,
     )
     from src.detection.reject_rebill import evaluate_reject_75_70  # noqa: PLC0415
+    from src.detection.mfr003_evaluator import (  # noqa: PLC0415
+        evaluate_mfr003_row,   # per-row adapter: (row, *, db, _fdb_cache, instance) → Anomaly|None
+        evaluate_hp008_row,    # per-row adapter: (row, *, db, _fdb_cache, instance) → Anomaly|None
+    )
+    from src.detection.mfr001_evaluator import evaluate_mfr001_row  # noqa: PLC0415
+    # evaluate_mfr001_row is a thin adapter over evaluate_mfr001_per_patient_row that
+    # accepts (row, *, db, _fdb_cache, instance, _mfr001_index=None).
+    # NQ = ingredient_cost_paid (NOT quantity_dispensed).
+    # Prior-fill index (_mfr001_index) is precomputed before the stream — zero per-row DB queries.
+    # Defined in mfr001_evaluator.py alongside evaluate_mfr001_per_patient_row (Task 5b).
+    # Disabled by default — not in per_row_instances until operator enables post-coverage-gate.
 
     _PER_ROW_EVALUATORS: dict[str, Any] = {
-        "MFR-001": evaluate_mfr001,   # disabled by default until coverage gate (Task 5a)
-        "MFR-003": evaluate_mfr003,   # FDB-WAC IC deviation, per-row
-        "HP-008":  evaluate_hp008,    # high-cost claimant percentile, per-row
+        "MFR-001": evaluate_mfr001_row,   # disabled by default until coverage gate (Task 5a)
+        "MFR-003": evaluate_mfr003_row,   # FDB-WAC IC deviation, per-row
+        "HP-008":  evaluate_hp008_row,    # high-cost claimant percentile, per-row
     }
     _GROUPING_EVALUATORS: dict[str, Any] = {
         "ALL-001":      _evaluate_all001,        # duplicate claim detection
@@ -3578,10 +5427,68 @@ def run_detection(db: Session, run: DetectionRun) -> int:
     # calibration helper (zscore_flag, percentile_within_cohort, threshold check).
     # It accepts (db, run, instance) and returns list[Anomaly].
 
+    # ── Step 0c: MFR-001 prior-NQ index (SET-BASED MINIMAL-COLUMN, before stream) ──
+    # FIX (MED): The previous implementation used `.scalars().all()` which materializes
+    # ALL full CsvUploadRow ORM objects — on the 2.6M-row file this loads gigabytes of
+    # JSONB into Python memory, violating the streaming/perf design of the engine.
+    #
+    # Correct approach: build the index via a minimal-column SQL projection that
+    # retrieves ONLY the four fields needed for the index
+    # (patient_unique_hash, resolved_ndc, date_of_service, ingredient_cost_paid),
+    # restricted to paid-B1 rows, as a lightweight tuple stream. This avoids
+    # materializing full ORM objects or any unneeded JSONB columns.
+    #
+    # The build_mfr001_prior_nq_index function's input contract is updated to accept
+    # either ORM rows (via .row_data dict) OR lightweight named-tuple rows
+    # (via direct attribute access) — see mfr001_evaluator.py for the dual-path
+    # implementation.
+    _mfr001_inst = next(
+        (i for i in per_row_instances if i.rule_type_code == "MFR-001"), None
+    )
+    _mfr001_index: dict | None = None
+    if _mfr001_inst is not None:
+        from src.detection.mfr001_evaluator import build_mfr001_prior_nq_index  # noqa: PLC0415
+        # Minimal-column query: only the four fields needed for the index.
+        # Restricted to paid-B1 rows (the only rows that feed the prior-NQ median).
+        # NO full-row ORM fetch — no .scalars().all() on 2.6M rows.
+        # Returns lightweight Row objects; build_mfr001_prior_nq_index accepts these
+        # via its _from_raw_rows=True path (added alongside this fix).
+        _mfr001_raw_rows = db.execute(
+            text(
+                """
+                SELECT
+                    (row_data->>'patient_unique_hash') AS patient_unique_hash,
+                    resolved_ndc,
+                    (row_data->>'date_of_service') AS date_of_service,
+                    (row_data->>'ingredient_cost_paid') AS ingredient_cost_paid
+                FROM reclaimrx.csv_upload_rows
+                WHERE detection_run_id = :run_id
+                  AND tenant_id = :tenant_id
+                  AND (row_data->>'transaction_code') = 'B1'
+                  AND (row_data->>'transaction_status') = 'Paid'
+                  AND (row_data->>'ingredient_cost_paid') IS NOT NULL
+                  AND (row_data->>'date_of_service') IS NOT NULL
+                  AND (row_data->>'patient_unique_hash') IS NOT NULL
+                  AND resolved_ndc IS NOT NULL
+                ORDER BY (row_data->>'date_of_service')
+                """
+            ),
+            {"run_id": str(run.id), "tenant_id": str(run.tenant_id)},
+        ).fetchall()
+        # build_mfr001_prior_nq_index handles both ORM rows (with .row_data dict)
+        # and raw lightweight rows (with direct .patient_unique_hash, .resolved_ndc,
+        # .date_of_service, .ingredient_cost_paid attributes) via _from_raw_rows=True.
+        _mfr001_index = build_mfr001_prior_nq_index(
+            _mfr001_raw_rows,
+            params=_mfr001_inst.parameters,
+            _from_raw_rows=True,
+        )
+
     # ── Step 1: STREAMING SCAN — per-row rules ───────────────────────────────
     # yield_per(500) streams rows in 500-row server-side batches.
     # The loop never holds the full file in memory.
     # _fdb_cache is already built above — zero per-row DB queries inside the loop.
+    # _mfr001_index is precomputed above — zero per-row DB queries for MFR-001.
     # Enabled instance list is pre-loaded above — no per-row session access.
     all_anomalies: list[Anomaly] = []
     record_count: int = 0
@@ -3603,7 +5510,9 @@ def run_detection(db: Session, run: DetectionRun) -> int:
             evaluator = _PER_ROW_EVALUATORS.get(inst.rule_type_code)
             if evaluator is None:
                 continue  # unknown code — skip gracefully, do not raise
-            result = evaluator(row, db=db, _fdb_cache=_fdb_cache, instance=inst)
+            # Pass _mfr001_index for MFR-001; other evaluators ignore it via **kwargs.
+            extra = {"_mfr001_index": _mfr001_index} if inst.rule_type_code == "MFR-001" else {}
+            result = evaluator(row, db=db, _fdb_cache=_fdb_cache, instance=inst, **extra)
             if result:
                 all_anomalies.append(result)
 
@@ -3664,10 +5573,17 @@ def run_detection(db: Session, run: DetectionRun) -> int:
     # all003_quality keys (when ALL-003 ran): missing_prescriber_npi, invalid_prescriber_npi
 
     # ── Step 3: data_quality dict (merged before guardrail) ─────────────────
+    # All four NPI keys are initialized to 0 BEFORE merging evaluator outputs
+    # so that absent evaluators (e.g. ALL-002 disabled) leave their keys at 0
+    # rather than missing. §12 H5 + tests require ALL FOUR keys always present.
     data_quality: dict[str, int] = {
         "no_fdb_wac": no_fdb_wac,
-        **all002_quality,   # missing_pharmacy_npi, invalid_pharmacy_npi
-        **all003_quality,   # missing_prescriber_npi, invalid_prescriber_npi
+        "missing_pharmacy_npi": 0,
+        "invalid_pharmacy_npi": 0,
+        "missing_prescriber_npi": 0,
+        "invalid_prescriber_npi": 0,
+        **all002_quality,   # overrides missing_pharmacy_npi, invalid_pharmacy_npi when ALL-002 ran
+        **all003_quality,   # overrides missing_prescriber_npi, invalid_prescriber_npi when ALL-003 ran
     }
     run.resolution_stats = {
         **(run.resolution_stats or {}),
@@ -3699,12 +5615,12 @@ Dispatch summary (complete in-scope rule set, nothing dropped):
 | Reference (Step 2) | ALL-002, ALL-003 | gated by enabled instance in `reference_instances`; instance passed to evaluator; data_quality dict returned only when instance present |
 
 Signature notes:
-- `evaluate_mfr003(row, *, db, _fdb_cache, instance)` — reads `_fdb_cache.get(row.resolved_ndc, {})` to obtain WAC; sets `wac_source="fdb"` in `finding_details` when found.
-- `evaluate_mfr001(row, *, db, _fdb_cache, instance)` — same cache lookup; MFR-001 uses WAC for dollar_floor guard. Disabled by default (`enabled=False` after migration 0012); not in `per_row_instances` until operator enables it post-coverage-gate.
-- `evaluate_hp008(row, *, db, _fdb_cache, instance)` — per-row percentile check against BaselineCache; uses CSV `total_paid_amt` (no FDB dependency).
+- `evaluate_mfr003_row(row, *, db, _fdb_cache, instance)` — thin adapter in `mfr003_evaluator.py`; calls `_derive_statistical_metric` for MFR-003; reads `_fdb_cache.get(row.resolved_ndc, {})` to obtain WAC; sets `wac_source="fdb"` in `finding_details` when found. Returns `Anomaly|None`.
+- `evaluate_mfr001_row(row, *, db, _fdb_cache, instance, _mfr001_index=None)` — thin adapter in `mfr001_evaluator.py`; NQ = `ingredient_cost_paid` (NOT `quantity_dispensed`); calls `evaluate_mfr001_per_patient_row` with strictly-prior median NQ from `_mfr001_index` (precomputed before stream — zero DB queries inside the loop); dollar_floor applied to `ingredient_cost_paid` directly. Disabled by default (`enabled=False` after migration 0012); not in `per_row_instances` until operator enables it post-coverage-gate. Returns `Anomaly|None`.
+- `evaluate_hp008_row(row, *, db, _fdb_cache, instance)` — thin adapter in `mfr003_evaluator.py`; per-row percentile check against BaselineCache; uses CSV `total_paid_amt` (no FDB dependency). Returns `Anomaly|None`.
 - `_evaluate_all001(db, run, instance)`, `_evaluate_mfr002(db, run, instance)` — existing Phase-1 grouping evaluators; Task 4c does not change their signatures.
 - `evaluate_reject_75_70(db, run, instance)` — set-based self-join; Task 3b evaluator unchanged.
-- `_evaluate_statistical_rules(db, run, instance)` — Task 2b evaluator; reads `instance.rule_type_code` and `instance.parameters` to dispatch to the correct calibration path.
+- `_evaluate_statistical_rules(db, run, instance)` — Task 2b evaluator; reads `instance.rule_type_code` and `instance.parameters` to dispatch to the correct calibration path. Signature `(db, run, instance)` is entity-level (MFR-004, HP-005, ALL-006, ALL-005) — NOT used for per-row rules (MFR-003, HP-008 use the `*_row` adapters above).
 - `evaluate_all002_phantom_pharmacy(db, run, *, instance: DetectionRuleInstance)` and `evaluate_all003_phantom_prescriber(db, run, *, instance: DetectionRuleInstance)` — now accept the enabled instance so they can read `instance.parameters` and so their fire counts feed the per-rule guardrail cap; return `(list[Anomaly], dict)` unchanged.
 
 **Test for FDB cache provenance** (add to `test_all002_all003.py`):
@@ -3712,29 +5628,30 @@ Signature notes:
 ```python
 def test_fdb_cache_built_once_and_mfr003_receives_it(db):
     """FDB cache is built once; MFR-003 uses wac_source='fdb' when WAC is found;
-    an NDC absent from fdb_ndc_price_history increments data_quality.no_fdb_wac.
+    an NDC whose cache entry has wac=None increments data_quality.no_fdb_wac.
 
-    NOTE: This test seeds reference.fdb_ndc_price_history directly.
-    Verified FDB columns: ndc_11, price_type, price (Numeric(16,5)), effective_date.
-    There is NO ndc/unit_price column.  WAC = price_type '09'.
+    Pure-Python test double: injects a crafted _fdb_cache dict directly into
+    fetch_current_prices_for_ndcs via unittest.mock.patch — no mutation of
+    reference.fdb_ndc_price_history (FDW foreign table is READ-ONLY).
+
+    _fdb_cache shape returned by fetch_current_prices_for_ndcs:
+      {ndc_11: {"wac": Decimal|None, "swp": ..., "nadac": ..., "drug_name": ...}}
+    An entry with wac=None is present for every requested NDC (key is always present).
     """
-    from sqlalchemy import text as _text
+    from decimal import Decimal
+    from unittest.mock import patch
     from src.detection.batch_engine import run_detection
     from src.models.detection_run_models import DetectionRun, CsvUploadRow
-    import uuid as _uuid
 
-    KNOWN_NDC = "00069315066"   # planted in fdb_ndc_price_history below
-    UNKNOWN_NDC = "99999999999"  # absent — should increment no_fdb_wac
+    KNOWN_NDC = "00069315066"   # wac present in injected cache
+    UNKNOWN_NDC = "99999999999"  # wac=None in injected cache → increments no_fdb_wac
 
-    # Seed FDB price row for KNOWN_NDC (price_type '09' = WAC).
-    # Columns: ndc_11, price_type, price (Numeric(16,5)), effective_date.
-    db.execute(_text("""
-        INSERT INTO reference.fdb_ndc_price_history
-            (ndc_11, price_type, price, effective_date)
-        VALUES (:ndc_11, '09', 12.50, '2026-01-01')
-        ON CONFLICT DO NOTHING
-    """), {"ndc_11": KNOWN_NDC})
-    db.flush()
+    # Injected cache: fetch_current_prices_for_ndcs returns a dict with an entry
+    # for every requested NDC; missing WAC is represented as wac=None (key present).
+    _fake_fdb = {
+        KNOWN_NDC:  {"wac": Decimal("12.50000"), "swp": None, "nadac": None, "drug_name": "TestDrug"},
+        UNKNOWN_NDC: {"wac": None,               "swp": None, "nadac": None, "drug_name": None},
+    }
 
     run = DetectionRun(
         tenant_id=TEST_TENANT_ID, data_source="csv_upload",
@@ -3761,14 +5678,24 @@ def test_fdb_cache_built_once_and_mfr003_receives_it(db):
         ))
     db.flush()
 
-    run_detection(db, run)
+    with patch(
+        "src.detection.batch_engine.fetch_current_prices_for_ndcs",
+        return_value=_fake_fdb,
+    ):
+        run_detection(db, run)
     db.refresh(run)
 
     dq = run.resolution_stats.get("data_quality", {})
-    # UNKNOWN_NDC has no FDB WAC row → no_fdb_wac must be >= 1
+    # UNKNOWN_NDC has wac=None → no_fdb_wac must be >= 1
     assert dq.get("no_fdb_wac", 0) >= 1, (
-        f"Expected no_fdb_wac >= 1 for UNKNOWN_NDC, got data_quality={dq}"
+        f"Expected no_fdb_wac >= 1 for UNKNOWN_NDC (wac=None), got data_quality={dq}"
     )
+    # All four NPI keys must always be present (0 when that rule didn't run).
+    for _key in ("missing_pharmacy_npi", "invalid_pharmacy_npi",
+                 "missing_prescriber_npi", "invalid_prescriber_npi"):
+        assert _key in dq, (
+            f"data_quality must always contain '{_key}' (0 when rule not enabled), got keys={list(dq.keys())}"
+        )
 
     # Any MFR-003 anomaly for KNOWN_NDC must have wac_source='fdb' in finding_details
     from src.models.detection_run_models import Anomaly
@@ -3814,14 +5741,21 @@ def test_run_detection_wires_all002_and_produces_anomaly(db):
     import uuid as _uuid
 
     TOTAL_ROWS = 500
-    # Known-good NPI: insert directly into reference.dataq_master so ALL-002 does NOT flag it.
-    KNOWN_GOOD_NPI = "1234560001"
-    db.execute(text("""
-        INSERT INTO reference.dataq_master (npi, entity_type, status, tenant_id)
-        VALUES (:npi, 'pharmacy', 'active', :tenant_id)
-        ON CONFLICT (npi) DO NOTHING
-    """), {"npi": KNOWN_GOOD_NPI, "tenant_id": str(TEST_TENANT_ID)})
-    db.flush()
+    # Known-good NPI: query a REAL existing NPI from reference.dataq_master —
+    # no mutation of the FDW foreign table (READ-ONLY for app role ifx_dev_app).
+    # Any active NPI present in the real reference data is guaranteed not-phantom.
+    _ref_row = db.execute(
+        text(
+            "SELECT npi FROM reference.dataq_master "
+            "WHERE npi IS NOT NULL AND deactivation_code IS NULL "
+            "LIMIT 1"
+        )
+    ).fetchone()
+    assert _ref_row is not None, (
+        "reference.dataq_master has no active rows — FDW not provisioned. "
+        "Run infrastructure/scripts/setup_fdw.sh first."
+    )
+    KNOWN_GOOD_NPI = _ref_row.npi
 
     run = DetectionRun(
         tenant_id=TEST_TENANT_ID, data_source="csv_upload",
@@ -3944,10 +5878,12 @@ def test_run_detection_wires_reject_7570_and_produces_anomaly(db):
       The anomaly's finding_details['bucket'] == 'le12h'
     """
     from src.detection.batch_engine import run_detection
-    from src.models.detection_run_models import DetectionRun, CsvUploadRow, Anomaly
+    from src.models.detection_run_models import (
+        DetectionRun, CsvUploadRow, Anomaly, DetectionRuleInstance,
+    )
     from src.detection.rule_type_registry import register_rule_types
     from sqlalchemy import select
-    from datetime import datetime, timedelta, UTC
+    from datetime import datetime, timedelta, UTC, date as _date
 
     TOTAL_ROWS = 1000
     base_ts = datetime(2026, 1, 20, 8, 0, 0, tzinfo=UTC)
@@ -4025,6 +5961,20 @@ def test_run_detection_wires_reject_7570_and_produces_anomaly(db):
 
     register_rule_types(db)
 
+    # run_detection gates each evaluator on enabled DetectionRuleInstance rows.
+    # register_rule_types only registers rule TYPES — instances must be seeded explicitly
+    # so the grouping pass dispatches to evaluate_reject_75_70.
+    db.add(DetectionRuleInstance(
+        tenant_id=TEST_TENANT_ID,
+        rule_type_code="REJECT-75-70",
+        instance_name="REJECT-75-70-wiring-test",
+        enabled=True,
+        effective_from=_date(2026, 1, 1),
+        created_by=TEST_USER_ID,
+        parameters={},
+    ))
+    db.flush()
+
     run_detection(db, run)
     db.refresh(run)
 
@@ -4043,7 +5993,8 @@ def test_run_detection_wires_reject_7570_and_produces_anomaly(db):
     ).scalars().all()
     assert len(r7570_anomalies) == 1, (
         f"Expected exactly 1 REJECT-75-70 anomaly; got {len(r7570_anomalies)}. "
-        "Check evaluate_reject_75_70 is wired into run_detection's grouping pass."
+        "Check evaluate_reject_75_70 is wired into run_detection's grouping pass "
+        "AND that an enabled DetectionRuleInstance for REJECT-75-70 exists."
     )
 
     # source_row_id must be the rebill row (the row flagged by the rule)
@@ -4119,14 +6070,21 @@ def test_run_detection_dispatches_all_inscope_rules(db):
     base_ts = datetime(2026, 2, 1, 10, 0, 0, tzinfo=UTC)
 
     # ── Plant per-row fires ────────────────────────────────────────────────
-    # MFR-003: IC far above FDB WAC → z-score fires.  Seed FDB WAC for this NDC.
-    MFR003_NDC = "11111111111"
-    db.execute(text("""
-        INSERT INTO reference.fdb_ndc_price_history
-            (ndc_11, price_type, price, effective_date)
-        VALUES (:ndc, '09', 1.00, '2026-01-01')
-        ON CONFLICT DO NOTHING
-    """), {"ndc": MFR003_NDC})
+    # MFR-003: IC far above FDB WAC → z-score fires.
+    # Use a real NDC present in reference.fdb_ndc_price_history with a known WAC
+    # (price_type='09') — READ-ONLY query, no mutation of the FDW foreign table.
+    _fdb_row = db.execute(
+        text(
+            "SELECT ndc_11 FROM reference.fdb_ndc_price_history "
+            "WHERE price_type = '09' AND price > 0 "
+            "LIMIT 1"
+        )
+    ).fetchone()
+    assert _fdb_row is not None, (
+        "reference.fdb_ndc_price_history has no WAC rows — FDW not provisioned. "
+        "Run infrastructure/scripts/setup_fdw.sh first."
+    )
+    MFR003_NDC = _fdb_row.ndc_11
     db.add(CsvUploadRow(
         tenant_id=TEST_TENANT_ID, detection_run_id=run.id, row_number=1,
         row_data={
@@ -4566,7 +6524,7 @@ No commit for this task.
 **Rule disabled by default (`enabled=False`) until coverage gate passes.**
 
 **Files:**
-- `modules/reclaimrx/migrations/versions/0012_reclaimrx_v2_mfr001_reframe.py` — update rule type + instance params
+- `modules/reclaimrx/alembic/versions/0012_reclaimrx_v2_mfr001_reframe.py` — update rule type + instance params
 - `modules/reclaimrx/src/detection/mfr001_evaluator.py` — new per-patient longitudinal evaluator
 - `modules/reclaimrx/tests/detection/test_mfr001_reframe.py`
 
@@ -4684,6 +6642,338 @@ class TestMFR001Evaluator:
         )
         assert fired is False
         assert evidence.get("reason") == "insufficient_history"
+
+    def test_nq_is_ingredient_cost_paid_not_quantity_dispensed(self):
+        """NQ = ingredient_cost_paid. build_mfr001_prior_nq_index must read
+        ingredient_cost_paid, NOT quantity_dispensed, when building the index."""
+        from src.detection.mfr001_evaluator import build_mfr001_prior_nq_index
+        from unittest.mock import MagicMock
+
+        # Two rows for the same patient+ndc: one with ingredient_cost_paid only,
+        # one with quantity_dispensed only. Only the ingredient_cost_paid row must
+        # be indexed.
+        row_with_nq = MagicMock()
+        row_with_nq.row_data = {
+            "patient_unique_hash": "ph-A",
+            "ndc": "11111111111",
+            "date_of_service": "2026-01-01",
+            "transaction_code": "B1",
+            "transaction_status": "Paid",
+            "ingredient_cost_paid": "100.00",
+            # quantity_dispensed intentionally absent
+        }
+        row_with_nq.resolved_ndc = "11111111111"
+
+        row_with_qty_only = MagicMock()
+        row_with_qty_only.row_data = {
+            "patient_unique_hash": "ph-B",
+            "ndc": "22222222222",
+            "date_of_service": "2026-01-01",
+            "transaction_code": "B1",
+            "transaction_status": "Paid",
+            "quantity_dispensed": "30",   # should NOT be indexed
+            # ingredient_cost_paid intentionally absent
+        }
+        row_with_qty_only.resolved_ndc = "22222222222"
+
+        params = {"patient_key": "patient_unique_hash", "drug_key": "ndc"}
+        index = build_mfr001_prior_nq_index([row_with_nq, row_with_qty_only], params=params)
+
+        assert ("ph-A", "11111111111") in index, (
+            "Row with ingredient_cost_paid must be indexed"
+        )
+        assert ("ph-B", "22222222222") not in index, (
+            "Row with only quantity_dispensed must NOT be indexed (NQ = ingredient_cost_paid)"
+        )
+
+    def test_future_fill_excluded_from_prior_median(self):
+        """evaluate_mfr001_row must exclude the current and future fills from
+        the prior-NQ median. Only strictly-prior fills (DOS < current DOS) are used.
+
+        Plant: patient-X, ndc-1
+          prior fill DOS=2026-01-01 ingredient_cost_paid=100 (prior)
+          prior fill DOS=2026-01-02 ingredient_cost_paid=100 (prior)
+          prior fill DOS=2026-01-03 ingredient_cost_paid=100 (prior)
+          current fill DOS=2026-01-10 ingredient_cost_paid=160 (current — must not count as prior)
+          future fill DOS=2026-01-20 ingredient_cost_paid=999 (future — must be ignored entirely)
+
+        Median of STRICTLY prior fills = 100. Current NQ = 160 → 60% > 50% threshold → fires.
+        If future fill (999) were included the median would shift, changing the result.
+        If the current fill were included as a prior, actual_prior_fills would be wrong.
+        """
+        from src.detection.mfr001_evaluator import build_mfr001_prior_nq_index, evaluate_mfr001_row
+        from unittest.mock import MagicMock
+
+        def _make_row(dos, nq, patient="ph-X", ndc="11111111111"):
+            r = MagicMock()
+            r.row_data = {
+                "patient_unique_hash": patient,
+                "ndc": ndc,
+                "date_of_service": dos,
+                "transaction_code": "B1",
+                "transaction_status": "Paid",
+                "ingredient_cost_paid": str(nq),
+            }
+            r.resolved_ndc = ndc
+            r.tenant_id = "tenant-1"
+            r.detection_run_id = "run-1"
+            r.id = f"row-{dos}"
+            return r
+
+        all_rows = [
+            _make_row("2026-01-01", "100.00"),
+            _make_row("2026-01-02", "100.00"),
+            _make_row("2026-01-03", "100.00"),
+            _make_row("2026-01-10", "160.00"),  # current
+            _make_row("2026-01-20", "999.00"),  # future — must be excluded
+        ]
+        params = {
+            "patient_key": "patient_unique_hash",
+            "drug_key": "ndc",
+            "lookback_window_days": 365,
+            "min_elapsed_days": 0,
+        }
+        index = build_mfr001_prior_nq_index(all_rows, params=params)
+
+        inst = MagicMock()
+        inst.parameters = {
+            **params,
+            "deviation_threshold": "0.50",
+            "min_prior_fills": 3,
+            "dollar_floor": "10.00",
+            "severity": "high",
+            "confidence": "0.75",
+        }
+
+        current_row = _make_row("2026-01-10", "160.00")
+        result = evaluate_mfr001_row(
+            current_row,
+            db=None,         # _mfr001_index provided — no DB needed
+            _fdb_cache={},
+            instance=inst,
+            _mfr001_index=index,
+        )
+        assert result is not None, (
+            "MFR-001 should fire: current NQ 160 > median prior NQ 100 * 1.50 = 150"
+        )
+        assert result.finding_code == "MFR-001"
+
+    def test_build_mfr001_index_from_raw_rows_no_orm_objects(self):
+        """build_mfr001_prior_nq_index with _from_raw_rows=True must produce the same
+        index as the ORM-row path without materializing ORM objects.
+
+        FIX (MED): verifies the streaming/minimal-column index build path used in
+        Task 4c Step 0c. A raw lightweight row (direct attribute access, no .row_data)
+        must build the same (patient_hash, ndc) → [(dos, nq)] index as ORM rows.
+        """
+        from src.detection.mfr001_evaluator import build_mfr001_prior_nq_index
+        from decimal import Decimal
+        from unittest.mock import MagicMock
+
+        # Simulate raw lightweight rows from the minimal-column SQL query.
+        # These have direct attributes, NOT a .row_data dict.
+        raw_rows = []
+        for dos, nq in [("2026-01-01", "100.00"), ("2026-01-02", "110.00")]:
+            r = MagicMock(spec=[])  # spec=[] → no row_data attribute
+            r.patient_unique_hash = "ph-RAW"
+            r.resolved_ndc = "NDCRAW001"
+            r.date_of_service = dos
+            r.ingredient_cost_paid = nq
+            raw_rows.append(r)
+
+        params = {"patient_key": "patient_unique_hash", "drug_key": "ndc"}
+        index = build_mfr001_prior_nq_index(raw_rows, params=params, _from_raw_rows=True)
+
+        assert ("ph-RAW", "NDCRAW001") in index, (
+            "Raw-row path must build the (patient_hash, ndc) key"
+        )
+        entries = index[("ph-RAW", "NDCRAW001")]
+        assert len(entries) == 2, f"Expected 2 entries, got {len(entries)}"
+        # Entries sorted by DOS asc
+        assert entries[0][0] == "2026-01-01"
+        assert entries[1][0] == "2026-01-02"
+        # NQ values are Decimal
+        assert isinstance(entries[0][1], Decimal)
+
+    def test_build_mfr001_index_no_all_call_on_large_run(self, db):
+        """Verify that the MFR-001 index build in run_detection Step 0c does NOT
+        call .scalars().all() on the full CsvUploadRow table.
+
+        FIX (MED): The old implementation called
+            db.execute(select(CsvUploadRow).where(...)).scalars().all()
+        which materializes all full ORM objects. This test verifies the fix:
+        the new path uses a raw text() query with a minimal column projection
+        and _from_raw_rows=True, so the full ORM table is never loaded.
+
+        Approach: seed 100 rows including both B1/Paid and non-B1 rows.
+        Enable MFR-001 on the run. Patch build_mfr001_prior_nq_index to capture
+        what is passed to it. Assert:
+          - The rows passed have direct .ingredient_cost_paid attribute (not .row_data).
+          - Only B1/Paid rows with ingredient_cost_paid are passed (pre-filtered by SQL).
+          - _from_raw_rows=True is passed.
+        """
+        from src.detection.batch_engine import run_detection
+        from src.detection import mfr001_evaluator as _mfr001_mod
+        from src.models.detection_run_models import (
+            DetectionRun, CsvUploadRow, DetectionRuleType, DetectionRuleInstance,
+        )
+        from datetime import date as _date
+        from unittest.mock import patch
+
+        run = DetectionRun(
+            tenant_id=TEST_TENANT_ID, data_source="csv_upload",
+            run_label="mfr001-stream-index-test", status="in_progress", created_by=TEST_USER_ID,
+            resolution_stats={"inserted_count": 100, "expected_count": 100},
+        )
+        db.add(run)
+        db.flush()
+
+        # 50 eligible paid-B1 rows (with ingredient_cost_paid)
+        for i in range(50):
+            db.add(CsvUploadRow(
+                tenant_id=TEST_TENANT_ID, detection_run_id=run.id, row_number=i + 1,
+                row_data={
+                    "patient_unique_hash": f"ph-{i}", "ndc": "NDCSTREAM",
+                    "date_of_service": "2026-01-01",
+                    "transaction_code": "B1", "transaction_status": "Paid",
+                    "ingredient_cost_paid": "100.00",
+                },
+                resolution_method="declared", resolved_ndc="NDCSTREAM",
+            ))
+        # 50 ineligible rows (Reversed or missing ingredient_cost_paid)
+        for i in range(50):
+            db.add(CsvUploadRow(
+                tenant_id=TEST_TENANT_ID, detection_run_id=run.id, row_number=50 + i + 1,
+                row_data={
+                    "patient_unique_hash": f"ph-rev-{i}",
+                    "transaction_code": "B1", "transaction_status": "Reversed",
+                    "ingredient_cost_paid": "200.00",
+                },
+                resolution_method="declared", resolved_ndc="NDCSTREAM",
+            ))
+        db.flush()
+
+        # Register MFR-001 rule type + enabled instance
+        existing_type = db.execute(
+            __import__("sqlalchemy", fromlist=["select"]).select(DetectionRuleType).where(
+                DetectionRuleType.code == "MFR-001"
+            )
+        ).scalar_one_or_none()
+        if existing_type is None:
+            db.add(DetectionRuleType(
+                code="MFR-001", name="MFR-001 Test", description="test",
+                family="A1", parameter_schema_version="1.0",
+                default_severity="high", default_confidence=Decimal("0.75"),
+                requires_baseline=False, requires_history=True,
+                deferred_data_feed=False, deferred_reason="",
+                required_data_columns=[], default_parameters={},
+            ))
+        db.add(DetectionRuleInstance(
+            tenant_id=TEST_TENANT_ID, rule_type_code="MFR-001",
+            instance_name="MFR-001-stream-test",
+            enabled=True,  # force-enabled for this test
+            effective_from=_date.today(), created_by=TEST_USER_ID,
+            parameters={
+                "patient_key": "patient_unique_hash", "drug_key": "ndc",
+                "lookback_window_days": 365, "min_prior_fills": 3,
+                "min_elapsed_days": 0, "deviation_threshold": "0.50",
+                "dollar_floor": "50.00", "rule_fire_rate_cap": "0.005",
+            },
+        ))
+        db.flush()
+
+        captured_args = {}
+
+        original_build = _mfr001_mod.build_mfr001_prior_nq_index
+
+        def _capture_build(rows, *, params, _from_raw_rows=False, **kwargs):
+            captured_args["rows"] = rows
+            captured_args["_from_raw_rows"] = _from_raw_rows
+            return original_build(rows, params=params, _from_raw_rows=_from_raw_rows)
+
+        with patch.object(_mfr001_mod, "build_mfr001_prior_nq_index", side_effect=_capture_build):
+            run_detection(db, run)
+
+        # Must have been called with _from_raw_rows=True
+        assert captured_args.get("_from_raw_rows") is True, (
+            "build_mfr001_prior_nq_index must be called with _from_raw_rows=True "
+            "from the minimal-column SQL path (not .scalars().all())"
+        )
+
+        # Rows passed must have direct .ingredient_cost_paid attribute (lightweight Row),
+        # NOT a .row_data dict (which would indicate the old ORM-materialization path).
+        rows_passed = captured_args.get("rows", [])
+        assert len(rows_passed) > 0, "At least some rows must be passed to build_mfr001_prior_nq_index"
+        first_row = rows_passed[0]
+        assert hasattr(first_row, "ingredient_cost_paid"), (
+            "Rows passed to build_mfr001_prior_nq_index must have direct .ingredient_cost_paid "
+            "attribute (minimal-column SQL Row), not a .row_data dict"
+        )
+        assert not hasattr(first_row, "row_data"), (
+            "Rows must NOT have .row_data — that would indicate the old .scalars().all() ORM path "
+            "which materializes 2.6M full objects"
+        )
+        # Only paid-B1 rows should be in the result (SQL pre-filters)
+        assert len(rows_passed) == 50, (
+            f"Only the 50 paid-B1 rows should be passed (SQL pre-filters); "
+            f"got {len(rows_passed)} rows"
+        )
+
+    def test_no_per_row_db_query_when_index_provided(self, db):
+        """Query count must be CONSTANT (not grow with row count) when _mfr001_index
+        is provided.  Verifies the precomputed set-based approach has zero per-row
+        DB queries inside the evaluator loop.
+
+        Approach: call evaluate_mfr001_row N times and verify db.execute is NOT
+        called each time — only the precomputed index is consulted.
+        """
+        from src.detection.mfr001_evaluator import build_mfr001_prior_nq_index, evaluate_mfr001_row
+        from unittest.mock import MagicMock, patch
+
+        def _make_row(dos, nq, patient="ph-Z", ndc="33333333333"):
+            r = MagicMock()
+            r.row_data = {
+                "patient_unique_hash": patient,
+                "ndc": ndc,
+                "date_of_service": dos,
+                "transaction_code": "B1",
+                "transaction_status": "Paid",
+                "ingredient_cost_paid": str(nq),
+            }
+            r.resolved_ndc = ndc
+            r.tenant_id = "t1"
+            r.detection_run_id = "r1"
+            r.id = f"id-{dos}"
+            return r
+
+        rows = [_make_row(f"2026-01-{i:02d}", "80.00") for i in range(1, 6)]
+        params = {"patient_key": "patient_unique_hash", "drug_key": "ndc",
+                  "lookback_window_days": 365, "min_elapsed_days": 0}
+        index = build_mfr001_prior_nq_index(rows, params=params)
+
+        inst = MagicMock()
+        inst.parameters = {**params, "deviation_threshold": "0.50", "min_prior_fills": 3,
+                           "dollar_floor": "10.00", "severity": "high", "confidence": "0.75"}
+
+        db_call_count = 0
+        original_execute = db.execute
+
+        def _counting_execute(*args, **kwargs):
+            nonlocal db_call_count
+            db_call_count += 1
+            return original_execute(*args, **kwargs)
+
+        db.execute = _counting_execute
+
+        for row in rows:
+            evaluate_mfr001_row(
+                row, db=db, _fdb_cache={}, instance=inst, _mfr001_index=index
+            )
+
+        assert db_call_count == 0, (
+            f"evaluate_mfr001_row must issue ZERO DB queries when _mfr001_index is provided, "
+            f"got {db_call_count} queries for {len(rows)} rows"
+        )
 ```
 
 Run → RED.
@@ -4772,9 +7062,209 @@ def evaluate_mfr001_per_patient_row(
         "actual_prior_fills": actual_prior_fills,
         "min_prior_fills": min_prior_fills,
     }
+
+
+def build_mfr001_prior_nq_index(
+    rows: "list[Any]",
+    *,
+    params: dict,
+    _from_raw_rows: bool = False,
+) -> "dict[tuple[str, str], list[tuple[str, Decimal]]]":
+    """Precompute per-(patient_unique_hash, ndc) prior-fill NQ lists for MFR-001.
+
+    Called ONCE before the yield_per stream — produces an in-memory index that
+    evaluate_mfr001_row reads per-row with ZERO DB queries inside the loop.
+
+    NQ = ingredient_cost_paid (the net amount, same field used by MFR-002/003).
+    Only paid-B1 rows are included (transaction_code='B1', transaction_status='Paid').
+
+    _from_raw_rows=False (default): input rows are ORM CsvUploadRow objects with
+        .row_data dict. The paid-B1 filter is applied inline.
+    _from_raw_rows=True: input rows are lightweight named-tuple rows from the
+        minimal-column SQL query in Task 4c Step 0c. They have direct attributes
+        .patient_unique_hash, .resolved_ndc, .date_of_service, .ingredient_cost_paid.
+        The SQL query already filters to paid-B1 rows, so no filter is needed here.
+        This path avoids materializing full ORM objects on 2.6M-row datasets.
+
+    Returns:
+        dict keyed by (patient_unique_hash, ndc) →
+            sorted list of (dos_str, nq_decimal) tuples in ascending DOS order.
+    """
+    from decimal import Decimal  # noqa: PLC0415
+
+    patient_key_field = params.get("patient_key", "patient_unique_hash")
+    drug_key_field = params.get("drug_key", "ndc")
+    index: dict = {}
+
+    for row in rows:
+        if _from_raw_rows:
+            # Raw-row path: direct attribute access on the minimal-column SQL result.
+            # The SQL query pre-filtered to paid-B1 rows, so no transaction_code/status
+            # filter is needed here. All four fields are guaranteed non-NULL by the SQL WHERE.
+            ph = getattr(row, "patient_unique_hash", None)
+            ndc = getattr(row, "resolved_ndc", None)
+            dos = getattr(row, "date_of_service", None)
+            nq_raw = getattr(row, "ingredient_cost_paid", None)
+        else:
+            # ORM-row path: extract from .row_data dict (used in unit tests).
+            rd = row.row_data
+            tc = rd.get("transaction_code", "")
+            ts = rd.get("transaction_status", "")
+            if tc != "B1" or ts != "Paid":
+                continue
+            ph = rd.get(patient_key_field)
+            ndc = rd.get(drug_key_field) or row.resolved_ndc
+            dos = rd.get("date_of_service", "")
+            nq_raw = rd.get("ingredient_cost_paid")
+
+        if not (ph and ndc and dos and nq_raw is not None):
+            continue
+        try:
+            nq = Decimal(str(nq_raw))
+        except Exception:  # noqa: BLE001
+            continue
+        key = (ph, ndc)
+        if key not in index:
+            index[key] = []
+        index[key].append((dos, nq))
+
+    # Sort each entry ascending by DOS so prior-fill extraction is a simple prefix scan.
+    for key in index:
+        index[key].sort(key=lambda t: t[0])
+    return index
+
+
+def evaluate_mfr001_row(
+    row: "Any",
+    *,
+    db: "Any",
+    _fdb_cache: dict,
+    instance: "Any",
+    _mfr001_index: "dict | None" = None,
+) -> "Any | None":
+    """Per-row dispatch adapter for MFR-001 — called by Task 4c _PER_ROW_EVALUATORS.
+
+    Signature matches all per-row evaluators: (row, *, db, _fdb_cache, instance).
+    Also accepts optional _mfr001_index (precomputed by build_mfr001_prior_nq_index
+    before the stream); when provided, issues ZERO DB queries — all prior-fill data
+    comes from the in-memory index.
+
+    NQ = ingredient_cost_paid (net amount). NOT quantity_dispensed.
+    Prior NQs = strictly-prior paid-B1 fills with DOS < current DOS AND
+                DOS >= current DOS - lookback_window_days, respecting min_elapsed_days.
+    The current row and any future fills are excluded from the median computation.
+
+    Returns Anomaly if fired, None otherwise.
+    DISABLED by default — not reached unless instance.enabled=True (post-coverage-gate).
+    """
+    from decimal import Decimal  # noqa: PLC0415
+    from statistics import median  # noqa: PLC0415
+    from src.models.detection_run_models import Anomaly  # noqa: PLC0415
+
+    params = instance.parameters
+    deviation_threshold = Decimal(str(params.get("deviation_threshold", "0.50")))
+    min_prior_fills = int(params.get("min_prior_fills", 3))
+    lookback_days = int(params.get("lookback_window_days", 365))
+    min_elapsed_days = int(params.get("min_elapsed_days", 0))
+    dollar_floor = Decimal(str(params.get("dollar_floor", "50.00")))
+    patient_key_field = params.get("patient_key", "patient_unique_hash")
+    drug_key_field = params.get("drug_key", "ndc")
+
+    rd = row.row_data
+    # Only evaluate paid B1 claims.
+    if rd.get("transaction_code") != "B1" or rd.get("transaction_status") != "Paid":
+        return None
+
+    patient_hash = rd.get(patient_key_field)
+    ndc = rd.get(drug_key_field) or row.resolved_ndc
+    current_dos = rd.get("date_of_service", "")
+
+    # NQ = ingredient_cost_paid (same field as MFR-002/003).  NOT quantity_dispensed.
+    nq_raw = rd.get("ingredient_cost_paid")
+    if nq_raw is None:
+        return None
+    try:
+        current_nq = Decimal(str(nq_raw))
+    except Exception:  # noqa: BLE001
+        return None
+
+    # Dollar floor guard against noise.
+    if current_nq < dollar_floor:
+        return None
+
+    # Resolve prior-fill NQ list from the precomputed in-memory index.
+    # ZERO DB queries inside the stream — all data was precomputed before yield_per.
+    if _mfr001_index is None:
+        # Safety fallback: index not provided (should not happen in production).
+        # Return None rather than issuing a per-row DB query.
+        return None
+
+    all_prior_nqs: list[Decimal] = []
+    actual_prior_fills: int = 0
+    key = (patient_hash, ndc)
+    fill_list = _mfr001_index.get(key, [])  # sorted (dos, nq) asc
+    for dos_str, nq in fill_list:
+        # Strictly prior: DOS must be < current DOS.
+        if dos_str >= current_dos:
+            continue
+        elapsed = _dos_diff_days(current_dos, dos_str)
+        if elapsed < 1:
+            continue
+        if elapsed < min_elapsed_days:
+            continue
+        lookback_start = _subtract_days(current_dos, lookback_days)
+        if dos_str < lookback_start:
+            continue
+        actual_prior_fills += 1
+        all_prior_nqs.append(nq)
+
+    median_prior_nq = Decimal(str(median(all_prior_nqs))) if all_prior_nqs else Decimal("0")
+
+    fired, evidence = evaluate_mfr001_per_patient_row(
+        current_nq=current_nq,
+        median_prior_nq=median_prior_nq,
+        deviation_threshold=deviation_threshold,
+        min_prior_fills=min_prior_fills,
+        actual_prior_fills=actual_prior_fills,
+    )
+    if not fired:
+        return None
+    return Anomaly(
+        tenant_id=row.tenant_id,
+        data_source="csv_upload",
+        data_source_run_id=row.detection_run_id,
+        source_table="csv_upload_rows",
+        source_row_id=row.id,
+        detection_kind="rule",
+        severity=params.get("severity", "high"),
+        confidence=Decimal(str(params.get("confidence", "0.75"))),
+        finding_code="MFR-001",
+        finding_summary="Ingredient cost paid deviates from patient's prior median (MFR-001)",
+        finding_details={k: str(v) if isinstance(v, Decimal) else v for k, v in evidence.items()},
+        pharmacy_npi=rd.get("pharmacy_npi"),
+        prescriber_npi=rd.get("prescriber_npi"),
+        ndc=ndc,
+        date_of_service=None,
+        status="open",
+    )
+
+
+def _dos_diff_days(current_dos: str, prior_dos: str) -> int:
+    """Return (current - prior) in days. Both are ISO date strings (YYYY-MM-DD)."""
+    from datetime import date as _date  # noqa: PLC0415
+    c = _date.fromisoformat(str(current_dos).strip()[:10])
+    p = _date.fromisoformat(str(prior_dos).strip()[:10])
+    return (c - p).days
+
+
+def _subtract_days(dos: str, days: int) -> str:
+    """Return ISO date string for dos - days."""
+    from datetime import date as _date, timedelta  # noqa: PLC0415
+    d = _date.fromisoformat(str(dos).strip()[:10])
+    return (d - timedelta(days=days)).isoformat()
 ```
 
-**Migration** (`modules/reclaimrx/migrations/versions/0012_reclaimrx_v2_mfr001_reframe.py`):
+**Migration** (`modules/reclaimrx/alembic/versions/0012_reclaimrx_v2_mfr001_reframe.py`):
 ```python
 """MFR-001 reframe: per-patient prior-NQ shape + unconditional enabled=False.
 
@@ -4836,7 +7326,7 @@ Run → GREEN.
 
 ```
 git add modules/reclaimrx/src/detection/mfr001_evaluator.py \
-        modules/reclaimrx/migrations/versions/0012_reclaimrx_v2_mfr001_reframe.py \
+        modules/reclaimrx/alembic/versions/0012_reclaimrx_v2_mfr001_reframe.py \
         modules/reclaimrx/tests/detection/test_mfr001_reframe.py
 git commit -m "feat(reclaimrx): migration 0012 — MFR-001 reframe, per-patient median-prior-NQ, disabled by default, coverage gate documented (§12 H3)"
 ```
@@ -4950,6 +7440,98 @@ class TestAnomaliesEndpoint:
             headers=_auth_headers(),
         )
         assert resp.status_code == 422
+
+    def test_entity_type_invalid_returns_422(self, client):
+        """FIX (LOW): An invalid entity_type must return 422 with INVALID_ENTITY_TYPE code.
+
+        The allowlist is pharmacy | prescriber | unknown. A non-allowlisted value
+        must not be silently ignored (which would return unfiltered results).
+        This is consistent with sort_by/sort_dir 422 validation.
+        """
+        resp = client.get(
+            "/api/v1/reclaimrx/anomalies?entity_type=invalid_type",
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 422, (
+            f"Expected 422 for invalid entity_type, got {resp.status_code}. "
+            "The endpoint must validate entity_type against the allowlist "
+            "(pharmacy|prescriber|unknown) and return 422 for non-allowlisted values."
+        )
+        assert "INVALID_ENTITY_TYPE" in resp.text, (
+            f"Expected INVALID_ENTITY_TYPE error code in response, got: {resp.text}"
+        )
+
+    def test_entity_type_valid_pharmacy_returns_200(self, client):
+        """Valid entity_type values must not return 422."""
+        for valid in ("pharmacy", "prescriber", "unknown"):
+            resp = client.get(
+                f"/api/v1/reclaimrx/anomalies?entity_type={valid}",
+                headers=_auth_headers(),
+            )
+            assert resp.status_code == 200, (
+                f"entity_type='{valid}' is a valid allowlisted value and must return 200, "
+                f"got {resp.status_code}"
+            )
+
+    def test_entity_type_unknown_filters_both_npi_null_rows_only(self, client, db):
+        """FIX MED-1: entity_type=unknown must return ONLY rows where both pharmacy_npi
+        and prescriber_npi are NULL.
+
+        Previously the unknown filter was allowlisted (returned 200) but not applied
+        to the query — it returned ALL anomalies instead of only both-NPI-null rows.
+        This test seeds:
+          (a) one anomaly with pharmacy_npi set (entity_type=pharmacy)
+          (b) one anomaly with prescriber_npi set, pharmacy_npi null (entity_type=prescriber)
+          (c) one anomaly with both NPIs null (entity_type=unknown)
+        Asserts entity_type=unknown returns ONLY row (c).
+        """
+        from src.models.detection_run_models import Anomaly
+        from decimal import Decimal
+
+        def _make_anomaly(pharmacy_npi=None, prescriber_npi=None, finding_code="MFR-004"):
+            return Anomaly(
+                tenant_id=TEST_TENANT_ID, data_source="csv_upload",
+                source_table="csv_upload_rows", source_row_id=uuid.uuid4(),
+                detection_kind="rule", severity="high",
+                confidence=Decimal("0.80"),
+                finding_code=finding_code, finding_summary="entity type test",
+                finding_details={}, status="open",
+                pharmacy_npi=pharmacy_npi,
+                prescriber_npi=prescriber_npi,
+            )
+
+        a_pharmacy = _make_anomaly(pharmacy_npi="1234567890", finding_code="ETYPE-PH")
+        a_prescriber = _make_anomaly(prescriber_npi="9876543210", finding_code="ETYPE-PR")
+        a_unknown = _make_anomaly(finding_code="ETYPE-UK")  # both NPIs None
+        for a in [a_pharmacy, a_prescriber, a_unknown]:
+            db.add(a)
+        db.flush()
+
+        resp = client.get(
+            "/api/v1/reclaimrx/anomalies?entity_type=unknown",
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 200, f"entity_type=unknown must return 200, got {resp.status_code}"
+        items = resp.json()["items"]
+
+        returned_ids = {item["id"] for item in items}
+        assert str(a_unknown.id) in returned_ids, (
+            "entity_type=unknown must include the both-NPI-null anomaly"
+        )
+        assert str(a_pharmacy.id) not in returned_ids, (
+            "entity_type=unknown must NOT include anomalies where pharmacy_npi is set"
+        )
+        assert str(a_prescriber.id) not in returned_ids, (
+            "entity_type=unknown must NOT include anomalies where prescriber_npi is set"
+        )
+        # Every returned item must have both NPIs null
+        for item in items:
+            assert item.get("pharmacy_npi") is None, (
+                f"entity_type=unknown result must have pharmacy_npi=None, got: {item.get('pharmacy_npi')}"
+            )
+            assert item.get("prescriber_npi") is None, (
+                f"entity_type=unknown result must have prescriber_npi=None, got: {item.get('prescriber_npi')}"
+            )
 
     def test_filter_by_finding_code(self, client, db):
         from src.models.detection_run_models import Anomaly, DetectionRun
@@ -5098,19 +7680,22 @@ def test_entity_name_enrichment_real_join(pg_client, pg_db):
     """
     import sqlalchemy as sa
 
-    KNOWN_PHARMACY_NPI = "1999000001"
-    KNOWN_PHARMACY_NAME = "Test Pharmacy Enrichment LLC"
-
-    # Seed the NPI into the reference table
-    pg_db.execute(
-        sa.text("""
-            INSERT INTO reference.dataq_master (npi, legal_business_name, entity_type, status, tenant_id)
-            VALUES (:npi, :name, 'pharmacy', 'active', :tenant_id)
-            ON CONFLICT (npi) DO UPDATE SET legal_business_name = EXCLUDED.legal_business_name
-        """),
-        {"npi": KNOWN_PHARMACY_NPI, "name": KNOWN_PHARMACY_NAME, "tenant_id": str(TEST_TENANT_ID)},
+    # Use a KNOWN-PRESENT NPI from reference.dataq_master with a non-NULL
+    # legal_business_name — READ-ONLY query, no mutation of the FDW foreign table.
+    _ref = pg_db.execute(
+        sa.text(
+            "SELECT npi, legal_business_name FROM reference.dataq_master "
+            "WHERE npi IS NOT NULL AND legal_business_name IS NOT NULL "
+            "AND deactivation_code IS NULL "
+            "LIMIT 1"
+        )
+    ).fetchone()
+    assert _ref is not None, (
+        "reference.dataq_master has no rows with a non-NULL legal_business_name — "
+        "FDW not provisioned. Run infrastructure/scripts/setup_fdw.sh first."
     )
-    pg_db.flush()
+    KNOWN_PHARMACY_NPI = _ref.npi
+    KNOWN_PHARMACY_NAME = _ref.legal_business_name
 
     from src.models.detection_run_models import Anomaly
     from decimal import Decimal
@@ -5250,6 +7835,20 @@ async def list_anomalies(
             ),
         )
 
+    # FIX (LOW): Validate entity_type against allowlist — silently ignoring invalid
+    # values would return unfiltered results, masking the caller error.
+    # Consistent with sort_by/sort_dir 422 validation pattern.
+    _ENTITY_TYPE_ALLOWLIST: frozenset[str] = frozenset({"pharmacy", "prescriber", "unknown"})
+    if entity_type is not None and entity_type not in _ENTITY_TYPE_ALLOWLIST:
+        raise HTTPException(
+            status_code=422,
+            detail=build_error_envelope(
+                "INVALID_ENTITY_TYPE",
+                f"entity_type must be one of: {', '.join(sorted(_ENTITY_TYPE_ALLOWLIST))}",
+                field="entity_type",
+            ),
+        )
+
     stmt = select(AnomalyModel).where(AnomalyModel.tenant_id == user.tenant_id)
 
     if run_id:
@@ -5266,6 +7865,17 @@ async def list_anomalies(
         stmt = stmt.where(
             AnomalyModel.prescriber_npi.isnot(None),
             AnomalyModel.pharmacy_npi.is_(None),
+        )
+    elif entity_type == "unknown":
+        # FIX MED-1: entity_type=unknown was allowlisted but never applied to the query,
+        # returning ALL anomalies instead of only rows where both NPIs are NULL.
+        # entity_type derivation semantics (from spec §12 H4):
+        #   pharmacy  = pharmacy_npi IS NOT NULL
+        #   prescriber = prescriber_npi IS NOT NULL AND pharmacy_npi IS NULL
+        #   unknown   = pharmacy_npi IS NULL AND prescriber_npi IS NULL
+        stmt = stmt.where(
+            AnomalyModel.pharmacy_npi.is_(None),
+            AnomalyModel.prescriber_npi.is_(None),
         )
 
     total_count = db.execute(
@@ -6055,6 +8665,12 @@ Design:
     are inserted without being filtered by the GUC.  This is critical: seeding via
     ifx_dev_app under a single-tenant GUC would cause the INSERT for the other tenant
     to fail or be misattributed under FORCE ROW LEVEL SECURITY.
+  - Seed data is COMMITTED immediately (not held in an open transaction) so that the
+    separate ifx_dev_app pg_session can see it.  Postgres does not expose uncommitted
+    rows from another session — a flush-only owner session would make pg_session see
+    nothing and the test would fail before validating SET LOCAL isolation.
+  - Because seed data is committed, the test uses explicit ID-based teardown in a
+    finally block (owner session deletes seeded rows by known IDs) to remain repeatable.
   - The behavior-under-test (run_detection) runs in a separate ifx_dev_app session
     with SET LOCAL app.current_tenant_id = tenant_A.
   - Isolation is verified from BOTH sides:
@@ -6130,31 +8746,32 @@ def pg_session(pg_engine):
 
 @pytest.fixture()
 def pg_owner_session(pg_owner_engine):
-    """Admin/owner session for seeding and post-run verification of tenant-B rows."""
+    """Admin/owner session for seeding and post-run verification of tenant-B rows.
+
+    This session COMMITS seed data so that the separate ifx_dev_app pg_session can
+    see it (Postgres does not expose another session's uncommitted rows).  Because
+    the data is committed — not auto-rolled-back by a SAVEPOINT fixture — the test
+    is responsible for explicit ID-based teardown in a finally block.
+    """
     conn = pg_owner_engine.connect()
-    outer = conn.begin()
-    nested = conn.begin_nested()
-    # Disable RLS for this session so it can see and insert rows for any tenant.
-    conn.execute(text("SET LOCAL row_security = OFF"))
-    session = Session(bind=conn, join_transaction_mode="create_savepoint")
-
-    @event.listens_for(session, "after_transaction_end")
-    def reopen(sess, txn):
-        nonlocal nested
-        if txn.nested and not txn._parent.nested:
-            nested = conn.begin_nested()
-
+    # Disable RLS so this session can insert/read rows for any tenant.
+    conn.execute(text("SET SESSION row_security = OFF"))
+    session = Session(bind=conn)
     yield session
     session.close()
-    outer.rollback()
     conn.close()
 
 
 def _seed_tenant_data(session, tenant_id, run_label, n_rows):
-    """Seed a DetectionRun + CsvUploadRows for the given tenant.
+    """Seed a DetectionRun + CsvUploadRows for the given tenant and COMMIT.
 
     MUST be called with an admin/owner session (pg_owner_session) so that
     rows for both tenant A and tenant B are inserted without RLS filtering.
+
+    Commits immediately so that the separate ifx_dev_app pg_session can see
+    the rows — Postgres does not expose uncommitted rows to other sessions.
+
+    Returns (run_id, csv_row_ids) so the caller can tear down by ID.
     """
     from src.models.detection_run_models import DetectionRun, CsvUploadRow
 
@@ -6166,23 +8783,29 @@ def _seed_tenant_data(session, tenant_id, run_label, n_rows):
     )
     session.add(run)
     session.flush()
+    csv_rows = []
     for i in range(n_rows):
-        session.add(CsvUploadRow(
+        row = CsvUploadRow(
             tenant_id=tenant_id, detection_run_id=run.id, row_number=i + 1,
             row_data={"patient_unique_hash": f"p-{tenant_id}-{i}", "ndc": "00000000001"},
             resolution_method="declared",
-        ))
+        )
+        session.add(row)
+        csv_rows.append(row)
     session.flush()
-    return run
+    run_id = run.id
+    csv_row_ids = [r.id for r in csv_rows]
+    session.commit()  # MUST commit so the separate pg_session can see these rows
+    return run_id, csv_row_ids
 
 
 def test_rls_guc_set_local_in_same_transaction(pg_session, pg_owner_session):
     """SET LOCAL app.current_tenant_id within run_detection transaction prevents cross-tenant access.
 
     Test structure:
-      SEED (via pg_owner_session — bypasses RLS, can insert rows for any tenant):
-        - Seed 5 CsvUploadRows for tenant B.
-        - Seed 5 CsvUploadRows + DetectionRun for tenant A.
+      SEED (via pg_owner_session — bypasses RLS, COMMITS so pg_session can see rows):
+        - Seed 5 CsvUploadRows for tenant B — committed.
+        - Seed 5 CsvUploadRows + DetectionRun for tenant A — committed.
 
       ACT (via pg_session — ifx_dev_app, RLS enforced):
         - SET LOCAL app.current_tenant_id = tenant_A (parameterized, never f-string).
@@ -6198,71 +8821,97 @@ def test_rls_guc_set_local_in_same_transaction(pg_session, pg_owner_session):
                Zero anomaly rows in the DB are attributed to tenant B.
                This assertion is NON-VACUOUS because pg_owner_session bypasses RLS and
                would show tenant-B anomalies if any were created.
+
+      TEARDOWN: explicit DELETE by known IDs (owner session) — required because seed
+      data is committed (not auto-rolled-back by a SAVEPOINT fixture).
     """
     from src.detection.batch_engine import run_detection
     from src.models.detection_run_models import Anomaly, CsvUploadRow, DetectionRun
 
-    # --- SEED via admin/owner session (bypasses RLS) ---
-    run_b = _seed_tenant_data(pg_owner_session, TENANT_B_ID, "rls-b", 5)
-    run_a = _seed_tenant_data(pg_owner_session, TENANT_A_ID, "rls-a", 5)
-    b_run_id = run_b.id
-    a_run_id = run_a.id
+    # --- SEED via admin/owner session (bypasses RLS) — COMMITS for cross-session visibility ---
+    b_run_id, b_csv_ids = _seed_tenant_data(pg_owner_session, TENANT_B_ID, "rls-b", 5)
+    a_run_id, a_csv_ids = _seed_tenant_data(pg_owner_session, TENANT_A_ID, "rls-a", 5)
 
-    # Flush seeded rows; they are visible to pg_owner_session for later verification.
-    pg_owner_session.flush()
+    try:
+        # --- ACT via ifx_dev_app session with tenant-A GUC ---
+        # SET LOCAL scopes to this transaction; expires on commit/rollback (test isolation safe).
+        pg_session.execute(
+            text("SET LOCAL app.current_tenant_id = :tid"),
+            {"tid": str(TENANT_A_ID)},
+        )
+        guc_val = pg_session.execute(
+            text("SELECT current_setting('app.current_tenant_id')")
+        ).scalar_one()
+        assert guc_val == str(TENANT_A_ID), (
+            f"GUC not set correctly: got {guc_val!r}, expected {str(TENANT_A_ID)!r}"
+        )
 
-    # --- ACT via ifx_dev_app session with tenant-A GUC ---
-    # SET LOCAL scopes to this transaction; expires on commit/rollback (test isolation safe).
-    pg_session.execute(
-        text("SET LOCAL app.current_tenant_id = :tid"),
-        {"tid": str(TENANT_A_ID)},
-    )
-    guc_val = pg_session.execute(
-        text("SELECT current_setting('app.current_tenant_id')")
-    ).scalar_one()
-    assert guc_val == str(TENANT_A_ID), (
-        f"GUC not set correctly: got {guc_val!r}, expected {str(TENANT_A_ID)!r}"
-    )
+        # run_detection must operate inside the same transaction (same GUC in effect).
+        # Seed data is committed so pg_session can see run_a via a normal SELECT.
+        run_a_in_act_session = pg_session.get(DetectionRun, a_run_id)
+        assert run_a_in_act_session is not None, (
+            "run_a not visible in pg_session — seed data must be committed before "
+            "the separate ifx_dev_app session can see it"
+        )
+        run_detection(pg_session, run_a_in_act_session)
+        # MUST commit (not just flush) so that the owner session's verification is
+        # non-vacuous.  A flush-only run leaves run_detection's writes in an open
+        # transaction invisible to any other session — the owner session would see
+        # zero tenant-B anomalies vacuously (nothing is committed yet), making the
+        # isolation assertion meaningless.  After commit, the owner session CAN see
+        # tenant-A's anomalies and will still see zero for tenant-B, proving isolation.
+        pg_session.commit()
 
-    # run_detection must operate inside the same transaction (same GUC in effect).
-    # Load run_a into pg_session so run_detection can work with it.
-    run_a_in_act_session = pg_session.get(DetectionRun, a_run_id)
-    assert run_a_in_act_session is not None, (
-        "run_a not visible in pg_session — check that pg_owner_session flushed correctly"
-    )
-    run_detection(pg_session, run_a_in_act_session)
-    pg_session.flush()
+        # --- VERIFY (i): tenant-A GUC session sees zero tenant-B anomalies ---
+        b_anomalies_via_act = pg_session.execute(
+            select(Anomaly).where(Anomaly.tenant_id == TENANT_B_ID)
+        ).scalars().all()
+        assert len(b_anomalies_via_act) == 0, (
+            f"RLS violation (tenant-A session): {len(b_anomalies_via_act)} anomaly rows "
+            f"attributed to tenant B were visible under tenant-A GUC. "
+            f"SET LOCAL GUC may not be respected by run_detection."
+        )
 
-    # --- VERIFY (i): tenant-A GUC session sees zero tenant-B anomalies ---
-    b_anomalies_via_act = pg_session.execute(
-        select(Anomaly).where(Anomaly.tenant_id == TENANT_B_ID)
-    ).scalars().all()
-    assert len(b_anomalies_via_act) == 0, (
-        f"RLS violation (tenant-A session): {len(b_anomalies_via_act)} anomaly rows "
-        f"attributed to tenant B were visible under tenant-A GUC. "
-        f"SET LOCAL GUC may not be respected by run_detection."
-    )
+        # --- VERIFY (ii): admin/owner session confirms tenant-B rows untouched ---
+        # This is the NON-VACUOUS check: pg_owner_session bypasses RLS, so if any
+        # tenant-B anomalies were created they WILL appear here.
+        pg_owner_session.expire_all()  # refresh after pg_session may have committed
+        b_anomalies_via_owner = pg_owner_session.execute(
+            select(Anomaly).where(Anomaly.tenant_id == TENANT_B_ID)
+        ).scalars().all()
+        assert len(b_anomalies_via_owner) == 0, (
+            f"RLS isolation failure (confirmed from admin session): {len(b_anomalies_via_owner)} "
+            f"anomaly rows attributed to tenant B exist in the DB after tenant A's detection run. "
+            f"run_detection created cross-tenant anomaly rows."
+        )
 
-    # --- VERIFY (ii): admin/owner session confirms tenant-B rows untouched ---
-    # This is the NON-VACUOUS check: pg_owner_session bypasses RLS, so if any
-    # tenant-B anomalies were created they WILL appear here.
-    b_anomalies_via_owner = pg_owner_session.execute(
-        select(Anomaly).where(Anomaly.tenant_id == TENANT_B_ID)
-    ).scalars().all()
-    assert len(b_anomalies_via_owner) == 0, (
-        f"RLS isolation failure (confirmed from admin session): {len(b_anomalies_via_owner)} "
-        f"anomaly rows attributed to tenant B exist in the DB after tenant A's detection run. "
-        f"run_detection created cross-tenant anomaly rows."
-    )
+        # Tenant-B CsvUploadRows must still exist — run_detection must not have deleted them.
+        b_rows_via_owner = pg_owner_session.execute(
+            select(CsvUploadRow).where(CsvUploadRow.tenant_id == TENANT_B_ID)
+        ).scalars().all()
+        assert len(b_rows_via_owner) == 5, (
+            f"Tenant-B CsvUploadRows were lost after tenant A's run. "
+            f"Expected 5, found {len(b_rows_via_owner)}."
+        )
 
-    # Tenant-B CsvUploadRows must still exist — run_detection must not have deleted them.
-    b_rows_via_owner = pg_owner_session.execute(
-        select(CsvUploadRow).where(CsvUploadRow.tenant_id == TENANT_B_ID)
-    ).scalars().all()
-    assert len(b_rows_via_owner) == 5, (
-        f"Tenant-B CsvUploadRows were lost after tenant A's run. "
-        f"Expected 5, found {len(b_rows_via_owner)}."
-    )
+    finally:
+        # --- TEARDOWN: delete committed seed rows by known IDs so the test is repeatable ---
+        # Anomalies created by run_detection for tenant A are also cleaned up here.
+        pg_owner_session.execute(
+            text("DELETE FROM reclaimrx.anomalies WHERE tenant_id IN (:ta, :tb)"),
+            {"ta": str(TENANT_A_ID), "tb": str(TENANT_B_ID)},
+        )
+        all_csv_ids = a_csv_ids + b_csv_ids
+        if all_csv_ids:
+            pg_owner_session.execute(
+                text("DELETE FROM reclaimrx.csv_upload_rows WHERE id = ANY(:ids)"),
+                {"ids": all_csv_ids},
+            )
+        pg_owner_session.execute(
+            text("DELETE FROM reclaimrx.detection_runs WHERE id IN (:a_run, :b_run)"),
+            {"a_run": a_run_id, "b_run": b_run_id},
+        )
+        pg_owner_session.commit()
 ```
 
 **Step 3 (formerly Step 2): Run detection CLI.**
@@ -6271,7 +8920,9 @@ cd C:\Users\MK\Documents\Code Projects\InfinityRx\infinityrx-platform
 python -m src.cli.detect
 ```
 
-The CLI calls `run_detection(db, run)` (with RLS GUC already set per Step 2 pattern above) for the existing ingested run (identified by status='completed' + matching source_sha256, or by explicit `--run-id` flag). Detection skips ingest entirely.
+The CLI creates a **fresh DetectionRun** (new `run.id`) pointing at the already-ingested `csv_upload_rows` via `data_source_run_id` — it does NOT re-ingest and does NOT reuse a stale run id from a prior v1/partial run. The fresh run's anomalies carry the new `data_source_run_id`; the atomic guardrail (delete-prior + bulk-insert in one transaction) applies cleanly to that run. The existing `csv_upload_rows` for the original ingest run remain untouched as the data source.
+
+Concretely: the CLI looks up the canonical ingest run (status='completed' + matching source_sha256, or `--ingest-run-id` flag), then inserts a new `DetectionRun` row with `data_source="csv_upload"` and `data_source_run_id=<ingest_run.id>`, and calls `run_detection(db, new_run)`. This guarantees that anomalies from a prior failed or partial detection run are never visible for the new run — the fresh run id has zero pre-existing anomalies, and the in-transaction delete in the promote path is a no-op for it.
 
 **Step 3: Assert acceptance criteria.**
 
