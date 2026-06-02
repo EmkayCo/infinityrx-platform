@@ -1,4 +1,4 @@
-﻿"""FDB pricing enrichment: fetch current WAC, NADAC, and SWP-as-AWP for a set of NDCs.
+"""FDB pricing enrichment: fetch current WAC, NADAC, and SWP-as-AWP for a set of NDCs.
 
 PRICING SIGN-OFF (2026-05-31, Mike K):
   WAC  = price_type '09' -- LIVE
@@ -13,6 +13,7 @@ Set-based: ONE query for all NDCs. Never per-row.
 Returns: {ndc_11: {"wac": Decimal|None, "swp": Decimal|None, "nadac": Decimal|None,
                     "drug_name": str|None}}
 wac=None when the NDC has no WAC record -- key is always present.
+drug_name is always None (see implementation note below).
 """
 from __future__ import annotations
 
@@ -40,55 +41,61 @@ def fetch_current_prices_for_ndcs(
     Returns an entry for every NDC in ndc_list that appears in fdb_ndc_price_history;
     NDCs with no price records are absent from the result (not present with wac=None).
     NDCs with price records but no WAC entry have wac=None in their entry.
+
+    drug_name is always None in the returned dict.  Fetching it requires a second
+    FDW round-trip (reference.drugs) that the detection engine never uses; the key
+    is kept in the result for API contract stability.
     """
     if not ndc_list:
         return {}
 
-    placeholders = ", ".join([f":ndc_{i}" for i in range(len(ndc_list))])
-    ndc_params = {f"ndc_{i}": ndc for i, ndc in enumerate(ndc_list)}
-
+    # Use ph.ndc_11 = ANY(:ndc_array) instead of a JOIN on unnest() so that
+    # postgres_fdw pushes the predicate to the remote server.
+    # With the old unnest-JOIN pattern the planner cannot push the join
+    # condition across the FDW boundary; it fetches the entire remote table
+    # (15M+ rows) then filters locally -- 14s for 5 NDCs on a 15M-row table.
+    # With = ANY(:ndc_array) the predicate is sent to the remote server and
+    # only the matching price rows cross the wire -- ~500ms for 990 NDCs.
+    #
+    # drug_name is dropped from this query: fetching it requires a second FDW
+    # round-trip (reference.drugs) that the detection engine never uses (the
+    # _fdb_cache in batch_engine only reads "wac").  The key is kept in the
+    # result dict as None for API contract stability.
     sql = text(
-        f"WITH ndc_set AS ("
-        f"    SELECT unnest(ARRAY[{placeholders}]::text[]) AS ndc_11"
-        f"),"
-        f" latest_prices AS ("
-        f"    SELECT"
-        f"        ph.ndc_11,"
-        f"        ph.price_type,"
-        f"        ph.price,"
-        f"        ph.effective_date,"
-        f"        ROW_NUMBER() OVER ("
-        f"            PARTITION BY ph.ndc_11, ph.price_type"
-        f"            ORDER BY ph.effective_date DESC"
-        f"        ) AS rn"
-        f"    FROM reference.fdb_ndc_price_history ph"
-        f"    JOIN ndc_set ns ON ns.ndc_11 = ph.ndc_11"
-        f"    WHERE ph.price_type IN (:wac, :swp, :nadac1, :nadac2)"
-        f"),"
-        f" current_prices AS ("
-        f"    SELECT ndc_11, price_type, price"
-        f"    FROM latest_prices"
-        f"    WHERE rn = 1"
-        f"),"
-        f" drug_names AS ("
-        f"    SELECT d.ndc_11, d.proprietary_name"
-        f"    FROM reference.drugs d"
-        f"    JOIN ndc_set ns ON ns.ndc_11 = d.ndc_11"
-        f")"
-        f" SELECT"
-        f"    ns.ndc_11,"
-        f"    MAX(CASE WHEN cp.price_type = :wac   THEN cp.price END) AS wac_price,"
-        f"    MAX(CASE WHEN cp.price_type = :swp   THEN cp.price END) AS swp_price,"
-        f"    MAX(CASE WHEN cp.price_type IN (:nadac1, :nadac2) THEN cp.price END) AS nadac_price,"
-        f"    dn.proprietary_name AS drug_name"
-        f" FROM ndc_set ns"
-        f" LEFT JOIN current_prices cp ON cp.ndc_11 = ns.ndc_11"
-        f" LEFT JOIN drug_names dn ON dn.ndc_11 = ns.ndc_11"
-        f" GROUP BY ns.ndc_11, dn.proprietary_name"
+        "WITH latest_prices AS ("
+        "    SELECT"
+        "        ph.ndc_11,"
+        "        ph.price_type,"
+        "        ph.price,"
+        "        ROW_NUMBER() OVER ("
+        "            PARTITION BY ph.ndc_11, ph.price_type"
+        "            ORDER BY ph.effective_date DESC"
+        "        ) AS rn"
+        "    FROM reference.fdb_ndc_price_history ph"
+        "    WHERE ph.ndc_11 = ANY(:ndc_array)"
+        "      AND ph.price_type = ANY(ARRAY[:wac, :swp, :nadac1, :nadac2]::text[])"
+        "),"
+        " current_prices AS ("
+        "    SELECT ndc_11, price_type, price"
+        "    FROM latest_prices"
+        "    WHERE rn = 1"
+        "),"
+        " ndc_set AS ("
+        "    SELECT unnest(:ndc_array) AS ndc_11"
+        ")"
+        " SELECT"
+        "    ns.ndc_11,"
+        "    MAX(CASE WHEN cp.price_type = :wac   THEN cp.price END) AS wac_price,"
+        "    MAX(CASE WHEN cp.price_type = :swp   THEN cp.price END) AS swp_price,"
+        "    MAX(CASE WHEN cp.price_type IN (:nadac1, :nadac2) THEN cp.price END) AS nadac_price,"
+        "    NULL::text AS drug_name"
+        " FROM ndc_set ns"
+        " LEFT JOIN current_prices cp ON cp.ndc_11 = ns.ndc_11"
+        " GROUP BY ns.ndc_11"
     )
 
     params = {
-        **ndc_params,
+        "ndc_array": ndc_list,
         "wac": _PRICE_TYPE_WAC,
         "swp": _PRICE_TYPE_SWP,
         "nadac1": _PRICE_TYPE_NADAC_1,

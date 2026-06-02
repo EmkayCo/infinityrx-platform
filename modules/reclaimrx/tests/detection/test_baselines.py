@@ -703,3 +703,49 @@ class TestEdgeCases:
         ).all()
         for row in rows:
             assert row.data_source == "csv_upload"
+
+    def test_compute_baseline_twice_no_unique_violation(self, db: Session):
+        """Running compute_baseline a second time for the same tenant/kind/scope
+        must NOT raise UniqueViolation -- it should upsert (ON CONFLICT DO UPDATE).
+
+        This verifies the correctness fix for the baseline_cache upsert: the
+        uq_baseline_cache_scope unique index on
+        (tenant_id, baseline_kind, scope_key, window_days, data_source)
+        must be respected by an ON CONFLICT DO UPDATE clause, not a blind INSERT.
+        """
+        run = _make_run(db)
+        # Three prescribers for NDC_A so peer baselines are computable.
+        for presc, count in [(_PRESC_X, 3), (_PRESC_Y, 3), (_PRESC_Z, 3)]:
+            for i in range(count):
+                _row(
+                    db, run,
+                    row_number=len(db.query(CsvUploadRow).all()) + 1,
+                    npi=_NPI_ALPHA, ndc=_NDC_A,
+                    prescriber_npi=presc,
+                )
+        db.flush()
+
+        # First run -- writes baseline rows.
+        n1 = compute_baseline(db, run, kind="prescriber_peer_volume", min_sample_count=1)
+        assert n1 > 0, "First compute_baseline must write at least one row"
+
+        # Second run with the same run / same scope -- must not raise, must upsert.
+        # On SQLite the unique index is not enforced as strictly as Postgres
+        # but the INSERT OR REPLACE path should still not raise.
+        try:
+            n2 = compute_baseline(db, run, kind="prescriber_peer_volume", min_sample_count=1)
+        except Exception as exc:
+            raise AssertionError(
+                f"Second compute_baseline raised {type(exc).__name__}: {exc} -- "
+                "expected upsert (ON CONFLICT DO UPDATE), not a UniqueViolation"
+            ) from exc
+
+        # After the second call the row count should be unchanged (same scope keys).
+        after = db.query(BaselineCache).filter(
+            BaselineCache.baseline_kind == "prescriber_peer_volume",
+            BaselineCache.tenant_id == _TENANT,
+        ).count()
+        assert after == n1, (
+            f"Row count after second compute_baseline ({after}) differs from "
+            f"first ({n1}); upsert should leave the count unchanged"
+        )
