@@ -686,6 +686,7 @@ def _evaluate_statistical_rules(
                         data_source_run_id=run.id,
                         source_table="csv_upload_rows", source_row_id=rep_row_id,
                         detection_kind="rule",
+                        detection_id=instance.id,
                         severity=params.get("severity", "high"),
                         confidence=Decimal(str(params.get("confidence", "0.80"))),
                         finding_code="MFR-004",
@@ -771,6 +772,7 @@ def _evaluate_statistical_rules(
                         data_source_run_id=run.id,
                         source_table="csv_upload_rows", source_row_id=rep_row_id,
                         detection_kind="rule",
+                        detection_id=instance.id,
                         severity=params.get("severity", "high"),
                         confidence=Decimal(str(params.get("confidence", "0.80"))),
                         finding_code="HP-005",
@@ -860,6 +862,7 @@ def _evaluate_statistical_rules(
                         data_source_run_id=run.id,
                         source_table="csv_upload_rows", source_row_id=rep_row_id,
                         detection_kind="rule",
+                        detection_id=instance.id,
                         severity=params.get("severity", "medium"),
                         confidence=Decimal(str(params.get("confidence", "0.75"))),
                         finding_code="ALL-006",
@@ -939,6 +942,7 @@ def _evaluate_statistical_rules(
                 data_source_run_id=run.id,
                 source_table="csv_upload_rows", source_row_id=r.rep_row_id,
                 detection_kind="rule",
+                detection_id=instance.id,
                 severity=params.get("severity", "medium"),
                 confidence=Decimal(str(params.get("confidence", "0.75"))),
                 finding_code="ALL-005",
@@ -1903,11 +1907,27 @@ def run_detection(
     # --- Guardrail check (\xa7\x31\x32 H1) BEFORE inserting any anomalies ---
     # Effective total cap = min(configured, CEILING) -- configured value can only be STRICTER.
     # A run that sets total_fire_rate_cap="0.99" is clamped to the 1% ceiling.
+    # DEV-ONLY escape hatch: RECLAIMRX_DISABLE_GUARDRAIL=1 relaxes the fire-rate ceilings to
+    # 100% so a run still promotes when uncalibrated rules over-fire (lets dev see real volume
+    # before calibration). HARD-gated to non-production: in production the env var is ignored
+    # and the 1% / 0.5% hard ceilings always apply. NEVER set this in prod.
+    import os as _os  # noqa: PLC0415
+    _dev_guardrail_off = (
+        _os.environ.get("RECLAIMRX_DISABLE_GUARDRAIL") == "1"
+        and _os.environ.get("INFINITYRX_ENV", "development").strip().lower() != "production"
+    )
+    _total_ceiling = Decimal("1.0") if _dev_guardrail_off else _TOTAL_FIRE_RATE_CEILING
+    _rule_ceiling = Decimal("1.0") if _dev_guardrail_off else _RULE_FIRE_RATE_CEILING
+    if _dev_guardrail_off:
+        logger.warning("reclaimrx.guardrail_disabled_dev run_id=%s -- fire-rate ceilings relaxed to 100%%", run.id)
+
     if record_count >= _MIN_GUARDRAIL_RECORDS:
         _configured_total = Decimal(str(
             run.resolution_stats.get("total_fire_rate_cap", str(_TOTAL_FIRE_RATE_CEILING))
         ))
-        total_cap = min(_configured_total, _TOTAL_FIRE_RATE_CEILING)
+        # In dev-bypass total_cap is 1.0 directly: the configured default IS the ceiling
+        # (0.01), so min(default, raised_ceiling) would still clamp to 0.01.
+        total_cap = _total_ceiling if _dev_guardrail_off else min(_configured_total, _TOTAL_FIRE_RATE_CEILING)
         record_count_d = Decimal(str(record_count)) if record_count > 0 else Decimal("1")
 
         # Build per-rule cap map: min(instance.parameters.rule_fire_rate_cap, CEILING).
@@ -1917,7 +1937,10 @@ def run_detection(
             configured_rule_cap = Decimal(str(
                 inst.parameters.get("rule_fire_rate_cap", str(_RULE_FIRE_RATE_CEILING))
             ))
-            rule_instance_cap[inst.rule_type_code] = min(configured_rule_cap, _RULE_FIRE_RATE_CEILING)
+            rule_instance_cap[inst.rule_type_code] = (
+                _rule_ceiling if _dev_guardrail_off
+                else min(configured_rule_cap, _RULE_FIRE_RATE_CEILING)
+            )
 
         # Count fires per rule from accumulated list
         rule_fire_counts: dict[str, int] = {}
